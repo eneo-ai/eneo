@@ -1012,6 +1012,13 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                 }
             ],
             "webhook_deliveries": [],
+            "provider_calls": {
+                "items": [],
+                "count": 0,
+                "total_count": 0,
+                "has_more": False,
+                "next_after_event_id": None,
+            },
             "debug_export": {
                 "schema_version": "eneo.flow.debug-export.v2",
                 "generated_at": "2026-03-20T12:05:00Z",

@@ -545,6 +545,20 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "and spend."
         ),
     ),
+    FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause=(
+            "The runtime could not durably record a provider-call lifecycle fact "
+            "after bounded persistence retries while the remote outcome and local "
+            "evidence gap remain explicitly separate."
+        ),
+        consumer_action=(
+            "Inspect the provider-call page and the evidence gap in the run error before "
+            "deciding whether to repeat a call whose remote outcome may be known."
+        ),
+        user_action="Contact support with the run ID before rerunning the step.",
+    ),
     FlowApiErrorCode.WEBHOOK_DELIVERY_FAILED: _entry(
         category="Step runtime",
         surfaced_through="Run error payload",
@@ -579,6 +593,16 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         cause="Raw evidence export was requested without an audit reason.",
         consumer_action="Collect and send a specific export reason with the request.",
         user_action="Enter a specific reason before exporting raw evidence.",
+    ),
+    FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The run has more provider-call events than one synchronous export may contain.",
+        consumer_action=(
+            "Use the paginated provider-calls endpoint or contact an administrator "
+            "for an offline export."
+        ),
+        user_action="Use the paginated evidence view or contact support.",
     ),
     FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(
         category="Typed input/output",

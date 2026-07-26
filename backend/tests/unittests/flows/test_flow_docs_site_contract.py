@@ -3705,7 +3705,7 @@ def test_flow_api_guide_documents_evidence_export_actor_contract() -> None:
         maxsplit=1,
     )[0]
 
-    assert "`flow-evidence-export.v11`" in evidence_export
+    assert "`flow-evidence-export.v12`" in evidence_export
     assert "`actor.type`" in evidence_export
     assert "`user_id`" in evidence_export
     assert "`key_id`" in evidence_export
@@ -3744,15 +3744,44 @@ def test_flow_api_guide_documents_unknown_provider_token_usage() -> None:
         maxsplit=1,
     )[0]
 
-    assert "`completed_provider_calls`" in evidence_view
+    assert "`provider_calls`" in evidence_view
+    assert "`provider-calls/`" in evidence_view
+    assert "default is `100`" in evidence_view
+    assert "maximum is `500`" in evidence_view
+    assert "`after_event_id`" in evidence_view
+    assert "`attempt_id`" in evidence_view
+    for lifecycle_status in (
+        "`started`",
+        "`completed`",
+        "`rejected`",
+        "`outcome_unknown`",
+    ):
+        assert lifecycle_status in evidence_view
+    assert "`mapped_source_id`" in evidence_view
+    assert "credential-free" in evidence_view
+    assert "`flow_provider_call_evidence_persistence_failed`" in evidence_view
     assert "`not_reported`" in evidence_view
     assert "measured zero" in evidence_view
     assert "treat it as unknown, never as zero" in evidence_view
     assert "aggregate count is also `null` or omitted" in evidence_view
     assert "count is null instead of branching" in evidence_view
     assert "does not prove that no provider request was sent" in evidence_view
-    assert "do not infer zero spend" in evidence_view
+    assert "never infer zero spend" in evidence_view
     assert "best-effort summaries that can include estimated" in evidence_view
+
+
+def test_flow_api_guide_documents_provider_call_export_boundary() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    evidence_export = guide.split("#### Evidence export", maxsplit=1)[1].split(
+        "#### Service keys and evidence",
+        maxsplit=1,
+    )[0]
+
+    assert "all provider-call lifecycle rows" in evidence_export
+    assert "`10,000`" in evidence_export
+    assert "`413`" in evidence_export
+    assert "`flow_evidence_export_too_large`" in evidence_export
+    assert "paginated `provider-calls/` endpoint" in evidence_export
 
 
 def test_flow_api_guide_documents_step_output_text_overflow() -> None:

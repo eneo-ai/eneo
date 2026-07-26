@@ -2211,7 +2211,78 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     details_schema = _resolve_component_ref(openapi_spec, structured_details_ref)
     assert details_schema.get("title") == "FlowRunErrorDetails"
     assert details_schema.get("additionalProperties") is False
-    assert set(details_schema.get("properties", {})) == {"step_description"}
+    assert set(details_schema.get("properties", {})) == {
+        "step_description",
+        "provider_call_evidence_gap",
+    }
+
+    gap_property = details_schema["properties"]["provider_call_evidence_gap"]
+    gap_options = gap_property.get("anyOf") or gap_property.get("oneOf") or []
+    gap_ref = next(
+        option
+        for option in gap_options
+        if isinstance(option, dict) and option.get("type") != "null"
+    )
+    gap_schema = _resolve_component_ref(openapi_spec, gap_ref)
+    assert gap_schema.get("title") == "ProviderCallEvidenceGap"
+    assert gap_schema.get("additionalProperties") is False
+    assert set(gap_schema.get("properties", {})) == {
+        "call_id",
+        "ordinal",
+        "provider_request_hash",
+        "provider_response_id",
+        "outcome",
+        "num_tokens_input",
+        "num_tokens_output",
+    }
+    assert set(gap_schema.get("required", [])) == {"outcome"}
+
+
+def test_openapi_provider_call_evidence_is_typed_and_cursor_paginated(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/provider-calls/",
+        "get",
+    )
+    assert operation.get("operationId") == "list_flow_run_provider_calls"
+
+    parameters = {
+        parameter["name"]: parameter for parameter in operation.get("parameters", [])
+    }
+    limit_schema = parameters["limit"]["schema"]
+    assert limit_schema.get("default") == 100
+    assert limit_schema.get("minimum") == 1
+    assert limit_schema.get("maximum") == 500
+    assert parameters["after_event_id"]["in"] == "query"
+    assert parameters["attempt_id"]["in"] == "query"
+
+    response_schema = operation["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]
+    page_schema = _resolve_component_ref(openapi_spec, response_schema)
+    assert page_schema.get("additionalProperties") is False
+    assert set(page_schema.get("required", [])) == {
+        "items",
+        "count",
+        "total_count",
+        "has_more",
+        "next_after_event_id",
+    }
+
+    item_ref = page_schema["properties"]["items"]["items"]
+    item_schema = _resolve_component_ref(openapi_spec, item_ref)
+    assert item_schema.get("additionalProperties") is False
+    assert "mapped_source_id" in item_schema.get("required", [])
+    assert _extract_enum_values(
+        openapi_spec,
+        item_schema["properties"]["status"],
+    ) == {"started", "completed", "rejected", "outcome_unknown"}
+    assert _extract_enum_values(
+        openapi_spec,
+        item_schema["properties"]["mapped_execution_mode"],
+    ) == {"per_item", "per_source"}
 
 
 def test_openapi_flow_run_public_exposes_strict_dispatch_lifecycle(
@@ -3390,7 +3461,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v11"}
+    ) == {"flow-evidence-export.v12"}
     assert "actor" in manifest.get("required", [])
     assert "exported_by_user_id" not in manifest_properties
     actor_schema = cast(dict[str, Any], manifest_properties["actor"])

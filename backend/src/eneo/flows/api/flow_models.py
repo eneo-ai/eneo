@@ -70,6 +70,10 @@ from eneo.flows.domain.flow import (
     parse_flow_step_retrieval_policy,
 )
 from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevision
+from eneo.flows.domain.provider_call import (
+    PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
+    ProviderCallEvidencePage,
+)
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -1979,6 +1983,7 @@ class FlowRunEvidenceResponse(BaseModel):
                 "rerun_invalidated_steps": [],
                 "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
                 "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+                "provider_calls": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
                 "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
             }
         }
@@ -1994,6 +1999,7 @@ class FlowRunEvidenceResponse(BaseModel):
     rerun_invalidated_steps: list[FlowRunRerunInvalidatedStepPublic]
     review_checkpoints: list[FlowRunReviewCheckpointEvidencePublic]
     webhook_deliveries: list[FlowRunWebhookDeliveryPublic]
+    provider_calls: ProviderCallEvidencePage
     debug_export: FlowRunDebugExport
 
 
@@ -2001,11 +2007,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v11",
+                "schema_version": "flow-evidence-export.v12",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v11",
+                    "schema_version": "flow-evidence-export.v12",
                     "app_version": "DEV",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
@@ -2376,13 +2382,14 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
                     "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
                     "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+                    "provider_calls": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
                     "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
                 },
             }
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v11"]
+    schema_version: Literal["flow-evidence-export.v12"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

@@ -61,8 +61,6 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-    ProviderCallTokenReceiptProvenance,
-    build_provider_call_token_usage,
     normalize_attempt_provenance,
     normalize_rag_payload,
     parse_attempt_provenance,
@@ -966,28 +964,6 @@ def test_parse_attempt_provenance_preserves_unreported_usage_as_unknown() -> Non
         result.provenance.token_usage.completed_provider_calls[1].num_tokens_input
         is None
     )
-
-
-def test_provider_call_aggregate_keeps_fully_unreported_usage_unknown() -> None:
-    usage = build_provider_call_token_usage(
-        (
-            ProviderCallTokenReceiptProvenance(
-                call_index=1,
-                input_source="not_reported",
-                output_source="not_reported",
-            ),
-            ProviderCallTokenReceiptProvenance(
-                call_index=2,
-                input_source="not_reported",
-                output_source="not_reported",
-            ),
-        )
-    )
-
-    assert usage.num_tokens_input is None
-    assert usage.num_tokens_output is None
-    assert usage.input_source == "not_reported"
-    assert usage.output_source == "not_reported"
 
 
 def test_complete_token_sum_is_unknown_when_any_count_is_unknown() -> None:

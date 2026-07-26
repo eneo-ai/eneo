@@ -170,20 +170,21 @@ def build_generic_failure_plan(
     *,
     claimed: FlowStepResult,
     public_error: str,
+    error_code: FlowApiErrorCode = FlowApiErrorCode.STEP_EXECUTION_FAILED,
 ) -> StepFailurePlan:
     return StepFailurePlan(
         attempt_status=FlowStepAttemptStatus.FAILED,
-        error_code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
+        error_code=error_code,
         error_message=public_error,
         failed_result=build_failed_step_result(
             claimed=claimed,
-            error_code=FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+            error_code=error_code.value,
             error_message=public_error,
         ),
         run_error_message=public_error,
         return_result={
             "status": "failed",
-            "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+            "error": error_code.value,
         },
     )
 

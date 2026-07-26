@@ -41,7 +41,6 @@ from eneo.flows.runtime.step_handlers.base import (
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
     mapped_admission_payload,
     mapped_output_diagnostics,
-    mapped_provider_call_receipts,
     mapped_rag_metadata,
 )
 from eneo.flows.runtime_input import build_runtime_input_config
@@ -353,9 +352,6 @@ async def _assemble_per_source_output(
         transcription_metadata=None,
         runtime_input_metadata=runtime_metadata,
         raw_completion_text=None,
-        provider_call_receipts=mapped_provider_call_receipts(
-            call.output for call in per_source_calls
-        ),
     )
 
 

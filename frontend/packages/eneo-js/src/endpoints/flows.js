@@ -1,6 +1,7 @@
 /** @typedef {import('../client/client').EneoError} EneoError */
 /** @typedef {NonNullable<import('../types/schema').operations["list_flow_runs"]["parameters"]["query"]>} FlowRunListQuery */
 /** @typedef {NonNullable<import('../types/schema').operations["export_flow_run_evidence"]["parameters"]["query"]>} FlowRunEvidenceExportQuery */
+/** @typedef {NonNullable<import('../types/schema').operations["list_flow_run_provider_calls"]["parameters"]["query"]>} FlowRunProviderCallListQuery */
 /** @typedef {import('../types/schema').operations["rerun_flow_run_step"]["requestBody"]["content"]["application/json"]} FlowRunStepRerunRequest */
 /** @typedef {import('../types/schema').operations["rerun_flow_run_step"]["responses"][202]["content"]["application/json"]} FlowRunStepRerunResponse */
 import { FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS } from "../flows/flow-run-reserved-input-payload-keys.js";
@@ -813,6 +814,28 @@ export function initFlows(client) {
         return _fetch("/api/v1/flows/{id}/runs/{run_id}/evidence/", {
           method: "get",
           params: { path: { id: flowId, run_id: run.id } }
+        });
+      },
+
+      /**
+       * List ordered provider-call lifecycle evidence for a flow run.
+       * Pass the returned next_after_event_id as afterEventId to fetch the next page.
+       * @param {{id: string, flowId: string, flow_id?: string, limit?: FlowRunProviderCallListQuery["limit"], afterEventId?: string, attemptId?: string}} run
+       * @returns {Promise<import('../types/resources').FlowProviderCallEvidencePage>}
+       * @throws {EneoError}
+       */
+      providerCalls: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "providerCalls");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/provider-calls/", {
+          method: "get",
+          params: {
+            path: { id: flowId, run_id: run.id },
+            query: {
+              limit: run.limit,
+              after_event_id: run.afterEventId,
+              attempt_id: run.attemptId
+            }
+          }
         });
       },
 

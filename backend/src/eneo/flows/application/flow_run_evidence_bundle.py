@@ -16,6 +16,7 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowVersion,
 )
+from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_provenance import (
@@ -71,6 +72,7 @@ class EvidenceBundle:
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep]
     review_checkpoints: Sequence[FlowRunReviewCheckpoint]
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead]
+    provider_calls: ProviderCallEvidencePage
     runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
     runtime_input_file_metadata_by_step_result_id: Mapping[
         UUID, Sequence[FlowRunStepInputFileMetadata]
@@ -123,6 +125,7 @@ class EvidenceBundle:
                 "webhook_deliveries": [
                     _dump_webhook_delivery(item) for item in self.webhook_deliveries
                 ],
+                "provider_calls": self.provider_calls.model_dump(mode="json"),
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=tuple(provenance_parse_results),
@@ -145,6 +148,7 @@ class RedactedEvidenceBundle:
     rerun_invalidated_steps: tuple[dict[str, Any], ...]
     review_checkpoints: tuple[dict[str, Any], ...]
     webhook_deliveries: tuple[dict[str, Any], ...]
+    provider_calls: ProviderCallEvidencePage
     debug_export: dict[str, Any]
     masked_paths: tuple[str, ...]
     masked_fields: tuple[MaskedField, ...]
@@ -165,6 +169,7 @@ class RedactedEvidenceBundle:
                 ],
                 "review_checkpoints": [dict(item) for item in self.review_checkpoints],
                 "webhook_deliveries": [dict(item) for item in self.webhook_deliveries],
+                "provider_calls": self.provider_calls.model_dump(mode="json"),
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=self.provenance_parse_results,
@@ -185,6 +190,7 @@ def build_evidence_bundle(
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep] = (),
     review_checkpoints: Sequence[FlowRunReviewCheckpoint] = (),
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
+    provider_calls: ProviderCallEvidencePage | None = None,
     runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
     | None = None,
     runtime_input_file_metadata_by_step_result_id: Mapping[
@@ -229,6 +235,14 @@ def build_evidence_bundle(
         rerun_invalidated_steps=tuple(rerun_invalidated_steps),
         review_checkpoints=tuple(review_checkpoints),
         webhook_deliveries=tuple(webhook_deliveries),
+        provider_calls=provider_calls
+        or ProviderCallEvidencePage(
+            items=(),
+            count=0,
+            total_count=0,
+            has_more=False,
+            next_after_event_id=None,
+        ),
         runtime_input_file_ids_by_step_result_id=(
             resolved_runtime_input_file_ids_by_step_result_id
         ),
@@ -357,6 +371,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         webhook_deliveries=tuple(
             _dump_webhook_delivery(item) for item in bundle.webhook_deliveries
         ),
+        provider_calls=bundle.provider_calls,
         debug_export=debug_export,
         masked_paths=tuple(
             dict.fromkeys(
@@ -533,6 +548,11 @@ def _dump_attempt_record(
         parse_result.provenance,
         item,
     )
+    if export_provenance is not None and export_provenance.token_usage is not None:
+        # Historical provider-call receipts remain in JSONB only as migration and
+        # rollback material. The relational provider_calls projection is the sole
+        # public lifecycle authority after the cutover.
+        export_provenance = export_provenance.model_copy(update={"token_usage": None})
     dumped["provenance_json"] = (
         export_provenance.to_payload()
         if export_provenance is not None

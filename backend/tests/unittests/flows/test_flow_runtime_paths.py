@@ -55,6 +55,7 @@ def _runtime_paths_payload() -> dict[str, object]:
         "get_run_template": "/api/v1/flows/{id}/runs/{run_id}/",
         "list_steps_template": "/api/v1/flows/{id}/runs/{run_id}/steps/",
         "evidence_template": "/api/v1/flows/{id}/runs/{run_id}/evidence/",
+        "provider_calls_template": ("/api/v1/flows/{id}/runs/{run_id}/provider-calls/"),
         "export_evidence_template": (
             "/api/v1/flows/{id}/runs/{run_id}/evidence/export"
         ),
@@ -122,6 +123,9 @@ def test_build_flow_runtime_paths_uses_explicit_api_prefix() -> None:
     assert (
         runtime_paths.export_evidence_template
         == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/evidence/export"
+    )
+    assert runtime_paths.provider_calls_template == (
+        f"/custom-api/flows/{flow_id}/runs/{{run_id}}/provider-calls/"
     )
     assert (
         runtime_paths.artifact_signed_url_template

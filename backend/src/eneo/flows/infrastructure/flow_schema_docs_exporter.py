@@ -78,6 +78,9 @@ FLOW_SCHEMA_MODEL_REGISTRY: tuple[FlowSchemaModelEntry, ...] = (
         flow_tables.FlowStepAttempts, FlowSchemaAggregate.RUN_EXECUTION
     ),
     FlowSchemaModelEntry(
+        flow_tables.FlowProviderCalls, FlowSchemaAggregate.RUN_EXECUTION
+    ),
+    FlowSchemaModelEntry(
         flow_tables.FlowRuntimeUploadedFiles, FlowSchemaAggregate.RUN_EXECUTION
     ),
     FlowSchemaModelEntry(

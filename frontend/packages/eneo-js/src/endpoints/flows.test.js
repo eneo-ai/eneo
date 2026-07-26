@@ -375,7 +375,7 @@ describe("flows templates endpoint", () => {
 
   it("exports evidence from the canonical flow run route", async () => {
     const fetch = vi.fn(async () => ({
-      schema_version: "flow-evidence-export.v11",
+      schema_version: "flow-evidence-export.v12",
       content_hash: "abc123"
     }));
     const flows = initFlows({ fetch });
@@ -394,7 +394,7 @@ describe("flows templates endpoint", () => {
     const fetch = vi.fn(
       async () =>
         new Response(
-          JSON.stringify({ schema_version: "flow-evidence-export.v11", content_hash: "abc123" })
+          JSON.stringify({ schema_version: "flow-evidence-export.v12", content_hash: "abc123" })
         )
     );
     const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
@@ -410,6 +410,39 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][0]).toBe(
       "https://api.example.test/api/v1/flows/flow-1/runs/run-1/evidence/export?format=json&detail=raw&reason=incident+review"
     );
+  });
+
+  it("pages provider-call evidence with consumer-friendly cursor options", async () => {
+    const fetch = vi.fn(async () => ({
+      items: [],
+      count: 0,
+      total_count: 0,
+      has_more: false,
+      next_after_event_id: null
+    }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.providerCalls({
+      id: "run-1",
+      flowId: "flow-1",
+      limit: 250,
+      afterEventId: "event-1",
+      attemptId: "attempt-1"
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/runs/{run_id}/provider-calls/");
+    expect(fetch.mock.calls[0][1]).toEqual({
+      method: "get",
+      params: {
+        path: { id: "flow-1", run_id: "run-1" },
+        query: {
+          limit: 250,
+          after_event_id: "event-1",
+          attempt_id: "attempt-1"
+        }
+      }
+    });
   });
 
   it("reruns a step with the generated operation body", async () => {

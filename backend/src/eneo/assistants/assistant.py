@@ -42,6 +42,10 @@ if TYPE_CHECKING:
     )
     from eneo.assistants.references import ReferencesService
     from eneo.collections.domain.collection import Collection
+    from eneo.completion_models.domain.provider_call_observer import (
+        ProviderCallObserver,
+        ProviderCallReason,
+    )
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
@@ -391,6 +395,8 @@ class Assistant(Entity):
         prompt: str | None = None,
         version: int = 1,
         reject_context_over_limit: bool = False,
+        provider_call_observer: "ProviderCallObserver | None" = None,
+        provider_call_reason: "ProviderCallReason" = "initial",
     ) -> "CompletionModelResponse":
         if self.completion_model is None:
             raise NoModelSelectedException()
@@ -415,6 +421,8 @@ class Assistant(Entity):
             version=version,
             mcp_servers=self._mcp_servers_for_completion(),
             reject_context_over_limit=reject_context_over_limit,
+            provider_call_observer=provider_call_observer,
+            provider_call_reason=provider_call_reason,
         )
 
     async def ask(

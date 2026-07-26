@@ -50,7 +50,6 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewMultipleActiveCheckpointsError,
 )
 from eneo.flows.domain.runtime import (
-    ProviderCallTokenReceipt,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
@@ -76,8 +75,6 @@ from eneo.flows.flow_run_provenance import (
     FlowAttemptProvenance,
     LlmProvenance,
     ModelParameterSnapshot,
-    ProviderCallTokenReceiptProvenance,
-    build_provider_call_token_usage,
     normalize_json_preview,
     normalize_text_preview,
 )
@@ -91,6 +88,10 @@ from eneo.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
+from eneo.flows.infrastructure.flow_provider_call_recorder import (
+    FlowProviderCallRecorder,
+    ProviderCallEvidencePersistenceError,
+)
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_rerun_repo import (
@@ -468,24 +469,6 @@ def _build_attempt_provenance(
         }
     if output.citation_sidecar is not None:
         provenance_payload["citations"] = output.citation_sidecar
-    if output.provider_call_receipts:
-        provenance_payload["token_usage"] = build_provider_call_token_usage(
-            tuple(
-                ProviderCallTokenReceiptProvenance(
-                    call_index=receipt.call_index,
-                    num_tokens_input=receipt.num_tokens_input,
-                    num_tokens_output=receipt.num_tokens_output,
-                    input_source=receipt.input_source,
-                    output_source=receipt.output_source,
-                    requested_model=receipt.requested_model,
-                    response_model=receipt.response_model,
-                    provider=receipt.provider,
-                    provider_response_id=receipt.provider_response_id,
-                    mapped_call=receipt.mapped_call,
-                )
-                for receipt in output.provider_call_receipts
-            )
-        )
     return FlowAttemptProvenance.model_validate(provenance_payload).to_payload()
 
 
@@ -1337,11 +1320,12 @@ class FlowRunExecutor:
             llm_request_timeout_seconds=llm_timeout_seconds,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
             run_cancelled=self._run_is_cancelled,
-            record_provider_call_receipt=lambda receipt: self._record_provider_call_receipt(
-                run=run,
-                step=step,
+            build_provider_call_observer=lambda mapped_call: FlowProviderCallRecorder(
+                run_id=run.id,
+                step_id=step.step_id,
                 attempt_no=attempt_no,
-                receipt=receipt,
+                tenant_id=run.tenant_id,
+                mapped_call=mapped_call,
             ),
         )
 
@@ -1463,38 +1447,6 @@ class FlowRunExecutor:
             step_input_override=step_input_override,
         )
         return PreparedAssistantStep(prepared=prepared, deps=execution_deps)
-
-    async def _record_provider_call_receipt(
-        self,
-        *,
-        run: FlowRun,
-        step: RuntimeStep,
-        attempt_no: int,
-        receipt: ProviderCallTokenReceipt,
-    ) -> None:
-        persisted = await self.flow_run_repo.append_attempt_provider_call_receipt(
-            run_id=run.id,
-            step_id=step.step_id,
-            attempt_no=attempt_no,
-            tenant_id=run.tenant_id,
-            receipt=ProviderCallTokenReceiptProvenance(
-                call_index=receipt.call_index,
-                num_tokens_input=receipt.num_tokens_input,
-                num_tokens_output=receipt.num_tokens_output,
-                input_source=receipt.input_source,
-                output_source=receipt.output_source,
-                requested_model=receipt.requested_model,
-                response_model=receipt.response_model,
-                provider=receipt.provider,
-                provider_response_id=receipt.provider_response_id,
-                mapped_call=receipt.mapped_call,
-            ),
-        )
-        if not persisted:
-            raise RuntimeError(
-                "Provider call receipt target attempt is no longer open."
-            )
-        await self._commit()
 
     async def _list_step_input_file_ids(
         self,
@@ -1790,11 +1742,26 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
         exc: Exception | None = None,
     ) -> dict[str, Any]:
+        evidence_persistence_error = (
+            exc if isinstance(exc, ProviderCallEvidencePersistenceError) else None
+        )
         late_capability_rejection = (
             isinstance(exc, ProviderCapabilityRejectedException)
             and not exc.retry_without_capability_safe
         )
-        if isinstance(exc, ProviderRejectedRequestException) and not (
+        if evidence_persistence_error is not None:
+            if evidence_persistence_error.facts.call_id is None:
+                public_error = (
+                    f"Flow step {step.step_order} stopped before provider I/O because "
+                    "request evidence could not be persisted."
+                )
+            else:
+                public_error = (
+                    f"Flow step {step.step_order} failed after provider work because "
+                    "provider-call evidence could not be persisted; the call was not "
+                    "repeated."
+                )
+        elif isinstance(exc, ProviderRejectedRequestException) and not (
             late_capability_rejection
         ):
             public_error = (
@@ -1809,6 +1776,11 @@ class FlowRunExecutor:
         failure_plan = build_generic_failure_plan(
             claimed=claimed,
             public_error=public_error,
+            error_code=(
+                FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED
+                if evidence_persistence_error is not None
+                else FlowApiErrorCode.STEP_EXECUTION_FAILED
+            ),
         )
         await self._rollback()
         attempt_start = _attempt_start_for_step(state=state, step=step)
@@ -1853,6 +1825,13 @@ class FlowRunExecutor:
                 code=failure_plan.error_code,
                 message=failure_plan.run_error_message,
                 step_order=step.step_order,
+                details=(
+                    FlowRunErrorDetails(
+                        provider_call_evidence_gap=evidence_persistence_error.facts
+                    )
+                    if evidence_persistence_error is not None
+                    else None
+                ),
             ),
         )
         await self._commit()

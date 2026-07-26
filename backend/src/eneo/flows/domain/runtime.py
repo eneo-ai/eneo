@@ -20,8 +20,6 @@ from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     MappedAdmissionProvenance,
-    MappedProviderCallProvenance,
-    TokenCountSource,
 )
 
 if TYPE_CHECKING:
@@ -46,14 +44,6 @@ def _empty_attempt_start_by_step() -> dict[UUID, AttemptStartProvenance]:
 
 
 def _empty_space_cache() -> dict[UUID, Space]:
-    return {}
-
-
-def _empty_provider_call_receipts() -> list[ProviderCallTokenReceipt]:
-    return []
-
-
-def _empty_provider_call_counts() -> dict[UUID, int]:
     return {}
 
 
@@ -96,20 +86,6 @@ class StepDiagnostic:
     severity: str = "warning"
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderCallTokenReceipt:
-    call_index: int
-    num_tokens_input: int | None
-    num_tokens_output: int | None
-    input_source: TokenCountSource
-    output_source: TokenCountSource
-    requested_model: str | None = None
-    response_model: str | None = None
-    provider: str | None = None
-    provider_response_id: str | None = None
-    mapped_call: MappedProviderCallProvenance | None = None
-
-
 @dataclass
 class StepExecutionOutput:
     input_text: str
@@ -139,9 +115,6 @@ class StepExecutionOutput:
     output_payload_extensions: dict[str, Any] | None = None
     citation_sidecar: dict[str, Any] | None = None
     raw_completion_text: str | None = None
-    provider_call_receipts: list[ProviderCallTokenReceipt] = field(
-        default_factory=_empty_provider_call_receipts
-    )
 
 
 @dataclass
@@ -170,9 +143,6 @@ class RunExecutionState:
         default_factory=_empty_attempt_start_by_step
     )
     in_flight_llm_task: asyncio.Task[Any] | None = None
-    provider_call_count_by_step: dict[UUID, int] = field(
-        default_factory=_empty_provider_call_counts
-    )
     mapped_admission_by_step: dict[UUID, MappedAdmissionProvenance] = field(
         default_factory=_empty_mapped_admission_by_step
     )

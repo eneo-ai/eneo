@@ -55,9 +55,7 @@ from eneo.flows.flow_run_input_envelope import (
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     FlowAttemptProvenanceWriteError,
-    MappedProviderCallProvenance,
     ModelParameterSnapshot,
-    ProviderCallTokenReceiptProvenance,
     parse_attempt_provenance,
 )
 from eneo.flows.infrastructure.flow_run_repo import (
@@ -671,7 +669,7 @@ async def test_list_runs_filters_by_flow_id(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
+async def test_list_token_usage_for_runs_sums_attempt_usage_across_attempts(
     db_container,
     completion_model_factory,
     space_factory,
@@ -752,26 +750,6 @@ async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
             attempt_no=1,
             celery_task_id="token-usage-failed",
         )
-        await run_repo.append_attempt_provider_call_receipt(
-            run_id=run.id,
-            step_id=step_one_id,
-            attempt_no=1,
-            tenant_id=tenant_id,
-            receipt=ProviderCallTokenReceiptProvenance(
-                call_index=1,
-                num_tokens_input=10,
-                num_tokens_output=4,
-                input_source="provider",
-                output_source="estimated",
-                requested_model="openai/gpt-4o-mini",
-                provider="openai",
-                provider_response_id="cancelled-attempt-call",
-                mapped_call=MappedProviderCallProvenance(
-                    execution_mode="per_item",
-                    item_index=1,
-                ),
-            ),
-        )
         cancelled_attempt = await run_repo.finish_attempt(
             run_id=run.id,
             step_id=step_one_id,
@@ -782,16 +760,6 @@ async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
             num_tokens_output=4,
         )
         assert cancelled_attempt is not None
-        cancelled_provenance = parse_attempt_provenance(
-            cancelled_attempt.provenance_json
-        )
-        assert cancelled_provenance.provenance is not None
-        assert cancelled_provenance.provenance.token_usage is not None
-        assert [
-            receipt.provider_response_id
-            for receipt in cancelled_provenance.provenance.token_usage.completed_provider_calls
-        ] == ["cancelled-attempt-call"]
-
         await run_repo.create_or_get_attempt_started(
             run_id=run.id,
             flow_id=flow.id,
@@ -801,26 +769,6 @@ async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
             attempt_no=2,
             celery_task_id="token-usage-completed",
             predecessor_attempt_id=first_attempt.id,
-        )
-        await run_repo.append_attempt_provider_call_receipt(
-            run_id=run.id,
-            step_id=step_one_id,
-            attempt_no=2,
-            tenant_id=tenant_id,
-            receipt=ProviderCallTokenReceiptProvenance(
-                call_index=1,
-                num_tokens_input=20,
-                num_tokens_output=6,
-                input_source="provider",
-                output_source="provider",
-                requested_model="openai/gpt-4o-mini",
-                provider="openai",
-                provider_response_id="retry-call",
-                mapped_call=MappedProviderCallProvenance(
-                    execution_mode="per_item",
-                    item_index=1,
-                ),
-            ),
         )
         completed_attempt = await run_repo.finish_attempt(
             run_id=run.id,
@@ -832,16 +780,6 @@ async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
             num_tokens_output=6,
         )
         assert completed_attempt is not None
-        completed_provenance = parse_attempt_provenance(
-            completed_attempt.provenance_json
-        )
-        assert completed_provenance.provenance is not None
-        assert completed_provenance.provenance.token_usage is not None
-        assert [
-            receipt.provider_response_id
-            for receipt in completed_provenance.provenance.token_usage.completed_provider_calls
-        ] == ["retry-call"]
-
         await run_repo.create_or_get_attempt_started(
             run_id=run.id,
             flow_id=flow.id,
@@ -2782,26 +2720,6 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
         assert persisted.requested_model is None
         assert persisted.provider is None
 
-        with pytest.raises(FlowAttemptProvenanceWriteError) as receipt_error:
-            await run_repo.append_attempt_provider_call_receipt(
-                run_id=context.run_id,
-                step_id=context.step_id,
-                attempt_no=1,
-                tenant_id=context.tenant_id,
-                receipt=ProviderCallTokenReceiptProvenance(
-                    call_index=1,
-                    num_tokens_input=5,
-                    num_tokens_output=2,
-                    input_source="provider",
-                    output_source="provider",
-                ),
-            )
-        assert receipt_error.value.status == unavailable_status
-        assert receipt_error.value.run_id == context.run_id
-        assert receipt_error.value.step_id == context.step_id
-        assert receipt_error.value.attempt_no == 1
-        assert receipt_error.value.tenant_id == context.tenant_id
-
         finished = await run_repo.finish_attempt(
             run_id=context.run_id,
             step_id=context.step_id,
@@ -2853,19 +2771,6 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
                 }
             )
         )
-        assert await run_repo.append_attempt_provider_call_receipt(
-            run_id=context.run_id,
-            step_id=context.step_id,
-            attempt_no=1,
-            tenant_id=context.tenant_id,
-            receipt=ProviderCallTokenReceiptProvenance(
-                call_index=1,
-                num_tokens_input=5,
-                num_tokens_output=2,
-                input_source="provider",
-                output_source="provider",
-            ),
-        )
         for _ in range(2):
             updated = await run_repo.record_attempt_start_provenance(
                 run_id=context.run_id,
@@ -2885,143 +2790,6 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
         assert parsed.provenance.artifacts is not None
         assert parsed.provenance.artifacts.model_dump() == {"generated_count": 1}
         assert parsed.provenance.attempt_start == context.attempt_start
-        assert parsed.provenance.token_usage is not None
-        assert len(parsed.provenance.token_usage.completed_provider_calls) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_provider_call_receipts_keep_unreported_usage_unknown(
-    attempt_provenance_context,
-):
-    context = attempt_provenance_context
-    async with sessionmanager.session() as session, session.begin():
-        run_repo = FlowRunRepository(session=session)
-        attempt = await run_repo.create_or_get_attempt_started(
-            run_id=context.run_id,
-            flow_id=context.flow_id,
-            tenant_id=context.tenant_id,
-            step_id=context.step_id,
-            step_order=1,
-            attempt_no=1,
-            celery_task_id="unreported-provider-usage",
-        )
-        assert await run_repo.append_attempt_provider_call_receipt(
-            run_id=context.run_id,
-            step_id=context.step_id,
-            attempt_no=1,
-            tenant_id=context.tenant_id,
-            receipt=ProviderCallTokenReceiptProvenance(
-                call_index=1,
-                num_tokens_input=5,
-                num_tokens_output=0,
-                input_source="provider",
-                output_source="provider",
-            ),
-        )
-        assert await run_repo.append_attempt_provider_call_receipt(
-            run_id=context.run_id,
-            step_id=context.step_id,
-            attempt_no=1,
-            tenant_id=context.tenant_id,
-            receipt=ProviderCallTokenReceiptProvenance(
-                call_index=2,
-                num_tokens_input=None,
-                num_tokens_output=2,
-                input_source="not_reported",
-                output_source="provider",
-            ),
-        )
-
-        persisted = await session.get(FlowStepAttempts, attempt.id)
-        assert persisted is not None
-        parsed = parse_attempt_provenance(persisted.provenance_json)
-        assert parsed.status == "tracked"
-        assert parsed.provenance is not None
-        usage = parsed.provenance.token_usage
-        assert usage is not None
-        assert usage.num_tokens_input is None
-        assert usage.input_source == "mixed"
-        assert usage.num_tokens_output == 2
-        assert usage.output_source == "provider"
-        assert usage.completed_provider_calls[0].num_tokens_output == 0
-        assert usage.completed_provider_calls[1].num_tokens_input is None
-
-        raw_usage = persisted.provenance_json["token_usage"]
-        assert "num_tokens_input" not in raw_usage
-        assert "num_tokens_input" not in raw_usage["completed_provider_calls"][1]
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_finish_attempt_refreshes_locked_row_before_merging_receipt(
-    attempt_provenance_context,
-):
-    context = attempt_provenance_context
-    async with sessionmanager.session() as session, session.begin():
-        attempt = await FlowRunRepository(
-            session=session
-        ).create_or_get_attempt_started(
-            run_id=context.run_id,
-            flow_id=context.flow_id,
-            tenant_id=context.tenant_id,
-            step_id=context.step_id,
-            step_order=1,
-            attempt_no=1,
-            celery_task_id="attempt-receipt-race",
-        )
-        attempt_id = attempt.id
-
-    async with sessionmanager.session() as finish_session, finish_session.begin():
-        preloaded = await finish_session.scalar(
-            sa.select(FlowStepAttempts).where(FlowStepAttempts.id == attempt_id)
-        )
-        assert preloaded is not None
-        assert preloaded.provenance_json is None
-
-        async with sessionmanager.session() as receipt_session, receipt_session.begin():
-            appended = await FlowRunRepository(
-                session=receipt_session
-            ).append_attempt_provider_call_receipt(
-                run_id=context.run_id,
-                step_id=context.step_id,
-                attempt_no=1,
-                tenant_id=context.tenant_id,
-                receipt=ProviderCallTokenReceiptProvenance(
-                    call_index=1,
-                    num_tokens_input=8,
-                    num_tokens_output=3,
-                    input_source="provider",
-                    output_source="provider",
-                ),
-            )
-            assert appended is True
-
-        finished = await FlowRunRepository(session=finish_session).finish_attempt(
-            run_id=context.run_id,
-            step_id=context.step_id,
-            attempt_no=1,
-            tenant_id=context.tenant_id,
-            status=FlowStepAttemptStatus.COMPLETED,
-            provenance_json={
-                "schema_version": "flow-attempt-provenance.v1",
-                "artifacts": {"generated_count": 1},
-            },
-        )
-        assert finished is not None
-        parsed = parse_attempt_provenance(finished.provenance_json)
-        assert parsed.provenance is not None
-        assert parsed.provenance.token_usage is not None
-        assert parsed.provenance.token_usage.num_tokens_input == 8
-        assert parsed.provenance.token_usage.num_tokens_output == 3
-
-    async with sessionmanager.session() as session, session.begin():
-        persisted = await session.get(FlowStepAttempts, attempt_id)
-        assert persisted is not None
-        parsed = parse_attempt_provenance(persisted.provenance_json)
-        assert parsed.provenance is not None
-        assert parsed.provenance.token_usage is not None
-        assert len(parsed.provenance.token_usage.completed_provider_calls) == 1
 
 
 @pytest.mark.asyncio

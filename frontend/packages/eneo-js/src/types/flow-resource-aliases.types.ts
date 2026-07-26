@@ -30,6 +30,8 @@ import type {
   FlowPackageRequirementDataSensitivity,
   FlowPackageResourceSlotRef,
   FlowPackageValidation,
+  FlowProviderCallEvidence,
+  FlowProviderCallEvidencePage,
   FlowRetentionPolicy,
   FlowRetentionChangeConfirmation,
   FlowRetentionImpactPreview,
@@ -105,6 +107,8 @@ type ExportFlowRunEvidenceResponse =
   operations["export_flow_run_evidence"]["responses"][200]["content"]["application/json"];
 type ExportFlowRunEvidenceError =
   operations["export_flow_run_evidence"]["responses"][400]["content"]["application/json"];
+type ListFlowRunProviderCallsResponse =
+  operations["list_flow_run_provider_calls"]["responses"][200]["content"]["application/json"];
 type ResumeFlowRunReviewCheckpointHeaders =
   operations["resume_flow_run_review_checkpoint"]["parameters"]["header"];
 type FlowRunReviewCheckpointEvidence =
@@ -141,6 +145,8 @@ type PublicFlowLaunchAliasSmoke = {
   FlowPackageRequirementDataSensitivity: FlowPackageRequirementDataSensitivity;
   FlowPackageResourceSlotRef: FlowPackageResourceSlotRef;
   FlowPackageValidation: FlowPackageValidation;
+  FlowProviderCallEvidence: FlowProviderCallEvidence;
+  FlowProviderCallEvidencePage: FlowProviderCallEvidencePage;
   FlowRetentionPolicy: FlowRetentionPolicy;
   FlowRetentionChangeConfirmation: FlowRetentionChangeConfirmation;
   FlowRetentionImpactPreview: FlowRetentionImpactPreview;
@@ -607,6 +613,45 @@ const validFlowGraphEdge: FlowGraphEdge = {
   kind: "execution"
 };
 
+const validProviderCallEvidence: FlowProviderCallEvidence = {
+  event_id: "00000000-0000-0000-0000-000000000501",
+  attempt_id: "00000000-0000-0000-0000-000000000502",
+  step_id: "00000000-0000-0000-0000-000000000503",
+  step_order: 1,
+  attempt_no: 1,
+  ordinal: 1,
+  status: "completed",
+  evidence_source: "live_observer",
+  request_schema_version: 1,
+  provider_request_hash: "a".repeat(64),
+  requested_model: "openai/gpt-4o-mini",
+  provider: "openai",
+  response_format: "json_schema",
+  call_reason: "initial",
+  mapped_execution_mode: null,
+  mapped_item_index: null,
+  mapped_source_index: null,
+  mapped_source_id: null,
+  response_model: "gpt-4o-mini-2026-07-01",
+  provider_response_id: "response-1",
+  num_tokens_input: 12,
+  num_tokens_output: null,
+  input_source: "provider",
+  output_source: "not_reported",
+  outcome_reason: null,
+  requested_at: isoTimestamp,
+  finished_at: isoTimestamp
+};
+const validProviderCallEvidencePage: FlowProviderCallEvidencePage = {
+  items: [validProviderCallEvidence],
+  count: 1,
+  total_count: 1,
+  has_more: false,
+  next_after_event_id: null
+};
+const validListFlowRunProviderCallsResponse: ListFlowRunProviderCallsResponse =
+  validProviderCallEvidencePage;
+
 const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
   run: validFlowRun,
   definition_integrity: {
@@ -622,6 +667,7 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
   rerun_invalidated_steps: [validRerunInvalidatedStep],
   review_checkpoints: [validReviewCheckpointEvidence],
   webhook_deliveries: [],
+  provider_calls: validProviderCallEvidencePage,
   debug_export: {
     schema_version: "eneo.flow.debug-export.v2",
     generated_at: isoTimestamp,
@@ -649,11 +695,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 const validUntypedFlowEvidence: FlowRunEvidence = validFlowEvidence;
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v11",
+  schema_version: "flow-evidence-export.v12",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v11",
+    schema_version: "flow-evidence-export.v12",
     app_version: "DEV",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",
@@ -910,6 +956,7 @@ void validFlowGraphEdge;
 void validReviewCheckpointState;
 void validReviewCheckpointResumeResponse;
 void validFlowEvidence;
+void validListFlowRunProviderCallsResponse;
 void validUntypedFlowEvidence;
 void validFlowEvidenceExport;
 void invalidRunCreateRequest;

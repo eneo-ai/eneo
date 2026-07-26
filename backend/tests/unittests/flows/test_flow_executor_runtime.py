@@ -43,6 +43,7 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
 from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunMultipleActiveOperationsError,
@@ -66,6 +67,9 @@ from eneo.flows.flow_run_provenance import (
     ModelParameterSnapshot,
 )
 from eneo.flows.flow_runtime_policy import FlowRuntimePolicy
+from eneo.flows.infrastructure.flow_provider_call_recorder import (
+    ProviderCallEvidencePersistenceError,
+)
 from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunActiveRerunOperation,
     FlowRunRerunRepository,
@@ -1414,6 +1418,56 @@ async def test_zero_call_compose_failure_has_no_provider_work_disclosure(user):
     assert finish_kwargs["error_message"] == "Flow step 1 execution failed."
     terminal_error = executor._terminalize_run.await_args.kwargs["error"]
     assert "Provider work" not in terminal_error.message
+
+
+@pytest.mark.asyncio
+async def test_provider_call_persistence_gap_is_typed_and_not_auto_retryable(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+    step = _step_for_execute_step()
+    run_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+    facts = ProviderCallEvidenceGap(
+        call_id=uuid4(),
+        ordinal=2,
+        provider_request_hash="a" * 64,
+        provider_response_id="response-123",
+        outcome="completed",
+        num_tokens_input=19,
+        num_tokens_output=7,
+    )
+
+    await executor._handle_generic_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=_empty_execution_state(),
+        exc=ProviderCallEvidencePersistenceError(facts=facts),
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["error_code"] == (
+        FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED.value
+    )
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert terminal_error.code is (
+        FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED
+    )
+    assert terminal_error.retryable is False
+    assert terminal_error.details is not None
+    assert terminal_error.details.provider_call_evidence_gap == facts
+    assert "the call was not repeated" in terminal_error.message
 
 
 @pytest.mark.asyncio

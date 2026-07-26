@@ -16,6 +16,7 @@ Use this table to choose the right runtime journey before you read the detailed 
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Quickstart                          | Discover the contract, create a run with idempotency, poll status, then read the final result.                            | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
 | Files                               | Upload files before run creation and bind returned ids to the step that consumes them.                                    | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
+| Evidence and provider usage         | Inspect bounded run evidence, page every provider-call lifecycle row, and export a verified evidence bundle.              | `GET /api/v1/flows/{id}/runs/{run_id}/evidence/` (`get_flow_run_evidence`)                                       |
 | Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                                    | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)      |
 | Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                             | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`) |
 | Results                             | Drive the UI from the typed final result, step details, artifact links, and status capabilities.                          | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
@@ -826,6 +827,29 @@ Endpoint facts:
 Contract coverage: These endpoints are contract-tested.
 
 Errors you must handle: `flow_run_required_step_input_missing`, `flow_run_step_input_max_files_exceeded`, `flow_run_step_input_file_too_large`, `flow_run_step_input_mimetype_rejected`, `flow_runtime_file_attached`.
+
+When a product needs explainability or cost visibility, read the bounded evidence view and page provider calls without losing lifecycle state.
+
+### Evidence and provider usage
+
+Inspect bounded run evidence, page every provider-call lifecycle row, and export a verified evidence bundle.
+
+1. Call `runtime_paths.evidence_template` for the redacted run trace and its first bounded `provider_calls` page.
+2. Call `runtime_paths.provider_calls_template` with `after_event_id` until `has_more` is false when the UI needs every provider call.
+3. Treat `outcome_unknown` as possible remote work or spend; never infer a safe retry from missing terminal evidence.
+4. Call `runtime_paths.export_evidence_template` for a hashed support or compliance bundle; use paginated provider-call evidence when the synchronous export limit is exceeded.
+
+Endpoint facts:
+
+| Endpoint                                           | Method | Success  | Operation                      |
+| -------------------------------------------------- | ------ | -------- | ------------------------------ |
+| `/api/v1/flows/{id}/runs/{run_id}/evidence/`       | `GET`  | `200 OK` | `get_flow_run_evidence`        |
+| `/api/v1/flows/{id}/runs/{run_id}/provider-calls/` | `GET`  | `200 OK` | `list_flow_run_provider_calls` |
+| `/api/v1/flows/{id}/runs/{run_id}/evidence/export` | `GET`  | `200 OK` | `export_flow_run_evidence`     |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_provider_call_evidence_persistence_failed`, `flow_evidence_export_too_large`.
 
 After inputs are bound, plan how the UI behaves when a review-marked step pauses the run.
 

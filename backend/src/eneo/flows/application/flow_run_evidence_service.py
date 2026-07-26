@@ -21,7 +21,12 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 )
 from eneo.flows.application.flow_run_export_json import render_evidence_json_export
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowRun
+from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallNotFoundError,
+    FlowProviderCallRepository,
+)
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
@@ -34,11 +39,16 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.exceptions import (
+    FileTooLargeException,
     NotFoundException,
     ResourceGoneException,
     UnauthorizedException,
 )
 from eneo.users.user import UserInDB
+
+EMBEDDED_PROVIDER_CALL_LIMIT = 100
+PROVIDER_CALL_PAGE_MAX_LIMIT = 500
+PROVIDER_CALL_EXPORT_MAX_EVENTS = 10_000
 
 
 class FlowRunEvidenceService:
@@ -53,6 +63,7 @@ class FlowRunEvidenceService:
         user: UserInDB,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
+        provider_call_repo: FlowProviderCallRepository,
         flow_run_rerun_repo: FlowRunRerunRepository,
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         flow_version_repo: FlowVersionRepository,
@@ -62,6 +73,7 @@ class FlowRunEvidenceService:
     ):
         self.user = user
         self.flow_run_repo = flow_run_repo
+        self.provider_call_repo = provider_call_repo
         self.flow_run_rerun_repo = flow_run_rerun_repo
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_version_repo = flow_version_repo
@@ -139,6 +151,46 @@ class FlowRunEvidenceService:
             run=run,
         )
 
+    async def list_provider_calls(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        limit: int,
+        after_event_id: UUID | None = None,
+        attempt_id: UUID | None = None,
+        run: FlowRun | None = None,
+    ) -> ProviderCallEvidencePage:
+        resolved_run = (
+            run
+            if run is not None
+            else await self.access_policy.load_run(
+                run_id=run_id,
+                flow_id=flow_id,
+                access_kind="evidence_view",
+            )
+        )
+        if run is not None:
+            if resolved_run.id != run_id or resolved_run.flow_id != flow_id:
+                self.access_policy.deny_run_access(auth_layer="flow_run_argument")
+            await self.access_policy.ensure_can_access_run(
+                resolved_run,
+                access_kind="evidence_view",
+            )
+        try:
+            return await self.provider_call_repo.list_evidence_page(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                limit=limit,
+                after_event_id=after_event_id,
+                attempt_id=attempt_id,
+            )
+        except FlowProviderCallNotFoundError as exc:
+            raise NotFoundException(
+                "Provider-call evidence cursor not found.",
+                code="not_found",
+            ) from exc
+
     async def export_evidence_json(
         self,
         *,
@@ -153,7 +205,9 @@ class FlowRunEvidenceService:
                 run_id=run_id,
                 access_kind="evidence_export_raw",
                 run=run,
+                provider_call_limit=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
             )
+            self._enforce_provider_call_export_limit(bundle.provider_calls)
             return render_evidence_json_export(
                 bundle=bundle,
                 context=EvidenceExportContext(
@@ -166,7 +220,9 @@ class FlowRunEvidenceService:
             run_id=run_id,
             access_kind="evidence_export_redacted",
             run=run,
+            provider_call_limit=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
         )
+        self._enforce_provider_call_export_limit(bundle.provider_calls)
         return render_evidence_json_export(
             bundle=bundle,
             context=EvidenceExportContext(
@@ -182,11 +238,13 @@ class FlowRunEvidenceService:
         run_id: UUID,
         access_kind: FlowRunAccessKind,
         run: FlowRun | None = None,
+        provider_call_limit: int = EMBEDDED_PROVIDER_CALL_LIMIT,
     ) -> RedactedEvidenceBundle:
         bundle = await self._get_evidence_bundle(
             run_id=run_id,
             access_kind=access_kind,
             run=run,
+            provider_call_limit=provider_call_limit,
         )
         return redact_evidence_bundle(bundle)
 
@@ -196,6 +254,7 @@ class FlowRunEvidenceService:
         run_id: UUID,
         access_kind: FlowRunAccessKind,
         run: FlowRun | None = None,
+        provider_call_limit: int = EMBEDDED_PROVIDER_CALL_LIMIT,
     ) -> EvidenceBundle:
         resolved_run = (
             run
@@ -218,39 +277,57 @@ class FlowRunEvidenceService:
             version=resolved_run.flow_version,
             tenant_id=self.user.tenant_id,
         )
-        (
-            step_results,
-            step_attempts,
-            rerun_operations,
-            rerun_invalidated_steps,
-            review_checkpoints,
-            result_files,
-        ) = await asyncio.gather(
-            self.flow_run_repo.list_step_results(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-            ),
-            self.flow_run_repo.list_step_attempts(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-            ),
-            self.flow_run_rerun_repo.list_rerun_operations_for_run(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-            ),
-            self.flow_run_rerun_repo.list_rerun_invalidated_steps_for_run(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-            ),
-            self.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-            ),
-            self.flow_run_repo.list_result_files(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-            ),
-        )
+        async with asyncio.TaskGroup() as task_group:
+            step_results_task = task_group.create_task(
+                self.flow_run_repo.list_step_results(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                )
+            )
+            step_attempts_task = task_group.create_task(
+                self.flow_run_repo.list_step_attempts(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                )
+            )
+            rerun_operations_task = task_group.create_task(
+                self.flow_run_rerun_repo.list_rerun_operations_for_run(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                )
+            )
+            rerun_invalidated_steps_task = task_group.create_task(
+                self.flow_run_rerun_repo.list_rerun_invalidated_steps_for_run(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                )
+            )
+            review_checkpoints_task = task_group.create_task(
+                self.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                )
+            )
+            result_files_task = task_group.create_task(
+                self.flow_run_repo.list_result_files(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                )
+            )
+            provider_calls_task = task_group.create_task(
+                self.provider_call_repo.list_evidence_page(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                    limit=provider_call_limit,
+                )
+            )
+        step_results = step_results_task.result()
+        step_attempts = step_attempts_task.result()
+        rerun_operations = rerun_operations_task.result()
+        rerun_invalidated_steps = rerun_invalidated_steps_task.result()
+        review_checkpoints = review_checkpoints_task.result()
+        result_files = result_files_task.result()
+        provider_calls = provider_calls_task.result()
         webhook_deliveries = (
             await self.webhook_delivery_repo.list_run_delivery_statuses(
                 run_id=resolved_run.id,
@@ -274,7 +351,27 @@ class FlowRunEvidenceService:
             rerun_invalidated_steps=rerun_invalidated_steps,
             review_checkpoints=review_checkpoints,
             webhook_deliveries=webhook_deliveries,
+            provider_calls=provider_calls,
             runtime_input_file_metadata_by_step_result_id=(
                 runtime_input_file_metadata_by_step_result_id
+            ),
+        )
+
+    @staticmethod
+    def _enforce_provider_call_export_limit(
+        provider_calls: ProviderCallEvidencePage,
+    ) -> None:
+        if provider_calls.total_count <= PROVIDER_CALL_EXPORT_MAX_EVENTS:
+            return
+        raise FileTooLargeException(
+            "Flow evidence export contains too many provider-call events.",
+            code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
+            context={
+                "provider_call_count": provider_calls.total_count,
+                "max_provider_call_events": PROVIDER_CALL_EXPORT_MAX_EVENTS,
+            },
+            docs_hint=(
+                "Use the paginated provider-calls endpoint or request an offline "
+                "administrative export."
             ),
         )

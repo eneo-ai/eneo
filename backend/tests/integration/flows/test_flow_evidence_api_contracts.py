@@ -42,6 +42,10 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.flow_run_input_revision import canonical_input_hash
+from eneo.flows.domain.provider_call import (
+    ProviderCallCompletion,
+    ProviderCallRequest,
+)
 from eneo.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
@@ -59,6 +63,10 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+    MappedProviderCallProvenance,
+)
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
 )
 from eneo.flows.published_definition import (
     build_published_definition_json,
@@ -676,6 +684,7 @@ async def _seed_flow_run_contract_data(
             "flow_id": str(flow.id),
             "run_id": str(run.id),
             "step_id": str(step.id),
+            "initial_attempt_id": str(initial_attempt.id),
             "space_id": str(space.id),
             "trace_id": str(run.trace_id),
         }
@@ -882,7 +891,7 @@ async def test_flow_run_evidence_endpoint_requires_trace_permission(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_run_evidence_keeps_unreported_provider_usage_unknown(
+async def test_flow_run_evidence_hides_legacy_provider_call_jsonb_after_cutover(
     client,
     db_container,
     patch_auth_service_jwt,
@@ -924,16 +933,149 @@ async def test_flow_run_evidence_keeps_unreported_provider_usage_unknown(
     )
 
     assert response.status_code == 200, response.text
-    usage = response.json()["step_attempts"][0]["provenance_json"]["token_usage"]
-    assert "num_tokens_input" not in usage
-    assert usage["input_source"] == "not_reported"
-    assert usage["num_tokens_output"] == 0
-    assert usage["output_source"] == "provider"
-    call = usage["completed_provider_calls"][0]
-    assert "num_tokens_input" not in call
-    assert call["input_source"] == "not_reported"
-    assert call["num_tokens_output"] == 0
-    assert call["output_source"] == "provider"
+    payload = response.json()
+    assert "token_usage" not in payload["step_attempts"][0]["provenance_json"]
+    assert payload["provider_calls"] == {
+        "items": [],
+        "count": 0,
+        "total_count": 0,
+        "has_more": False,
+        "next_after_event_id": None,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    attempt_id = UUID(seeded["initial_attempt_id"])
+    async with db_container() as container:
+        session = container.session()
+        attempt = await session.get(FlowStepAttempts, attempt_id)
+        assert attempt is not None
+        attempt.status = "started"
+        await session.flush()
+        provider_call_repo = FlowProviderCallRepository(session=session)
+        rejected = await provider_call_repo.start_call(
+            attempt_id=attempt_id,
+            request=ProviderCallRequest(
+                provider_request_hash="a" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                response_format="json_schema",
+                call_reason="initial",
+            ),
+        )
+        await provider_call_repo.reject_call(
+            call_id=rejected.id,
+            reason="response_format_rejected",
+        )
+        completed = await provider_call_repo.start_call(
+            attempt_id=attempt_id,
+            request=ProviderCallRequest(
+                provider_request_hash="b" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                response_format="json_object",
+                call_reason="response_format_fallback",
+                mapped_call=MappedProviderCallProvenance(
+                    execution_mode="per_source_reader",
+                    source_index=1,
+                    source_id="source-file-1",
+                ),
+            ),
+        )
+        await provider_call_repo.complete_call(
+            call_id=completed.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="response-fallback-1",
+                num_tokens_input=14,
+                num_tokens_output=None,
+                input_source="provider",
+                output_source="not_reported",
+            ),
+        )
+        attempt.status = "completed"
+        await session.flush()
+
+    endpoint = (
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/provider-calls/"
+    )
+    headers = {"Authorization": f"Bearer {trace_token}"}
+    first_response = await client.get(endpoint, params={"limit": 1}, headers=headers)
+
+    assert first_response.status_code == 200, first_response.text
+    first_page = first_response.json()
+    assert first_page["count"] == 1
+    assert first_page["total_count"] == 2
+    assert first_page["has_more"] is True
+    assert first_page["next_after_event_id"] == str(rejected.id)
+    assert first_page["items"][0]["status"] == "rejected"
+    assert first_page["items"][0]["outcome_reason"] == ("response_format_rejected")
+    assert first_page["items"][0]["provider_request_hash"] == "a" * 64
+
+    second_response = await client.get(
+        endpoint,
+        params={
+            "limit": 1,
+            "after_event_id": first_page["next_after_event_id"],
+            "attempt_id": str(attempt_id),
+        },
+        headers=headers,
+    )
+
+    assert second_response.status_code == 200, second_response.text
+    second_page = second_response.json()
+    assert second_page["count"] == 1
+    assert second_page["total_count"] == 2
+    assert second_page["has_more"] is False
+    assert second_page["next_after_event_id"] is None
+    assert second_page["items"][0]["event_id"] == str(completed.id)
+    assert second_page["items"][0]["status"] == "completed"
+    assert second_page["items"][0]["call_reason"] == "response_format_fallback"
+    assert second_page["items"][0]["num_tokens_input"] == 14
+    assert second_page["items"][0]["num_tokens_output"] is None
+    assert second_page["items"][0]["output_source"] == "not_reported"
+    assert second_page["items"][0]["mapped_execution_mode"] == "per_source"
+    assert second_page["items"][0]["mapped_source_index"] == 1
+    assert second_page["items"][0]["mapped_source_id"] == "source-file-1"
+
+    unknown_cursor_response = await client.get(
+        endpoint,
+        params={"after_event_id": str(uuid4())},
+        headers=headers,
+    )
+    assert unknown_cursor_response.status_code == 404
+    assert unknown_cursor_response.json()["code"] == "not_found"
+
+    evidence_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers=headers,
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    embedded = evidence_response.json()["provider_calls"]
+    assert embedded["count"] == 2
+    assert embedded["total_count"] == 2
+    assert [item["event_id"] for item in embedded["items"]] == [
+        str(rejected.id),
+        str(completed.id),
+    ]
 
 
 @pytest.mark.asyncio

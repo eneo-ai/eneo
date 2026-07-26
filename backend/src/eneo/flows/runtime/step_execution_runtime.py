@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
 
-from eneo.ai_models.completion_models.completion_model import (
-    Completion,
-    ProviderDispatch,
+from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.completion_models.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallReason,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
@@ -31,13 +32,11 @@ from eneo.flows.citation_sidecar import (
 )
 from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.runtime import (
-    ProviderCallTokenReceipt,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
     StepExecutionOutput,
     StepInputValue,
-    TokenCountSource,
 )
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
@@ -231,8 +230,11 @@ class RunCancelledFn(Protocol):
     ) -> Awaitable[bool]: ...
 
 
-class RecordProviderCallReceiptFn(Protocol):
-    def __call__(self, receipt: ProviderCallTokenReceipt) -> Awaitable[None]: ...
+class BuildProviderCallObserverFn(Protocol):
+    def __call__(
+        self,
+        mapped_call: MappedProviderCallProvenance | None,
+    ) -> ProviderCallObserver: ...
 
 
 class FlowStepCancelledError(Exception):
@@ -266,7 +268,7 @@ class StepExecutionRuntimeDeps:
     run_cancel_poll_interval_seconds: float = 2.0
     llm_task_cancellation_grace_seconds: float = LLM_TASK_CANCELLATION_GRACE_SECONDS
     rag_retrieval_timeout_seconds: float = 30
-    record_provider_call_receipt: RecordProviderCallReceiptFn | None = None
+    build_provider_call_observer: BuildProviderCallObserverFn | None = None
     mapped_call_context: MappedProviderCallProvenance | None = None
 
 
@@ -435,72 +437,6 @@ def _typed_context_window_error(
     )
 
 
-def build_provider_call_receipts(
-    *,
-    dispatches: Sequence[ProviderDispatch],
-    fallback_provider_response_id: str | None,
-    first_call_index: int,
-    aggregate_num_tokens_input: int,
-    aggregate_num_tokens_output: int,
-    aggregate_input_source: TokenCountSource,
-    aggregate_output_source: TokenCountSource,
-    requested_model: str | None,
-    response_model: str | None,
-    provider: str | None,
-    mapped_call: MappedProviderCallProvenance | None,
-) -> list[ProviderCallTokenReceipt]:
-    """One receipt per request the provider served, in dispatch order.
-
-    Adapters that report their dispatches give a receipt each, carrying that
-    dispatch's own usage. Adapters that do not report them still yield a single
-    receipt holding the aggregate, which is what the caller could observe: an
-    invented per-call split would be worse than an honest single total.
-    """
-    if len(dispatches) <= 1:
-        return [
-            ProviderCallTokenReceipt(
-                call_index=first_call_index,
-                num_tokens_input=aggregate_num_tokens_input,
-                num_tokens_output=aggregate_num_tokens_output,
-                input_source=aggregate_input_source,
-                output_source=aggregate_output_source,
-                requested_model=requested_model,
-                response_model=response_model,
-                provider=provider,
-                provider_response_id=fallback_provider_response_id,
-                mapped_call=mapped_call,
-            )
-        ]
-
-    receipts: list[ProviderCallTokenReceipt] = []
-    for offset, dispatch in enumerate(dispatches):
-        usage = dispatch.usage
-        prompt_tokens = usage.prompt_tokens if usage is not None else None
-        completion_tokens = usage.completion_tokens if usage is not None else None
-        receipts.append(
-            ProviderCallTokenReceipt(
-                call_index=first_call_index + offset,
-                num_tokens_input=prompt_tokens,
-                num_tokens_output=completion_tokens,
-                # Per-dispatch counts come from the provider when it reported
-                # them for that request; otherwise this dispatch's share is
-                # genuinely unknown rather than estimated.
-                input_source="provider"
-                if prompt_tokens is not None
-                else "not_reported",
-                output_source="provider"
-                if completion_tokens is not None
-                else "not_reported",
-                requested_model=requested_model,
-                response_model=dispatch.response_model or response_model,
-                provider=provider,
-                provider_response_id=dispatch.provider_response_id,
-                mapped_call=mapped_call,
-            )
-        )
-    return receipts
-
-
 async def call_assistant_with_timeout(
     *,
     step: RuntimeStep,
@@ -512,6 +448,7 @@ async def call_assistant_with_timeout(
     info_blob_chunks: list[InfoBlobChunkInDBWithScore],
     prompt_override: str,
     version: int,
+    provider_call_reason: ProviderCallReason,
     step_deadline_monotonic: float | None = None,
 ) -> Any:
     # When a step deadline is supplied, the json-mode rejection retry shares
@@ -554,6 +491,12 @@ async def call_assistant_with_timeout(
             prompt_override=prompt_override,
             version=version,
             reject_context_over_limit=True,
+            provider_call_observer=(
+                deps.build_provider_call_observer(deps.mapped_call_context)
+                if deps.build_provider_call_observer is not None
+                else None
+            ),
+            provider_call_reason=provider_call_reason,
         )
     )
     state.in_flight_llm_task = llm_task
@@ -1397,6 +1340,7 @@ async def complete_step_execution(
             info_blob_chunks=info_blob_chunks,
             prompt_override=prompt_override,
             version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
+            provider_call_reason="initial",
             step_deadline_monotonic=step_deadline_monotonic,
         )
     except ProviderCapabilityRejectedException as model_exc:
@@ -1419,6 +1363,7 @@ async def complete_step_execution(
                 info_blob_chunks=info_blob_chunks,
                 prompt_override=prompt_override,
                 version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
+                provider_call_reason="capability_fallback",
                 step_deadline_monotonic=step_deadline_monotonic,
             )
         else:
@@ -1458,11 +1403,6 @@ async def complete_step_execution(
         if response_usage is not None and response_usage.prompt_tokens is not None
         else response.total_token_count
     )
-    input_token_source = (
-        "provider"
-        if response_usage is not None and response_usage.prompt_tokens is not None
-        else "estimated"
-    )
     num_tokens_output = (
         response_usage.completion_tokens
         if response_usage is not None and response_usage.completion_tokens is not None
@@ -1471,32 +1411,6 @@ async def complete_step_execution(
         )
         + reasoning_tokens
     )
-    output_token_source = (
-        "provider"
-        if response_usage is not None and response_usage.completion_tokens is not None
-        else "estimated"
-    )
-    # One receipt per request the provider actually served. A completion that
-    # needed tool rounds sent several and merged their usage, so recording a
-    # single receipt would undercount what was billed.
-    receipts = build_provider_call_receipts(
-        dispatches=tuple(getattr(completion, "provider_dispatches", ()) or ()),
-        fallback_provider_response_id=getattr(completion, "provider_response_id", None),
-        first_call_index=state.provider_call_count_by_step.get(step.step_id, 0) + 1,
-        aggregate_num_tokens_input=num_tokens_input,
-        aggregate_num_tokens_output=num_tokens_output,
-        aggregate_input_source=input_token_source,
-        aggregate_output_source=output_token_source,
-        requested_model=requested_model_name(prepared.assistant),
-        response_model=getattr(response_model_info, "name", None),
-        provider=getattr(response_model_info, "provider_type", None),
-        mapped_call=deps.mapped_call_context,
-    )
-    if deps.record_provider_call_receipt is not None:
-        for receipt in receipts:
-            await deps.record_provider_call_receipt(receipt)
-    state.provider_call_count_by_step[step.step_id] = receipts[-1].call_index
-
     rag_metadata = apply_prompt_context_trace(
         rag_metadata,
         knowledge_trace=getattr(response, "knowledge_trace", None),
@@ -1587,5 +1501,4 @@ async def complete_step_execution(
             and bool(citation_sidecar.get("citation_observed"))
             else None
         ),
-        provider_call_receipts=receipts,
     )

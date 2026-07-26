@@ -22,6 +22,7 @@ from eneo.flows.api.flow_models import (
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_EVIDENCE_EXPORT_PATH,
     FLOW_RUN_EVIDENCE_PATH,
+    FLOW_RUN_PROVIDER_CALLS_PATH,
 )
 from eneo.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
@@ -31,7 +32,12 @@ from eneo.flows.api.flow_trace_audit import (
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
 )
+from eneo.flows.application.flow_run_evidence_service import (
+    EMBEDDED_PROVIDER_CALL_LIMIT,
+    PROVIDER_CALL_PAGE_MAX_LIMIT,
+)
 from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_redaction import redact_payload
@@ -75,6 +81,16 @@ Evidence export is policy-based and tiered:
 - raw/full export is a stricter surface, especially for classification 3 spaces
 - service keys may export only their own-run evidence and only when explicit machine evidence
   capability allows it
+    """
+
+_FLOW_PROVIDER_CALLS_DESCRIPTION = """
+List ordered provider-call lifecycle evidence for one Flow run.
+
+The stable order is step order, attempt number, call ordinal, and event id. Each item
+records the credential-free request hash before provider I/O and the observed terminal
+state afterward. `outcome_unknown` means the runtime cannot prove the remote outcome;
+a local evidence-persistence failure is reported separately in the run error details.
+Use `after_event_id` for cursor pagination and `attempt_id` to narrow one attempt.
     """
 
 _DEFAULT_EVIDENCE_EXPORT_REASON: Final[str] = "support_debug"
@@ -205,6 +221,122 @@ async def get_flow_run_evidence(
 
 
 @router.get(
+    FLOW_RUN_PROVIDER_CALLS_PATH,
+    response_model=ProviderCallEvidencePage,
+    status_code=status.HTTP_200_OK,
+    operation_id="list_flow_run_provider_calls",
+    summary="List flow run provider calls",
+    description=_FLOW_PROVIDER_CALLS_DESCRIPTION,
+    responses={
+        403: error_response(
+            description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run or provider-call cursor not found in this scope.",
+            message="Provider-call evidence cursor not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+        503: error_response(
+            description="Evidence audit logging is unavailable for this request.",
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
+    },
+)
+async def list_flow_run_provider_calls(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the run."),
+    ],
+    run_id: Annotated[
+        UUID,
+        Path(description="Identifier of the run whose provider calls are listed."),
+    ],
+    request: Request,
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=PROVIDER_CALL_PAGE_MAX_LIMIT,
+            description="Maximum provider-call events to return.",
+        ),
+    ] = EMBEDDED_PROVIDER_CALL_LIMIT,
+    after_event_id: Annotated[
+        UUID | None,
+        Query(
+            description=(
+                "Return events after this event id in the stable run-wide order."
+            )
+        ),
+    ] = None,
+    attempt_id: Annotated[
+        UUID | None,
+        Query(description="Optionally restrict events to one step attempt."),
+    ] = None,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
+) -> ProviderCallEvidencePage:
+    committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
+    try:
+        async with commit_flow_runtime_write_before_response(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+            )
+            user = container.user()
+            evidence_service = container.flow_run_evidence_service()
+            run = await evidence_service.get_run(
+                run_id=run_id,
+                flow_id=id,
+                access_kind="evidence_view",
+            )
+            page = await evidence_service.list_provider_calls(
+                run_id=run_id,
+                flow_id=id,
+                limit=limit,
+                after_event_id=after_event_id,
+                attempt_id=attempt_id,
+                run=run,
+            )
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed provider-call evidence for flow run {run.id}",
+                extra={
+                    "evidence_detail": "provider_calls",
+                    "page_count": page.count,
+                },
+            )
+            committed_audit_context = (user, run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return page
+
+
+@router.get(
     FLOW_RUN_EVIDENCE_EXPORT_PATH,
     response_model=None,
     status_code=status.HTTP_200_OK,
@@ -233,6 +365,19 @@ async def get_flow_run_evidence(
             context={
                 "detail": "raw",
                 "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
+            },
+        ),
+        413: error_response(
+            description=(
+                "The synchronous evidence export exceeds the provider-call event "
+                "safety boundary."
+            ),
+            message="Flow evidence export contains too many provider-call events.",
+            eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
+            code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE,
+            context={
+                "provider_call_count": 10_001,
+                "max_provider_call_events": 10_000,
             },
         ),
         403: error_response(

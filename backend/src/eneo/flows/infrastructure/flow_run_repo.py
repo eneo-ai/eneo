@@ -60,9 +60,7 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
-    ProviderCallTokenReceiptProvenance,
     attempt_provenance_for_write,
-    build_provider_call_token_usage,
     resolve_attempt_terminalization_evidence,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
@@ -1470,49 +1468,6 @@ class FlowRunRepository:
         await self.session.flush()
         await self.session.refresh(row)
         return FlowStepAttempt.model_validate(row)
-
-    async def append_attempt_provider_call_receipt(
-        self,
-        *,
-        run_id: UUID,
-        step_id: UUID,
-        attempt_no: int,
-        tenant_id: UUID,
-        receipt: ProviderCallTokenReceiptProvenance,
-    ) -> bool:
-        row = await self.session.scalar(
-            sa.select(FlowStepAttempts)
-            .where(FlowStepAttempts.flow_run_id == run_id)
-            .where(FlowStepAttempts.step_id == step_id)
-            .where(FlowStepAttempts.attempt_no == attempt_no)
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
-            .execution_options(populate_existing=True)
-            .with_for_update()
-        )
-        if row is None:
-            return False
-        provenance = attempt_provenance_for_write(
-            row.provenance_json,
-            run_id=run_id,
-            step_id=step_id,
-            attempt_no=attempt_no,
-            tenant_id=tenant_id,
-        )
-        usage = provenance.token_usage
-        receipts = list(usage.completed_provider_calls) if usage is not None else []
-        expected_index = len(receipts) + 1
-        if receipt.call_index != expected_index:
-            raise ValueError(
-                f"Provider call receipt index must be {expected_index}, got {receipt.call_index}."
-            )
-        receipts.append(receipt)
-        provenance = provenance.model_copy(
-            update={"token_usage": build_provider_call_token_usage(receipts)}
-        )
-        row.provenance_json = provenance.to_payload()
-        await self.session.flush()
-        return True
 
     async def finish_attempt(
         self,

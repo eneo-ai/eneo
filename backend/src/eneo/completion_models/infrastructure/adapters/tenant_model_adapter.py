@@ -1,5 +1,6 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
+import asyncio
 import json
 import re
 import uuid
@@ -17,6 +18,7 @@ from typing import (
     cast,
 )
 from urllib.parse import urlsplit, urlunsplit
+from uuid import UUID
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -26,10 +28,16 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     McpToolReference,
     ModelKwargs,
-    ProviderDispatch,
     ResponseType,
     TokenUsage,
     ToolCallMetadata,
+)
+from eneo.completion_models.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallObserverError,
+    ProviderCallReason,
+    ProviderCallResultFacts,
+    build_provider_call_request_facts,
 )
 from eneo.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
@@ -49,7 +57,12 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     resolve_structured_output_capability,
 )
 from eneo.logging.logging import LoggingDetails
-from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
+from eneo.main.exceptions import (
+    APIKeyNotConfiguredException,
+    OpenAIException,
+    ProviderCapabilityRejectedException,
+    ProviderRejectedRequestException,
+)
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -544,27 +557,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
         return cast(dict[str, Any], parsed)
 
-    def _provider_dispatch(
-        self,
-        *,
-        ordinal: int,
-        response: _LiteLLMResponse,
-        reason: Literal["initial", "tool_round"],
-    ) -> ProviderDispatch:
-        """Record one request that was actually sent to the provider.
-
-        Tool rounds accumulate their usage into the returned completion, so the
-        per-dispatch usage recorded here is the only place the individual calls
-        remain visible.
-        """
-        return ProviderDispatch(
-            ordinal=ordinal,
-            response_model=getattr(response, "model", None),
-            provider_response_id=extract_provider_response_id(response),
-            usage=self._extract_usage(response),
-            reason=reason,
-        )
-
     def _extract_usage(self, response: _LiteLLMHasUsage) -> TokenUsage | None:
         """Extract token usage from a LiteLLM response."""
         usage = getattr(response, "usage", None)
@@ -796,6 +788,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         context: "Context",
         model_kwargs: ModelKwargs | dict[str, Any] | None,
         mcp_proxy: "MCPProxySession | None" = None,
+        provider_call_observer: ProviderCallObserver | None = None,
+        provider_call_reason: ProviderCallReason = "initial",
         **kwargs: Any,
     ) -> Completion:
         """
@@ -836,28 +830,17 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         completed_provider_calls = 0
         try:
-            response = cast(
-                _LiteLLMResponse,
-                await _acompletion_call(
-                    model=self.litellm_model,
-                    messages=messages,
-                    stream=False,
-                    drop_params=True,
-                    **litellm_kwargs,
-                ),
+            response = await self._observed_provider_call(
+                messages=messages,
+                litellm_kwargs=litellm_kwargs,
+                observer=provider_call_observer,
+                reason=provider_call_reason,
+                retry_without_capability_safe=True,
             )
             completed_provider_calls += 1
 
             # Extract token usage from provider response
             usage = self._extract_usage(response)
-            dispatches: list[ProviderDispatch] = [
-                self._provider_dispatch(
-                    ordinal=completed_provider_calls,
-                    response=response,
-                    reason="initial",
-                )
-            ]
-
             completion = Completion()
             if response.choices:
                 choice = response.choices[0]
@@ -941,24 +924,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 "content": llm_text,
                             }
                         )
-                    response = cast(
-                        _LiteLLMResponse,
-                        await _acompletion_call(
-                            model=self.litellm_model,
-                            messages=messages,
-                            stream=False,
-                            drop_params=True,
-                            **litellm_kwargs,
-                        ),
+                    response = await self._observed_provider_call(
+                        messages=messages,
+                        litellm_kwargs=litellm_kwargs,
+                        observer=provider_call_observer,
+                        reason="tool_round",
+                        retry_without_capability_safe=False,
                     )
                     completed_provider_calls += 1
-                    dispatches.append(
-                        self._provider_dispatch(
-                            ordinal=completed_provider_calls,
-                            response=response,
-                            reason="tool_round",
-                        )
-                    )
                     usage = self._accumulate_usage(usage, response)
                     if not response.choices:
                         break
@@ -973,12 +946,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                 completion.stop = choice.finish_reason == "stop"
 
             completion.usage = usage
-            completion.provider_dispatches = tuple(dispatches)
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Completion successful"
             )
             return completion
 
+        except ProviderCallObserverError:
+            raise
         except Exception as exc:
             logger.exception(
                 f"[TenantModelAdapter] Unexpected error for {self.litellm_model}"
@@ -997,6 +971,83 @@ class TenantModelAdapter(CompletionModelAdapter):
                 ),
                 retry_without_capability_safe=completed_provider_calls == 0,
             )
+
+    async def _observed_provider_call(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        litellm_kwargs: dict[str, Any],
+        observer: ProviderCallObserver | None,
+        reason: ProviderCallReason,
+        retry_without_capability_safe: bool,
+    ) -> _LiteLLMResponse:
+        call_id: UUID | None = None
+        if observer is not None:
+            request = build_provider_call_request_facts(
+                requested_model=self.litellm_model,
+                provider=self.provider_type,
+                messages=cast("list[dict[str, object]]", messages),
+                request_kwargs=cast("dict[str, object]", litellm_kwargs),
+                reason=reason,
+            )
+            call_id = await observer.started(request)
+
+        try:
+            response = cast(
+                _LiteLLMResponse,
+                await _acompletion_call(
+                    model=self.litellm_model,
+                    messages=messages,
+                    stream=False,
+                    drop_params=True,
+                    **litellm_kwargs,
+                ),
+            )
+        except asyncio.CancelledError:
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
+        except Exception as exc:
+            try:
+                litellm_transport.raise_public_litellm_error(
+                    exc,
+                    provider_type=self.provider_type,
+                    is_unavailable=_is_provider_unavailable_error,
+                    raise_unavailable=lambda error: self._raise_provider_unavailable(
+                        phase="completion", exc=error
+                    ),
+                    retry_without_capability_safe=retry_without_capability_safe,
+                )
+            except ProviderCapabilityRejectedException:
+                if observer is not None and call_id is not None:
+                    await observer.rejected(call_id, "response_format_rejected")
+                raise
+            except ProviderRejectedRequestException:
+                if observer is not None and call_id is not None:
+                    await observer.rejected(call_id, "provider_rejected")
+                raise
+            except Exception:
+                if observer is not None and call_id is not None:
+                    await observer.outcome_unknown(call_id, "provider_error")
+                raise
+            raise AssertionError("Provider error mapping unexpectedly returned.")
+
+        if observer is not None and call_id is not None:
+            usage = self._extract_usage(response)
+            await observer.completed(
+                call_id,
+                ProviderCallResultFacts(
+                    response_model=getattr(response, "model", None),
+                    provider_response_id=extract_provider_response_id(response),
+                    num_tokens_input=(
+                        usage.prompt_tokens if usage is not None else None
+                    ),
+                    num_tokens_output=(
+                        usage.completion_tokens if usage is not None else None
+                    ),
+                ),
+            )
+        return response
 
     @override
     async def prepare_streaming(

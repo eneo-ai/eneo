@@ -4872,6 +4872,32 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/runs/{run_id}/provider-calls/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List flow run provider calls
+     * @description List ordered provider-call lifecycle evidence for one Flow run.
+     *
+     *     The stable order is step order, attempt number, call ordinal, and event id. Each item
+     *     records the credential-free request hash before provider I/O and the observed terminal
+     *     state afterward. `outcome_unknown` means the runtime cannot prove the remote outcome;
+     *     a local evidence-persistence failure is reported separately in the run error details.
+     *     Use `after_event_id` for cursor pagination and `attempt_id` to narrow one attempt.
+     */
+    get: operations["list_flow_run_provider_calls"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/runs/{run_id}/evidence/export": {
     parameters: {
       query?: never;
@@ -13065,7 +13091,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v11";
+      schema_version: "flow-evidence-export.v12";
       /** App Version */
       app_version: string;
       /** Provenance Schema Version Min */
@@ -13787,11 +13813,13 @@ export interface components {
       | "flow_step_missing"
       | "flow_step_attempt_start_failed"
       | "flow_step_execution_failed"
+      | "flow_provider_call_evidence_persistence_failed"
       | "flow_webhook_delivery_failed"
       | "flow_runtime_file_empty"
       | "flow_runtime_file_attached"
       | "flow_evidence_audit_logging_failed"
       | "flow_evidence_export_reason_required"
+      | "flow_evidence_export_too_large"
       | "flow_llm_request_timeout"
       | "flow_runtime_input_not_consumed"
       | "flow_mapped_provider_call_limit_exceeded"
@@ -16472,6 +16500,7 @@ export interface components {
         | "flow_llm_request_timeout"
         | "flow_mapped_provider_call_limit_exceeded"
         | "flow_missing_principal"
+        | "flow_provider_call_evidence_persistence_failed"
         | "flow_review_expired"
         | "flow_review_open_active_conflict_invariant"
         | "flow_review_open_multiple_active_checkpoints_invariant"
@@ -16567,6 +16596,8 @@ export interface components {
        * @description Human label for the affected step, truncated to a small public diagnostic budget.
        */
       step_description?: string | null;
+      /** @description Secret-free provider-call facts retained when the local evidence transaction failed after bounded retries. This describes a local persistence gap, not an unknown remote outcome. */
+      provider_call_evidence_gap?: components["schemas"]["ProviderCallEvidenceGap"] | null;
     };
     /**
      * FlowRunEvidenceExportResponse
@@ -16668,6 +16699,41 @@ export interface components {
      *               "step_order": 1
      *             }
      *           ]
+     *         },
+     *         "provider_calls": {
+     *           "count": 1,
+     *           "has_more": true,
+     *           "items": [
+     *             {
+     *               "attempt_id": "00000000-0000-0000-0000-000000000701",
+     *               "attempt_no": 1,
+     *               "call_reason": "initial",
+     *               "event_id": "00000000-0000-0000-0000-000000000801",
+     *               "evidence_source": "live_observer",
+     *               "finished_at": "2026-07-26T12:00:01Z",
+     *               "input_source": "provider",
+     *               "mapped_execution_mode": "per_item",
+     *               "mapped_item_index": 1,
+     *               "mapped_source_id": "source-file-1",
+     *               "num_tokens_input": 824,
+     *               "num_tokens_output": 167,
+     *               "ordinal": 1,
+     *               "output_source": "provider",
+     *               "provider": "openai",
+     *               "provider_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     *               "provider_response_id": "resp_01HZXAMPLE",
+     *               "request_schema_version": 1,
+     *               "requested_at": "2026-07-26T12:00:00Z",
+     *               "requested_model": "gpt-5-mini",
+     *               "response_format": "json_schema",
+     *               "response_model": "gpt-5-mini-2025-08-07",
+     *               "status": "completed",
+     *               "step_id": "00000000-0000-0000-0000-000000000601",
+     *               "step_order": 1
+     *             }
+     *           ],
+     *           "next_after_event_id": "00000000-0000-0000-0000-000000000801",
+     *           "total_count": 2
      *         },
      *         "result_files": [
      *           {
@@ -16882,7 +16948,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v11",
+     *         "schema_version": "flow-evidence-export.v12",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -16902,7 +16968,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v11",
+     *       "schema_version": "flow-evidence-export.v12",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -17220,7 +17286,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v11";
+      schema_version: "flow-evidence-export.v12";
       /**
        * Generated At
        * Format: date-time
@@ -17341,6 +17407,41 @@ export interface components {
      *             "step_order": 1
      *           }
      *         ]
+     *       },
+     *       "provider_calls": {
+     *         "count": 1,
+     *         "has_more": true,
+     *         "items": [
+     *           {
+     *             "attempt_id": "00000000-0000-0000-0000-000000000701",
+     *             "attempt_no": 1,
+     *             "call_reason": "initial",
+     *             "event_id": "00000000-0000-0000-0000-000000000801",
+     *             "evidence_source": "live_observer",
+     *             "finished_at": "2026-07-26T12:00:01Z",
+     *             "input_source": "provider",
+     *             "mapped_execution_mode": "per_item",
+     *             "mapped_item_index": 1,
+     *             "mapped_source_id": "source-file-1",
+     *             "num_tokens_input": 824,
+     *             "num_tokens_output": 167,
+     *             "ordinal": 1,
+     *             "output_source": "provider",
+     *             "provider": "openai",
+     *             "provider_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     *             "provider_response_id": "resp_01HZXAMPLE",
+     *             "request_schema_version": 1,
+     *             "requested_at": "2026-07-26T12:00:00Z",
+     *             "requested_model": "gpt-5-mini",
+     *             "response_format": "json_schema",
+     *             "response_model": "gpt-5-mini-2025-08-07",
+     *             "status": "completed",
+     *             "step_id": "00000000-0000-0000-0000-000000000601",
+     *             "step_order": 1
+     *           }
+     *         ],
+     *         "next_after_event_id": "00000000-0000-0000-0000-000000000801",
+     *         "total_count": 2
      *       },
      *       "rerun_invalidated_steps": [],
      *       "rerun_operations": [],
@@ -17506,6 +17607,7 @@ export interface components {
       review_checkpoints: components["schemas"]["FlowRunReviewCheckpointEvidencePublic"][];
       /** Webhook Deliveries */
       webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryPublic"][];
+      provider_calls: components["schemas"]["ProviderCallEvidencePage"];
       debug_export: components["schemas"]["FlowRunDebugExport"];
     };
     /** FlowRunFileBackedTextResultPublic */
@@ -17955,6 +18057,7 @@ export interface components {
             | "flow_llm_request_timeout"
             | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
+            | "flow_provider_call_evidence_persistence_failed"
             | "flow_review_expired"
             | "flow_review_open_active_conflict_invariant"
             | "flow_review_open_multiple_active_checkpoints_invariant"
@@ -18809,6 +18912,7 @@ export interface components {
             | "flow_llm_request_timeout"
             | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
+            | "flow_provider_call_evidence_persistence_failed"
             | "flow_review_expired"
             | "flow_review_open_active_conflict_invariant"
             | "flow_review_open_multiple_active_checkpoints_invariant"
@@ -19336,6 +19440,11 @@ export interface components {
        */
       evidence_template: string;
       /**
+       * Provider Calls Template
+       * @description GET template for ordered provider-call lifecycle evidence. Replace `{run_id}` with the run id; use `after_event_id` to page through large runs without changing the stable order.
+       */
+      provider_calls_template: string;
+      /**
        * Export Evidence Template
        * @description GET template for downloading a redacted evidence JSON bundle. Replace `{run_id}` with the id returned by create_run; raw export requires a non-default `reason` query parameter.
        */
@@ -19432,6 +19541,7 @@ export interface components {
      *         "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
      *         "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
      *         "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
+     *         "provider_calls_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/provider-calls/",
      *         "redispatch_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/redispatch/",
      *         "rerun_step_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/{step_id}/rerun/",
      *         "review_checkpoints": {
@@ -19736,6 +19846,7 @@ export interface components {
             | "flow_llm_request_timeout"
             | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
+            | "flow_provider_call_evidence_persistence_failed"
             | "flow_review_expired"
             | "flow_review_open_active_conflict_invariant"
             | "flow_review_open_multiple_active_checkpoints_invariant"
@@ -24075,6 +24186,194 @@ export interface components {
        */
       email: string;
     };
+    /**
+     * ProviderCallEvidence
+     * @description Run-scoped ordered read model for one provider-call lifecycle row.
+     */
+    ProviderCallEvidence: {
+      /**
+       * Event Id
+       * Format: uuid
+       */
+      event_id: string;
+      /**
+       * Attempt Id
+       * Format: uuid
+       */
+      attempt_id: string;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+      /** Attempt No */
+      attempt_no: number;
+      /** Ordinal */
+      ordinal: number;
+      status: components["schemas"]["ProviderCallStatus"];
+      evidence_source: components["schemas"]["ProviderCallEvidenceSource"];
+      /** Request Schema Version */
+      request_schema_version: number | null;
+      /** Provider Request Hash */
+      provider_request_hash: string | null;
+      /** Requested Model */
+      requested_model: string | null;
+      /** Provider */
+      provider: string | null;
+      response_format: components["schemas"]["ProviderCallResponseFormat"] | null;
+      call_reason: components["schemas"]["ProviderCallReason"];
+      /** Mapped Execution Mode */
+      mapped_execution_mode: ("per_item" | "per_source") | null;
+      /** Mapped Item Index */
+      mapped_item_index?: number | null;
+      /** Mapped Source Index */
+      mapped_source_index?: number | null;
+      /** Mapped Source Id */
+      mapped_source_id: string | null;
+      /** Response Model */
+      response_model: string | null;
+      /** Provider Response Id */
+      provider_response_id: string | null;
+      /** Num Tokens Input */
+      num_tokens_input?: number | null;
+      /** Num Tokens Output */
+      num_tokens_output?: number | null;
+      /** Input Source */
+      input_source: ("provider" | "estimated" | "mixed" | "not_applicable" | "not_reported") | null;
+      /** Output Source */
+      output_source:
+        ("provider" | "estimated" | "mixed" | "not_applicable" | "not_reported") | null;
+      /** Outcome Reason */
+      outcome_reason?:
+        | components["schemas"]["ProviderCallRejectionReason"]
+        | components["schemas"]["ProviderCallUnknownReason"]
+        | null;
+      /** Requested At */
+      requested_at: string | null;
+      /** Finished At */
+      finished_at: string | null;
+    };
+    /**
+     * ProviderCallEvidenceGap
+     * @description Secret-free facts retained when an evidence transaction cannot commit.
+     */
+    ProviderCallEvidenceGap: {
+      /** Call Id */
+      call_id?: string | null;
+      /** Ordinal */
+      ordinal?: number | null;
+      /** Provider Request Hash */
+      provider_request_hash?: string | null;
+      /** Provider Response Id */
+      provider_response_id?: string | null;
+      /**
+       * Outcome
+       * @enum {string}
+       */
+      outcome:
+        | "started"
+        | "completed"
+        | "response_format_rejected"
+        | "provider_rejected"
+        | "request_timeout"
+        | "run_cancelled"
+        | "worker_interrupted"
+        | "provider_error"
+        | "request_cancelled"
+        | "stale_started";
+      /** Num Tokens Input */
+      num_tokens_input?: number | null;
+      /** Num Tokens Output */
+      num_tokens_output?: number | null;
+    };
+    /**
+     * ProviderCallEvidencePage
+     * @example {
+     *       "count": 1,
+     *       "has_more": true,
+     *       "items": [
+     *         {
+     *           "attempt_id": "00000000-0000-0000-0000-000000000701",
+     *           "attempt_no": 1,
+     *           "call_reason": "initial",
+     *           "event_id": "00000000-0000-0000-0000-000000000801",
+     *           "evidence_source": "live_observer",
+     *           "finished_at": "2026-07-26T12:00:01Z",
+     *           "input_source": "provider",
+     *           "mapped_execution_mode": "per_item",
+     *           "mapped_item_index": 1,
+     *           "mapped_source_id": "source-file-1",
+     *           "num_tokens_input": 824,
+     *           "num_tokens_output": 167,
+     *           "ordinal": 1,
+     *           "output_source": "provider",
+     *           "provider": "openai",
+     *           "provider_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     *           "provider_response_id": "resp_01HZXAMPLE",
+     *           "request_schema_version": 1,
+     *           "requested_at": "2026-07-26T12:00:00Z",
+     *           "requested_model": "gpt-5-mini",
+     *           "response_format": "json_schema",
+     *           "response_model": "gpt-5-mini-2025-08-07",
+     *           "status": "completed",
+     *           "step_id": "00000000-0000-0000-0000-000000000601",
+     *           "step_order": 1
+     *         }
+     *       ],
+     *       "next_after_event_id": "00000000-0000-0000-0000-000000000801",
+     *       "total_count": 2
+     *     }
+     */
+    ProviderCallEvidencePage: {
+      /** Items */
+      items: components["schemas"]["ProviderCallEvidence"][];
+      /** Count */
+      count: number;
+      /** Total Count */
+      total_count: number;
+      /** Has More */
+      has_more: boolean;
+      /** Next After Event Id */
+      next_after_event_id: string | null;
+    };
+    /**
+     * ProviderCallEvidenceSource
+     * @enum {string}
+     */
+    ProviderCallEvidenceSource: "live_observer" | "legacy_provenance";
+    /**
+     * ProviderCallReason
+     * @enum {string}
+     */
+    ProviderCallReason: "initial" | "response_format_fallback" | "tool_round" | "legacy_backfill";
+    /**
+     * ProviderCallRejectionReason
+     * @enum {string}
+     */
+    ProviderCallRejectionReason: "response_format_rejected" | "provider_rejected";
+    /**
+     * ProviderCallResponseFormat
+     * @enum {string}
+     */
+    ProviderCallResponseFormat: "none" | "json_object" | "json_schema" | "other";
+    /**
+     * ProviderCallStatus
+     * @enum {string}
+     */
+    ProviderCallStatus: "started" | "completed" | "rejected" | "outcome_unknown";
+    /**
+     * ProviderCallUnknownReason
+     * @enum {string}
+     */
+    ProviderCallUnknownReason:
+      | "request_timeout"
+      | "run_cancelled"
+      | "worker_interrupted"
+      | "provider_error"
+      | "request_cancelled"
+      | "stale_started";
     /**
      * PublishedDefinitionIntegrityStatus
      * @enum {string}
@@ -46475,6 +46774,101 @@ export interface operations {
       };
     };
   };
+  list_flow_run_provider_calls: {
+    parameters: {
+      query?: {
+        /** @description Maximum provider-call events to return. */
+        limit?: number;
+        /** @description Return events after this event id in the stable run-wide order. */
+        after_event_id?: string | null;
+        /** @description Optionally restrict events to one step attempt. */
+        attempt_id?: string | null;
+      };
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run. */
+        id: string;
+        /** @description Identifier of the run whose provider calls are listed. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProviderCallEvidencePage"];
+        };
+      };
+      /** @description Forbidden. Service keys (`sk_`) need `resource_permissions.flows >= read` before `resource_permissions.flow_evidence` is evaluated. For own-run evidence, `flow_evidence >= read` allows view, `flow_evidence >= write` allows redacted export, and `flow_evidence = admin` allows raw export when tenant Flow evidence policy also permits it. Scope, resource permission, tenant permission, run ownership, and evidence policy are evaluated before returning Flow evidence. Machine-readable codes include `insufficient_scope`, `insufficient_resource_permission`, and `flow_run_evidence_forbidden`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run or provider-call cursor not found in this scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Provider-call evidence cursor not found.",
+           *       "eneo_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Evidence audit logging is unavailable for this request. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Evidence audit logging is unavailable.",
+           *       "eneo_error_code": 9024,
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   export_flow_run_evidence: {
     parameters: {
       query?: {
@@ -46557,6 +46951,26 @@ export interface operations {
            *       "message": "Flow run not found.",
            *       "eneo_error_code": 9000,
            *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The synchronous evidence export exceeds the provider-call event safety boundary. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow evidence export contains too many provider-call events.",
+           *       "eneo_error_code": 9015,
+           *       "code": "flow_evidence_export_too_large",
+           *       "context": {
+           *         "provider_call_count": 10001,
+           *         "max_provider_call_events": 10000
+           *       }
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

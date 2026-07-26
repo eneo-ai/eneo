@@ -46,6 +46,7 @@ FLOW_RUN_ARTIFACT_SIGNED_URL_PATH: Final[str] = (
 )
 
 FLOW_RUN_EVIDENCE_PATH: Final[str] = "/{id}/runs/{run_id}/evidence/"
+FLOW_RUN_PROVIDER_CALLS_PATH: Final[str] = "/{id}/runs/{run_id}/provider-calls/"
 FLOW_RUN_EVIDENCE_EXPORT_PATH: Final[str] = "/{id}/runs/{run_id}/evidence/export"
 
 _EXAMPLE_FLOW_ID: Final[str] = "00000000-0000-0000-0000-000000000001"
@@ -195,6 +196,13 @@ class FlowRuntimePathsPublic(BaseModel):
             "only their own runs."
         )
     )
+    provider_calls_template: str = Field(
+        description=(
+            "GET template for ordered provider-call lifecycle evidence. Replace "
+            "`{run_id}` with the run id; use `after_event_id` to page through "
+            "large runs without changing the stable order."
+        )
+    )
     export_evidence_template: str = Field(
         description=(
             "GET template for downloading a redacted evidence JSON bundle. Replace "
@@ -326,6 +334,11 @@ def build_flow_runtime_paths(
         ),
         evidence_template=_flow_path(
             FLOW_RUN_EVIDENCE_PATH,
+            flow_id=flow_id_value,
+            api_prefix=api_prefix,
+        ),
+        provider_calls_template=_flow_path(
+            FLOW_RUN_PROVIDER_CALLS_PATH,
             flow_id=flow_id_value,
             api_prefix=api_prefix,
         ),

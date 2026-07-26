@@ -15,6 +15,10 @@ from eneo.ai_models.completion_models.completion_model import (
     TokenUsage,
 )
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.provider_call_observer import (
+    ProviderCallRequestFacts,
+    ProviderCallResultFacts,
+)
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
 )
@@ -774,7 +778,7 @@ async def test_complete_step_execution_strips_known_unsupported_stored_response_
 
 
 @pytest.mark.asyncio
-async def test_completed_provider_call_receipt_is_recorded_before_postprocessing_failure(
+async def test_completed_provider_call_is_observed_before_postprocessing_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
     model_names: list[str | None] = []
@@ -797,14 +801,42 @@ async def test_completed_provider_call_receipt_is_recorded_before_postprocessing
         provider_type="openai",
     )
     assistant.completion_model_kwargs = None
-    assistant.get_response = AsyncMock(
-        return_value=SimpleNamespace(
+    observer = SimpleNamespace(
+        started=AsyncMock(return_value=uuid4()),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+
+    async def _observed_response(**kwargs):
+        provider_observer = kwargs["provider_call_observer"]
+        call_id = await provider_observer.started(
+            ProviderCallRequestFacts(
+                request_schema_version=1,
+                provider_request_hash="f" * 64,
+                requested_model="openai/gpt-test",
+                provider="openai",
+                response_format="none",
+                reason="initial",
+            )
+        )
+        await provider_observer.completed(
+            call_id,
+            ProviderCallResultFacts(
+                response_model="gpt-test",
+                provider_response_id="observed-response",
+                num_tokens_input=7,
+                num_tokens_output=None,
+            ),
+        )
+        return SimpleNamespace(
             total_token_count=5,
             completion="answer",
             usage=SimpleNamespace(prompt_tokens=7, completion_tokens=None),
             model=SimpleNamespace(name="gpt-test", provider_type="openai"),
         )
-    )
+
+    assistant.get_response = AsyncMock(side_effect=_observed_response)
     prepared = PreparedStepExecution(
         assistant=assistant,
         step_input=StepInputValue(text="hello", source_text="hello"),
@@ -814,10 +846,9 @@ async def test_completed_provider_call_receipt_is_recorded_before_postprocessing
         diagnostics=[],
         llm_files=[],
     )
-    record_receipt = AsyncMock()
 
     async def _fail_after_receipt(**_kwargs):
-        record_receipt.assert_awaited_once()
+        observer.completed.assert_awaited_once()
         raise RuntimeError("postprocessing failed")
 
     deps = StepExecutionRuntimeDeps(
@@ -828,7 +859,7 @@ async def test_completed_provider_call_receipt_is_recorded_before_postprocessing
         retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
         process_typed_output=AsyncMock(side_effect=_fail_after_receipt),
         apply_output_cap=AsyncMock(),
-        record_provider_call_receipt=record_receipt,
+        build_provider_call_observer=lambda mapped_call: observer,
         mapped_call_context=MappedProviderCallProvenance(
             execution_mode="per_item",
             item_index=1,
@@ -844,15 +875,10 @@ async def test_completed_provider_call_receipt_is_recorded_before_postprocessing
             deps=deps,
         )
 
-    receipt = record_receipt.await_args.args[0]
-    assert receipt.num_tokens_input == 7
-    assert receipt.input_source == "provider"
-    assert receipt.num_tokens_output == 3
-    assert receipt.output_source == "estimated"
-    assert receipt.mapped_call == MappedProviderCallProvenance(
-        execution_mode="per_item",
-        item_index=1,
-    )
+    result = observer.completed.await_args.args[1]
+    assert result.num_tokens_input == 7
+    assert result.num_tokens_output is None
+    assert observer.started.await_args.args[0].provider_request_hash == "f" * 64
     assert model_names == ["openai/gpt-test"]
 
 

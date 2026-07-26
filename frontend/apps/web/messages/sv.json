@@ -4364,6 +4364,8 @@
   "flow_error_flow_template_unsupported_extension": "Endast .docx-filer kan användas som mall. Välj en .docx-fil och försök igen.",
   "flow_error_typed_io_contract_violation": "Det ändrade resultatet matchar inte stegets utdatakontrakt. Rätta JSON-strukturen och spara igen.",
   "flow_error_flow_llm_request_timeout": "Modellanropet tog för lång tid, men leverantörsarbetet kan ändå ha slutförts. Kontrollera körningen innan du försöker igen eftersom det kan medföra dubbelt arbete och dubbla kostnader.",
+  "flow_error_flow_provider_call_evidence_persistence_failed": "Evidensen för provider-anropet kunde inte sparas tillförlitligt. Försök inte igen automatiskt; kontrollera körningen eftersom provider-arbete kan ha utförts.",
+  "flow_error_flow_evidence_export_too_large": "Körningen har för många provider-anrop för en enda evidensexport. Använd paginerad evidens för provider-anrop eller kontakta support.",
   "flow_error_flow_runtime_input_not_consumed": "Runtime-filer kopplades till körningen, men stegets indata refererar inte till dem. Uppdatera steget så att det använder step_input.* eller ta bort filerna.",
   "flow_error_flow_mapped_provider_call_limit_exceeded": "Det mappade steget kan överskrida organisationens gräns för provider-anrop. Använd färre objekt eller filer, eller be en administratör höja gränsen.",
   "flow_error_flow_unsupported_output_mode": "Steget använder ett utdataläge som runtime inte kan köra. Ändra utdataläget och publicera flödet igen.",

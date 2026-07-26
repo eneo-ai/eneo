@@ -68,11 +68,15 @@ class FlowApiErrorCode(str, Enum):
     STEP_MISSING = "flow_step_missing"
     STEP_ATTEMPT_START_FAILED = "flow_step_attempt_start_failed"
     STEP_EXECUTION_FAILED = "flow_step_execution_failed"
+    PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED = (
+        "flow_provider_call_evidence_persistence_failed"
+    )
     WEBHOOK_DELIVERY_FAILED = "flow_webhook_delivery_failed"
     RUNTIME_FILE_EMPTY = "flow_runtime_file_empty"
     RUNTIME_FILE_ATTACHED = "flow_runtime_file_attached"
     EVIDENCE_AUDIT_LOGGING_FAILED = "flow_evidence_audit_logging_failed"
     EVIDENCE_EXPORT_REASON_REQUIRED = "flow_evidence_export_reason_required"
+    EVIDENCE_EXPORT_TOO_LARGE = "flow_evidence_export_too_large"
     LLM_REQUEST_TIMEOUT = "flow_llm_request_timeout"
     RUNTIME_INPUT_NOT_CONSUMED = "flow_runtime_input_not_consumed"
     MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED = "flow_mapped_provider_call_limit_exceeded"
@@ -244,6 +248,7 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.STEP_MISSING,
         FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,
         FlowApiErrorCode.STEP_EXECUTION_FAILED,
+        FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED,
         FlowApiErrorCode.WEBHOOK_DELIVERY_FAILED,
         FlowApiErrorCode.REVIEW_POLICY_INVALID,
         FlowApiErrorCode.REVIEW_EXPIRED,

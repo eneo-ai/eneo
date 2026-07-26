@@ -1,9 +1,13 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 from litellm.exceptions import BadRequestError
 
+from eneo.completion_models.domain.provider_call_observer import (
+    ProviderCallObserverError,
+)
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
@@ -137,14 +141,17 @@ async def test_late_capability_rejection_is_not_safe_to_repeat_without_capabilit
 
 
 @pytest.mark.asyncio
-async def test_tool_round_records_each_provider_dispatch_separately():
-    """Tool rounds accumulate usage into one completion.
-
-    Without a per-dispatch record, a caller counting provider requests sees one
-    where two were sent and billed.
-    """
+async def test_provider_call_observer_records_each_tool_round_separately():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
+    initial_call_id = uuid4()
+    tool_round_call_id = uuid4()
+    observer = SimpleNamespace(
+        started=AsyncMock(side_effect=[initial_call_id, tool_round_call_id]),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
 
     first_message = SimpleNamespace(
         content=None,
@@ -173,26 +180,39 @@ async def test_tool_round_records_each_provider_dispatch_separately():
         "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         AsyncMock(side_effect=[first_response, follow_up_response]),
     ):
-        completion = await adapter.get_response(
+        await adapter.get_response(
             context=SimpleNamespace(),
             model_kwargs={},
             mcp_proxy=mcp_proxy,
+            provider_call_observer=observer,
         )
 
-    assert [d.ordinal for d in completion.provider_dispatches] == [1, 2]
-    assert [d.reason for d in completion.provider_dispatches] == [
+    assert [call.args[0].reason for call in observer.started.await_args_list] == [
         "initial",
         "tool_round",
     ]
-    assert [d.provider_response_id for d in completion.provider_dispatches] == [
+    assert [call.args[0] for call in observer.completed.await_args_list] == [
+        initial_call_id,
+        tool_round_call_id,
+    ]
+    assert [
+        call.args[1].provider_response_id for call in observer.completed.await_args_list
+    ] == [
         "resp-initial",
         "resp-final",
     ]
 
 
 @pytest.mark.asyncio
-async def test_single_call_records_one_dispatch():
+async def test_provider_call_observer_wraps_actual_non_streaming_io():
     adapter = _make_adapter()
+    call_id = uuid4()
+    observer = SimpleNamespace(
+        started=AsyncMock(return_value=call_id),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
     response = SimpleNamespace(
         choices=[
             SimpleNamespace(
@@ -200,17 +220,102 @@ async def test_single_call_records_one_dispatch():
                 finish_reason="stop",
             )
         ],
-        id="resp-only",
+        id="observed-response",
+        model="observed-model",
     )
+
+    async def observed_provider_call(**_kwargs):
+        observer.started.assert_awaited_once()
+        return response
 
     with patch(
         "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(side_effect=[response]),
-    ):
-        completion = await adapter.get_response(
-            context=SimpleNamespace(), model_kwargs={}
+        AsyncMock(side_effect=observed_provider_call),
+    ) as completion_call:
+        await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=observer,
         )
 
-    assert len(completion.provider_dispatches) == 1
-    assert completion.provider_dispatches[0].ordinal == 1
-    assert completion.provider_dispatches[0].reason == "initial"
+    assert completion_call.await_count == 1
+    request = observer.started.await_args.args[0]
+    assert request.request_schema_version == 1
+    assert request.requested_model == "openai/test-model"
+    assert request.provider == "openai"
+    assert request.provider_request_hash is not None
+    observer.completed.assert_awaited_once()
+    assert observer.completed.await_args.args[0] == call_id
+    result = observer.completed.await_args.args[1]
+    assert result.provider_response_id == "observed-response"
+    assert result.response_model == "observed-model"
+    observer.rejected.assert_not_awaited()
+    observer.outcome_unknown.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_call_observer_records_known_capability_rejection():
+    adapter = _make_adapter()
+    call_id = uuid4()
+    observer = SimpleNamespace(
+        started=AsyncMock(return_value=call_id),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    rejection = BadRequestError(
+        message="unsupported request parameter",
+        model="test-model",
+        llm_provider="openai",
+        body={
+            "error": {
+                "param": "response_format",
+                "code": "unsupported_parameter",
+            }
+        },
+    )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=rejection),
+        ),
+        pytest.raises(ProviderCapabilityRejectedException),
+    ):
+        await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=observer,
+        )
+
+    observer.rejected.assert_awaited_once_with(call_id, "response_format_rejected")
+    observer.completed.assert_not_awaited()
+    observer.outcome_unknown.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_call_observer_start_failure_prevents_provider_io():
+    adapter = _make_adapter()
+    observer = SimpleNamespace(
+        started=AsyncMock(
+            side_effect=ProviderCallObserverError("evidence store unavailable")
+        ),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(),
+        ) as completion_call,
+        pytest.raises(ProviderCallObserverError, match="evidence store unavailable"),
+    ):
+        await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=observer,
+        )
+
+    completion_call.assert_not_awaited()

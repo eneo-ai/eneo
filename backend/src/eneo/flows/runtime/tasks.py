@@ -36,6 +36,7 @@ from eneo.flows.domain.flow_run_recovery_policy import (
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
 )
+from eneo.flows.domain.provider_call import ProviderCallUnknownReason
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_document_limits import resolve_flow_document_render_limits
@@ -705,6 +706,7 @@ async def _reconcile_stale_running_runs_all_tenants(
         enable_autobegin_for_flow_task_session(session)
         container = Container(session=providers.Object(session))
         run_repo = container.flow_run_repo()
+        provider_call_repo = container.flow_provider_call_repo()
         terminalizer = container.flow_run_terminalizer()
         tenant_repo = container.tenant_repo()
         async with session.begin():
@@ -730,8 +732,13 @@ async def _reconcile_stale_running_runs_all_tenants(
                             ),
                         ),
                     )
-                if result.did_transition:
-                    reconciled += 1
+                    if result.did_transition:
+                        await provider_call_repo.mark_started_calls_outcome_unknown_for_run(
+                            run_id=run.id,
+                            tenant_id=run.tenant_id,
+                            reason=ProviderCallUnknownReason.STALE_STARTED,
+                        )
+                        reconciled += 1
     return {"status": "ok", "reconciled": reconciled}
 
 

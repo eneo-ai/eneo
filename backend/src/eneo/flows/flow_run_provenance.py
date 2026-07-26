@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, TypeAlias, TypeVar, cast
@@ -218,31 +218,6 @@ def _validate_aggregate_count_source(
         )
 
 
-def build_provider_call_token_usage(
-    receipts: Sequence[ProviderCallTokenReceiptProvenance],
-) -> TokenUsageProvenance:
-    if not receipts:
-        raise ValueError("Provider call token usage requires at least one receipt.")
-
-    input_sources: set[TokenCountSource] = {
-        receipt.input_source for receipt in receipts
-    }
-    output_sources: set[TokenCountSource] = {
-        receipt.output_source for receipt in receipts
-    }
-    return TokenUsageProvenance(
-        num_tokens_input=sum_complete_token_counts(
-            [receipt.num_tokens_input for receipt in receipts]
-        ),
-        num_tokens_output=sum_complete_token_counts(
-            [receipt.num_tokens_output for receipt in receipts]
-        ),
-        input_source=_aggregate_token_count_sources(input_sources),
-        output_source=_aggregate_token_count_sources(output_sources),
-        completed_provider_calls=tuple(receipts),
-    )
-
-
 def sum_complete_token_counts(counts: Iterable[int | None]) -> int | None:
     total = 0
     observed = False
@@ -252,14 +227,6 @@ def sum_complete_token_counts(counts: Iterable[int | None]) -> int | None:
         total += count
         observed = True
     return total if observed else None
-
-
-def _aggregate_token_count_sources(
-    sources: set[TokenCountSource],
-) -> TokenCountSource:
-    if len(sources) == 1:
-        return next(iter(sources))
-    return "mixed"
 
 
 class RagProvenance(BaseModel):

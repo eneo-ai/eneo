@@ -270,6 +270,8 @@ export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];
 export type FlowRunEvidenceWithTypedSteps = Omit<FlowRunEvidence, "step_results"> & {
   step_results: FlowRunStep[];
 };
+export type FlowProviderCallEvidence = components["schemas"]["ProviderCallEvidence"];
+export type FlowProviderCallEvidencePage = components["schemas"]["ProviderCallEvidencePage"];
 export type FlowRunEvidenceExport = components["schemas"]["FlowRunEvidenceExportResponse"];
 export type FlowRunRedispatchRequest = components["schemas"]["FlowRunRedispatchRequest"];
 export type FlowRunRedispatchResult = components["schemas"]["FlowRunRedispatchResponse"];

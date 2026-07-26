@@ -30,6 +30,7 @@ from eneo.flows.api.flow_run_contract_models import (
 from eneo.flows.api.flow_run_evidence_router import (
     export_flow_run_evidence,
     get_flow_run_evidence,
+    list_flow_run_provider_calls,
 )
 from eneo.flows.api.flow_run_steps_router import (
     generate_flow_run_artifact_signed_url,
@@ -37,6 +38,7 @@ from eneo.flows.api.flow_run_steps_router import (
 )
 from eneo.flows.application.flow_run_service import FlowRunStepResultWithFiles
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult
+from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -66,6 +68,16 @@ from tests.unittests.flows.test_flow_router import (
 class FlowErrorResponse(TypedDict):
     status_code: int
     payload: dict[str, object]
+
+
+def _empty_provider_calls() -> dict[str, object]:
+    return {
+        "items": [],
+        "count": 0,
+        "total_count": 0,
+        "has_more": False,
+        "next_after_event_id": None,
+    }
 
 
 class _EvidenceTransaction:
@@ -194,6 +206,7 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
+        "provider_calls": _empty_provider_calls(),
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -277,6 +290,85 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_flow_run_provider_calls_forwards_cursor_and_audits_page(
+    monkeypatch,
+):
+    container = MagicMock()
+    events: list[str] = []
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    after_event_id = uuid4()
+    attempt_id = uuid4()
+    page = ProviderCallEvidencePage(
+        items=(),
+        count=0,
+        total_count=4,
+        has_more=False,
+        next_after_event_id=None,
+    )
+    evidence_service = AsyncMock()
+    evidence_service.get_run.return_value = run
+    evidence_service.list_provider_calls.return_value = page
+    container.flow_run_evidence_service.return_value = evidence_service
+    audit_service = AsyncMock()
+
+    def _record_audit(**_kwargs: object) -> object:
+        events.append("audit_log")
+        return object()
+
+    audit_service.log.side_effect = _record_audit
+    container.audit_service.return_value = audit_service
+    session = MagicMock()
+    session._is_explicit_tx_test_session = True
+    session.begin.return_value = _EvidenceTransaction(events)
+    container.session.return_value = session
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await list_flow_run_provider_calls(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        limit=250,
+        after_event_id=after_event_id,
+        attempt_id=attempt_id,
+        container=container,
+    )
+
+    assert response == page
+    evidence_service.get_run.assert_awaited_once_with(
+        run_id=run.id,
+        flow_id=flow_id,
+        access_kind="evidence_view",
+    )
+    evidence_service.list_provider_calls.assert_awaited_once_with(
+        run_id=run.id,
+        flow_id=flow_id,
+        limit=250,
+        after_event_id=after_event_id,
+        attempt_id=attempt_id,
+        run=run,
+    )
+    audit_service.log.assert_awaited_once()
+    assert audit_service.log.await_args.kwargs["metadata"]["extra"] == {
+        "evidence_detail": "provider_calls",
+        "page_count": 0,
+    }
+    assert events == ["transaction_enter", "audit_log", "transaction_exit"]
+
+
+@pytest.mark.asyncio
 async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
@@ -307,6 +399,7 @@ async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
+        "provider_calls": _empty_provider_calls(),
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -399,6 +492,7 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
+        "provider_calls": _empty_provider_calls(),
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -534,6 +628,7 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
             }
         ],
         "webhook_deliveries": [],
+        "provider_calls": _empty_provider_calls(),
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -674,6 +769,7 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
+        "provider_calls": _empty_provider_calls(),
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -823,6 +919,7 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
+        "provider_calls": _empty_provider_calls(),
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),

@@ -343,6 +343,7 @@ Example response:
     "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
     "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
     "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
+    "provider_calls_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/provider-calls/",
     "export_evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/export",
     "artifact_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/artifacts/{file_id}/signed-url/"
   }
@@ -360,7 +361,7 @@ The full `runtime_paths` object includes `run_contract`, `graph`,
 `create_run`, `list_runs`, `cancel_run_template`, `rerun_step_template`,
 `redispatch_run_template`, `review_checkpoints`,
 `get_graph_for_run_template`, `get_run_template`, `list_steps_template`,
-`evidence_template`, `export_evidence_template`, and
+`evidence_template`, `provider_calls_template`, `export_evidence_template`, and
 `artifact_signed_url_template`. The nested `review_checkpoints` object contains
 `active_template`, `edit_template`, `approve_template`, `reject_template`, and
 `resume_template`.
@@ -1116,9 +1117,51 @@ not the redacted projection.
 
 ##### Provider token usage
 
-For provider-backed attempts, inspect
-`step_attempts[].provenance_json.token_usage.completed_provider_calls`. Input and
-output usage are independent: each receipt has a count and a matching `*_source`.
+The evidence response embeds `provider_calls`, the first ordered page of durable
+provider-call lifecycle rows. Use the dedicated `provider-calls/` endpoint when a
+UI needs later pages or one attempt only:
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/provider-calls/?limit=100
+GET /api/v1/flows/{flow_id}/runs/{run_id}/provider-calls/?limit=100&after_event_id={event_id}
+GET /api/v1/flows/{flow_id}/runs/{run_id}/provider-calls/?attempt_id={attempt_id}
+```
+
+The default is `100` rows and the maximum is `500`. Rows stay ordered by step,
+attempt, call ordinal, and event id. Pass `next_after_event_id` as
+`after_event_id` while `has_more` is true. A cursor that does not belong to the
+same run and optional `attempt_id` filter returns `404` rather than silently
+starting another page.
+
+```js
+const page = await client.flows.runs.providerCalls({
+  id: runId,
+  flowId,
+  limit: 250,
+  afterEventId,
+  attemptId,
+});
+```
+
+Each row has an explicit lifecycle status:
+
+- `started` means the credential-free request identity was stored before provider
+  I/O. It is normally transient.
+- `completed` means the response and usage receipt were observed and stored.
+- `rejected` means the request was known to be rejected; inspect `outcome_reason`.
+- `outcome_unknown` means Eneo cannot prove the remote outcome. Provider work or
+  spend may still have occurred, so never infer zero spend or an automatically
+  safe retry.
+
+`provider_request_hash` correlates the exact request content and allowed controls
+without exposing credentials or copying the full request into this table. Request
+and response model ids, provider, response format, call reason, response id, and
+timestamps explain the dispatch. Mapped calls additionally expose
+`mapped_execution_mode`, the item or source index, and `mapped_source_id` when the
+runtime had one.
+
+Input and output usage are independent: each completed row has a count and a
+matching `*_source`.
 
 - `provider` means the provider reported that count. An explicit `0` is a real,
   measured zero.
@@ -1132,13 +1175,18 @@ output usage are independent: each receipt has a count and a matching `*_source`
   provider count does not apply. It is not the new representation for missing
   provider usage.
 
-The current `completed_provider_calls` list contains dispatch evidence returned
-by the model adapter. On a failed, cancelled, or interrupted attempt, an absent
-receipt does not prove that no provider request was sent. Use the attempt status
-and error together, and do not infer zero spend from an empty list.
+On a failed, cancelled, or interrupted attempt, an absent completed row
+does not prove that no provider request was sent. Inspect `started` and `outcome_unknown`
+rows together with the attempt error. If the local evidence write itself cannot
+be completed after bounded retries, the run fails with
+`flow_provider_call_evidence_persistence_failed` and structured
+`provider_call_evidence_gap` details instead of inventing a lifecycle state.
+Recording `request_cancelled` during active task cancellation is best-effort;
+if that final write is itself interrupted, stale-row recovery is the durable
+guarantee and records `stale_started` rather than claiming a known outcome.
 
 Run and attempt token totals are best-effort summaries that can include estimated
-counts. Use `completed_provider_calls` when you need the per-call evidence.
+counts. Use `provider_calls` when you need per-call evidence.
 
 ##### Rerun input revisions
 
@@ -1195,8 +1243,14 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
-The JSON response uses manifest schema `flow-evidence-export.v11`. Version 11 adds
-the typed rerun `input_revision` evidence to the hashed bundle. Its required
+The JSON response uses manifest schema `flow-evidence-export.v12`. Version 12 adds
+all provider-call lifecycle rows to the hashed bundle while retaining the typed
+rerun `input_revision` evidence introduced in version 11. A synchronous export
+supports at most `10,000` provider-call rows. Larger runs return `413` with code
+`flow_evidence_export_too_large`; consume the paginated `provider-calls/` endpoint
+or request an offline administrative export instead.
+
+The manifest's required
 `actor` identifies the caller that performed the export, not the run owner.
 Branch on `actor.type`: a user actor contains only `user_id`, while a
 `service_key` actor contains only `key_id`. Both actor variants reject additional

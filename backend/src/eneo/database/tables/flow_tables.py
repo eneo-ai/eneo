@@ -31,6 +31,15 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportStatus,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionStatus
+from eneo.flows.domain.provider_call import (
+    PROVIDER_CALL_EVIDENCE_SOURCE_VALUES,
+    PROVIDER_CALL_REASON_VALUES,
+    PROVIDER_CALL_REJECTION_REASON_VALUES,
+    PROVIDER_CALL_RESPONSE_FORMAT_VALUES,
+    PROVIDER_CALL_STATUS_VALUES,
+    PROVIDER_CALL_TOKEN_SOURCE_VALUES,
+    PROVIDER_CALL_UNKNOWN_REASON_VALUES,
+)
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     FLOW_INPUT_SOURCE_VALUES,
@@ -1208,6 +1217,155 @@ class FlowStepAttempts(BasePublic):
         Index(
             "ix_flow_step_attempts_superseded_by_attempt",
             "superseded_by_attempt_id",
+        ),
+    )
+
+
+class FlowProviderCalls(BasePublic):
+    """Stores one durable lifecycle row per Flow provider request. Writer: FlowProviderCallRepository. Purpose: preserve credential-free request identity, terminal outcome, token usage, and mapped source evidence outside attempt JSONB."""
+
+    flow_step_attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowStepAttempts.id, ondelete="CASCADE"),
+        nullable=False,
+    )
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    evidence_source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    request_schema_version: Mapped[Optional[int]] = mapped_column(
+        sa.SmallInteger, nullable=True
+    )
+    provider_request_hash: Mapped[Optional[str]] = mapped_column(
+        sa.String(64), nullable=True
+    )
+    requested_model: Mapped[Optional[str]] = mapped_column(sa.String(255))
+    provider: Mapped[Optional[str]] = mapped_column(sa.String(128))
+    response_format: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    call_reason: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    mapped_execution_mode: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    mapped_item_index: Mapped[Optional[int]] = mapped_column()
+    mapped_source_index: Mapped[Optional[int]] = mapped_column()
+    mapped_source_id: Mapped[Optional[str]] = mapped_column(sa.Text())
+    response_model: Mapped[Optional[str]] = mapped_column(sa.String(255))
+    provider_response_id: Mapped[Optional[str]] = mapped_column(sa.String(512))
+    num_tokens_input: Mapped[Optional[int]] = mapped_column()
+    num_tokens_output: Mapped[Optional[int]] = mapped_column()
+    input_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    output_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    outcome_reason: Mapped[Optional[str]] = mapped_column(sa.String(64))
+    requested_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "flow_step_attempt_id",
+            "ordinal",
+            name="uq_flow_provider_calls_attempt_ordinal",
+        ),
+        CheckConstraint(
+            "ordinal >= 1",
+            name="ck_flow_provider_calls_ordinal_positive",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(PROVIDER_CALL_STATUS_VALUES)})",
+            name="ck_flow_provider_calls_status",
+        ),
+        CheckConstraint(
+            "evidence_source IN "
+            f"({_check_values(PROVIDER_CALL_EVIDENCE_SOURCE_VALUES)})",
+            name="ck_flow_provider_calls_evidence_source",
+        ),
+        CheckConstraint(
+            "response_format IS NULL OR response_format IN "
+            f"({_check_values(PROVIDER_CALL_RESPONSE_FORMAT_VALUES)})",
+            name="ck_flow_provider_calls_response_format",
+        ),
+        CheckConstraint(
+            f"call_reason IN ({_check_values(PROVIDER_CALL_REASON_VALUES)})",
+            name="ck_flow_provider_calls_reason",
+        ),
+        CheckConstraint(
+            "(request_schema_version IS NULL AND provider_request_hash IS NULL) OR "
+            "(request_schema_version = 1 AND provider_request_hash ~ '^[0-9a-f]{64}$')",
+            name="ck_flow_provider_calls_request_identity",
+        ),
+        CheckConstraint(
+            "num_tokens_input IS NULL OR num_tokens_input >= 0",
+            name="ck_flow_provider_calls_input_tokens_nonnegative",
+        ),
+        CheckConstraint(
+            "num_tokens_output IS NULL OR num_tokens_output >= 0",
+            name="ck_flow_provider_calls_output_tokens_nonnegative",
+        ),
+        CheckConstraint(
+            "input_source IS NULL OR input_source IN "
+            f"({_check_values(PROVIDER_CALL_TOKEN_SOURCE_VALUES)})",
+            name="ck_flow_provider_calls_input_source",
+        ),
+        CheckConstraint(
+            "output_source IS NULL OR output_source IN "
+            f"({_check_values(PROVIDER_CALL_TOKEN_SOURCE_VALUES)})",
+            name="ck_flow_provider_calls_output_source",
+        ),
+        CheckConstraint(
+            "(input_source IS NULL AND num_tokens_input IS NULL) OR "
+            "(input_source = 'not_reported' AND num_tokens_input IS NULL) OR "
+            "(input_source IS NOT NULL AND input_source <> 'not_reported' "
+            "AND num_tokens_input IS NOT NULL)",
+            name="ck_flow_provider_calls_input_usage_shape",
+        ),
+        CheckConstraint(
+            "(output_source IS NULL AND num_tokens_output IS NULL) OR "
+            "(output_source = 'not_reported' AND num_tokens_output IS NULL) OR "
+            "(output_source IS NOT NULL AND output_source <> 'not_reported' "
+            "AND num_tokens_output IS NOT NULL)",
+            name="ck_flow_provider_calls_output_usage_shape",
+        ),
+        CheckConstraint(
+            "(status = 'started' AND finished_at IS NULL AND outcome_reason IS NULL "
+            "AND response_model IS NULL AND provider_response_id IS NULL "
+            "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
+            "AND input_source IS NULL AND output_source IS NULL) OR "
+            "(status = 'completed' AND outcome_reason IS NULL "
+            "AND input_source IS NOT NULL AND output_source IS NOT NULL "
+            "AND ((evidence_source = 'legacy_provenance') OR "
+            "(finished_at IS NOT NULL))) OR "
+            "(status = 'rejected' AND finished_at IS NOT NULL "
+            f"AND outcome_reason IN ({_check_values(PROVIDER_CALL_REJECTION_REASON_VALUES)}) "
+            "AND response_model IS NULL AND provider_response_id IS NULL "
+            "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
+            "AND input_source IS NULL AND output_source IS NULL) OR "
+            "(status = 'outcome_unknown' AND finished_at IS NOT NULL "
+            f"AND outcome_reason IN ({_check_values(PROVIDER_CALL_UNKNOWN_REASON_VALUES)}) "
+            "AND response_model IS NULL AND provider_response_id IS NULL "
+            "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
+            "AND input_source IS NULL AND output_source IS NULL)",
+            name="ck_flow_provider_calls_lifecycle_shape",
+        ),
+        CheckConstraint(
+            "(evidence_source = 'live_observer' AND response_format IS NOT NULL "
+            "AND request_schema_version = 1 "
+            "AND provider_request_hash IS NOT NULL AND requested_at IS NOT NULL "
+            "AND call_reason <> 'legacy_backfill') OR "
+            "(evidence_source = 'legacy_provenance' AND status = 'completed' "
+            "AND response_format IS NULL "
+            "AND request_schema_version IS NULL AND provider_request_hash IS NULL "
+            "AND requested_at IS NULL AND finished_at IS NULL "
+            "AND call_reason = 'legacy_backfill')",
+            name="ck_flow_provider_calls_evidence_shape",
+        ),
+        CheckConstraint(
+            "(mapped_execution_mode IS NULL AND mapped_item_index IS NULL "
+            "AND mapped_source_index IS NULL AND mapped_source_id IS NULL) OR "
+            "(mapped_execution_mode = 'per_item' AND mapped_item_index >= 1 "
+            "AND mapped_source_index IS NULL) OR "
+            "(mapped_execution_mode = 'per_source' AND mapped_source_index >= 1 "
+            "AND mapped_item_index IS NULL)",
+            name="ck_flow_provider_calls_mapped_context",
+        ),
+        Index(
+            "ix_flow_provider_calls_started_requested_at",
+            "requested_at",
+            postgresql_where=sa.text("status = 'started'"),
         ),
     )
 

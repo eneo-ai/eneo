@@ -45,6 +45,7 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
 )
 from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
+from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
@@ -68,6 +69,9 @@ from eneo.flows.flow_run_step_inputs import (
     normalize_step_inputs_payload,
 )
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+)
 from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunCommandResult,
     FlowRunRerunRepository,
@@ -115,6 +119,18 @@ def _flow_run_rerun_repo() -> AsyncMock:
     repo = AsyncMock(spec=FlowRunRerunRepository)
     repo.list_rerun_operations_for_run.return_value = []
     repo.list_rerun_invalidated_steps_for_run.return_value = []
+    return repo
+
+
+def _provider_call_repo() -> AsyncMock:
+    repo = AsyncMock(spec=FlowProviderCallRepository)
+    repo.list_evidence_page.return_value = ProviderCallEvidencePage(
+        items=(),
+        count=0,
+        total_count=0,
+        has_more=False,
+        next_after_event_id=None,
+    )
     return repo
 
 
@@ -2233,6 +2249,7 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2287,6 +2304,7 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2332,6 +2350,7 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2384,6 +2403,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2422,6 +2442,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_de
         user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2468,6 +2489,7 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
         user=allowed_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2507,6 +2529,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2554,6 +2577,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2588,6 +2612,7 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
         user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -2625,6 +2650,7 @@ async def test_export_evidence_json_rejects_cross_tenant_injected_run_for_tenant
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -3059,6 +3085,7 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -3103,6 +3130,7 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -3150,6 +3178,7 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -3206,6 +3235,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
         user=trace_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -3891,6 +3921,7 @@ async def test_get_evidence_redacts_sensitive_values(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -4038,6 +4069,7 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -4127,6 +4159,7 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -4179,6 +4212,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -4201,7 +4235,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v11"
+        assert export["schema_version"] == "flow-evidence-export.v12"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert isinstance(export["manifest"]["app_version"], str)
         assert export["manifest"]["app_version"]
@@ -4264,6 +4298,7 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -4326,6 +4361,7 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -4386,6 +4422,7 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -4436,6 +4473,7 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
@@ -4637,6 +4675,7 @@ def _artifact_service(user, *, file_repo, result_file=None, run=None):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,

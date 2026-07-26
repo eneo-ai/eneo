@@ -1114,6 +1114,7 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
     run_two = SimpleNamespace(id=uuid4(), tenant_id=tenant_two.id)
     events: list[str] = []
     repo = MagicMock()
+    provider_call_repo = MagicMock()
     tenant_repo = MagicMock()
 
     async def get_all_tenants():
@@ -1128,6 +1129,14 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
 
     tenant_repo.get_all_tenants = AsyncMock(side_effect=get_all_tenants)
     repo.list_stale_running_runs = AsyncMock(side_effect=list_stale_running_runs)
+
+    async def mark_provider_calls(*, run_id, **_kwargs):
+        events.append(f"recover_calls:{run_id}")
+        return 1
+
+    provider_call_repo.mark_started_calls_outcome_unknown_for_run = AsyncMock(
+        side_effect=mark_provider_calls
+    )
     terminalizer = MagicMock()
 
     async def terminalize_stale_running_run(*, run_id, **_kwargs):
@@ -1145,6 +1154,9 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
 
         def flow_run_repo(self):
             return self._repo
+
+        def flow_provider_call_repo(self):
+            return provider_call_repo
 
         def flow_run_terminalizer(self):
             return terminalizer
@@ -1185,12 +1197,14 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
         "commit",
         "begin",
         f"terminalize:{run_one.id}",
+        f"recover_calls:{run_one.id}",
         "commit",
         "begin",
         f"list:{tenant_two.id}",
         "commit",
         "begin",
         f"terminalize:{run_two.id}",
+        f"recover_calls:{run_two.id}",
         "commit",
     ]
     assert terminalizer.terminalize_stale_running_run.await_count == 2
@@ -1211,6 +1225,8 @@ def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch)
     tenant = SimpleNamespace(id=uuid4())
     stale_run = SimpleNamespace(id=uuid4(), tenant_id=tenant.id)
     repo = MagicMock()
+    provider_call_repo = MagicMock()
+    provider_call_repo.mark_started_calls_outcome_unknown_for_run = AsyncMock()
     tenant_repo = MagicMock()
     tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant])
     repo.list_stale_running_runs = AsyncMock(return_value=[stale_run])
@@ -1226,6 +1242,9 @@ def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch)
 
         def flow_run_repo(self):
             return self._repo
+
+        def flow_provider_call_repo(self):
+            return provider_call_repo
 
         def flow_run_terminalizer(self):
             return terminalizer
@@ -1258,6 +1277,7 @@ def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch)
     assert result["reconciled"] == 0
     assert fake_session.sync_session.autobegin is True
     terminalizer.terminalize_stale_running_run.assert_awaited_once()
+    provider_call_repo.mark_started_calls_outcome_unknown_for_run.assert_not_awaited()
     terminal_kwargs = terminalizer.terminalize_stale_running_run.await_args.kwargs
     assert terminal_kwargs["error"].code == "flow_worker_stalled"
     assert terminal_kwargs["error"].message == (

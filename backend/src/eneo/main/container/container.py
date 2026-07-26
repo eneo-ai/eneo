@@ -127,6 +127,9 @@ from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.flows.infrastructure.flow_classification_retention_policy_repo import (
     FlowClassificationRetentionPolicyRepository,
 )
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+)
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
@@ -840,6 +843,10 @@ class Container(containers.DeclarativeContainer):
         session=session,
         audit_outbox_repo=flow_run_audit_outbox_repo,
     )
+    flow_provider_call_repo = providers.Factory(
+        FlowProviderCallRepository,
+        session=session,
+    )
     flow_run_rerun_repo = providers.Factory(
         FlowRunRerunRepository,
         session=session,
@@ -1453,6 +1460,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=flow_provider_call_repo,
         flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,

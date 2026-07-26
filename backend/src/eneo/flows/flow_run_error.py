@@ -18,6 +18,7 @@ from pydantic import (
     model_validator,
 )
 
+from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
@@ -187,6 +188,14 @@ class FlowRunErrorDetails(BaseModel):
         description=(
             "Human label for the affected step, truncated to a small public "
             "diagnostic budget."
+        ),
+    )
+    provider_call_evidence_gap: ProviderCallEvidenceGap | None = Field(
+        default=None,
+        description=(
+            "Secret-free provider-call facts retained when the local evidence "
+            "transaction failed after bounded retries. This describes a local "
+            "persistence gap, not an unknown remote outcome."
         ),
     )
 

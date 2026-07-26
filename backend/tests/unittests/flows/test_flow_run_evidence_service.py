@@ -9,6 +9,7 @@ from test_flow_run_service import (
     _file_repo,
     _flow,
     _flow_repo,
+    _provider_call_repo,
     _run,
     _step_result_record,
     _trace_user,
@@ -18,7 +19,16 @@ from test_flow_run_service import (
 from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.files.file_models import FileType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
-from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
+from eneo.flows.application.flow_run_evidence_service import (
+    EMBEDDED_PROVIDER_CALL_LIMIT,
+    PROVIDER_CALL_EXPORT_MAX_EVENTS,
+    FlowRunEvidenceService,
+)
+from eneo.flows.domain.provider_call import (
+    ProviderCallEvidence,
+    ProviderCallEvidencePage,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
@@ -26,7 +36,7 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
 from eneo.flows.published_definition import published_definition_checksum
-from eneo.main.exceptions import UnauthorizedException
+from eneo.main.exceptions import FileTooLargeException, UnauthorizedException
 
 
 def _flow_run_rerun_repo() -> AsyncMock:
@@ -40,6 +50,201 @@ def _webhook_delivery_repo() -> AsyncMock:
     repo = AsyncMock(spec=FlowRunWebhookDeliveryRepository)
     repo.list_run_delivery_statuses.return_value = []
     return repo
+
+
+def _provider_call_evidence() -> ProviderCallEvidence:
+    now = datetime.now(timezone.utc)
+    return ProviderCallEvidence(
+        event_id=uuid4(),
+        attempt_id=uuid4(),
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=1,
+        ordinal=1,
+        status="completed",
+        evidence_source="live_observer",
+        request_schema_version=1,
+        provider_request_hash="a" * 64,
+        requested_model="openai/gpt-4o-mini",
+        provider="openai",
+        response_format="json_schema",
+        call_reason="initial",
+        mapped_execution_mode=None,
+        mapped_item_index=None,
+        mapped_source_index=None,
+        mapped_source_id=None,
+        response_model="gpt-4o-mini-2026-07-01",
+        provider_response_id="response-1",
+        num_tokens_input=12,
+        num_tokens_output=None,
+        input_source="provider",
+        output_source="not_reported",
+        outcome_reason=None,
+        requested_at=now,
+        finished_at=now,
+    )
+
+
+def _service_for_empty_run(
+    *,
+    user,
+    provider_call_repo: AsyncMock,
+    access_policy: AsyncMock | None = None,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow = _flow(user=user)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_result_files.return_value = []
+    flow_version_repo = AsyncMock()
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    review_checkpoint_repo = AsyncMock()
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    resolved_access_policy = access_policy or AsyncMock(spec=FlowRunAccessPolicy)
+    resolved_access_policy.load_run.return_value = run
+    service = FlowRunEvidenceService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=provider_call_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+        access_policy=resolved_access_policy,
+    )
+    return service, run
+
+
+@pytest.mark.asyncio
+async def test_evidence_embeds_first_bounded_provider_call_page(user):
+    user = _trace_user(user)
+    provider_call_repo = _provider_call_repo()
+    event = _provider_call_evidence()
+    page = ProviderCallEvidencePage(
+        items=(event,),
+        count=1,
+        total_count=2,
+        has_more=True,
+        next_after_event_id=event.event_id,
+    )
+    provider_call_repo.list_evidence_page.return_value = page
+    service, run = _service_for_empty_run(
+        user=user,
+        provider_call_repo=provider_call_repo,
+    )
+
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
+
+    assert evidence["provider_calls"] == page.model_dump(mode="json")
+    provider_call_repo.list_evidence_page.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        limit=EMBEDDED_PROVIDER_CALL_LIMIT,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_provider_calls_authorizes_run_and_forwards_page_cursor(user):
+    user = _trace_user(user)
+    provider_call_repo = _provider_call_repo()
+    access_policy = AsyncMock(spec=FlowRunAccessPolicy)
+    service, run = _service_for_empty_run(
+        user=user,
+        provider_call_repo=provider_call_repo,
+        access_policy=access_policy,
+    )
+    after_event_id = uuid4()
+    attempt_id = uuid4()
+
+    page = await service.list_provider_calls(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        limit=375,
+        after_event_id=after_event_id,
+        attempt_id=attempt_id,
+        run=run,
+    )
+
+    assert page.total_count == 0
+    access_policy.ensure_can_access_run.assert_awaited_once_with(
+        run,
+        access_kind="evidence_view",
+    )
+    provider_call_repo.list_evidence_page.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        limit=375,
+        after_event_id=after_event_id,
+        attempt_id=attempt_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_v12_hash_covers_all_provider_call_events(user):
+    user = _trace_user(user)
+    provider_call_repo = _provider_call_repo()
+    event = _provider_call_evidence()
+    service, run = _service_for_empty_run(
+        user=user,
+        provider_call_repo=provider_call_repo,
+    )
+    provider_call_repo.list_evidence_page.return_value = ProviderCallEvidencePage(
+        items=(event,),
+        count=1,
+        total_count=1,
+        has_more=False,
+        next_after_event_id=None,
+    )
+
+    export_with_event = await service.export_evidence_json(run_id=run.id)
+    provider_call_repo.list_evidence_page.return_value = ProviderCallEvidencePage(
+        items=(),
+        count=0,
+        total_count=0,
+        has_more=False,
+        next_after_event_id=None,
+    )
+    export_without_event = await service.export_evidence_json(run_id=run.id)
+
+    assert export_with_event["schema_version"] == "flow-evidence-export.v12"
+    assert export_with_event["bundle"]["provider_calls"]["items"][0]["event_id"] == str(
+        event.event_id
+    )
+    assert export_with_event["content_hash"] != export_without_event["content_hash"]
+    assert all(
+        call.kwargs["limit"] == PROVIDER_CALL_EXPORT_MAX_EVENTS + 1
+        for call in provider_call_repo.list_evidence_page.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_rejects_more_than_provider_call_safety_boundary(user):
+    user = _trace_user(user)
+    provider_call_repo = _provider_call_repo()
+    provider_call_repo.list_evidence_page.return_value = ProviderCallEvidencePage(
+        items=(),
+        count=0,
+        total_count=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
+        has_more=True,
+        next_after_event_id=uuid4(),
+    )
+    service, run = _service_for_empty_run(
+        user=user,
+        provider_call_repo=provider_call_repo,
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value
+    assert exc_info.value.context == {
+        "provider_call_count": PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
+        "max_provider_call_events": PROVIDER_CALL_EXPORT_MAX_EVENTS,
+    }
 
 
 @pytest.mark.asyncio
@@ -81,6 +286,7 @@ async def test_evidence_exports_identical_safe_webhook_delivery_metadata(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
@@ -142,6 +348,7 @@ async def test_get_evidence_loads_run_through_access_policy(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
@@ -182,6 +389,7 @@ async def test_get_evidence_preserves_corrupt_snapshot_with_integrity_status(use
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
@@ -252,6 +460,7 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
@@ -291,6 +500,7 @@ async def test_export_evidence_json_rejects_injected_run_id_mismatch(user):
         user=user,
         flow_repo=_flow_repo(),
         flow_run_repo=AsyncMock(),
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=AsyncMock(),
@@ -343,6 +553,7 @@ async def test_preloaded_run_is_revalidated_before_evidence_is_returned(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
         flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,

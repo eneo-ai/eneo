@@ -4,23 +4,13 @@ from collections.abc import Iterable
 from typing import Any
 
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
-from eneo.flows.domain.runtime import (
-    ProviderCallTokenReceipt,
-    StepDiagnostic,
-    StepExecutionOutput,
-)
+from eneo.flows.domain.runtime import StepDiagnostic, StepExecutionOutput
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     MappedAdmissionProvenance,
     MappedExecutionMode,
 )
 from eneo.main.exceptions import TypedIOValidationException
-
-
-def mapped_provider_call_receipts(
-    outputs: Iterable[StepExecutionOutput],
-) -> list[ProviderCallTokenReceipt]:
-    return [receipt for output in outputs for receipt in output.provider_call_receipts]
 
 
 def mapped_admission_payload(

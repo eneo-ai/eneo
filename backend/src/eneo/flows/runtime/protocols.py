@@ -27,6 +27,10 @@ from eneo.sessions.session import SessionInDB
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
+    from eneo.completion_models.domain.provider_call_observer import (
+        ProviderCallObserver,
+        ProviderCallReason,
+    )
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -98,4 +102,6 @@ class RuntimeAssistantProtocol(Protocol):
         prompt: str | None = None,
         version: int = 1,
         reject_context_over_limit: bool = False,
+        provider_call_observer: ProviderCallObserver | None = None,
+        provider_call_reason: ProviderCallReason = "initial",
     ) -> CompletionModelResponse: ...

@@ -18,6 +18,10 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
 )
+from eneo.completion_models.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallReason,
+)
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
@@ -501,6 +505,8 @@ class CompletionService:
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
         reject_context_over_limit: bool = False,
+        provider_call_observer: ProviderCallObserver | None = None,
+        provider_call_reason: ProviderCallReason = "initial",
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -514,6 +520,10 @@ class CompletionService:
             web_search_results = []
         if mcp_servers is None:
             mcp_servers = []
+        if stream and provider_call_observer is not None:
+            raise ValueError(
+                "Provider call observation is only supported for non-streaming requests."
+            )
         # Org-level disable must be honored at runtime. Disabling a server only
         # flips MCPServers.is_enabled (mcp_server_settings_service); the existing
         # assistant->server associations are never pruned, so a disabled server
@@ -597,6 +607,8 @@ class CompletionService:
                     context=context,
                     model_kwargs=model_kwargs,
                     mcp_proxy=mcp_proxy,
+                    provider_call_observer=provider_call_observer,
+                    provider_call_reason=provider_call_reason,
                 )
             finally:
                 # Ensure cleanup for non-streaming
