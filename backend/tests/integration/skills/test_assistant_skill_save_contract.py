@@ -8,6 +8,7 @@ from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     ProviderToolCall,
 )
+from eneo.completion_models.domain.skill_context import SkillContextMeasurement
 from eneo.database.tables.assistant_table import (
     AssistantMCPServers,
     AssistantMCPServerTools,
@@ -540,13 +541,23 @@ async def test_retained_on_demand_candidate_rejection_rolls_back_new_always_bind
 
 
 @pytest.mark.parametrize(
-    ("activated_tokens", "expected_status"),
-    [(7_000, 200), (7_001, 400)],
-    ids=("fits-after-unblock", "blocked-candidate-overflows"),
+    ("blocked_mode", "boundary_tokens", "expected_status"),
+    [
+        (SkillActivationMode.ON_DEMAND, 7_000, 200),
+        (SkillActivationMode.ON_DEMAND, 7_001, 400),
+        (SkillActivationMode.ALWAYS, 100, 200),
+        (SkillActivationMode.ALWAYS, 101, 400),
+    ],
+    ids=(
+        "blocked-on-demand-fits",
+        "blocked-on-demand-overflows",
+        "blocked-always-fits",
+        "blocked-always-overflows",
+    ),
 )
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
+async def test_blocked_binding_is_staged_before_binding_save(
     client,
     admin_token,
     admin_user,
@@ -555,9 +566,11 @@ async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
     space_factory,
     assistant_factory,
     monkeypatch,
-    activated_tokens,
+    blocked_mode,
+    boundary_tokens,
     expected_status,
 ):
+    always_instructions = "Required context restored after unblock."
     monkeypatch.setattr(
         "eneo.files.attachment_budget.get_settings",
         lambda: SimpleNamespace(attachment_context_reserve_tokens=1_000),
@@ -574,7 +587,11 @@ async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
     def measure_provider_payload(messages, _tools, _model_route):
         activated = any(message.get("role") == "tool" for message in messages)
         return TokenCount(
-            tokens=activated_tokens if activated else 100,
+            tokens=(
+                boundary_tokens
+                if activated and blocked_mode is SkillActivationMode.ON_DEMAND
+                else 100
+            ),
             source=TokenCountSource.LITELLM,
         )
 
@@ -582,6 +599,22 @@ async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
         "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
         measure_provider_payload,
     )
+    if blocked_mode is SkillActivationMode.ALWAYS:
+
+        def measure_skill_context(*, composed_instructions, tools=None, **_kwargs):
+            includes_post_unblock_plan = (
+                always_instructions in composed_instructions and bool(tools)
+            )
+            return SkillContextMeasurement(
+                tokens=boundary_tokens if includes_post_unblock_plan else 50,
+                limit=100,
+                source=TokenCountSource.LITELLM,
+            )
+
+        monkeypatch.setattr(
+            "eneo.completion_models.domain.skill_activation.measure_skill_context",
+            measure_skill_context,
+        )
 
     async with db_container() as container:
         (
@@ -604,19 +637,53 @@ async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
             skill_instructions=("This exact reviewed body must remain activatable."),
             organization_skill=True,
         )
+        organization_space = await _organization_space(
+            session,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert organization_space is not None
         repo = container.skill_repo()
         always = await repo.create(
-            space_id=target_space.id,
+            space_id=organization_space.id,
             slug=f"blocked-always-{uuid4().hex[:8]}",
-            display_name="New always Skill",
-            description="Required context added while the candidate is blocked",
-            instructions="This body expands the required prompt.",
+            display_name="Retained always Skill",
+            description="Required context retained during an incident",
+            instructions=always_instructions,
             content_digest="4" * 64,
             created_by_user_id=admin_user.id,
         )
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=always.id,
+            expected_revision_id=always.current_revision.id,
+        )
+        if blocked_mode is SkillActivationMode.ALWAYS:
+            await container.skill_service().replace_assistant_bindings(
+                space_id=target_space.id,
+                assistant_id=assistant.id,
+                intents=[
+                    SkillBindingIntent(
+                        reference=SkillBindingReference(
+                            skill_id=candidate.id,
+                            skill_revision_id=candidate.current_revision.id,
+                        ),
+                        activation_mode=SkillActivationMode.ON_DEMAND,
+                    ),
+                    SkillBindingIntent(
+                        reference=SkillBindingReference(
+                            skill_id=always.id,
+                            skill_revision_id=always.current_revision.id,
+                        ),
+                        activation_mode=SkillActivationMode.ALWAYS,
+                    ),
+                ],
+            )
+        blocked_skill = (
+            candidate if blocked_mode is SkillActivationMode.ON_DEMAND else always
+        )
         blocked = await repo.block_organization_skill(
             tenant_id=admin_user.tenant_id,
-            skill_id=candidate.id,
+            skill_id=blocked_skill.id,
             blocked_by_user_id=admin_user.id,
             reason="Confirmed unsafe instructions",
         )
@@ -627,6 +694,7 @@ async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
         always_id = always.id
         always_revision_id = always.current_revision.id
         block_id = blocked.block.id
+        blocked_skill_id = blocked_skill.id
         model_route = "openai/gpt-4o"
 
     original_name, original_bindings = await _persisted_assistant_state(
@@ -659,7 +727,11 @@ async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
         assistant_id=assistant_id,
     )
     if expected_status == 400:
-        assert 'on-demand Skill "Blocked candidate Skill"' in response.json()["message"]
+        if blocked_mode is SkillActivationMode.ON_DEMAND:
+            assert (
+                'on-demand Skill "Blocked candidate Skill"'
+                in response.json()["message"]
+            )
         assert persisted_name == original_name
         assert persisted_bindings == original_bindings
         return
@@ -669,16 +741,16 @@ async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
         candidate_id,
         always_id,
     ]
+    unblock_response = await client.post(
+        f"/api/v1/settings/skills/{blocked_skill_id}/execution-block/unblock",
+        json={
+            "expected_block_id": str(block_id),
+            "reason": "The reviewed instructions are safe again",
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert unblock_response.status_code == 200, unblock_response.text
     async with db_container() as container:
-        repo = container.skill_repo()
-        released = await repo.unblock_organization_skill(
-            tenant_id=admin_user.tenant_id,
-            skill_id=candidate_id,
-            expected_block_id=block_id,
-            unblocked_by_user_id=admin_user.id,
-            reason="The reviewed instructions are safe again",
-        )
-        assert released is not None
         skill_service = container.skill_service()
         resolution = await skill_service.resolve_assistant_bindings_for_runtime(
             assistant_id=assistant_id

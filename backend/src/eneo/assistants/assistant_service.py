@@ -594,7 +594,7 @@ class AssistantService:
             space_is_personal=space.is_personal(),
         )
         validation_plan = (
-            skill_plan.for_on_demand_save_validation()
+            skill_plan.for_full_save_validation()
             if validate_all_on_demand_candidates
             else skill_plan
         )

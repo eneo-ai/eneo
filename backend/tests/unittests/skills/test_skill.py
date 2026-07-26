@@ -337,7 +337,7 @@ def test_turn_plan_freezes_bindings_and_starts_with_required_skills():
     assert "Confirmed unsafe instructions" not in evidence.model_dump_json()
 
 
-def test_turn_plan_stages_blocked_on_demand_bindings_for_save_validation():
+def test_turn_plan_stages_all_blocked_bindings_for_full_save_validation():
     blocked_always = replace(
         _binding(position=0, name="Blocked required"),
         activation_mode=SkillActivationMode.ALWAYS,
@@ -369,9 +369,10 @@ def test_turn_plan_stages_blocked_on_demand_bindings_for_save_validation():
         policy=policy,
     )
 
-    validation_plan = plan.for_on_demand_save_validation()
+    validation_plan = plan.for_full_save_validation()
 
     assert [binding.binding for binding in validation_plan.available] == [
+        blocked_always,
         blocked_on_demand,
         available_always,
         available_on_demand,
@@ -380,9 +381,10 @@ def test_turn_plan_stages_blocked_on_demand_bindings_for_save_validation():
         "skill-1",
         "skill-2",
         "skill-3",
+        "skill-4",
     ]
-    assert validation_plan.initially_active_keys == ("skill-2",)
-    assert [binding.binding for binding in validation_plan.blocked] == [blocked_always]
+    assert validation_plan.initially_active_keys == ("skill-1", "skill-3")
+    assert validation_plan.blocked == ()
     assert [binding.binding for binding in plan.available] == [
         available_always,
         available_on_demand,

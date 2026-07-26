@@ -925,35 +925,26 @@ class SkillTurnPlan:
             ),
         )
 
-    def for_on_demand_save_validation(self) -> "SkillTurnPlan":
-        """Stage retained blocked candidates as they would appear after unblock.
+    def for_full_save_validation(self) -> "SkillTurnPlan":
+        """Stage retained blocked bindings as they would appear after unblock.
 
         Execution blocks must keep the live plan fail-closed. Save validation,
-        however, must prove that a retained on-demand pin remains activatable
-        when its block is later released. Rebuild through the canonical plan
-        constructor so ordering, activation keys, catalogue composition, and
-        required instructions match the first real post-unblock turn.
+        however, must prove that retained always-on instructions and on-demand
+        candidates still fit together when their blocks are later released.
+        Rebuild through the canonical plan constructor so ordering, activation
+        keys, catalogue composition, and required instructions match the first
+        real post-unblock turn.
         """
-        blocked_on_demand = tuple(
-            binding.binding
-            for binding in self.blocked
-            if binding.binding.activation_mode is SkillActivationMode.ON_DEMAND
-        )
-        if not blocked_on_demand:
+        if not self.blocked:
             return self
         return SkillTurnPlan.create(
             base_instructions=self.base_instructions,
             resolution=SkillRuntimeResolution(
                 eligible=(
                     *(binding.binding for binding in self.available),
-                    *blocked_on_demand,
+                    *(binding.binding for binding in self.blocked),
                 ),
-                blocked=tuple(
-                    binding.binding
-                    for binding in self.blocked
-                    if binding.binding.activation_mode
-                    is not SkillActivationMode.ON_DEMAND
-                ),
+                blocked=(),
             ),
             policy=self.policy,
         )
