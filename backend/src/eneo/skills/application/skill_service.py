@@ -13,11 +13,14 @@ from eneo.roles.permissions import Permission, validate_permission
 from eneo.skills.domain.skill import (
     MAX_SKILL_CATALOG_PAGE_LIMIT,
     MAX_SKILL_CATALOG_QUERY_LENGTH,
+    AssistantSkillBindingReplacement,
     NormalizedSkillContent,
     PublishedSkillDeactivationError,
     PublishedSkillDeletionError,
     ResolvedSkillBinding,
     Skill,
+    SkillActivationMode,
+    SkillBindingIntent,
     SkillBindingProjection,
     SkillBindingReference,
     SkillCatalogPage,
@@ -483,6 +486,7 @@ class SkillService:
         references: list[SkillBindingReference],
         resolved_groups: tuple[list[ResolvedSkillBinding], ...],
         existing: list[ResolvedSkillBinding],
+        requested_modes: dict[UUID, SkillActivationMode] | None = None,
         missing_error: Exception,
     ) -> list[ResolvedSkillBinding]:
         resolved_by_reference = {
@@ -492,21 +496,21 @@ class SkillService:
         }
         if any(reference not in resolved_by_reference for reference in references):
             raise missing_error
-        # Re-resolution rebuilds bindings from catalogue state, which would
-        # silently reset a stored activation mode. A parent carries at most one
-        # binding per Skill, so a Skill already bound to the parent keeps its
-        # saved mode even when the request pins a different revision; only a
-        # genuinely new Skill takes the resolver default.
+        # Explicit mode intent wins; otherwise a retained Skill keeps its mode.
         existing_mode_by_skill_id = {
             binding.skill_id: binding.activation_mode for binding in existing
         }
+        requested_modes = requested_modes or {}
         return [
             replace(
                 resolved_by_reference[reference],
                 position=position,
-                activation_mode=existing_mode_by_skill_id.get(
+                activation_mode=requested_modes.get(
                     reference.skill_id,
-                    resolved_by_reference[reference].activation_mode,
+                    existing_mode_by_skill_id.get(
+                        reference.skill_id,
+                        resolved_by_reference[reference].activation_mode,
+                    ),
                 ),
             )
             for position, reference in enumerate(references)
@@ -520,6 +524,7 @@ class SkillService:
         organization_space: bool,
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
+        requested_modes: dict[UUID, SkillActivationMode] | None = None,
     ) -> list[ResolvedSkillBinding]:
         await self._validate_reference_count(tenant_id=tenant_id, references=references)
         retained_by_reference, new_references = await self._resolve_retained_references(
@@ -554,9 +559,20 @@ class SkillService:
         )
         # Resolution holds the Skill rows FOR SHARE, so this read observes a
         # concurrent execution block that acquired FOR UPDATE first.
+        existing_by_reference = {
+            self._binding_reference(binding): binding for binding in existing
+        }
+        requested_modes = requested_modes or {}
+        mode_changed_retained_references = [
+            reference
+            for reference in retained_by_reference
+            if reference.skill_id in requested_modes
+            and requested_modes[reference.skill_id]
+            is not existing_by_reference[reference].activation_mode
+        ]
         await self._reject_blocked_references(
             tenant_id=tenant_id,
-            references=new_references,
+            references=[*new_references, *mode_changed_retained_references],
         )
         return self._order_resolved_bindings(
             references=references,
@@ -566,6 +582,7 @@ class SkillService:
                 published,
             ),
             existing=existing,
+            requested_modes=requested_modes,
             missing_error=NotFoundException(
                 "One or more Skill revisions are unavailable for this resource"
             ),
@@ -653,8 +670,8 @@ class SkillService:
         *,
         space_id: UUID,
         assistant_id: UUID,
-        references: list[SkillBindingReference],
-    ) -> list[ResolvedSkillBinding]:
+        intents: list[SkillBindingIntent],
+    ) -> AssistantSkillBindingReplacement:
         if self.user.active_api_key is not None:
             raise UnauthorizedException("Skill binding changes require a session token")
         space = await self._space(space_id)
@@ -678,6 +695,13 @@ class SkillService:
         if locked_space_id != space_id:
             raise NotFoundException()
         existing = await self.repo.list_assistant_bindings(assistant_id=assistant_id)
+        references = [intent.reference for intent in intents]
+        requested_modes = {
+            intent.reference.skill_id: intent.activation_mode
+            for intent in intents
+            if intent.activation_mode is not None
+        }
+        existing_by_skill_id = {binding.skill_id: binding for binding in existing}
         tenant_id = self._tenant_id(space)
         resolved = await self._resolve_resource_references(
             space_id=space_id,
@@ -685,6 +709,17 @@ class SkillService:
             organization_space=space.is_organization(),
             references=references,
             existing=existing,
+            requested_modes=requested_modes,
+        )
+        on_demand_skill_ids_requiring_validation = frozenset(
+            binding.skill_id
+            for binding in resolved
+            if binding.activation_mode is SkillActivationMode.ON_DEMAND
+            and (
+                (stored := existing_by_skill_id.get(binding.skill_id)) is None
+                or stored.skill_revision_id != binding.skill_revision_id
+                or stored.activation_mode is not SkillActivationMode.ON_DEMAND
+            )
         )
         await self.repo.replace_assistant_bindings(
             assistant_id=assistant_id,
@@ -692,7 +727,12 @@ class SkillService:
             space_id=space_id,
             bindings=resolved,
         )
-        return resolved
+        return AssistantSkillBindingReplacement(
+            bindings=tuple(resolved),
+            on_demand_skill_ids_requiring_validation=(
+                on_demand_skill_ids_requiring_validation
+            ),
+        )
 
     async def list_app_bindings(
         self, *, space_id: UUID, app_id: UUID

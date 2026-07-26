@@ -42,7 +42,8 @@ flowchart LR
     Published --> Policy["Personal Chat policy"]
     Builder --> Resource["Assistant or App"]
     Policy --> Chat["Personal Chat"]
-    Resource --> Request["Instructions enter each request"]
+    Resource --> Mode["Always or on demand"]
+    Mode --> Request["Resolved instructions enter the request"]
     Chat --> Request
 ```
 
@@ -90,10 +91,18 @@ Before attaching that Skill:
 4. Test an allowed request, a denied request, an approval-required call, an
    unavailable server, and a request outside the Skill's scope.
 
-An Assistant cannot currently use knowledge and MCP at the same time. Tool
-availability can also change after a Skill is saved. Eneo therefore does not
-treat Skill text as a dependency declaration or perform a save-time MCP health
-check: the existing MCP runtime remains the source of truth and fails closed.
+An Assistant cannot currently use knowledge and MCP at the same time. Eneo
+includes every stored, enabled and approved MCP tool schema available to the
+Assistant—not a user-specific subset—when it validates whether a saved on-demand
+Skill can fit. The check reserves the same question headroom used for attachments
+instead of letting saved Skill context fill the model window. Live discovery,
+user permissions, approvals, and tool availability can still change later, so
+runtime remains the source of truth and fails closed.
+
+Eneo repeats that validation when a save changes Skill bindings, the selected
+model, prompt, attachments, or the stored MCP catalogue. If an existing
+on-demand Skill would no longer be activatable, the complete save is rejected
+and the previous configuration is kept.
 
 ## Create and attach a Skill
 
@@ -143,8 +152,16 @@ These are structural configuration facts:
 | Used       | The model relied on those instructions in its reasoning or output |
 
 The adoption view proves **configured**, not model use or outcome attribution.
-In the current release, all attached Skills enter each request in their listed
-order. Selective per-question activation is not implemented.
+The Assistant API accepts **always** or **on demand** for each binding:
+
+- **Always** includes the exact pinned instructions in every request.
+- **On demand** advertises a compact descriptor and loads the exact pinned
+  instructions only when a tool-capable model requests them.
+
+The web builder control arrives in the next UI slice. Apps and Personal Chat
+remain eager: their attached Skills enter every request in the configured order.
+Runtime evidence, rather than the adoption view, shows which Assistant Skills
+were eligible, requested, blocked, or included.
 
 ## Scopes and permissions
 
@@ -153,7 +170,7 @@ order. Selective per-question activation is not implemented.
 | Surface       | Selection owner                                              | Runtime effect                                      |
 | ------------- | ------------------------------------------------------------ | --------------------------------------------------- |
 | Personal Chat | Tenant admin in Personal Chat settings                       | Ordered versions apply to every user's new requests |
-| Assistant     | Builder with **Use Skills** and edit access to the Assistant | Exact versions apply when that Assistant runs       |
+| Assistant     | Builder with **Use Skills** and edit access to the Assistant | Exact versions run always or load on demand         |
 | App           | Builder with **Use Skills** and edit access to the App       | Exact versions apply when that App runs             |
 
 A Space controls where local Skills can be authored and attached. It does not
@@ -267,25 +284,26 @@ Review the adoption view and update or remove unsafe versions before unblocking.
 - Skills contain instructions and metadata. They do not execute scripts or
   import bundled files.
 - Skills do not grant models, tools, knowledge, or permissions.
-- Every attached Skill currently enters every request in its listed order.
+- Assistant bindings can be **always** or **on demand**. Apps and Personal Chat
+  remain eager.
 - Organisation approval and exact pins do not update existing resources
   automatically.
 - This release has no external Skill marketplace or package installation flow.
 
 ## Planned next steps
 
-The next runtime change will let Assistant builders and tenant admins choose
-between **always** and **on demand** for each approved binding. On-demand Skills
-will advertise a compact description and load the exact pinned instructions only
-when a tool-capable model requests them. Apps will remain eager.
+The next runtime work will make the existing activation evidence easier to
+inspect in the opt-in chat debug panel, including whether each Skill was always
+included or requested on demand and why a candidate was not loaded. Apps will
+remain eager until their execution contracts can preserve the same frozen-plan
+and audit guarantees.
 
-Eneo will show the selected model, measured Skill budget, and whether every
-attached Skill is discoverable. Tenant admins will be able to change the seeded
-10% total Skill-context share in **Admin > Overview** without a code change or
-deployment; the model window and platform safety bounds still apply. Eneo will
-reject a new configuration in which an advertised Skill could never be loaded,
-instead of hiding a subset. Models without tool calling will keep only
-**always** Skills and show that limitation.
+The tenant settings API owns the seeded total Skill-context share; its admin
+form arrives in the next UI slice. The selected model window and fixed platform
+safety bounds still apply. Eneo rejects an Assistant configuration when any
+affected on-demand Skill cannot fit after a binding, prompt, model, attachment,
+or MCP-tool change. Models without tool calling keep only **always** Skills and
+report that limitation in runtime evidence.
 
 Editable Space copies with explicit source updates come later. External
 Marketplace distribution remains a separate final phase.

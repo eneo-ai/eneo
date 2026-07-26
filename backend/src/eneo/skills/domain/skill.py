@@ -638,9 +638,35 @@ class ResolvedSkillBinding:
 
 
 @dataclass(frozen=True)
+class SkillBindingIntent:
+    """Assistant binding identity plus an optional requested mode change."""
+
+    reference: SkillBindingReference
+    activation_mode: SkillActivationMode | None = None
+
+
+@dataclass(frozen=True)
+class AssistantSkillBindingReplacement:
+    bindings: tuple[ResolvedSkillBinding, ...]
+    on_demand_skill_ids_requiring_validation: frozenset[UUID]
+
+
+@dataclass(frozen=True)
 class SkillBindingProjection:
     binding: ResolvedSkillBinding
     execution_blocked: bool
+
+
+@dataclass(frozen=True)
+class AssistantSkillRuntimeProjection:
+    effective_model_id: UUID
+    snapshot: SkillActivationSnapshot
+
+
+@dataclass(frozen=True)
+class AssistantSkillConfigurationProjection:
+    bindings: tuple[SkillBindingProjection, ...]
+    runtime: AssistantSkillRuntimeProjection | None
 
 
 @dataclass(frozen=True)
@@ -897,6 +923,30 @@ class SkillTurnPlan:
                 base_instructions=base_instructions,
                 bindings=[binding.binding for binding in initially_active],
             ),
+        )
+
+    def for_full_save_validation(self) -> "SkillTurnPlan":
+        """Stage retained blocked bindings as they would appear after unblock.
+
+        Execution blocks must keep the live plan fail-closed. Save validation,
+        however, must prove that retained always-on instructions and on-demand
+        candidates still fit together when their blocks are later released.
+        Rebuild through the canonical plan constructor so ordering, activation
+        keys, catalogue composition, and required instructions match the first
+        real post-unblock turn.
+        """
+        if not self.blocked:
+            return self
+        return SkillTurnPlan.create(
+            base_instructions=self.base_instructions,
+            resolution=SkillRuntimeResolution(
+                eligible=(
+                    *(binding.binding for binding in self.available),
+                    *(binding.binding for binding in self.blocked),
+                ),
+                blocked=(),
+            ),
+            policy=self.policy,
         )
 
     def to_activation_runtime(

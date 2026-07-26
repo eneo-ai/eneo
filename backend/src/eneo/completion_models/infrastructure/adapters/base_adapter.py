@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator, Optional
 
 if TYPE_CHECKING:
@@ -10,6 +11,15 @@ if TYPE_CHECKING:
     )
     from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
     from eneo.logging.logging import LoggingDetails
+
+
+@dataclass(frozen=True)
+class ProviderInput:
+    """Canonical messages and tools sent to a completion provider."""
+
+    messages: list[dict[str, Any]]
+    tools: list[dict[str, Any]]
+    built_in_tools: list[dict[str, Any]]
 
 
 class CompletionModelAdapter(ABC):
@@ -32,6 +42,17 @@ class CompletionModelAdapter(ABC):
         self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
     ) -> "LoggingDetails":
         raise NotImplementedError()
+
+    @abstractmethod
+    def prepare_provider_input(
+        self,
+        context: "Context",
+        *,
+        mcp_proxy: Any | None = None,
+        skill_runtime: "SkillActivationRuntime | None" = None,
+    ) -> ProviderInput:
+        """Serialize the exact provider-visible messages and tool catalogue."""
+        pass
 
     async def get_response(
         self,

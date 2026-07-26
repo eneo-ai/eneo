@@ -35,7 +35,7 @@ continuity:
   last_handoff_at: null
   last_verified_revision: "5d54e242a0edd878ef0768c00ea35b63c827e50a"
 
-active_task: T015
+active_task: T016
 
 tasks:
   - id: T001
@@ -956,10 +956,10 @@ tasks:
   - id: T015
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement Task #553 slice 4: the trusted internal on-demand activation effect through the existing completion loop."
-    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/599"
     inputs:
       - "Completed T014 receipt"
       - "docs/enterprise-skills-roadmap.md slice 4 contract"
@@ -992,24 +992,70 @@ tasks:
     stop_if:
       - "The implementation requires PR #538's loopback transport, knowledge stack, or a generic plugin framework."
       - "The provider adapter must import the Skills module or a mutable binding lookup occurs after plan construction."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Added the trusted internal on-demand activation effect to the existing streaming and non-streaming completion loops, kept exact Skill content server-side, closed failure and forged-call evidence gaps from Review 1, and squash-merged PR #600."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/599"
+      merged_pr: 600
+      source_head: "bba9bbfd1cedca4030601f7a0418b18f2f05b796"
+      merge_commit: "2746098cc008f7e9b95eae775ae4501a11cdb5c3"
+      merged_at: "2026-07-24T22:56:51Z"
+      github_checks: "All required CI passed, including backend tests, frontend E2E, schema drift, route metadata, and coverage diff"
+      final_review: "Review 2 confirmed F1-F3 resolved and reported no current findings with complete changed-file coverage"
+      review_url: "https://github.com/eneo-ai/eneo/pull/600#issuecomment-5075095090"
+      verification:
+        - "backend: 3898 unit tests passed"
+        - "backend: focused T015 bundle passed 147 tests"
+        - "backend: stream-abort integration passed 6 tests"
+        - "backend: runtime robustness passed 19 cases"
+        - "backend: Ruff, format, Pyright, uv lock, and schema drift passed"
+        - "Claude and Codex final gates passed; GitHub CI completed successfully"
+      changed_files:
+        - "backend/src/eneo/ai_models/completion_models/completion_model.py"
+        - "backend/src/eneo/assistants/"
+        - "backend/src/eneo/completion_models/"
+        - "backend/src/eneo/help_assistants/"
+        - "backend/src/eneo/questions/"
+        - "backend/src/eneo/sessions/"
+        - "backend/src/eneo/skills/"
+        - "backend/src/eneo/tokens/"
+        - "backend/tests/"
+        - "docs/enterprise-skills-roadmap.md"
+        - "docs/goals/enterprise-skills-rollout/"
+      commands:
+        - cmd: "uv run pytest tests/unit tests/unittests -q"
+          result: "pass: 3898 tests"
+        - cmd: "focused T015 unit bundle"
+          result: "pass: 147 tests"
+        - cmd: "uv run pytest tests/integration/services/test_conversation_stream_abort.py -q"
+          result: "pass: 6 tests"
+        - cmd: "runtime robustness suite"
+          result: "pass: 19 cases"
+        - cmd: "Ruff format/check, source Pyright, uv lock --check, git diff --check, and pre-push schema drift"
+          result: pass
+        - cmd: "required GitHub CI and final /review"
+          result: pass
+      review:
+        claude: ".codex/artifacts/claude-peer-loop-t015-selective-skill-activation-pre-commit-gate-20260724T212107Z.md; green, score 8"
+        codex: ".codex/artifacts/codex-peer-loop-t015-trusted-on-demand-skill-activation-final-gate-20260724T202555Z.md; green, score 8"
+        github: "Review 1 findings F1-F3 were fixed; Review 2 found no current findings with complete changed-file coverage"
 
   - id: T016
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
-    objective: "Implement Task #553 slice 5: public binding-mode save contracts, admin runtime-policy UI, honest activation controls, and one shared fit/activatability owner."
-    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    objective: "Implement Task #553 slice 5A: Assistant binding-mode save contracts, admin runtime-policy UI, honest activation controls, and the shared fit/activatability owner."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/602"
     inputs:
       - "Completed T015 receipt"
       - "docs/enterprise-skills-roadmap.md slice 5 contract"
       - "Current typed Skill runtime policy and generated per-model projections"
-      - "Current Assistant and Governance Policy parent-save owners and shared SkillBindingsEditor"
+      - "Current Assistant parent-save owner and shared SkillBindingsEditor"
+      - ".codex/artifacts/claude-peer-loop-t016-assistant-selective-activation-implementation-ready-gate-20260726T105040Z.md"
     allowed_files:
       - "backend/src/eneo/assistants/"
       - "backend/src/eneo/completion_models/"
-      - "backend/src/eneo/governance_policy/"
       - "backend/src/eneo/settings/"
       - "backend/src/eneo/skills/"
       - "backend/tests/"
@@ -1025,18 +1071,61 @@ tasks:
       - "Expose mode writes only after T015 runtime semantics are merged."
       - "Distinguish an omitted mode from an explicit mode change; preserve retained modes."
       - "Apps expose no mode and remain eager."
-      - "One concrete typed fit/activatability function must own ordinary save, API/UI projection, future rollout preview/apply, and tests."
+      - "SkillTurnPlan.to_activation_runtime() remains the single selective-fit owner for save, read projection, ask, and tests; do not add a second evaluator."
       - "Reuse stored admin policy; platform model-window and safety ceilings remain fixed invariants while tenant values remain admin-configurable."
       - "Use existing admin and binding-editor surfaces with installed shadcn-svelte components; no new dashboard or form store."
     verify:
-      - "Assistant and Governance mode saves, omitted/explicit distinction, model changes, policy precedence, and rollback"
-      - "Small and large context windows, LiteLLM estimate, provider-selected Governance models, and unsupported model fallback"
+      - "Assistant mode saves, omitted/explicit distinction, model changes, policy precedence, and rollback"
+      - "Small and large context windows, canonical LiteLLM measurement, and unsupported model fallback"
       - "Admin bounds/reset/audit and natural Swedish/English UI copy"
       - "Keyboard, invalid-focus, loading/stale/estimated/error/narrow-screen states"
       - "Generated contracts, backend/frontend suites, docs build, CI, and fresh /review"
     stop_if:
       - "Fit or activatability would be calculated in more than one owner."
       - "The UI needs a second design system or Apps would gain on-demand behavior."
+    receipt: null
+
+  - id: T019
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Complete Task #553 slice 5 for Personal Chat with Governance Policy mode saves and model-set fit validation through T016A's shared owner."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    inputs:
+      - "Completed T016 receipt"
+      - "docs/enterprise-skills-roadmap.md slice 5 contract"
+      - "Current Governance Policy parent-save owner and shared SkillBindingsEditor"
+      - "T016A shared fit/activatability owner"
+    allowed_files:
+      - "backend/src/eneo/assistants/"
+      - "backend/src/eneo/completion_models/"
+      - "backend/src/eneo/governance_policy/"
+      - "backend/src/eneo/settings/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/admin/personal-assistant/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Reuse T016's fit/activatability owner and canonical token counter; do not add a second calculator or tokenizer."
+      - "Evaluate the explicitly applicable Governance model set without scanning every tenant-available model by default."
+      - "Distinguish an omitted mode from an explicit mode change and preserve retained modes."
+      - "Apps expose no mode and remain eager."
+      - "Use the existing Personal Chat policy draft and shared editor; add no new form store."
+    verify:
+      - "Governance mode saves, omitted/explicit distinction, model-set changes, policy precedence, and rollback"
+      - "Provider-selected or unbounded model policies fail closed until their applicable set is explicit"
+      - "Natural Swedish/English UI copy, keyboard, invalid-focus, loading, error, and narrow-screen states"
+      - "Generated contracts, backend/frontend suites, docs build, CI, and fresh /review"
+    stop_if:
+      - "The implementation requires a second fit calculation, a tenant-wide model scan, or speculative caching/job infrastructure."
+      - "Apps would gain on-demand behavior."
     receipt: null
 
   - id: T008
@@ -1046,7 +1135,7 @@ tasks:
     reasoning_hint: medium
     objective: "Consolidate Skill lifecycle and revision conflicts into the existing typed API conflict contract after Task #553 owners are stable."
     inputs:
-      - "Completed T016 receipt"
+      - "Completed T016 and T019 receipts"
       - "Current publish, revision, restore, delete, and binding-mode conflict outcomes"
     constraints:
       - "Do not broaden this into a generic error framework."
@@ -1067,7 +1156,7 @@ tasks:
     reasoning_hint: high
     objective: "Add tenant-admin controlled rollout of one published organisation Skill revision to existing Assistant and Personal Chat pins."
     inputs:
-      - "Completed T008 and T016 receipts"
+      - "Completed T008, T016, and T019 receipts"
       - "docs/enterprise-skills-roadmap.md controlled rollout contract"
       - "docs/adr/marketplace-hub-package-portability-and-skills.md R1 contract"
       - "docs/goals/enterprise-skills-rollout/notes/T014-mcp-rollout-blocking-plan.md"

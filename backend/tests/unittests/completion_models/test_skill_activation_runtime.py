@@ -18,7 +18,10 @@ from eneo.completion_models.domain.skill_activation import (
     SkillPromptOwnershipError,
     SkillTurnEffectiveMode,
 )
-from eneo.completion_models.domain.skill_context import SkillContextMeasurement
+from eneo.completion_models.domain.skill_context import (
+    SkillContextMeasurement,
+    measure_skill_context,
+)
 from eneo.skills.domain.skill import (
     MAX_SKILL_ACTIVATIONS_PER_TURN,
     ResolvedSkillBinding,
@@ -295,6 +298,86 @@ def test_activation_rejects_candidate_when_fit_cannot_be_measured():
     )
 
 
+def test_fresh_candidate_assessment_matches_accepted_first_activation():
+    candidate = _skill(
+        key="skill-1",
+        name="Payroll",
+        description="Payroll questions",
+        position=1,
+        instructions="Use the approved payroll procedure.",
+        initially_active=False,
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(candidate,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=1,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=8_000,
+        supports_tool_calling=True,
+    )
+
+    assessments = runtime.assess_on_demand_candidates(
+        frozenset({candidate.binding.skill_id})
+    )
+
+    assert len(assessments) == 1
+    assessment = assessments[0]
+    assert assessment.skill_id == candidate.binding.skill_id
+    assert assessment.activation_key == candidate.activation_key
+    assert assessment.rejection_reason is None
+    assert runtime.snapshot().active == ()
+
+    decisions = _apply_activation_requests(runtime, ("activate", "skill-1"))
+
+    assert decisions == [{"activated": True}]
+    assert runtime.prompt == assessment.prompt
+    assert runtime.snapshot().measurement == assessment.measurement
+
+
+def test_fresh_candidate_assessment_matches_oversized_first_activation_rejection():
+    candidate = _skill(
+        key="skill-1",
+        name="Oversized",
+        description="A compact descriptor",
+        position=1,
+        instructions="large " * 20_000,
+        initially_active=False,
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(candidate,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=1,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=2_000,
+        supports_tool_calling=True,
+    )
+
+    assessments = runtime.assess_on_demand_candidates(
+        frozenset({candidate.binding.skill_id})
+    )
+
+    assert len(assessments) == 1
+    assessment = assessments[0]
+    assert assessment.skill_id == candidate.binding.skill_id
+    assert assessment.activation_key == candidate.activation_key
+    assert assessment.rejection_reason is (
+        SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED
+    )
+    assert assessment.measurement.tokens > assessment.measurement.limit
+    assert runtime.snapshot().active == ()
+
+    decisions = _apply_activation_requests(runtime, ("activate", "skill-1"))
+
+    assert decisions == [{"activated": False, "unavailable": True}]
+    assert runtime.snapshot().rejected[0].reason is assessment.rejection_reason
+
+
 def test_activation_rejects_when_complete_follow_up_exceeds_model_input_limit():
     runtime = SkillActivationRuntime.create(
         base_instructions="Base",
@@ -351,6 +434,142 @@ def test_activation_rejects_when_complete_follow_up_exceeds_model_input_limit():
         SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED
     )
     assert "Payroll body" not in str(messages[0]["content"])
+
+
+@pytest.mark.parametrize(
+    ("provider_tokens", "expected_rejection"),
+    [
+        (1_000, None),
+        (
+            1_001,
+            SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED,
+        ),
+    ],
+    ids=("exact-limit", "overflow"),
+)
+def test_provider_candidate_assessment_is_exact_and_non_mutating(
+    provider_tokens,
+    expected_rejection,
+):
+    candidate = _skill(
+        key="skill-1",
+        name="Payroll",
+        description="Payroll questions",
+        position=1,
+        instructions="Payroll body",
+        initially_active=False,
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(candidate,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=1,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=1_000,
+        supports_tool_calling=True,
+    )
+    messages = [
+        {"role": "system", "content": "Base"},
+        {"role": "user", "content": "Minimal non-empty question"},
+    ]
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "large_mcp_schema",
+                "parameters": {"description": "x" * 2_000},
+            },
+        }
+    ]
+    snapshot_before = runtime.snapshot()
+    messages_before = [message.copy() for message in messages]
+
+    with (
+        patch(
+            "eneo.completion_models.domain.skill_activation.measure_skill_context",
+            wraps=measure_skill_context,
+        ) as measure_share,
+        patch(
+            "eneo.completion_models.domain.skill_activation."
+            "measure_provider_input_tokens",
+            return_value=TokenCount(
+                tokens=provider_tokens,
+                source=TokenCountSource.LITELLM,
+            ),
+        ) as measure,
+    ):
+        assessments = runtime.assess_provider_payload_candidates(
+            frozenset({candidate.binding.skill_id}),
+            messages=messages,
+            provider_tools=provider_tools,
+        )
+
+    assert len(assessments) == 1
+    assert measure_share.call_count == 1
+    assert assessments[0].rejection_reason is expected_rejection
+    assert measure.call_args.args[0][1]["content"] == "Minimal non-empty question"
+    assert measure.call_args.args[1] == provider_tools
+    assert runtime.snapshot() == snapshot_before
+    assert messages == messages_before
+
+
+@pytest.mark.parametrize(
+    ("provider_tokens", "expected_rejection"),
+    [
+        (900, None),
+        (
+            901,
+            SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED,
+        ),
+    ],
+    ids=("reserved-limit", "reserved-overflow"),
+)
+def test_provider_candidate_assessment_uses_explicit_payload_limit(
+    provider_tokens,
+    expected_rejection,
+):
+    candidate = _skill(
+        key="skill-1",
+        name="Payroll",
+        description="Payroll questions",
+        position=1,
+        instructions="Payroll body",
+        initially_active=False,
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(candidate,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=1,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=1_000,
+        supports_tool_calling=True,
+    )
+
+    with patch(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        return_value=TokenCount(
+            tokens=provider_tokens,
+            source=TokenCountSource.LITELLM,
+        ),
+    ):
+        assessments = runtime.assess_provider_payload_candidates(
+            frozenset({candidate.binding.skill_id}),
+            messages=[
+                {"role": "system", "content": "Base"},
+                {"role": "user", "content": "Reserved question space"},
+            ],
+            provider_tools=[],
+            provider_input_token_limit=900,
+        )
+
+    assert len(assessments) == 1
+    assert assessments[0].rejection_reason is expected_rejection
+    assert assessments[0].measurement.limit == 1_000
 
 
 def test_model_limit_rejects_oversized_earlier_skill_and_keeps_later_fit():

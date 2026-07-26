@@ -20,7 +20,11 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import Status
 from eneo.roles.permissions import Permission
-from eneo.skills.domain.skill import SkillBindingReference, SkillRuntimePolicy
+from eneo.skills.domain.skill import (
+    SkillBindingIntent,
+    SkillBindingReference,
+    SkillRuntimePolicy,
+)
 
 
 @dataclass(frozen=True)
@@ -197,7 +201,7 @@ async def test_binding_projection_keeps_pinned_and_current_revision_identity(
         await container.skill_service().replace_assistant_bindings(
             space_id=resources.space_id,
             assistant_id=resources.assistant_id,
-            references=[resources.first_reference],
+            intents=[SkillBindingIntent(reference=resources.first_reference)],
         )
         change = await container.skill_service().create_revision(
             skill_id=resources.first_skill_id,
@@ -239,7 +243,9 @@ async def test_parent_binding_replacements_are_serialized(
             return await service.replace_assistant_bindings(
                 space_id=resources.space_id,
                 assistant_id=resources.assistant_id,
-                references=references,
+                intents=[
+                    SkillBindingIntent(reference=reference) for reference in references
+                ],
             )
         return await service.replace_app_bindings(
             space_id=resources.space_id,
@@ -306,7 +312,7 @@ async def test_assistant_move_and_skill_binding_update_are_serialized(
         return await container.skill_service().replace_assistant_bindings(
             space_id=resources.space_id,
             assistant_id=resources.assistant_id,
-            references=[resources.first_reference],
+            intents=[SkillBindingIntent(reference=resources.first_reference)],
         )
 
     first_action = move if first_operation == "move" else bind
@@ -582,7 +588,7 @@ async def test_block_winning_skill_lock_rejects_concurrent_binding_change(
             await service.replace_assistant_bindings(
                 space_id=resources.space_id,
                 assistant_id=resources.assistant_id,
-                references=[existing_reference],
+                intents=[SkillBindingIntent(reference=existing_reference)],
             )
         elif parent_kind == "app":
             await service.replace_app_bindings(
@@ -619,7 +625,10 @@ async def test_block_winning_skill_lock_rejects_concurrent_binding_change(
                 return await service.replace_assistant_bindings(
                     space_id=resources.space_id,
                     assistant_id=resources.assistant_id,
-                    references=references,
+                    intents=[
+                        SkillBindingIntent(reference=reference)
+                        for reference in references
+                    ],
                 )
             if parent_kind == "app":
                 return await service.replace_app_bindings(
@@ -1039,7 +1048,10 @@ async def test_binding_write_waits_for_concurrent_policy_lowering(
             return await container.skill_service().replace_assistant_bindings(
                 space_id=resources.space_id,
                 assistant_id=resources.assistant_id,
-                references=[resources.first_reference, resources.second_reference],
+                intents=[
+                    SkillBindingIntent(reference=resources.first_reference),
+                    SkillBindingIntent(reference=resources.second_reference),
+                ],
             )
 
     admin_task = asyncio.create_task(holding_admin_lowerer())

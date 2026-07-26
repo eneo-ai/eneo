@@ -1,18 +1,22 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from eneo.main.models import PaginatedResponse
+from eneo.main.models import NotProvided, PaginatedResponse
 from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
     MAX_SKILL_SLUG_LENGTH,
+    SkillActivationFallbackReason,
+    SkillActivationMode,
     SkillAdoptionDrift,
     SkillAdoptionResourceKind,
     SkillBindingSource,
     SkillPublicationState,
+    SkillTurnEffectiveMode,
 )
+from eneo.tokens.token_utils import TokenCountSource
 
 
 class SkillContentInput(BaseModel):
@@ -179,8 +183,16 @@ class PublishedSkillSummaryPagePublic(PaginatedResponse[PublishedSkillSummaryPub
 
 
 class SkillBindingReferenceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     skill_id: UUID
     skill_revision_id: UUID
+
+
+class AssistantSkillBindingInput(SkillBindingReferenceInput):
+    activation_mode: SkillActivationMode | NotProvided = Field(
+        default_factory=NotProvided
+    )
 
 
 class SkillBindingSummary(BaseModel):
@@ -197,3 +209,21 @@ class SkillBindingSummary(BaseModel):
     is_active: bool
     source: SkillBindingSource
     execution_blocked: bool
+
+
+class AssistantSkillBindingSummary(SkillBindingSummary):
+    activation_mode: SkillActivationMode
+
+
+class AssistantSkillRuntimeSummary(BaseModel):
+    effective_model_id: UUID
+    effective_mode: SkillTurnEffectiveMode
+    fallback_reason: SkillActivationFallbackReason | None
+    skill_context_tokens: int
+    skill_context_token_limit: int
+    token_count_source: TokenCountSource
+
+
+class AssistantSkillConfigurationPublic(BaseModel):
+    bindings: list[AssistantSkillBindingSummary]
+    runtime: AssistantSkillRuntimeSummary | None

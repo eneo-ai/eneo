@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import AssistantBase, AssistantUpdatePublic
-from eneo.skills.presentation.skill_models import SkillBindingReferenceInput
+from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
 
 
 def test_assistant_base_coerces_db_null_to_default_kwargs():
@@ -47,7 +47,7 @@ def test_assistant_base_rejects_falsy_non_none_values(bad_value):
 def test_assistant_update_skill_bindings_preserve_patch_semantics():
     omitted = AssistantUpdatePublic()
     explicit_null = AssistantUpdatePublic(skill_bindings=None)
-    reference = SkillBindingReferenceInput(
+    reference = AssistantSkillBindingInput(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
     )

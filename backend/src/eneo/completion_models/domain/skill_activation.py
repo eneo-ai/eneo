@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, cast
+from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
     FunctionDefinition,
@@ -84,6 +85,18 @@ class SkillActivationSnapshot:
 class SkillActivationRejectionSnapshot:
     activation_key: str
     reason: SkillActivationRejectionReason
+
+
+@dataclass(frozen=True)
+class SkillActivationCandidateAssessment:
+    """Non-mutating fit result for one on-demand candidate."""
+
+    skill_id: UUID
+    display_name: str
+    activation_key: str
+    prompt: str
+    rejection_reason: SkillActivationRejectionReason | None
+    measurement: SkillContextMeasurement
 
 
 @dataclass(frozen=True)
@@ -315,6 +328,114 @@ class SkillActivationRuntime:
             ),
         )
 
+    def assess_on_demand_candidates(
+        self,
+        skill_ids: frozenset[UUID],
+    ) -> tuple[SkillActivationCandidateAssessment, ...]:
+        """Measure requested candidates against the current selective state.
+
+        The method reuses the exact runtime measurement path without mutating
+        activation state. Callers must handle plan-level fallback before asking
+        for candidate results; an ALWAYS_ONLY runtime has no activatable
+        candidates to assess. Unknown or blocked Skill ids are omitted because
+        binding resolution owns membership and governance validation.
+        """
+        if self._effective_mode is not SkillTurnEffectiveMode.SELECTIVE:
+            return ()
+
+        assessments: list[SkillActivationCandidateAssessment] = []
+        for skill in self._skills:
+            if skill.initially_active or skill.binding.skill_id not in skill_ids:
+                continue
+            assessments.append(self._assess_candidate(skill))
+        return tuple(assessments)
+
+    def assess_provider_payload_candidates(
+        self,
+        skill_ids: frozenset[UUID],
+        *,
+        messages: list[dict[str, Any]],
+        provider_tools: list[dict[str, Any]],
+        provider_input_token_limit: int | None = None,
+    ) -> tuple[SkillActivationCandidateAssessment, ...]:
+        """Stage each candidate against the provider-visible request payload.
+
+        Save-time preflight uses the same transcript mutation and token
+        measurement as a real activation round. Each probe runs on a fork so
+        neither the frozen turn state nor the caller's messages are changed.
+        Each selected on-demand candidate is measured exactly once. Save-time
+        callers may reserve question space with a lower provider-input limit;
+        the runtime's model window still owns Skill-share measurement.
+        """
+        if self._effective_mode is not SkillTurnEffectiveMode.SELECTIVE:
+            return ()
+
+        provider_assessments: list[SkillActivationCandidateAssessment] = []
+        for skill in self._skills:
+            if skill.initially_active or skill.binding.skill_id not in skill_ids:
+                continue
+            staged = self._fork()
+            staged_messages = [message.copy() for message in messages]
+            staged.apply_provider_tool_calls(
+                calls=(
+                    ProviderToolCall(
+                        call_id=f"preflight-{skill.activation_key}",
+                        name=SKILL_ACTIVATION_TOOL_NAME,
+                        arguments=json.dumps({"skill_key": skill.activation_key}),
+                    ),
+                ),
+                messages=cast("list[dict[str, object]]", staged_messages),
+                provider_tools=cast(
+                    "list[dict[str, object]]",
+                    provider_tools,
+                ),
+                provider_input_token_limit=provider_input_token_limit,
+            )
+            snapshot = staged.snapshot()
+            rejection_reason = next(
+                (
+                    rejection.reason
+                    for rejection in snapshot.rejected
+                    if rejection.activation_key == skill.activation_key
+                ),
+                None,
+            )
+            provider_assessments.append(
+                SkillActivationCandidateAssessment(
+                    skill_id=skill.binding.skill_id,
+                    display_name=skill.display_name,
+                    activation_key=skill.activation_key,
+                    prompt=_compose_prompt(
+                        base_instructions=self._base_instructions,
+                        skills=self._active_skills(skill.activation_key),
+                    ),
+                    rejection_reason=rejection_reason,
+                    measurement=snapshot.measurement,
+                )
+            )
+        return tuple(provider_assessments)
+
+    def _assess_candidate(
+        self,
+        skill: FrozenSkillInstruction,
+    ) -> SkillActivationCandidateAssessment:
+        prompt, measurement = self._measure(self._active_skills(skill.activation_key))
+        rejection_reason: SkillActivationRejectionReason | None = None
+        if measurement.source is TokenCountSource.FALLBACK_ESTIMATE:
+            rejection_reason = (
+                SkillActivationRejectionReason.TOKEN_MEASUREMENT_UNAVAILABLE
+            )
+        elif measurement.tokens > measurement.limit:
+            rejection_reason = SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED
+        return SkillActivationCandidateAssessment(
+            skill_id=skill.binding.skill_id,
+            display_name=skill.display_name,
+            activation_key=skill.activation_key,
+            prompt=prompt,
+            rejection_reason=rejection_reason,
+            measurement=measurement,
+        )
+
     @staticmethod
     def _provider_unavailable() -> dict[str, bool]:
         return {"activated": False, "unavailable": True}
@@ -472,27 +593,11 @@ class SkillActivationRuntime:
                 )
                 continue
 
-            candidate_prompt, candidate_measurement = self._measure(
-                self._active_skills(key)
-            )
-            if candidate_measurement.source is TokenCountSource.FALLBACK_ESTIMATE:
+            assessment = self._assess_candidate(candidate)
+            if assessment.rejection_reason is not None:
                 self._reject(
                     activation_key=key,
-                    reason=(
-                        SkillActivationRejectionReason.TOKEN_MEASUREMENT_UNAVAILABLE
-                    ),
-                )
-                decisions.append(
-                    SkillActivationDecision(
-                        call_id=request.call_id,
-                        provider_payload=self._provider_unavailable(),
-                    )
-                )
-                continue
-            if candidate_measurement.tokens > candidate_measurement.limit:
-                self._reject(
-                    activation_key=key,
-                    reason=SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED,
+                    reason=assessment.rejection_reason,
                 )
                 decisions.append(
                     SkillActivationDecision(
@@ -504,8 +609,8 @@ class SkillActivationRuntime:
 
             self._active_keys.add(key)
             self._accepted.append(key)
-            self.prompt = candidate_prompt
-            self._measurement = candidate_measurement
+            self.prompt = assessment.prompt
+            self._measurement = assessment.measurement
             accepted_any = True
             decisions.append(
                 SkillActivationDecision(
@@ -652,8 +757,15 @@ class SkillActivationRuntime:
         messages: list[dict[str, object]],
         provider_tools: list[dict[str, object]] | None = None,
         assistant_content: str | None = None,
+        provider_input_token_limit: int | None = None,
     ) -> SkillToolCallApplication:
         """Close internal calls and return external calls safe to dispatch."""
+
+        provider_limit = (
+            self._max_input_tokens
+            if provider_input_token_limit is None
+            else provider_input_token_limit
+        )
 
         internal = tuple(
             call for call in calls if call.name == SKILL_ACTIVATION_TOOL_NAME
@@ -783,7 +895,7 @@ class SkillActivationRuntime:
                     }
                 )
                 continue
-            if provider_measurement.tokens > self._max_input_tokens:
+            if provider_measurement.tokens > provider_limit:
                 overflow_key = newly_accepted[-1]
                 for index, candidate_key in enumerate(newly_accepted[:-1]):
                     probe_rejections = {
@@ -818,7 +930,7 @@ class SkillActivationRuntime:
                         )
                         overflow_key = None
                         break
-                    if probe_measurement.tokens > self._max_input_tokens:
+                    if probe_measurement.tokens > provider_limit:
                         overflow_key = candidate_key
                         break
 

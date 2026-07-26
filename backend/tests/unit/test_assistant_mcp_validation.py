@@ -20,6 +20,7 @@ def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=Fal
         get_assistant=lambda **_: assistant,
         is_personal=lambda: is_personal,
         is_mcp_server_in_space=lambda _server_id: server_in_space,
+        mcp_servers=[],
     )
     actor = SimpleNamespace(
         can_edit_assistants=lambda: True,
@@ -30,7 +31,10 @@ def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=Fal
         execute=AsyncMock(),
     )
     service.space_repo = SimpleNamespace(
-        get_space_by_assistant=AsyncMock(return_value=space)
+        get_space_by_assistant=AsyncMock(return_value=space),
+        project_assistant_mcp_servers=AsyncMock(
+            side_effect=lambda **kwargs: kwargs["mcp_servers"]
+        ),
     )
     service.actor_manager = SimpleNamespace(
         get_space_actor_from_space=MagicMock(return_value=actor)
@@ -42,6 +46,7 @@ def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=Fal
     )
     service.user = SimpleNamespace(tenant_id=uuid4())
     service.effective_config_service = None
+    service._validate_attachments_fit = AsyncMock()
     return service, assistant_id, session
 
 
@@ -90,13 +95,21 @@ async def test_add_mcp_to_assistant_allows_personal_space_server_enabled_after_c
         is_personal=True, server_in_space=True
     )
     mcp_server_id = uuid4()
+    mcp_server = SimpleNamespace(id=mcp_server_id)
+    existing_mcp_server = SimpleNamespace(id=uuid4())
+    service.space_repo.get_space_by_assistant.return_value.get_assistant(
+        assistant_id=assistant_id
+    ).mcp_servers = [existing_mcp_server]
+    service.space_repo.get_space_by_assistant.return_value.mcp_servers = [mcp_server]
     assistant_in_db = SimpleNamespace(id=assistant_id)
     session.scalar.side_effect = [
         SimpleNamespace(id=mcp_server_id),  # server exists and is enabled
         assistant_in_db,  # assistant row for set_mcp_servers
     ]
     result = MagicMock()
-    result.scalars.return_value = []
+    result.scalars.return_value = [
+        SimpleNamespace(mcp_server_id=existing_mcp_server.id)
+    ]
     session.execute.return_value = result
 
     await service.add_mcp_to_assistant(
@@ -106,20 +119,27 @@ async def test_add_mcp_to_assistant_allows_personal_space_server_enabled_after_c
 
     assert session.scalar.await_count == 2
     service.repo.set_mcp_servers.assert_awaited_once_with(
-        assistant_in_db, [mcp_server_id]
+        assistant_in_db, [existing_mcp_server.id, mcp_server_id]
     )
+    service.space_repo.project_assistant_mcp_servers.assert_awaited_once_with(
+        space_id=service.space_repo.get_space_by_assistant.return_value.id,
+        assistant_id=assistant_id,
+        mcp_servers=[existing_mcp_server, mcp_server],
+    )
+    service._validate_attachments_fit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_add_mcp_to_assistant_skips_space_mapping_when_governed():
     service, assistant_id, session = _build_assistant_service_with_mocks()
     mcp_server_id = uuid4()
+    mcp_server = SimpleNamespace(id=mcp_server_id)
     assistant_in_db = SimpleNamespace(id=assistant_id)
     service.effective_config_service = AsyncMock(
         resolve_for=AsyncMock(
             return_value=SimpleNamespace(
                 mcp_enforced=True,
-                available_mcp_servers=[SimpleNamespace(id=mcp_server_id)],
+                available_mcp_servers=[mcp_server],
             )
         )
     )

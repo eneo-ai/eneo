@@ -1,6 +1,9 @@
 from unittest.mock import patch
 
-from eneo.completion_models.domain.skill_context import measure_skill_context
+from eneo.completion_models.domain.skill_context import (
+    measure_skill_context,
+    skill_context_token_allowance,
+)
 from eneo.tokens.token_utils import TokenCount, TokenCountSource
 
 
@@ -25,6 +28,16 @@ def test_measure_skill_context_uses_system_message_delta_and_policy_share():
     assert measurement.tokens == 125
     assert measurement.limit == 19_200
     assert measurement.source is TokenCountSource.LITELLM
+
+
+def test_skill_context_token_allowance_applies_policy_share_with_integer_floor():
+    assert (
+        skill_context_token_allowance(
+            max_input_tokens=8_192,
+            context_share_percent=10,
+        )
+        == 819
+    )
 
 
 def test_measure_skill_context_preserves_the_atomic_counters_source():
