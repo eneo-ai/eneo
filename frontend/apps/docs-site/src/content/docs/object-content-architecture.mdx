@@ -110,10 +110,13 @@ product reference disappears; they are not duplicated as File-identity rules.
 ## Crash recovery and reconciliation
 
 Inline creation has no database/object-store crash gap: payload and intent share
-one transaction. Network and process failures can interrupt object-store work
-after its intent commits. Bounded leases, idempotent retries, multipart abort
-records, and a queue-neutral reconciler close that gap. The current worker
-schedules the reconciler with ARQ, but lifecycle code does not depend on ARQ.
+one transaction. For eligible new File and Icon object-store writes, Eneo
+uploads and HEAD verifies captured bytes under a bounded PostgreSQL reservation
+before one short transaction publishes product metadata, already-available
+content rows, and concrete references. A pre-publication crash therefore leaves
+no invisible product row; repeated inventory and the existing grace period own
+the row-less remote residue. The current worker schedules that queue-neutral
+reconciler with ARQ, but lifecycle code does not depend on ARQ.
 
 Local lifecycle, retention, reference audit, and inline deletion reconciliation
 continue even when no endpoint is configured or a configured endpoint is

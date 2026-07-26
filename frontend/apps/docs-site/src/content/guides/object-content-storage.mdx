@@ -163,7 +163,10 @@ mean “more services.”
 safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
 upload limit. For PostgreSQL-inline session uploads, Eneo uses the smaller of
 the admin policy and this ceiling. **Admin > Storage** shows the configured
-limit, effective limit, and constraining source.
+limit, effective limit, and constraining source. Object-store session uploads
+use the same rule with the portable multipart envelope derived from deployment
+transport settings. File and Icon reject envelope + 1 before capture or disk
+spooling.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same

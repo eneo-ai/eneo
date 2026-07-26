@@ -1,4 +1,3 @@
-import asyncio
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -49,11 +48,12 @@ from eneo.object_content.content import (
     InvalidContentRangeError,
     StorageKind,
 )
-from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.content_service import (
+    ObjectContentService,
+    VerifiedObjectPublication,
+)
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
-
-_FILE_COMPENSATION_TIMEOUT_SECONDS = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +91,6 @@ class _CapturedPreparedFile:
 class _PersistedCapturedFile:
     metadata: FileMetadata
     references: tuple[FileContentReferenceRecord, ...]
-    remote_uploads: tuple[tuple[UUID, CapturedContent], ...]
 
 
 class FileService:
@@ -125,95 +124,77 @@ class FileService:
     async def save_file(self, upload_file: UploadFile) -> FileInfo:
         snapshot = self._require_upload_admission()
         storage_target = snapshot.session_storage_target
+        if (
+            storage_target is StorageKind.OBJECT_STORE
+            and self.repo.session.in_transaction()
+        ):
+            raise RuntimeError(
+                "Object-store File admission requires a non-ambient transaction"
+            )
         await self._object_content.ensure_target_ready(storage_target)
 
-        root_id: UUID | None = None
-        family_visible = False
-        try:
-            async with self.protocol.prepare_upload(
-                upload_file,
-                upload_admission_snapshot=snapshot,
-            ) as prepared:
-                async with AsyncExitStack() as capture_stack:
-                    family = tuple(
-                        [
-                            await self._capture_prepared_file(
-                                capture_stack,
-                                prepared,
-                                storage_kind=storage_target,
-                                business_maximum_bytes=self._maximum_bytes_for_file_type(
-                                    prepared.file_type,
-                                    snapshot=snapshot,
-                                ),
-                            )
-                        ]
-                        + [
-                            await self._capture_prepared_file(
-                                capture_stack,
-                                derivative,
-                                storage_kind=storage_target,
-                                business_maximum_bytes=self._maximum_bytes_for_file_type(
-                                    derivative.file_type,
-                                    snapshot=snapshot,
-                                ),
-                            )
-                            for derivative in prepared.derivatives
-                        ]
-                    )
-
-                    if (
-                        storage_target is StorageKind.OBJECT_STORE
-                        and self.repo.session.in_transaction()
-                    ):
-                        raise RuntimeError(
-                            "Object-store File admission requires a "
-                            "non-ambient transaction"
+        async with self.protocol.prepare_upload(
+            upload_file,
+            upload_admission_snapshot=snapshot,
+        ) as prepared:
+            async with AsyncExitStack() as capture_stack:
+                family = tuple(
+                    [
+                        await self._capture_prepared_file(
+                            capture_stack,
+                            prepared,
+                            storage_kind=storage_target,
+                            business_maximum_bytes=self._maximum_bytes_for_file_type(
+                                prepared.file_type,
+                                snapshot=snapshot,
+                            ),
                         )
+                    ]
+                    + [
+                        await self._capture_prepared_file(
+                            capture_stack,
+                            derivative,
+                            storage_kind=storage_target,
+                            business_maximum_bytes=self._maximum_bytes_for_file_type(
+                                derivative.file_type,
+                                snapshot=snapshot,
+                            ),
+                        )
+                        for derivative in prepared.derivatives
+                    ]
+                )
 
+                if storage_target is StorageKind.POSTGRES_INLINE:
                     async with self._write_transaction():
                         root = await self._persist_captured_file(
                             family[0],
-                            storage_kind=storage_target,
                             policy_revision=snapshot.policy_revision,
                         )
-                        root_id = root.metadata.id
-                        persisted = [root]
                         for derivative in family[1:]:
-                            persisted.append(
-                                await self._persist_captured_file(
-                                    derivative,
-                                    storage_kind=storage_target,
-                                    policy_revision=snapshot.policy_revision,
-                                    parent_file_id=root_id,
-                                )
+                            await self._persist_captured_file(
+                                derivative,
+                                policy_revision=snapshot.policy_revision,
+                                parent_file_id=root.metadata.id,
                             )
-                        response = project_file_info(
-                            root.metadata,
-                            list(root.references),
-                        )
-
-                    if storage_target is StorageKind.POSTGRES_INLINE:
-                        family_visible = True
-                        return response
-
-                    remote_uploads = tuple(
-                        upload for file in persisted for upload in file.remote_uploads
+                    return project_file_info(
+                        root.metadata,
+                        list(root.references),
                     )
-                    for content_id, content in remote_uploads:
-                        await self._object_content.store_and_verify(
-                            content_id=content_id,
-                            content=content,
+
+                contents = tuple(
+                    entry.captured
+                    for captured_file in family
+                    for entry in captured_file.contents
+                )
+                async with self._object_content.upload_for_publication(
+                    contents
+                ) as publication:
+                    async with self._write_transaction():
+                        return await self._publish_verified_family(
+                            family,
+                            publication=publication,
+                            policy_revision=snapshot.policy_revision,
                         )
-                    family_visible = True
-                    return response
-        except BaseException as operation_error:
-            if (
-                root_id is not None
-                and not family_visible
-                and not self.repo.session.in_transaction()
-            ):
-                await self._complete_compensation(root_id, operation_error)
-            raise
 
     async def _capture_prepared_file(
         self,
@@ -249,13 +230,92 @@ class FileService:
         self,
         captured_file: _CapturedPreparedFile,
         *,
-        storage_kind: StorageKind,
         policy_revision: int | None = None,
         parent_file_id: UUID | None = None,
     ) -> _PersistedCapturedFile:
+        metadata = await self._add_metadata(
+            captured_file,
+            parent_file_id=parent_file_id,
+        )
+        references: list[FileContentReferenceRecord] = []
+        for entry in captured_file.contents:
+            stored = await self._object_content.prepare_in_transaction(
+                self.repo.session,
+                intent=self._content_intent(
+                    metadata.id,
+                    entry.pending,
+                    policy_revision=policy_revision,
+                ),
+                content=entry.captured,
+                storage_kind=StorageKind.POSTGRES_INLINE,
+            )
+            references.append(
+                await self._add_content_reference(
+                    metadata.id,
+                    entry,
+                    content_id=stored.id,
+                )
+            )
+        return _PersistedCapturedFile(
+            metadata=metadata,
+            references=tuple(references),
+        )
+
+    async def _publish_verified_family(
+        self,
+        family: tuple[_CapturedPreparedFile, ...],
+        *,
+        publication: VerifiedObjectPublication,
+        policy_revision: int,
+    ) -> FileInfo:
+        root_metadata = await self._add_metadata(family[0])
+        metadata = [root_metadata]
+        for derivative in family[1:]:
+            metadata.append(
+                await self._add_metadata(
+                    derivative,
+                    parent_file_id=root_metadata.id,
+                )
+            )
+
+        entries = tuple(
+            (file_metadata, entry)
+            for file_metadata, captured_file in zip(metadata, family, strict=True)
+            for entry in captured_file.contents
+        )
+        stored = await self._object_content.adopt_verified_in_transaction(
+            self.repo.session,
+            intents=tuple(
+                self._content_intent(
+                    file_metadata.id,
+                    entry.pending,
+                    policy_revision=policy_revision,
+                )
+                for file_metadata, entry in entries
+            ),
+            contents=tuple(entry.captured for _metadata, entry in entries),
+            publication=publication,
+        )
+        root_references: list[FileContentReferenceRecord] = []
+        for (file_metadata, entry), content in zip(entries, stored, strict=True):
+            reference = await self._add_content_reference(
+                file_metadata.id,
+                entry,
+                content_id=content.id,
+            )
+            if file_metadata.id == root_metadata.id:
+                root_references.append(reference)
+        return project_file_info(root_metadata, root_references)
+
+    async def _add_metadata(
+        self,
+        captured_file: _CapturedPreparedFile,
+        *,
+        parent_file_id: UUID | None = None,
+    ) -> FileMetadata:
         user = self._authenticated_user()
         prepared = captured_file.prepared
-        metadata = await self.repo.add_metadata(
+        return await self.repo.add_metadata(
             FileMetadataCreate(
                 name=prepared.name,
                 file_type=prepared.file_type,
@@ -265,97 +325,61 @@ class FileService:
                 parent_file_id=parent_file_id,
             )
         )
-        references: list[FileContentReferenceRecord] = []
-        remote_uploads: list[tuple[UUID, CapturedContent]] = []
-        for entry in captured_file.contents:
-            pending = entry.pending
-            captured = entry.captured
-            receipt = f"file:{metadata.id}:{pending.variant.value}:{pending.ordinal}"
-            # Inline-pinned generated images keep their pre-policy receipt.
-            if policy_revision is not None:
-                receipt = f"{receipt}:policy_revision={policy_revision}"
-            stored = await self._object_content.prepare_in_transaction(
-                self.repo.session,
-                intent=ContentIntent(
-                    tenant_id=user.tenant_id,
-                    created_by_user_id=user.id,
-                    access_class=ContentAccessClass.PRIVATE_RESOURCE,
-                    idempotency_key=(
-                        f"file:{metadata.id}:{pending.variant.value}:{pending.ordinal}"
-                    ),
-                    producer_receipt=receipt,
-                ),
-                content=captured,
-                storage_kind=storage_kind,
-            )
-            await self.repo.add_content_reference(
-                file_id=metadata.id,
-                content_id=stored.id,
-                variant=pending.variant,
-                ordinal=pending.ordinal,
-                page_number=pending.page_number,
-                width=pending.width,
-                height=pending.height,
-                duration_ms=pending.duration_ms,
-            )
-            references.append(
-                FileContentReferenceRecord(
-                    file_id=metadata.id,
-                    content_id=stored.id,
-                    variant=pending.variant,
-                    ordinal=pending.ordinal,
-                    page_number=pending.page_number,
-                    width=pending.width,
-                    height=pending.height,
-                    duration_ms=pending.duration_ms,
-                    sha256=captured.sha256,
-                    size_bytes=captured.size_bytes,
-                    media_type=captured.verified_media_type,
-                    access_class=ContentAccessClass.PRIVATE_RESOURCE,
-                )
-            )
-            if storage_kind is StorageKind.OBJECT_STORE:
-                remote_uploads.append((stored.id, captured))
-        return _PersistedCapturedFile(
-            metadata=metadata,
-            references=tuple(references),
-            remote_uploads=tuple(remote_uploads),
-        )
 
-    async def _compensate_new_family(self, root_file_id: UUID) -> None:
-        user = self._authenticated_user()
-        async with self.repo.session.begin():
-            await self.repo.delete_by_owner_for_lifecycle(
-                id=root_file_id,
-                user_id=user.id,
-                tenant_id=user.tenant_id,
-            )
-
-    async def _complete_compensation(
+    def _content_intent(
         self,
-        root_file_id: UUID,
-        original_error: BaseException,
-    ) -> None:
-        cleanup = asyncio.create_task(
-            asyncio.wait_for(
-                self._compensate_new_family(root_file_id),
-                timeout=_FILE_COMPENSATION_TIMEOUT_SECONDS,
-            )
+        file_id: UUID,
+        pending: PendingFileContent,
+        *,
+        policy_revision: int | None,
+    ) -> ContentIntent:
+        user = self._authenticated_user()
+        idempotency_key = f"file:{file_id}:{pending.variant.value}:{pending.ordinal}"
+        receipt = idempotency_key
+        # Inline-pinned generated images keep their pre-policy receipt.
+        if policy_revision is not None:
+            receipt = f"{receipt}:policy_revision={policy_revision}"
+        return ContentIntent(
+            tenant_id=user.tenant_id,
+            created_by_user_id=user.id,
+            access_class=ContentAccessClass.PRIVATE_RESOURCE,
+            idempotency_key=idempotency_key,
+            producer_receipt=receipt,
         )
-        while not cleanup.done():
-            try:
-                await asyncio.shield(cleanup)
-            except asyncio.CancelledError:
-                continue
-            except BaseException:
-                break
-        try:
-            cleanup.result()
-        except BaseException as cleanup_error:
-            raise BaseExceptionGroup(
-                "File save and compensation both failed",
-                [original_error, cleanup_error],
-            ) from None
+
+    async def _add_content_reference(
+        self,
+        file_id: UUID,
+        entry: _CapturedPendingContent,
+        *,
+        content_id: UUID,
+    ) -> FileContentReferenceRecord:
+        pending = entry.pending
+        captured = entry.captured
+        await self.repo.add_content_reference(
+            file_id=file_id,
+            content_id=content_id,
+            variant=pending.variant,
+            ordinal=pending.ordinal,
+            page_number=pending.page_number,
+            width=pending.width,
+            height=pending.height,
+            duration_ms=pending.duration_ms,
+        )
+        return FileContentReferenceRecord(
+            file_id=file_id,
+            content_id=content_id,
+            variant=pending.variant,
+            ordinal=pending.ordinal,
+            page_number=pending.page_number,
+            width=pending.width,
+            height=pending.height,
+            duration_ms=pending.duration_ms,
+            sha256=captured.sha256,
+            size_bytes=captured.size_bytes,
+            media_type=captured.verified_media_type,
+            access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        )
 
     @staticmethod
     def _maximum_bytes_for_file_type(
@@ -416,10 +440,7 @@ class FileService:
                 business_maximum_bytes=None,
             )
             async with self._write_transaction():
-                persisted = await self._persist_captured_file(
-                    captured,
-                    storage_kind=StorageKind.POSTGRES_INLINE,
-                )
+                persisted = await self._persist_captured_file(captured)
         return persisted.metadata.id
 
     async def get_file_by_id(self, file_id: UUID) -> FileInfo:

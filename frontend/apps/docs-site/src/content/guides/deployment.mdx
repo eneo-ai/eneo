@@ -424,7 +424,9 @@ not match.
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
 an explicit verified migration moves it. The product has one provider-neutral
-object-store path, not vendor-specific storage modes.
+object-store path, not vendor-specific storage modes. **Admin > Storage** also
+shows the portable multipart envelope when it constrains object-store session
+uploads; File and Icon reject envelope + 1 before capture or spooling.
 
 Follow [Object Content Storage](/guides/object-content-storage) for the image
 digest, credentials, MinIO policy, TLS, readiness, backup, and troubleshooting
@@ -654,7 +656,7 @@ ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 | Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false`                    | Set to `true`, restart backend                                                      |
 | Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                | Set to external URL (not localhost in prod)                                         |
 | Can't upload multiple files          | `MAX_IN_QUESTION=1`                                | Increase value in backend env                                                       |
-| Large file uploads fail              | Admin policy or inline operator ceiling is lower   | Review configured, effective, and source values in Admin > Storage                  |
+| Large file uploads fail              | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > Storage                |
 | "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                | Set correct key or re-enter credentials                                             |
 | Credentials API returns 404/error    | `TENANT_CREDENTIALS_ENABLED=false`                 | Set to `true`, requires `ENCRYPTION_KEY`                                            |
 | OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                           | Must match in backend, frontend, AND IdP config                                     |

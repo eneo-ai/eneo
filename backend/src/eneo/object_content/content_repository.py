@@ -104,6 +104,41 @@ class ObjectContentRepository:
             created=created,
         )
 
+    async def prepare_verified_object_store(
+        self,
+        *,
+        intent: ContentIntent,
+        content: CapturedContent,
+        object_key: str,
+        request_fingerprint: bytes,
+    ) -> PreparedContent:
+        row, created = await self._prepare_control(
+            intent=intent,
+            content=content,
+            storage_kind=StorageKind.OBJECT_STORE,
+            state=ContentState.AVAILABLE,
+            request_fingerprint=request_fingerprint,
+        )
+        if created:
+            descriptor = ObjectStoreObjects()
+            descriptor.content_id = row.id
+            descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+            descriptor.object_key = object_key
+            self._session.add(descriptor)
+            await self._session.flush()
+        else:
+            descriptor = await self._object_store_descriptor(row.id, for_update=True)
+            if descriptor.object_key != object_key:
+                raise ObjectContentIdempotencyConflictError(
+                    "The idempotency key is bound to another verified object"
+                )
+        return PreparedContent(
+            id=row.id,
+            storage_kind=StorageKind(row.storage_kind),
+            state=ContentState(row.state),
+            created=created,
+        )
+
     async def prepare_inline(
         self,
         *,

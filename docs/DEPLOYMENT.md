@@ -532,3 +532,6 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
 - For PostgreSQL-inline session uploads, the effective limit is the smaller of
   the admin policy and the operator-owned
   `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+- For object-store session uploads, the effective limit is the smaller of the
+  admin policy and the portable multipart envelope derived from deployment
+  transport settings. Eneo rejects larger uploads before capture or spooling.

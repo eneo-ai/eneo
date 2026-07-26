@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from uuid import UUID, uuid4
@@ -11,11 +10,11 @@ import pytest
 import sqlalchemy as sa
 from fastapi import UploadFile
 
-import eneo.files.file_service as file_service_module
 from eneo.database.database import AsyncSession, DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
+    ObjectContentOrphanCandidates,
     ObjectContents,
     ObjectStoreObjects,
 )
@@ -34,10 +33,19 @@ from eneo.object_content.content import (
     ObjectContentUnavailableError,
     StorageKind,
 )
-from eneo.object_content.content_repository import ReadableContent
-from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.content_service import (
+    ObjectContentService,
+    VerifiedObjectPublication,
+)
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
-from eneo.object_content.s3_object_store import ObjectStoreNotFoundError, S3ObjectStore
+from eneo.object_content.lease import OperationCheckpoint
+from eneo.object_content.s3_object_store import (
+    MultipartStarted,
+    ObjectHead,
+    ObjectStoreNotFoundError,
+    ObjectStoreUnavailableError,
+    S3ObjectStore,
+)
 from eneo.users.user import UserInDB
 from tests.integration.object_content.conftest import RealObjectStore
 
@@ -71,9 +79,8 @@ class _ControlledObjectContentService(ObjectContentService):
         *,
         database: DatabaseSessionManager,
         real_object_store: RealObjectStore,
-        fail_at: int | None = None,
-        pause_at: int | None = None,
-        cancel_after: int | None = None,
+        pause_before_publication: bool = False,
+        cancel_after_publication: bool = False,
     ) -> None:
         super().__init__(
             real_object_store.settings,
@@ -81,43 +88,33 @@ class _ControlledObjectContentService(ObjectContentService):
             object_store_settings=real_object_store.settings,
             object_store=real_object_store.store,
         )
-        self._fail_at = fail_at
-        self._pause_at = pause_at
-        self._cancel_after = cancel_after
+        self._pause_before_publication = pause_before_publication
+        self._cancel_after_publication = cancel_after_publication
         self.store_calls = 0
+        self.object_keys: tuple[str, ...] = ()
         self.paused = asyncio.Event()
 
     async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
         assert storage_kind is StorageKind.OBJECT_STORE
 
-    async def store_and_verify(
+    @asynccontextmanager
+    async def upload_for_publication(
         self,
-        *,
-        content_id: UUID,
-        content: CapturedContent,
-    ) -> ReadableContent:
-        call_index = self.store_calls
-        self.store_calls += 1
-        if call_index == self._fail_at:
-            raise ObjectContentUnavailableError("injected File upload outage")
-        if call_index == self._pause_at:
-            self.paused.set()
-            await asyncio.Event().wait()
-        readable = await super().store_and_verify(
-            content_id=content_id,
-            content=content,
-        )
-        if call_index == self._cancel_after:
-            task = asyncio.current_task()
-            assert task is not None
-            task.cancel()
-        return readable
-
-
-class _SlowCompensationFileService(FileService):
-    async def _compensate_new_family(self, root_file_id: UUID) -> None:
-        del root_file_id
-        await asyncio.sleep(0.05)
+        contents: Sequence[CapturedContent],
+    ) -> AsyncGenerator[VerifiedObjectPublication]:
+        async with super().upload_for_publication(contents) as publication:
+            self.store_calls = len(publication.uploads)
+            self.object_keys = tuple(
+                upload.object_key for upload in publication.uploads
+            )
+            if self._pause_before_publication:
+                self.paused.set()
+                await asyncio.Event().wait()
+            yield publication
+            if self._cancel_after_publication:
+                task = asyncio.current_task()
+                assert task is not None
+                task.cancel()
 
 
 def _snapshot(storage_target: StorageKind) -> UploadAdmissionSnapshot:
@@ -125,9 +122,7 @@ def _snapshot(storage_target: StorageKind) -> UploadAdmissionSnapshot:
     return UploadAdmissionSnapshot(
         policy_revision=41,
         session_storage_target=storage_target,
-        session_operator_ceiling_bytes=(
-            maximum if storage_target is StorageKind.POSTGRES_INLINE else None
-        ),
+        session_operator_ceiling_bytes=maximum,
         session_file_maximum_bytes=maximum,
         session_image_maximum_bytes=maximum,
         session_audio_maximum_bytes=maximum,
@@ -192,24 +187,13 @@ def _service(
     protocol: FileProtocol,
     object_content: ObjectContentService,
     snapshot: UploadAdmissionSnapshot,
-    service_type: type[FileService] = FileService,
 ) -> FileService:
-    return service_type(
+    return FileService(
         user=user,
         repo=FileRepository(session),
         protocol=protocol,
         object_content=object_content,
         upload_admission=snapshot,
-    )
-
-
-def _group_contains(error: BaseExceptionGroup, expected: type[BaseException]) -> bool:
-    return any(
-        isinstance(nested, expected)
-        or (
-            isinstance(nested, BaseExceptionGroup) and _group_contains(nested, expected)
-        )
-        for nested in error.exceptions
     )
 
 
@@ -232,20 +216,45 @@ async def _delete_remote_objects(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fail_at", [0, 1, 2])
-async def test_remote_failure_compensates_the_whole_multi_content_family(
+@pytest.mark.parametrize("fail_on_upload", [1, 2, 3])
+async def test_remote_failure_publishes_no_multi_content_family_rows(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
-    fail_at: int,
+    monkeypatch: pytest.MonkeyPatch,
+    fail_on_upload: int,
 ) -> None:
-    name = f"failure-{fail_at}-{uuid4().hex}"
+    name = f"failure-{uuid4().hex}"
     protocol = _PreparedFileProtocol(_three_content_family(name))
     content_service = _ControlledObjectContentService(
         database=object_content_database,
         real_object_store=real_object_store,
-        fail_at=fail_at,
     )
     snapshot = _snapshot(StorageKind.OBJECT_STORE)
+    upload_calls = 0
+    uploaded_object_keys: list[str] = []
+    upload = real_object_store.store.upload
+
+    async def fail_during_family_upload(
+        key: str,
+        content: CapturedContent,
+        *,
+        multipart_started: MultipartStarted | None = None,
+        operation_checkpoint: OperationCheckpoint | None = None,
+    ) -> ObjectHead:
+        nonlocal upload_calls
+        upload_calls += 1
+        if upload_calls == fail_on_upload:
+            raise ObjectStoreUnavailableError("injected File upload outage")
+        head = await upload(
+            key,
+            content,
+            multipart_started=multipart_started,
+            operation_checkpoint=operation_checkpoint,
+        )
+        uploaded_object_keys.append(key)
+        return head
+
+    monkeypatch.setattr(real_object_store.store, "upload", fail_during_family_upload)
 
     try:
         async with object_content_database.session() as session:
@@ -259,7 +268,7 @@ async def test_remote_failure_compensates_the_whole_multi_content_family(
             )
             with pytest.raises(
                 ObjectContentUnavailableError,
-                match="injected File upload outage",
+                match="temporarily unavailable",
             ):
                 await service.save_file(
                     UploadFile(
@@ -283,115 +292,23 @@ async def test_remote_failure_compensates_the_whole_multi_content_family(
                     sa.select(sa.func.count()).select_from(FileContentReferences)
                 )
             ) == 0
-            states = Counter(await session.scalars(sa.select(ObjectContents.state)))
-            assert states == Counter(
-                {
-                    ContentState.DELETE_PENDING.value: fail_at,
-                    ContentState.FAILED.value: 3 - fail_at,
-                }
+            assert await session.scalar(sa.select(ObjectContents.id)) is None
+            assert (
+                await session.scalar(sa.select(ObjectStoreObjects.content_id)) is None
             )
-            assert set(
-                await session.scalars(sa.select(ObjectContents.reference_count))
-            ) == {0}
+        assert upload_calls == fail_on_upload
+        assert len(uploaded_object_keys) == fail_on_upload - 1
+        for object_key in uploaded_object_keys:
+            assert (await real_object_store.store.head(object_key)).size_bytes > 0
     finally:
         await _delete_remote_objects(
             real_object_store.store,
-            await _remote_object_keys(object_content_database),
+            uploaded_object_keys,
         )
 
 
 @pytest.mark.asyncio
-async def test_remote_failure_bounds_stalled_database_compensation(
-    object_content_database: DatabaseSessionManager,
-    real_object_store: RealObjectStore,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        file_service_module,
-        "_FILE_COMPENSATION_TIMEOUT_SECONDS",
-        0.001,
-        raising=False,
-    )
-    name = f"stalled-compensation-{uuid4().hex}"
-    content_service = _ControlledObjectContentService(
-        database=object_content_database,
-        real_object_store=real_object_store,
-        fail_at=0,
-    )
-
-    async with object_content_database.session() as session:
-        user = await _user(session)
-        service = _service(
-            session=session,
-            user=user,
-            protocol=_PreparedFileProtocol(_three_content_family(name)),
-            object_content=content_service,
-            snapshot=_snapshot(StorageKind.OBJECT_STORE),
-            service_type=_SlowCompensationFileService,
-        )
-
-        with pytest.raises(BaseExceptionGroup) as error:
-            await service.save_file(
-                UploadFile(
-                    file=BytesIO(),
-                    filename=f"{name}.pdf",
-                    headers={"content-type": "application/pdf"},
-                )
-            )
-
-    assert _group_contains(error.value, ObjectContentUnavailableError)
-    assert _group_contains(error.value, TimeoutError)
-
-
-@pytest.mark.asyncio
-async def test_cancellation_bounds_stalled_database_compensation(
-    object_content_database: DatabaseSessionManager,
-    real_object_store: RealObjectStore,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        file_service_module,
-        "_FILE_COMPENSATION_TIMEOUT_SECONDS",
-        0.001,
-        raising=False,
-    )
-    name = f"cancel-stalled-compensation-{uuid4().hex}"
-    content_service = _ControlledObjectContentService(
-        database=object_content_database,
-        real_object_store=real_object_store,
-        pause_at=0,
-    )
-
-    async with object_content_database.session() as session:
-        user = await _user(session)
-        service = _service(
-            session=session,
-            user=user,
-            protocol=_PreparedFileProtocol(_three_content_family(name)),
-            object_content=content_service,
-            snapshot=_snapshot(StorageKind.OBJECT_STORE),
-            service_type=_SlowCompensationFileService,
-        )
-        saving = asyncio.create_task(
-            service.save_file(
-                UploadFile(
-                    file=BytesIO(),
-                    filename=f"{name}.pdf",
-                    headers={"content-type": "application/pdf"},
-                )
-            )
-        )
-        await asyncio.wait_for(content_service.paused.wait(), timeout=10)
-        saving.cancel()
-        with pytest.raises(BaseExceptionGroup) as error:
-            await saving
-
-    assert _group_contains(error.value, asyncio.CancelledError)
-    assert _group_contains(error.value, TimeoutError)
-
-
-@pytest.mark.asyncio
-async def test_cancellation_before_final_promotion_finishes_compensation(
+async def test_cancellation_before_publication_leaves_no_file_family_rows(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
 ) -> None:
@@ -399,7 +316,7 @@ async def test_cancellation_before_final_promotion_finishes_compensation(
     content_service = _ControlledObjectContentService(
         database=object_content_database,
         real_object_store=real_object_store,
-        pause_at=2,
+        pause_before_publication=True,
     )
 
     try:
@@ -439,17 +356,99 @@ async def test_cancellation_before_final_promotion_finishes_compensation(
                     sa.select(sa.func.count()).select_from(FileContentReferences)
                 )
             ) == 0
-            states = Counter(await session.scalars(sa.select(ObjectContents.state)))
-            assert states == Counter(
-                {
-                    ContentState.DELETE_PENDING.value: 2,
-                    ContentState.FAILED.value: 1,
-                }
+            assert await session.scalar(sa.select(ObjectContents.id)) is None
+            assert (
+                await session.scalar(sa.select(ObjectStoreObjects.content_id)) is None
             )
+        assert content_service.store_calls == 3
+        assert len(content_service.object_keys) == 3
+        for object_key in content_service.object_keys:
+            assert (await real_object_store.store.head(object_key)).size_bytes > 0
     finally:
         await _delete_remote_objects(
             real_object_store.store,
-            await _remote_object_keys(object_content_database),
+            list(content_service.object_keys),
+        )
+
+
+@pytest.mark.asyncio
+async def test_database_rollback_after_verified_uploads_publishes_no_family_rows(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    name = f"rollback-before-commit-{uuid4().hex}"
+    content_service = _ControlledObjectContentService(
+        database=object_content_database,
+        real_object_store=real_object_store,
+    )
+
+    try:
+        async with object_content_database.session() as session:
+            user = await _user(session)
+            service = _service(
+                session=session,
+                user=user,
+                protocol=_PreparedFileProtocol(_three_content_family(name)),
+                object_content=content_service,
+                snapshot=_snapshot(StorageKind.OBJECT_STORE),
+            )
+
+            def reject_commit(_session: object) -> None:
+                raise RuntimeError("injected publication commit failure")
+
+            sa.event.listen(
+                session.sync_session,
+                "before_commit",
+                reject_commit,
+                once=True,
+            )
+            with pytest.raises(
+                RuntimeError,
+                match="injected publication commit failure",
+            ):
+                await service.save_file(
+                    UploadFile(
+                        file=BytesIO(),
+                        filename=f"{name}.pdf",
+                        headers={"content-type": "application/pdf"},
+                    )
+                )
+
+        async with object_content_database.session() as session, session.begin():
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(Files)
+                    .where(Files.name.like(f"{name}%"))
+                )
+            ) == 0
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count()).select_from(FileContentReferences)
+                )
+            ) == 0
+            assert await session.scalar(sa.select(ObjectContents.id)) is None
+            assert (
+                await session.scalar(sa.select(ObjectStoreObjects.content_id)) is None
+            )
+            assert set(
+                await session.scalars(
+                    sa.select(ObjectContentOrphanCandidates.object_key).where(
+                        ObjectContentOrphanCandidates.object_key.in_(
+                            content_service.object_keys
+                        )
+                    )
+                )
+            ) == set(content_service.object_keys)
+
+        assert content_service.store_calls == 3
+        assert len(content_service.object_keys) == 3
+        for object_key in content_service.object_keys:
+            assert (await real_object_store.store.head(object_key)).size_bytes > 0
+    finally:
+        await _delete_remote_objects(
+            real_object_store.store,
+            list(content_service.object_keys),
         )
 
 
@@ -462,7 +461,7 @@ async def test_cancellation_after_final_promotion_preserves_the_visible_family(
     content_service = _ControlledObjectContentService(
         database=object_content_database,
         real_object_store=real_object_store,
-        cancel_after=2,
+        cancel_after_publication=True,
     )
 
     try:

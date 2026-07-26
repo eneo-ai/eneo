@@ -92,13 +92,15 @@ class UploadAdmissionSnapshot:
 
 
 def project_upload_limits(
-    policy: DeploymentPolicy, *, inline_maximum_bytes: int
+    policy: DeploymentPolicy,
+    *,
+    inline_maximum_bytes: int,
+    object_store_maximum_bytes: int | None,
 ) -> tuple[UploadLimitProjection, ...]:
-    session_ceiling = (
-        inline_maximum_bytes
-        if policy.new_write_storage_target is StorageKind.POSTGRES_INLINE
-        else None
-    )
+    session_ceiling = {
+        StorageKind.POSTGRES_INLINE: inline_maximum_bytes,
+        StorageKind.OBJECT_STORE: object_store_maximum_bytes,
+    }[policy.new_write_storage_target]
 
     def session_limit(
         use_case: UploadLimitUseCase, configured_bytes: int
@@ -213,6 +215,7 @@ async def load_upload_admission_snapshot(
     session: AsyncSession,
     *,
     inline_maximum_bytes: int,
+    object_store_maximum_bytes: int | None,
 ) -> UploadAdmissionSnapshot:
     policy = await DeploymentPolicyRepository(session).get()
     projections = {
@@ -220,6 +223,7 @@ async def load_upload_admission_snapshot(
         for projection in project_upload_limits(
             policy,
             inline_maximum_bytes=inline_maximum_bytes,
+            object_store_maximum_bytes=object_store_maximum_bytes,
         )
     }
     session_file = projections[UploadLimitUseCase.SESSION_FILE]

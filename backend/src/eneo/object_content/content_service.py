@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator, AsyncIterable, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from secrets import token_hex
 from time import monotonic
@@ -40,6 +41,7 @@ from eneo.object_content.inline_content_store import InlineContentStore
 from eneo.object_content.lease import OperationLeaseCheckpoint
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
+    PublicationReservation,
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
@@ -66,6 +68,21 @@ def retry_delay_seconds(
 # This is an internal PostgreSQL bind/query chunk, not a user-visible content
 # limit. Larger requests are processed across multiple bounded pages.
 _READ_BATCH_MAX_ITEMS = 500
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedObjectUpload:
+    object_key: str
+    sha256: bytes
+    size_bytes: int
+    declared_media_type: str
+    verified_media_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedObjectPublication:
+    lease_owner: str
+    uploads: tuple[VerifiedObjectUpload, ...]
 
 
 class ObjectContentService:
@@ -239,7 +256,10 @@ class ObjectContentService:
                     "business_maximum_bytes is required for object-store capture"
                 )
             settings, _store = self._require_object_store()
-            maximum_size_bytes = business_maximum_bytes
+            maximum_size_bytes = min(
+                business_maximum_bytes,
+                settings.maximum_multipart_bytes,
+            )
             spool_memory_bytes = settings.spool_memory_bytes
             multipart_part_bytes = settings.multipart_part_bytes
         async with capture_content(
@@ -255,6 +275,166 @@ class ObjectContentService:
     async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
         if storage_kind is StorageKind.OBJECT_STORE:
             await self.check_object_store_ready()
+
+    @asynccontextmanager
+    async def upload_for_publication(
+        self,
+        contents: Sequence[CapturedContent],
+    ) -> AsyncGenerator[VerifiedObjectPublication]:
+        if not contents:
+            raise ValueError("Object publication requires at least one content item")
+        settings, store = self._require_object_store()
+        lease_owner = token_hex(16)
+        reservations = tuple(
+            PublicationReservation(
+                object_key=new_object_key(settings),
+                size_bytes=content.size_bytes,
+            )
+            for content in contents
+        )
+        lease_started_at = monotonic()
+        try:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentReconciliationRepository(
+                    session
+                ).reserve_publication_objects(
+                    reservations,
+                    lease_owner=lease_owner,
+                    lease_seconds=settings.reconciliation_lease_seconds,
+                    orphan_grace_seconds=settings.orphan_grace_seconds,
+                )
+        except ObjectContentBusyError as error:
+            raise ObjectContentUnavailableError(
+                "Durable object publication is temporarily unavailable"
+            ) from error
+        except (OSError, SQLAlchemyError) as error:
+            raise ObjectContentUnavailableError(
+                "Unable to reserve durable object publication"
+            ) from error
+
+        async def renew_publication_reservations() -> None:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentReconciliationRepository(
+                    session
+                ).renew_publication_reservations(
+                    reservations,
+                    lease_owner=lease_owner,
+                    lease_seconds=settings.reconciliation_lease_seconds,
+                )
+
+        checkpoint = OperationLeaseCheckpoint(
+            lease_started_at=lease_started_at,
+            lease_seconds=settings.reconciliation_lease_seconds,
+            request_budget_seconds=settings.sdk_request_budget_seconds,
+            renew=renew_publication_reservations,
+        )
+        try:
+            try:
+                uploads: list[VerifiedObjectUpload] = []
+                for reservation, content in zip(reservations, contents, strict=True):
+                    await store.upload(
+                        reservation.object_key,
+                        content,
+                        operation_checkpoint=checkpoint,
+                    )
+                    uploads.append(
+                        VerifiedObjectUpload(
+                            object_key=reservation.object_key,
+                            sha256=content.sha256,
+                            size_bytes=content.size_bytes,
+                            declared_media_type=content.declared_media_type,
+                            verified_media_type=content.verified_media_type,
+                        )
+                    )
+            except ObjectStoreIntegrityError as error:
+                raise ObjectContentIntegrityError(
+                    "Durable object verification failed"
+                ) from error
+            except (ObjectContentBusyError, ObjectStoreUnavailableError) as error:
+                raise ObjectContentUnavailableError(
+                    "Durable object content is temporarily unavailable"
+                ) from error
+            except (OSError, SQLAlchemyError) as error:
+                raise ObjectContentUnavailableError(
+                    "Unable to renew durable object publication"
+                ) from error
+
+            yield VerifiedObjectPublication(
+                lease_owner=lease_owner,
+                uploads=tuple(uploads),
+            )
+        finally:
+            try:
+                async with self._database.session() as session, session.begin():
+                    await ObjectContentReconciliationRepository(
+                        session
+                    ).release_publication_reservations(
+                        reservations,
+                        lease_owner=lease_owner,
+                    )
+            except (OSError, SQLAlchemyError):
+                # The bounded lease expires after a process or database failure;
+                # the existing orphan inventory remains the durable cleanup owner.
+                pass
+
+    async def adopt_verified_in_transaction(
+        self,
+        session: AsyncSession,
+        *,
+        intents: Sequence[ContentIntent],
+        contents: Sequence[CapturedContent],
+        publication: VerifiedObjectPublication,
+    ) -> tuple[PreparedContent, ...]:
+        if not session.in_transaction():
+            raise RuntimeError("Verified publication requires an owning transaction")
+        if len(intents) != len(contents) or len(contents) != len(publication.uploads):
+            raise ValueError("Verified publication inputs must have equal lengths")
+
+        reservations: list[PublicationReservation] = []
+        for content, upload in zip(contents, publication.uploads, strict=True):
+            if (
+                upload.sha256 != content.sha256
+                or upload.size_bytes != content.size_bytes
+                or upload.declared_media_type != content.declared_media_type
+                or upload.verified_media_type != content.verified_media_type
+            ):
+                raise ObjectContentStateError(
+                    "Verified publication does not match captured content"
+                )
+            reservations.append(
+                PublicationReservation(
+                    object_key=upload.object_key,
+                    size_bytes=upload.size_bytes,
+                )
+            )
+
+        await ObjectContentReconciliationRepository(
+            session
+        ).consume_publication_reservations(
+            reservations,
+            lease_owner=publication.lease_owner,
+        )
+        repository = ObjectContentRepository(session)
+        prepared: list[PreparedContent] = []
+        for intent, content, upload in zip(
+            intents,
+            contents,
+            publication.uploads,
+            strict=True,
+        ):
+            prepared.append(
+                await repository.prepare_verified_object_store(
+                    intent=intent,
+                    content=content,
+                    object_key=upload.object_key,
+                    request_fingerprint=content_request_fingerprint(
+                        intent,
+                        content,
+                        StorageKind.OBJECT_STORE,
+                    ),
+                )
+            )
+        return tuple(prepared)
 
     async def prepare_in_transaction(
         self,
@@ -286,6 +466,9 @@ class ObjectContentService:
                     request_fingerprint=request_fingerprint,
                 )
             case StorageKind.OBJECT_STORE:
+                # Keep PENDING for persisted rows and explicit store_and_verify
+                # recovery. Delete it only after a database audit finds no such
+                # rows and every live producer/cutover uses verified publication.
                 settings, _store = self._require_object_store()
                 return await repository.prepare_object_store(
                     intent=intent,

@@ -742,6 +742,9 @@ your public URL.
    - For PostgreSQL-inline session uploads, the effective limit is the smaller
      of the admin policy and the operator-owned
      `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+   - For object-store session uploads, the effective limit is the smaller of
+     the admin policy and the configured portable multipart envelope. The
+     constraining source is visible in **Admin > Storage**.
 
 2. **Verify worker is running**:
    ```bash

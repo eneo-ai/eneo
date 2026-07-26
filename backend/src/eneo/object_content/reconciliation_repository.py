@@ -86,6 +86,12 @@ class OrphanDeleteLease:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicationReservation:
+    object_key: str
+    size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class MultipartAbortLease:
     object_key: str
     upload_id: str
@@ -405,6 +411,159 @@ class ObjectContentReconciliationRepository:
             continuation_token=state.object_continuation_token,
         )
 
+    async def reserve_publication_objects(
+        self,
+        reservations: Sequence[PublicationReservation],
+        *,
+        lease_owner: str,
+        lease_seconds: int,
+        orphan_grace_seconds: int,
+    ) -> None:
+        ordered = tuple(sorted(reservations, key=lambda item: item.object_key))
+        keys = tuple(item.object_key for item in ordered)
+        if not keys or len(set(keys)) != len(keys):
+            raise ValueError("Publication reservations must have unique object keys")
+        now = await self._database_now()
+
+        multipart_candidates = (
+            await self._session.scalars(
+                select(ObjectContentMultipartCandidates)
+                .where(ObjectContentMultipartCandidates.object_key.in_(keys))
+                .order_by(
+                    ObjectContentMultipartCandidates.object_key,
+                    ObjectContentMultipartCandidates.upload_id,
+                )
+                .with_for_update()
+            )
+        ).all()
+        if any(
+            row.lease_owner is not None
+            and (row.lease_until is None or row.lease_until > now)
+            for row in multipart_candidates
+        ):
+            raise ObjectContentBusyError(
+                "A multipart cleanup already owns a publication object"
+            )
+
+        rows = (
+            await self._session.scalars(
+                select(ObjectContentOrphanCandidates)
+                .where(ObjectContentOrphanCandidates.object_key.in_(keys))
+                .order_by(ObjectContentOrphanCandidates.object_key)
+                .with_for_update()
+            )
+        ).all()
+        by_key = {row.object_key: row for row in rows}
+        if any(
+            row.lease_owner not in {None, lease_owner}
+            and (row.lease_until is None or row.lease_until > now)
+            for row in rows
+        ):
+            raise ObjectContentBusyError(
+                "An orphan cleanup already owns a publication object"
+            )
+
+        reservation_cycle_id = uuid4()
+        lease_until = now + timedelta(seconds=lease_seconds)
+        eligible_after = now + timedelta(seconds=orphan_grace_seconds)
+        for reservation in ordered:
+            row = by_key.get(reservation.object_key)
+            if row is None:
+                row = ObjectContentOrphanCandidates()
+                row.object_key = reservation.object_key
+                self._session.add(row)
+            row.size_bytes = reservation.size_bytes
+            # Publication intent is not evidence that the object exists remotely.
+            # Only a completed inventory may advance observation count.
+            row.observed_cycle_id = reservation_cycle_id
+            row.eligible_after = eligible_after
+            row.last_observed_at = now
+            row.completed_observations = 0
+            row.lease_owner = lease_owner
+            row.lease_until = lease_until
+        await self._session.flush()
+
+    async def renew_publication_reservations(
+        self,
+        reservations: Sequence[PublicationReservation],
+        *,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> None:
+        ordered = tuple(sorted(reservations, key=lambda item: item.object_key))
+        keys = tuple(item.object_key for item in ordered)
+        if not keys:
+            raise ValueError("Publication renewal requires at least one reservation")
+        rows = (
+            await self._session.scalars(
+                select(ObjectContentOrphanCandidates)
+                .where(ObjectContentOrphanCandidates.object_key.in_(keys))
+                .order_by(ObjectContentOrphanCandidates.object_key)
+                .with_for_update()
+            )
+        ).all()
+        if {row.object_key for row in rows} != set(keys) or any(
+            row.lease_owner != lease_owner for row in rows
+        ):
+            raise ObjectContentBusyError("Publication reservations changed")
+        now = await self._database_now()
+        for row in rows:
+            row.lease_until = now + timedelta(seconds=lease_seconds)
+        await self._session.flush()
+
+    async def consume_publication_reservations(
+        self,
+        reservations: Sequence[PublicationReservation],
+        *,
+        lease_owner: str,
+    ) -> None:
+        ordered = tuple(sorted(reservations, key=lambda item: item.object_key))
+        keys = tuple(item.object_key for item in ordered)
+        if not keys:
+            raise ValueError("Publication adoption requires at least one reservation")
+        rows = (
+            await self._session.scalars(
+                select(ObjectContentOrphanCandidates)
+                .where(ObjectContentOrphanCandidates.object_key.in_(keys))
+                .order_by(ObjectContentOrphanCandidates.object_key)
+                .with_for_update()
+            )
+        ).all()
+        by_key = {row.object_key: row for row in rows}
+        if set(by_key) != set(keys):
+            raise ObjectContentBusyError("Publication reservations changed")
+        for reservation in ordered:
+            row = by_key[reservation.object_key]
+            if (
+                row.lease_owner != lease_owner
+                or row.size_bytes != reservation.size_bytes
+            ):
+                raise ObjectContentBusyError("Publication reservations changed")
+        await self._session.execute(
+            delete(ObjectContentOrphanCandidates).where(
+                ObjectContentOrphanCandidates.object_key.in_(keys),
+                ObjectContentOrphanCandidates.lease_owner == lease_owner,
+            )
+        )
+
+    async def release_publication_reservations(
+        self,
+        reservations: Sequence[PublicationReservation],
+        *,
+        lease_owner: str,
+    ) -> None:
+        keys = tuple(sorted(reservation.object_key for reservation in reservations))
+        if not keys:
+            return
+        await self._session.execute(
+            update(ObjectContentOrphanCandidates)
+            .where(
+                ObjectContentOrphanCandidates.object_key.in_(keys),
+                ObjectContentOrphanCandidates.lease_owner == lease_owner,
+            )
+            .values(lease_owner=None, lease_until=None)
+        )
+
     async def record_object_page(
         self,
         *,
@@ -503,7 +662,11 @@ class ObjectContentReconciliationRepository:
 
         await self._session.execute(
             delete(ObjectContentOrphanCandidates).where(
-                ObjectContentOrphanCandidates.observed_cycle_id != cursor.cycle_id
+                ObjectContentOrphanCandidates.observed_cycle_id != cursor.cycle_id,
+                or_(
+                    ObjectContentOrphanCandidates.lease_until.is_(None),
+                    ObjectContentOrphanCandidates.lease_until <= now,
+                ),
             )
         )
         await self._session.execute(
@@ -833,6 +996,13 @@ class ObjectContentReconciliationRepository:
                 ObjectContents.lease_until > now,
             )
         )
+        active_publication = exists(
+            select(ObjectContentOrphanCandidates.object_key).where(
+                ObjectContentOrphanCandidates.object_key
+                == ObjectContentMultipartCandidates.object_key,
+                ObjectContentOrphanCandidates.lease_until > now,
+            )
+        )
         rows = (
             await self._session.scalars(
                 select(ObjectContentMultipartCandidates)
@@ -845,6 +1015,7 @@ class ObjectContentReconciliationRepository:
                         ObjectContentMultipartCandidates.lease_until <= now,
                     ),
                     ~active_upload,
+                    ~active_publication,
                 )
                 .order_by(
                     ObjectContentMultipartCandidates.eligible_after,
@@ -885,6 +1056,21 @@ class ObjectContentReconciliationRepository:
         if candidate is None:
             return False
 
+        publication = (
+            await self._session.scalars(
+                select(ObjectContentOrphanCandidates)
+                .where(ObjectContentOrphanCandidates.object_key == lease.object_key)
+                .with_for_update()
+            )
+        ).one_or_none()
+        now = await self._database_now()
+        if publication is not None and publication.lease_until is not None:
+            if publication.lease_until > now:
+                candidate.lease_owner = None
+                candidate.lease_until = None
+                await self._session.flush()
+                return False
+
         found = (
             await self._session.execute(
                 select(ObjectContents, ObjectStoreObjects)
@@ -903,7 +1089,6 @@ class ObjectContentReconciliationRepository:
         if content is None or content.state != ContentState.PENDING.value:
             return True
 
-        now = await self._database_now()
         if (
             content.lease_owner != lease_owner
             and content.lease_until is not None

@@ -119,6 +119,9 @@ async def _read_projection(
         limits=project_upload_limits(
             policy,
             inline_maximum_bytes=object_content_runtime.inline_maximum_bytes,
+            object_store_maximum_bytes=(
+                object_content_runtime.object_store_maximum_bytes
+            ),
         ),
         capabilities=capabilities,
         inventory=inventory,

@@ -1,9 +1,10 @@
 """Tests for FileProtocol limits from the immutable upload-admission snapshot."""
 
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import UploadFile
@@ -35,6 +36,15 @@ _UPLOAD_ADMISSION = UploadAdmissionSnapshot(
     session_audio_maximum_bytes=AUDIO_MAX,
     knowledge_file_maximum_bytes=30_000_000,
     knowledge_audio_maximum_bytes=220_000_000,
+)
+_OBJECT_STORE_ENVELOPE = 10_000_000
+_OBJECT_STORE_ADMISSION = replace(
+    _UPLOAD_ADMISSION,
+    session_storage_target=StorageKind.OBJECT_STORE,
+    session_operator_ceiling_bytes=_OBJECT_STORE_ENVELOPE,
+    session_file_maximum_bytes=_OBJECT_STORE_ENVELOPE,
+    session_image_maximum_bytes=_OBJECT_STORE_ENVELOPE,
+    session_audio_maximum_bytes=_OBJECT_STORE_ENVELOPE,
 )
 
 
@@ -218,6 +228,25 @@ async def test_text_over_limit_rejected(protocol):
 
     assert exc_info.value.max_size == TEXT_MAX
     assert exc_info.value.limit_name == "session_file"
+
+
+@pytest.mark.asyncio
+async def test_object_store_envelope_plus_one_rejected_before_disk_spool(protocol):
+    upload, size = _make_upload("text/plain", _OBJECT_STORE_ENVELOPE + 1)
+    protocol.file_size_service.get_file_size.return_value = size
+    protocol.file_size_service.save_file_to_disk = AsyncMock(
+        side_effect=AssertionError("oversized upload must not reach disk spooling")
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        async with protocol.prepare_upload(
+            upload,
+            upload_admission_snapshot=_OBJECT_STORE_ADMISSION,
+        ):
+            pass
+
+    assert exc_info.value.max_size == _OBJECT_STORE_ENVELOPE
+    protocol.file_size_service.save_file_to_disk.assert_not_awaited()
 
 
 # ── Tests: image files use IMAGE_MAX ─────────────────────────────────────

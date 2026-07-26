@@ -34,7 +34,7 @@ def service():
         object_content=AsyncMock(),
         upload_admission=UploadAdmissionSnapshot(
             policy_revision=7,
-            session_storage_target=StorageKind.POSTGRES_INLINE,
+            session_storage_target=StorageKind.OBJECT_STORE,
             session_operator_ceiling_bytes=4,
             session_file_maximum_bytes=4,
             session_image_maximum_bytes=4,
@@ -80,7 +80,9 @@ async def test_create_icon_rejects_invalid_mimetype(service: IconService):
         )
 
 
-async def test_create_icon_rejects_oversized_file(service: IconService):
+async def test_create_icon_rejects_object_store_envelope_plus_one_before_capture(
+    service: IconService,
+):
     service.file_size_service.get_file_size.return_value = 5
 
     upload_file = UploadFile(
@@ -97,6 +99,8 @@ async def test_create_icon_rejects_oversized_file(service: IconService):
         )
     assert error.value.max_size == 4
     assert error.value.limit_name == UploadLimitUseCase.SESSION_IMAGE.value
+    service.object_content.ensure_target_ready.assert_not_awaited()
+    service.object_content.capture_for_target.assert_not_called()
 
 
 async def test_create_icon_returns_metadata_without_reading_captured_payload() -> None:

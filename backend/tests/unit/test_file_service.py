@@ -129,6 +129,7 @@ async def test_unready_object_store_rejects_without_inline_fallback_or_mutation(
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     repo = AsyncMock()
     repo.session = MagicMock()
+    repo.session.in_transaction.return_value = False
     protocol = MagicMock()
     object_content = MagicMock()
     object_content.ensure_target_ready = AsyncMock(

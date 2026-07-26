@@ -1,12 +1,12 @@
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterable
+from collections.abc import AsyncGenerator, AsyncIterable, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from uuid import UUID
 
 import pytest
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.icons_table import Icons
@@ -29,8 +29,10 @@ from eneo.object_content.content import (
     ObjectContentUnavailableError,
     StorageKind,
 )
-from eneo.object_content.content_repository import ReadableContent
-from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.content_service import (
+    ObjectContentService,
+    VerifiedObjectPublication,
+)
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
 from tests.integration.object_content.conftest import RealObjectStore
@@ -48,43 +50,41 @@ class _PausingStoreContentService(ObjectContentService):
         super().__init__(*args, **kwargs)
         self.store_started = asyncio.Event()
         self.release_store = asyncio.Event()
-        self.content_id: UUID | None = None
+        self.object_key: str | None = None
 
     async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
         del storage_kind
 
-    async def store_and_verify(
+    @asynccontextmanager
+    async def upload_for_publication(
         self,
-        *,
-        content_id: UUID,
-        content: CapturedContent,
-    ) -> ReadableContent:
-        self.content_id = content_id
-        self.store_started.set()
-        await self.release_store.wait()
-        return await super().store_and_verify(
-            content_id=content_id,
-            content=content,
-        )
+        contents: Sequence[CapturedContent],
+    ) -> AsyncGenerator[VerifiedObjectPublication]:
+        async with super().upload_for_publication(contents) as publication:
+            self.object_key = publication.uploads[0].object_key
+            self.store_started.set()
+            await self.release_store.wait()
+            yield publication
 
 
 class _FailingStoreContentService(ObjectContentService):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.content_id: UUID | None = None
+        self.object_key: str | None = None
 
     async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
         del storage_kind
 
-    async def store_and_verify(
+    @asynccontextmanager
+    async def upload_for_publication(
         self,
-        *,
-        content_id: UUID,
-        content: CapturedContent,
-    ) -> ReadableContent:
-        del content
-        self.content_id = content_id
-        raise ObjectContentUnavailableError("injected object-store outage")
+        contents: Sequence[CapturedContent],
+    ) -> AsyncGenerator[VerifiedObjectPublication]:
+        async with super().upload_for_publication(contents) as publication:
+            self.object_key = publication.uploads[0].object_key
+            if publication.uploads:
+                raise ObjectContentUnavailableError("injected object-store outage")
+            yield publication
 
 
 class _CancelAfterPublicationContentService(ObjectContentService):
@@ -118,11 +118,10 @@ def _admission(
     revision: int,
     maximum_bytes: int = _ICON_LIMIT_BYTES,
 ) -> UploadAdmissionSnapshot:
-    operator_ceiling = maximum_bytes if target is StorageKind.POSTGRES_INLINE else None
     return UploadAdmissionSnapshot(
         policy_revision=revision,
         session_storage_target=target,
-        session_operator_ceiling_bytes=operator_ceiling,
+        session_operator_ceiling_bytes=maximum_bytes,
         session_file_maximum_bytes=maximum_bytes,
         session_image_maximum_bytes=maximum_bytes,
         session_audio_maximum_bytes=maximum_bytes,
@@ -161,6 +160,26 @@ async def _read_icon_bytes(service: IconService, icon_id: UUID) -> bytes:
         return b"".join([chunk async for chunk in opened.chunks])
     finally:
         await opened.aclose()
+
+
+async def _publication_row_counts(
+    database: DatabaseSessionManager,
+) -> tuple[int, int, int, int, int]:
+    async with database.session() as session, session.begin():
+        return (
+            await session.scalar(select(func.count()).select_from(Icons)) or 0,
+            await session.scalar(
+                select(func.count()).select_from(IconContentReferences)
+            )
+            or 0,
+            await session.scalar(select(func.count()).select_from(ObjectContents)) or 0,
+            await session.scalar(select(func.count()).select_from(ObjectStoreObjects))
+            or 0,
+            await session.scalar(
+                select(func.count()).select_from(InlineContentPayloads)
+            )
+            or 0,
+        )
 
 
 def _upload(payload: bytes) -> UploadFile:
@@ -300,7 +319,7 @@ async def test_policy_sized_object_store_icon_spools_and_streams_in_chunks(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_pending_icon_is_hidden_until_final_remote_promotion(
+async def test_object_store_icon_is_not_published_until_remote_verification_finishes(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
 ) -> None:
@@ -313,6 +332,7 @@ async def test_pending_icon_is_hidden_until_final_remote_promotion(
     )
     assert isinstance(content_service, _PausingStoreContentService)
     remote_object_key: str | None = None
+    baseline = await _publication_row_counts(object_content_database)
 
     async with object_content_database.session() as create_session:
         create_task = asyncio.create_task(
@@ -328,30 +348,24 @@ async def test_pending_icon_is_hidden_until_final_remote_promotion(
             )
         )
         await content_service.store_started.wait()
-        assert content_service.content_id is not None
+        assert content_service.object_key is not None
 
-        async with object_content_database.session() as session, session.begin():
-            icon_id = await session.scalar(
-                select(IconContentReferences.icon_id).where(
-                    IconContentReferences.content_id == content_service.content_id
-                )
-            )
-            assert icon_id is not None
-            repository = IconRepository(session)
-            assert await repository.get(icon_id) is None
-            assert await repository.get_for_lifecycle(icon_id) is not None
+        assert await _publication_row_counts(object_content_database) == baseline
 
         content_service.release_store.set()
         created = await create_task
-        assert created.id == icon_id
 
     try:
         async with object_content_database.session() as session, session.begin():
             repository = IconRepository(session)
-            assert await repository.get(icon_id) is not None
-            descriptor = await session.get(
-                ObjectStoreObjects,
-                content_service.content_id,
+            assert await repository.get(created.id) is not None
+            descriptor = await session.scalar(
+                select(ObjectStoreObjects)
+                .join(
+                    IconContentReferences,
+                    IconContentReferences.content_id == ObjectStoreObjects.content_id,
+                )
+                .where(IconContentReferences.icon_id == created.id)
             )
             assert descriptor is not None
             remote_object_key = descriptor.object_key
@@ -364,7 +378,7 @@ async def test_pending_icon_is_hidden_until_final_remote_promotion(
                             file_size_service=FileSizeService(),
                             object_content=content_service,
                         ),
-                        icon_id,
+                        created.id,
                     )
                     == payload
                 )
@@ -375,7 +389,7 @@ async def test_pending_icon_is_hidden_until_final_remote_promotion(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_cancelled_remote_upload_completes_compensation_before_reraising(
+async def test_cancelled_verified_upload_leaves_only_bounded_remote_residue(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
 ) -> None:
@@ -386,47 +400,42 @@ async def test_cancelled_remote_upload_completes_compensation_before_reraising(
         _PausingStoreContentService,
     )
     assert isinstance(content_service, _PausingStoreContentService)
+    baseline = await _publication_row_counts(object_content_database)
 
-    async with object_content_database.session() as create_session:
-        create_task = asyncio.create_task(
-            IconService(
-                icon_repo=IconRepository(create_session),
-                file_size_service=FileSizeService(),
-                object_content=content_service,
-                upload_admission=_admission(StorageKind.OBJECT_STORE, revision=61),
-            ).create_icon(
-                _upload(b"\x89PNG\r\n\x1a\ncancelled-icon"),
-                tenant_id=user.tenant_id,
-                created_by_user_id=user.id,
-            )
-        )
-        await content_service.store_started.wait()
-        assert content_service.content_id is not None
-        async with object_content_database.session() as session, session.begin():
-            icon_id = await session.scalar(
-                select(IconContentReferences.icon_id).where(
-                    IconContentReferences.content_id == content_service.content_id
+    try:
+        async with object_content_database.session() as create_session:
+            create_task = asyncio.create_task(
+                IconService(
+                    icon_repo=IconRepository(create_session),
+                    file_size_service=FileSizeService(),
+                    object_content=content_service,
+                    upload_admission=_admission(
+                        StorageKind.OBJECT_STORE,
+                        revision=61,
+                    ),
+                ).create_icon(
+                    _upload(b"\x89PNG\r\n\x1a\ncancelled-icon"),
+                    tenant_id=user.tenant_id,
+                    created_by_user_id=user.id,
                 )
             )
-            assert icon_id is not None
-        create_task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await create_task
+            await content_service.store_started.wait()
+            assert content_service.object_key is not None
+            create_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await create_task
 
-    async with object_content_database.session() as session, session.begin():
-        assert await session.get(Icons, icon_id) is None
-        content = await session.get(ObjectContents, content_service.content_id)
-        assert content is not None
-        assert content.state == ContentState.FAILED.value
-        assert content.failure_code == ContentFailureCode.OWNER_DETACHED.value
-        assert (
-            await session.get(InlineContentPayloads, content_service.content_id) is None
-        )
+        assert await _publication_row_counts(object_content_database) == baseline
+        head = await real_object_store.store.head(content_service.object_key)
+        assert head.size_bytes > 0
+    finally:
+        if content_service.object_key is not None:
+            await real_object_store.store.delete_and_confirm(content_service.object_key)
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_remote_failure_compensates_without_inline_fallback(
+async def test_remote_failure_publishes_no_icon_or_content_rows(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
 ) -> None:
@@ -437,40 +446,29 @@ async def test_remote_failure_compensates_without_inline_fallback(
         _FailingStoreContentService,
     )
     assert isinstance(content_service, _FailingStoreContentService)
+    baseline = await _publication_row_counts(object_content_database)
 
-    async with object_content_database.session() as create_session:
-        with pytest.raises(ObjectContentUnavailableError):
-            await IconService(
-                icon_repo=IconRepository(create_session),
-                file_size_service=FileSizeService(),
-                object_content=content_service,
-                upload_admission=_admission(StorageKind.OBJECT_STORE, revision=71),
-            ).create_icon(
-                _upload(b"\x89PNG\r\n\x1a\nfailed-icon"),
-                tenant_id=user.tenant_id,
-                created_by_user_id=user.id,
-            )
-
-    assert content_service.content_id is not None
-    async with object_content_database.session() as session, session.begin():
-        assert (
-            await session.scalar(
-                select(IconContentReferences.icon_id).where(
-                    IconContentReferences.content_id == content_service.content_id
+    try:
+        async with object_content_database.session() as create_session:
+            with pytest.raises(ObjectContentUnavailableError):
+                await IconService(
+                    icon_repo=IconRepository(create_session),
+                    file_size_service=FileSizeService(),
+                    object_content=content_service,
+                    upload_admission=_admission(
+                        StorageKind.OBJECT_STORE,
+                        revision=71,
+                    ),
+                ).create_icon(
+                    _upload(b"\x89PNG\r\n\x1a\nfailed-icon"),
+                    tenant_id=user.tenant_id,
+                    created_by_user_id=user.id,
                 )
-            )
-            is None
-        )
-        content = await session.get(ObjectContents, content_service.content_id)
-        assert content is not None
-        failed_icon_id = UUID(content.idempotency_key.split(":")[1])
-        assert await session.get(Icons, failed_icon_id) is None
-        assert content.storage_kind == StorageKind.OBJECT_STORE.value
-        assert content.state == ContentState.FAILED.value
-        assert content.failure_code == ContentFailureCode.OWNER_DETACHED.value
-        assert (
-            await session.get(InlineContentPayloads, content_service.content_id) is None
-        )
+
+        assert await _publication_row_counts(object_content_database) == baseline
+    finally:
+        if content_service.object_key is not None:
+            await real_object_store.store.delete_and_confirm(content_service.object_key)
 
 
 @pytest.mark.integration

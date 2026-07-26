@@ -160,6 +160,13 @@ class ObjectContentRuntime:
         return settings.inline_maximum_bytes
 
     @property
+    def object_store_maximum_bytes(self) -> int | None:
+        settings = self._settings
+        if settings is None:
+            return None
+        return settings.maximum_multipart_bytes
+
+    @property
     def service(self) -> ObjectContentService:
         service = self._service
         if service is None:

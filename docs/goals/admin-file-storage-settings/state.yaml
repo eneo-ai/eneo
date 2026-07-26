@@ -714,6 +714,98 @@ tasks:
           session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
           result: "Claude iteration 36 VERDICT green, GREEN_LIGHT yes, MIN_SCORE 9; no P0/P1/P2 or blocker."
           disposition: "The simplified six-request test now asserts only owned-transaction ordering across concurrent async suspension; the production guard owns the hard invariant and no real-pool integration test is claimed. The GET permission rationale and bounded disposable namespace tradeoff are documented. Reviewer found further deletion would be churn."
+      review_5:
+        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5082850757"
+        head: "94796176ef71e4432f9fd10504894bc7f9d4e7ec"
+        coverage: "incomplete: 87 of 99 changed paths; the next repository review must cover every path"
+        findings:
+          - "F11 genuine/P1: object-store File/Icon metadata and references publish before remote upload verification, so process death can leave a permanently invisible product aggregate."
+          - "F12 genuine/P2: object-store projections expose no applicable ceiling even though the portable multipart envelope is authoritative, allowing capture/spooling beyond a size the backend can accept."
+        direction_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T091642Z.md"
+          session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
+          result: "Claude iteration 39 changes_required, GREEN_LIGHT no, MIN_SCORE 7; owner chose the structurally reliable upload-before-publication direction rather than accepting residual risk."
+        iteration_40:
+          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T105539Z.md"
+          staged_sha256: "d70a51defba47757a2b3f645db87e0ae2ea43553e2dbf5dcaf2307f1f204f378"
+          result: "changes_required, GREEN_LIGHT no, MIN_SCORE 7. The sole blocker was missing visible owner authorization, not a code defect; F12 and the publication structure/reuse were verified clean."
+          owner_authority: "The owner explicitly directed this task to fix verified PR #601 review findings through finding-free review, green CI, and merge. That authority includes changing the initial object-store invariant so pre-verified bytes may be created AVAILABLE only in the same short transaction as exactly one concrete first product owner/reference."
+          invariant_scope: "This authorization does not permit PR #569 PR 2 moves, automatic product cleanup, a new reaper/marker/staging table, knowledge/InfoBlob/Flow work, fallback, dual write, provider-specific product behavior, or per-tenant policy."
+        iteration_41:
+          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T110712Z.md"
+          staged_sha256: "675657f43081cd24f8b5f0cf37a08355c4c6b5464c062e387d6b05518da589ce"
+          result: "GREEN_LIGHT yes, MIN_SCORE 8; owner authority, invariant scope, degraded projection ownership, PENDING deletion trigger, and real File-family database rollback evidence were accepted."
+          accepted_comment: "Document that the AVAILABLE/current-transaction predicate assumes the owner-check trigger remains DEFERRABLE INITIALLY DEFERRED through commit; no SQL or behavior changes."
+        frozen_owners:
+          - "ObjectContentRuntime and deployment_policy projection own the applicable inline or portable object-store operator ceiling; downstream admission consumes the existing effective values."
+          - "ObjectContentService and ObjectContentRepository own opaque remote upload verification and adoption of already-available bytes."
+          - "FileService and IconService own atomic product metadata/reference publication after every object-store payload is verified."
+          - "Existing bounded prefix inventory/orphan reconciliation owns remote residue left before product publication; no product reaper, marker, cleanup policy, provider branch, or new authorization/multi-tenant layer is permitted."
+        red_first_plan:
+          - "F12 policy projection: object_store configured maximum above maximum_multipart_bytes must report effective=envelope, operator ceiling, and constraining_source=operator_ceiling; maximum remains admin-constrained at or below the envelope."
+          - "F12 File/Icon admission: envelope+1 must fail before capture/spooling or any object-store mutation; envelope succeeds subject to media behavior. PostgreSQL-inline projection and admission remain unchanged."
+          - "F11 real PostgreSQL/SeaweedFS: Icon and multi-content File remote failure/process boundary before the publication transaction leave no metadata/reference/control rows; verified remote residue is discoverable and deleted only by the existing bounded orphan inventory after grace."
+          - "F11 success: all File-family/Icon bytes are uploaded and HEAD-verified once, then AVAILABLE control+descriptor rows, product metadata, and concrete references become visible in one short transaction with no remote I/O."
+          - "F11 race: adoption serializes against an active orphan-delete candidate for the same object key before publishing, so reconciliation cannot delete bytes being adopted."
+          - "Migration: change only the initial-state/first-reference fences required for object-store AVAILABLE creation, prove upgrade/downgrade/re-upgrade and one head on disposable PostgreSQL."
+        expected_paths:
+          - "backend/src/eneo/object_content/runtime.py"
+          - "backend/src/eneo/object_content/deployment_policy.py"
+          - "backend/src/eneo/object_content/deployment_policy_router.py"
+          - "backend/src/eneo/object_content/content_service.py"
+          - "backend/src/eneo/object_content/content_repository.py"
+          - "backend/src/eneo/files/file_service.py"
+          - "backend/src/eneo/icons/icon_service.py"
+          - "backend/alembic/versions/202607261000_allow_verified_object_adoption.py"
+          - "focused backend unit/integration/migration tests under backend/tests"
+          - "docs/deployment/OBJECT_CONTENT.md and the existing docs.eneo.ai storage page only where the effective-ceiling/publication behavior changes"
+        deletion_and_non_goals:
+          - "Delete the object-store post-commit prepare/claim/upload compensation path from File/Icon when the verified publication path makes it dead; retain the inline path unchanged."
+          - "Explicit owner-approved invariant change: pre-verified object-store bytes may be inserted AVAILABLE only with exactly one first concrete owner/reference in the same transaction; this does not authorize verified moves or any automatic cleanup scope."
+          - "Do not add automatic product cleanup, a generic reconciliation callback, unpublished-byte database markers, client idempotency, PR2 moves, knowledge/InfoBlob work, fallback, dual write, vendor logic, or per-tenant policy."
+        red_evidence:
+          - "F12 RED: two object-store policy projections rejected the new portable-ceiling input and two runtime checks lacked object_store_maximum_bytes."
+          - "F12 owner-boundary RED: ObjectContentService captured portable multipart maximum + 1 when called directly with a larger business value; the focused test failed before the canonical capture clamp."
+          - "F11 RED on real PostgreSQL/SeaweedFS: paused Icon creation exposed product metadata before verification; failed Icon creation retained its product row; all three injected failure points in a multi-content File family retained object-content/product state. Exact result: 5 failed in 25.51 seconds."
+          - "F11 transaction-entry RED: an object-store File call with an ambient repository transaction reached readiness before rejection; the focused test failed until the existing guard moved ahead of readiness, protocol preparation, and capture."
+          - "F11 inventory RED: a reserved but unlisted object gained one completed observation when an empty concurrent inventory cycle finished; the reservation must not impersonate remote evidence."
+        implementation_progress:
+          - "F12: runtime exposes ObjectContentSettings.maximum_multipart_bytes; policy projection and immutable admission snapshots use min(admin policy, applicable inline or object-store ceiling) with truthful source; ObjectContentService independently clamps object-store capture to the same portable envelope, and FileProtocol/Icon reject envelope + 1 before spooling/capture."
+          - "F11: one bounded publication lease owner reserves a sorted File family in existing orphan-candidate rows; each captured payload uploads and HEAD-verifies once outside the product transaction; one short transaction consumes the reservations and creates AVAILABLE controls/descriptors, File/Icon metadata, and concrete references atomically."
+          - "File rejects an invalid ambient object-store transaction before readiness or any protocol/capture work; Icon already owned the equivalent early guard."
+          - "Publication reservations use one fresh batch sentinel rather than reading/stamping the active inventory cycle; this deletes one query and ensures only an actual remote listing advances observations while the existing lease remains the race fence."
+          - "The old File/Icon post-commit compensation path and its tests are deleted. Existing pending-content reconciliation remains for persisted legacy/foundation rows; no new product reaper, staging table, marker, provider branch, or fence weakening was added."
+          - "The serialized Alembic revision changes only initial AVAILABLE object-store creation/first-reference fences; ownerless or multiple first references remain rejected."
+          - "The retained PENDING seam now names its live owner and deletion trigger: persisted pending rows and explicit store_and_verify recovery remain until a database audit proves zero such rows and every live producer/cutover uses verified publication."
+        focused_green:
+          - "F12 projection/runtime/admission and F11 owner/race/fence checks => 11 passed in 26.74 seconds."
+          - "Canonical object-store capture accepts the portable envelope and rejects envelope + 1; the full target-capture file => 5 passed."
+          - "Ambient File transaction rejects before readiness/protocol/capture, while a normal unready target still fails without fallback or mutation => 2 passed."
+          - "Icon pre-publication, cancellation, and failure boundaries => 3 passed in 25.87 seconds; complete File/Icon lifecycle packet previously reached 8 additional passes."
+          - "Active publication reservation versus orphan-delete => passed; an expired crash-left publication lease converges through the existing grace/two-inventory deletion path => 1 passed in 19.47 seconds; the generic row-less object/multipart test remains unchanged."
+          - "Reservation-not-observation, active cleanup race, and expired crash convergence packet => 3 passed in 33.38 seconds."
+          - "Degraded object-store projection deliberately keeps configured policy values with no invented operator ceiling; capability readiness/selectability remains the separate failure owner."
+          - "Real PostgreSQL/SeaweedFS File-family commit failure after all three verified uploads rolls back File/reference/control/descriptor rows while leaving three bounded remote orphans for existing inventory."
+          - "Public File route audit behavior for inline and object-store => 2 passed after the canonical integration cleanup fixture restored the migration-seeded reconciliation singleton."
+        broad_validation_progress:
+          - "Whole-backend strict Pyright => 0 errors, 0 warnings, 0 informations."
+          - "Complete exact-state object-content integration directory, including crash-left lease convergence and reservation-not-observation => 115 passed in 262.99 seconds."
+          - "Whole backend non-integration => 3971 passed, 1250 deselected in 30.88 seconds."
+          - "Disposable PostgreSQL migration upgrade/downgrade/re-upgrade => 1 passed; Alembic reports exactly one 202607261000 head."
+          - "Changed Python Ruff and format checks => passed; docs.eneo.ai production build => 32 pages, 28 indexed pages, with only the pre-existing img warning."
+          - "The earlier fixture failure was isolated to full-table test cleanup omitting the migration-seeded reconciliation singleton; canonical cleanup restores id=1 and product code has no fallback."
+        docs_progress:
+          - "Updated focused deployment/install/troubleshooting docs and docs.eneo.ai storage/deployment/architecture pages for object-store effective ceilings, pre-spool rejection, upload-before-publication, and bounded row-less orphan recovery."
+        iteration_40_follow_up_validation:
+          - "Degraded object-store limit projection => 1 passed in 2.44 seconds."
+          - "Real PostgreSQL/SeaweedFS File-family rollback after three verified uploads => 1 passed in 16.99 seconds, including durable orphan-candidate ownership of all three remote residues."
+          - "Focused Ruff/format => passed; Goal board checker => ok with no warnings/errors. No types changed, so the already-green exact-state whole-backend Pyright evidence remains applicable."
+        complexity_evidence:
+          - "F12 admission is O(1). File/Icon publication is O(k + total bytes) for bounded family size k: one capture and one upload plus HEAD verification per payload, sorted batched reservation queries, no per-object task fan-out, no second full-byte read, and no remote I/O in the publication transaction."
+          - "The complexity scanner's two object-content leads were independently rejected as unrelated existing patterns: one page loop performs total-byte reads and one membership check uses a constant-size set. No performance refactor is warranted in this slice."
+        stop_conditions:
+          - "Stop before implementation if row-less object orphans are not bounded by the current prefix inventory, or if safe adoption requires remote I/O inside the product transaction."
+          - "Do not commit until red tests fail for the intended behavior, focused/broad gates are green, the exact changed-path inventory and staged hash are frozen, and same-session Claude iteration 40 returns GREEN_LIGHT yes with MIN_SCORE >= 8."
       next_gate: "Freeze the board-inclusive final hash, run the same-session exact-state verification, then commit with normal hooks only if green >= 8."
 
   - id: T007

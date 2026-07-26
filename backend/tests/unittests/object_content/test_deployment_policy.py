@@ -385,6 +385,7 @@ async def test_concurrent_policy_projections_close_transactions_before_readiness
 
     class Runtime:
         inline_maximum_bytes = 100
+        object_store_maximum_bytes = None
 
         async def storage_capabilities(self) -> tuple[StorageCapability, ...]:
             session = request_session.get()
@@ -563,7 +564,11 @@ def test_limit_projection_applies_inline_ceiling_only_to_session_content() -> No
         transcription_audio=104,
     )
 
-    projections = project_upload_limits(policy, inline_maximum_bytes=100)
+    projections = project_upload_limits(
+        policy,
+        inline_maximum_bytes=100,
+        object_store_maximum_bytes=None,
+    )
 
     assert [projection.use_case for projection in projections] == [
         UploadLimitUseCase.SESSION_FILE,
@@ -585,7 +590,7 @@ def test_limit_projection_applies_inline_ceiling_only_to_session_content() -> No
     assert projections[4].operator_ceiling_bytes is None
 
 
-def test_limit_projection_has_no_inline_ceiling_for_object_store() -> None:
+def test_limit_projection_applies_portable_ceiling_to_object_store_sessions() -> None:
     projections = project_upload_limits(
         _policy(
             target=StorageKind.OBJECT_STORE,
@@ -595,15 +600,92 @@ def test_limit_projection_has_no_inline_ceiling_for_object_store() -> None:
             transcription_audio=104,
         ),
         inline_maximum_bytes=1,
+        object_store_maximum_bytes=100,
     )
 
-    assert all(projection.operator_ceiling_bytes is None for projection in projections)
+    assert [projection.effective_bytes for projection in projections[:3]] == [
+        100,
+        100,
+        100,
+    ]
     assert all(
-        projection.constraining_source is ConstrainingSource.ADMIN_POLICY
-        for projection in projections
+        projection.operator_ceiling_bytes == 100 for projection in projections[:3]
+    )
+    assert all(
+        projection.constraining_source is ConstrainingSource.OPERATOR_CEILING
+        for projection in projections[:3]
     )
     assert projections[0].storage_target is StorageKind.OBJECT_STORE
+    assert projections[3].effective_bytes == 103
+    assert projections[3].operator_ceiling_bytes is None
+    assert projections[3].constraining_source is ConstrainingSource.ADMIN_POLICY
     assert projections[3].storage_target is None
+
+
+def test_object_store_projection_without_capability_keeps_admin_policy_limits() -> None:
+    projections = project_upload_limits(
+        _policy(
+            target=StorageKind.OBJECT_STORE,
+            session_file=101,
+            session_image=102,
+            knowledge_file=103,
+            transcription_audio=104,
+        ),
+        inline_maximum_bytes=1,
+        object_store_maximum_bytes=None,
+    )
+
+    assert [projection.effective_bytes for projection in projections[:3]] == [
+        101,
+        102,
+        104,
+    ]
+    assert all(
+        projection.storage_target is StorageKind.OBJECT_STORE
+        for projection in projections[:3]
+    )
+    assert all(
+        projection.operator_ceiling_bytes is None for projection in projections[:3]
+    )
+    assert all(
+        projection.constraining_source is ConstrainingSource.ADMIN_POLICY
+        for projection in projections[:3]
+    )
+
+
+async def test_object_store_admission_snapshot_uses_portable_ceiling() -> None:
+    policy = _policy(
+        target=StorageKind.OBJECT_STORE,
+        session_file=101,
+        session_image=99,
+        knowledge_file=103,
+        transcription_audio=104,
+    )
+    session = AsyncMock()
+    session.scalar.return_value = SimpleNamespace(
+        revision=policy.revision,
+        new_write_storage_target=policy.new_write_storage_target.value,
+        session_file_limit_bytes=policy.session_file_limit_bytes,
+        session_image_limit_bytes=policy.session_image_limit_bytes,
+        knowledge_file_limit_bytes=policy.knowledge_file_limit_bytes,
+        transcription_audio_limit_bytes=policy.transcription_audio_limit_bytes,
+        updated_by_actor=policy.updated_by_actor.value,
+        updated_by_user_id=policy.updated_by_user_id,
+        created_at=policy.created_at,
+        updated_at=policy.updated_at,
+    )
+
+    snapshot = await load_upload_admission_snapshot(
+        session,
+        inline_maximum_bytes=1,
+        object_store_maximum_bytes=100,
+    )
+
+    assert snapshot.session_storage_target is StorageKind.OBJECT_STORE
+    assert snapshot.session_operator_ceiling_bytes == 100
+    assert snapshot.session_file_maximum_bytes == 100
+    assert snapshot.session_image_maximum_bytes == 99
+    assert snapshot.session_audio_maximum_bytes == 100
 
 
 async def test_load_upload_admission_snapshot_reads_one_effective_revision() -> None:
@@ -631,6 +713,7 @@ async def test_load_upload_admission_snapshot_reads_one_effective_revision() -> 
     snapshot = await load_upload_admission_snapshot(
         session,
         inline_maximum_bytes=100,
+        object_store_maximum_bytes=None,
     )
 
     assert snapshot == UploadAdmissionSnapshot(

@@ -273,7 +273,10 @@ bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
 business limit. Lowering it affects new inline writes, not reads of existing
 rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
 of the admin policy and this ceiling. **Admin > Storage** shows the configured
-limit, effective limit, and constraining source.
+limit, effective limit, and constraining source. Object-store session uploads
+use the same rule with the portable multipart envelope derived from configured
+transport settings. File and Icon reject envelope + 1 before capture or disk
+spooling.
 
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is
@@ -340,18 +343,23 @@ store and the paired backup record, then recover the matching pair. The marker
 is an internal safety invariant, not an administrator or tenant setting, and
 must be included in bucket backups.
 
-Uploads and deletes record durable PostgreSQL intent before remote work.
-Bounded leases, idempotency, retries, multipart abort records, tombstones, and
-two-sided reconciliation converge after a process or network failure. Delete
-intent is irreversible. A final reference cannot delete content while a hold or
-minimum-retention boundary blocks it.
+Remote mutations are fenced by durable PostgreSQL intent or a bounded
+publication reservation before remote work. Bounded leases, idempotency,
+retries, multipart abort records, tombstones, and two-sided reconciliation
+converge after a process or network failure. Delete intent is irreversible. A
+final reference cannot delete content while a hold or minimum-retention
+boundary blocks it.
 
 A new inline record commits its verified payload, immediately available control
 row, and exactly one first File, InfoBlob, or Icon reference in the same
-transaction. A new object-store record commits its descriptor, `pending`
-control row, and exactly one first reference before remote upload begins. Later
-references require `available`. Deferred PostgreSQL constraints reject an
-ownerless record, a mismatched backend, or multiple first references.
+transaction. For eligible new File and Icon object-store writes, Eneo first
+uploads and HEAD verifies every captured payload under opaque reserved keys.
+One short transaction then creates already-`available` control and descriptor
+rows, product metadata, and exactly one concrete reference per payload. A crash
+before that transaction leaves no invisible File or Icon; only row-less remote
+bytes remain, and the existing repeated-inventory grace path removes them.
+Deferred PostgreSQL constraints reject an ownerless record, a mismatched
+backend, or multiple first references.
 
 Hard deletion is also fenced in PostgreSQL. Active holds cannot be removed with
 a direct row delete, and retained content cannot bypass the lifecycle. A

@@ -174,8 +174,10 @@ Then restart the backend.
 Ask a platform admin to review the configured and effective limits in
 **Admin > Storage**. For PostgreSQL-inline session uploads, the effective limit
 is the smaller of the admin policy and the operator's
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. The page identifies which value
-constrains the upload.
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. For object-store session uploads,
+the effective limit is the smaller of the admin policy and the configured
+portable multipart envelope. The page identifies which value constrains the
+upload before Eneo captures or spools the file.
 
 ### Login Issues During Development
 

@@ -172,6 +172,15 @@ def test_runtime_inline_capacity_has_no_process_owned_business_limit() -> None:
     assert runtime.state is ObjectContentRuntimeState.ENABLED
 
 
+def test_runtime_exposes_the_configured_portable_object_store_ceiling() -> None:
+    settings = _settings()
+    runtime = ObjectContentRuntime()
+
+    runtime.start(settings=settings, store=cast(S3ObjectStore, _ReadinessStore()))
+
+    assert runtime.object_store_maximum_bytes == settings.maximum_multipart_bytes
+
+
 @pytest.mark.asyncio
 async def test_absent_object_store_is_a_healthy_inline_capability(
     monkeypatch: pytest.MonkeyPatch,
@@ -193,6 +202,7 @@ async def test_absent_object_store_is_a_healthy_inline_capability(
     assert readiness.ready is True
     assert readiness.code is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
     assert runtime.inline_maximum_bytes == 200 * 1024**2
+    assert runtime.object_store_maximum_bytes is None
     assert capabilities[0].configured is True
     assert capabilities[0].selectable is True
     assert capabilities[1].configured is False

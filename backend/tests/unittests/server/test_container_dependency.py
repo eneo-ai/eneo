@@ -79,7 +79,7 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
     snapshot = UploadAdmissionSnapshot(
         policy_revision=8,
         session_storage_target=StorageKind.OBJECT_STORE,
-        session_operator_ceiling_bytes=None,
+        session_operator_ceiling_bytes=199,
         session_file_maximum_bytes=11,
         session_image_maximum_bytes=12,
         session_audio_maximum_bytes=13,
@@ -95,7 +95,10 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
     monkeypatch.setattr(
         container_dependency,
         "object_content_runtime",
-        SimpleNamespace(inline_maximum_bytes=99),
+        SimpleNamespace(
+            inline_maximum_bytes=99,
+            object_store_maximum_bytes=199,
+        ),
     )
     container = Container(session=providers.Object(session))
 
@@ -103,4 +106,8 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
 
     assert resolved is snapshot
     assert container.upload_admission() is snapshot
-    loader.assert_awaited_once_with(session, inline_maximum_bytes=99)
+    loader.assert_awaited_once_with(
+        session,
+        inline_maximum_bytes=99,
+        object_store_maximum_bytes=199,
+    )

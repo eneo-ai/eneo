@@ -84,6 +84,35 @@ async def test_object_store_target_uses_configured_multipart_part_size() -> None
 
 
 @pytest.mark.asyncio
+async def test_object_store_target_rejects_portable_multipart_maximum_plus_one() -> (
+    None
+):
+    service = _service(multipart_part_bytes=1)
+    portable_maximum = 10_000
+
+    async with service.capture_for_target(
+        _source(b"x" * portable_maximum),
+        storage_kind=StorageKind.OBJECT_STORE,
+        declared_media_type="application/octet-stream",
+        verified_media_type="application/octet-stream",
+        business_maximum_bytes=portable_maximum + 1,
+    ) as captured:
+        assert captured.size_bytes == portable_maximum
+
+    with pytest.raises(ContentTooLargeError) as error:
+        async with service.capture_for_target(
+            _source(b"x" * (portable_maximum + 1)),
+            storage_kind=StorageKind.OBJECT_STORE,
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            business_maximum_bytes=portable_maximum + 1,
+        ):
+            pytest.fail("portable multipart maximum + 1 must not be captured")
+
+    assert error.value.maximum_size_bytes == portable_maximum
+
+
+@pytest.mark.asyncio
 async def test_object_store_target_requires_business_maximum() -> None:
     service = _service()
     with pytest.raises(

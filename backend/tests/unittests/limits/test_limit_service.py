@@ -10,7 +10,7 @@ def test_limits_project_one_upload_admission_snapshot() -> None:
     upload_admission = UploadAdmissionSnapshot(
         policy_revision=9,
         session_storage_target=StorageKind.OBJECT_STORE,
-        session_operator_ceiling_bytes=None,
+        session_operator_ceiling_bytes=16,
         session_file_maximum_bytes=11,
         session_image_maximum_bytes=12,
         session_audio_maximum_bytes=13,

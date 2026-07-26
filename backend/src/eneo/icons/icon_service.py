@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -32,7 +31,6 @@ ICON_ALLOWED_MIMETYPES = (
     "image/webp",
 )
 _ICON_STREAM_CHUNK_BYTES = 64 * 1024
-_ICON_COMPENSATION_TIMEOUT_SECONDS = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,36 +80,6 @@ class IconService:
         async with session.begin():
             yield
 
-    async def _compensate_created_icon(self, icon_id: UUID) -> None:
-        async with self.icon_repo.session.begin():
-            await self.icon_repo.delete(icon_id)
-
-    async def _complete_compensation(
-        self,
-        icon_id: UUID,
-        original_error: BaseException,
-    ) -> None:
-        cleanup = asyncio.create_task(
-            asyncio.wait_for(
-                self._compensate_created_icon(icon_id),
-                timeout=_ICON_COMPENSATION_TIMEOUT_SECONDS,
-            )
-        )
-        while not cleanup.done():
-            try:
-                await asyncio.shield(cleanup)
-            except asyncio.CancelledError:
-                continue
-            except BaseException:
-                break
-        try:
-            cleanup.result()
-        except BaseException as cleanup_error:
-            raise BaseExceptionGroup(
-                "Icon creation and compensation both failed",
-                [original_error, cleanup_error],
-            ) from None
-
     async def create_icon(
         self,
         upload_file: UploadFile,
@@ -141,16 +109,14 @@ class IconService:
             )
         await self.object_content.ensure_target_ready(storage_kind)
 
-        metadata = None
-        published = False
-        try:
-            async with self.object_content.capture_for_target(
-                _upload_chunks(upload_file),
-                storage_kind=storage_kind,
-                declared_media_type=media_type,
-                verified_media_type=media_type,
-                business_maximum_bytes=maximum_size_bytes,
-            ) as captured:
+        async with self.object_content.capture_for_target(
+            _upload_chunks(upload_file),
+            storage_kind=storage_kind,
+            declared_media_type=media_type,
+            verified_media_type=media_type,
+            business_maximum_bytes=maximum_size_bytes,
+        ) as captured:
+            if storage_kind is StorageKind.POSTGRES_INLINE:
                 async with self._write_transaction():
                     metadata = await self.icon_repo.add_metadata(
                         IconMetadataCreate(tenant_id=tenant_id)
@@ -168,26 +134,46 @@ class IconService:
                             ),
                         ),
                         content=captured,
-                        storage_kind=storage_kind,
+                        storage_kind=StorageKind.POSTGRES_INLINE,
                     )
                     await self.icon_repo.add_primary_reference(
                         icon_id=metadata.id,
                         content_id=prepared.id,
                     )
+                return metadata
 
-                if storage_kind is StorageKind.OBJECT_STORE:
-                    await self.object_content.store_and_verify(
-                        content_id=prepared.id,
-                        content=captured,
+            async with self.object_content.upload_for_publication(
+                (captured,)
+            ) as publication:
+                async with self._write_transaction():
+                    metadata = await self.icon_repo.add_metadata(
+                        IconMetadataCreate(tenant_id=tenant_id)
                     )
-                published = True
-        except BaseException as error:
-            if metadata is not None and not published and not ambient_transaction:
-                await self._complete_compensation(metadata.id, error)
-            raise
-
-        assert metadata is not None
-        return metadata
+                    (
+                        prepared,
+                    ) = await self.object_content.adopt_verified_in_transaction(
+                        self.icon_repo.session,
+                        intents=(
+                            ContentIntent(
+                                tenant_id=tenant_id,
+                                created_by_user_id=created_by_user_id,
+                                access_class=ContentAccessClass.PUBLIC_IMMUTABLE,
+                                idempotency_key=f"icon:{metadata.id}:primary",
+                                producer_receipt=(
+                                    f"icon:{metadata.id}:primary:"
+                                    f"policy_revision="
+                                    f"{self.upload_admission.policy_revision}"
+                                ),
+                            ),
+                        ),
+                        contents=(captured,),
+                        publication=publication,
+                    )
+                    await self.icon_repo.add_primary_reference(
+                        icon_id=metadata.id,
+                        content_id=prepared.id,
+                    )
+                return metadata
 
     async def open_icon(self, icon_id: UUID) -> IconDownload:
         session = self.icon_repo.session

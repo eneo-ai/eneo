@@ -137,6 +137,7 @@ async def load_container_upload_admission(
     snapshot = await load_upload_admission_snapshot(
         session,
         inline_maximum_bytes=object_content_runtime.inline_maximum_bytes,
+        object_store_maximum_bytes=(object_content_runtime.object_store_maximum_bytes),
     )
     container.upload_admission.override(  # pyright: ignore[reportUnknownMemberType]
         providers.Object(snapshot)
