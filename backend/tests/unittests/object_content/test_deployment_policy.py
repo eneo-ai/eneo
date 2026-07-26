@@ -1,5 +1,7 @@
+import asyncio
 import importlib.util
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -18,6 +20,7 @@ from eneo.authentication.auth_dependencies import (
     require_session_auth,
     require_user_identity,
 )
+from eneo.database.database import get_session, get_session_with_transaction
 from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
 )
@@ -36,8 +39,13 @@ from eneo.object_content.deployment_policy import (
     project_upload_limits,
 )
 from eneo.object_content.deployment_policy_router import (
+    get_deployment_policy,
     replace_deployment_policy,
     router,
+)
+from eneo.object_content.runtime import (
+    ObjectContentReadinessCode,
+    StorageCapability,
 )
 from eneo.tenants.tenant import TenantState
 from eneo.users.user import (
@@ -308,6 +316,201 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
     assert require_platform_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
     assert route.responses[409]["model"].__name__ == "GeneralError"
+
+
+def test_policy_get_uses_a_non_transactional_request_session() -> None:
+    route = next(
+        route
+        for route in router.routes
+        if isinstance(route, APIRoute) and route.endpoint is get_deployment_policy
+    )
+    dependencies = list(route.dependant.dependencies)
+    dependency_calls = set()
+    while dependencies:
+        dependency = dependencies.pop()
+        dependency_calls.add(dependency.call)
+        dependencies.extend(dependency.dependencies)
+
+    assert get_session in dependency_calls
+    assert get_session_with_transaction not in dependency_calls
+
+
+@pytest.mark.asyncio
+async def test_concurrent_policy_projections_close_transactions_before_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = _policy(
+        target=StorageKind.POSTGRES_INLINE,
+        session_file=101,
+        session_image=102,
+        knowledge_file=103,
+        transcription_audio=104,
+    )
+
+    class Session:
+        def __init__(self) -> None:
+            self._transaction_active = False
+
+        def in_transaction(self) -> bool:
+            return self._transaction_active
+
+        @asynccontextmanager
+        async def begin(self):
+            assert not self._transaction_active
+            self._transaction_active = True
+            try:
+                yield
+            finally:
+                self._transaction_active = False
+
+    request_session: ContextVar[Session] = ContextVar("policy_projection_session")
+
+    class PolicyRepository:
+        def __init__(self, session: Session) -> None:
+            self._session = session
+
+        async def get(self) -> DeploymentPolicy:
+            assert self._session.in_transaction()
+            await asyncio.sleep(0)
+            return policy
+
+    class InventoryRepository:
+        def __init__(self, session: Session) -> None:
+            self._session = session
+
+        async def inventory_facts(self) -> tuple[object, ...]:
+            assert self._session.in_transaction()
+            await asyncio.sleep(0)
+            return ()
+
+    class Runtime:
+        inline_maximum_bytes = 100
+
+        async def storage_capabilities(self) -> tuple[StorageCapability, ...]:
+            session = request_session.get()
+            assert not session.in_transaction()
+            await asyncio.sleep(0)
+            assert not session.in_transaction()
+            return (
+                StorageCapability(
+                    target=StorageKind.POSTGRES_INLINE,
+                    configured=True,
+                    selectable=True,
+                    readiness_code=ObjectContentReadinessCode.READY,
+                ),
+            )
+
+    async def request_projection() -> None:
+        session = Session()
+        token = request_session.set(session)
+        container = SimpleNamespace(
+            session=lambda: session,
+            user=lambda: TEST_USER,
+        )
+        try:
+            await get_deployment_policy(container)
+        finally:
+            request_session.reset(token)
+
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "DeploymentPolicyRepository",
+        PolicyRepository,
+    )
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "ObjectContentReconciliationRepository",
+        InventoryRepository,
+    )
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "object_content_runtime",
+        Runtime(),
+    )
+
+    await asyncio.gather(*(request_projection() for _ in range(6)))
+
+
+@pytest.mark.asyncio
+async def test_policy_put_projects_after_its_compare_and_swap_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = _policy(
+        target=StorageKind.POSTGRES_INLINE,
+        session_file=101,
+        session_image=102,
+        knowledge_file=103,
+        transcription_audio=104,
+    )
+
+    class Session:
+        def __init__(self) -> None:
+            self._transaction_active = False
+
+        def in_transaction(self) -> bool:
+            return self._transaction_active
+
+        @asynccontextmanager
+        async def begin(self):
+            assert not self._transaction_active
+            self._transaction_active = True
+            try:
+                yield
+            finally:
+                self._transaction_active = False
+
+    session = Session()
+
+    class Repository:
+        def __init__(self, repository_session: Session) -> None:
+            assert repository_session is session
+
+        async def get(self) -> DeploymentPolicy:
+            assert session.in_transaction()
+            return policy
+
+        async def replace(
+            self,
+            _replacement: DeploymentPolicyUpdate,
+            *,
+            actor_user_id,
+        ) -> DeploymentPolicy:
+            del actor_user_id
+            assert session.in_transaction()
+            return policy
+
+    projection = SimpleNamespace(policy=policy)
+
+    async def read_projection(projection_session: Session) -> SimpleNamespace:
+        assert projection_session is session
+        assert not projection_session.in_transaction()
+        return projection
+
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "DeploymentPolicyRepository",
+        Repository,
+    )
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "_read_projection",
+        read_projection,
+    )
+
+    result = await replace_deployment_policy(
+        DeploymentPolicyUpdate(
+            expected_revision=1,
+            new_write_storage_target=StorageKind.POSTGRES_INLINE,
+            session_file_limit_bytes=101,
+            session_image_limit_bytes=102,
+            knowledge_file_limit_bytes=103,
+            transcription_audio_limit_bytes=104,
+        ),
+        TEST_USER.model_copy(update={"is_platform_admin": True}),
+        SimpleNamespace(session=lambda: session),
+    )
+
+    assert result is projection
 
 
 def test_policy_router_is_registered_on_the_admin_surface() -> None:

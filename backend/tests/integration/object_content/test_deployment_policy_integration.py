@@ -131,23 +131,10 @@ async def test_policy_compare_and_swap_has_one_winner_and_atomic_read(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
-    async with db_container() as container:
-        session = container.session()
-        await session.execute(delete(ObjectContentDeploymentPolicy))
-        await session.execute(
-            insert(ObjectContentDeploymentPolicy).values(
-                id=1,
-                revision=1,
-                new_write_storage_target=StorageKind.POSTGRES_INLINE.value,
-                session_file_limit_bytes=10,
-                session_image_limit_bytes=20,
-                knowledge_file_limit_bytes=30,
-                transcription_audio_limit_bytes=40,
-                updated_by_actor="migration",
-            )
-        )
-
-        projection = await _read_projection(session)
+    await _seed_policy()
+    async with db_container():
+        async with sessionmanager.session() as session:
+            projection = await _read_projection(session)
 
     assert len(projection.capabilities) == 2
     assert len(projection.limits) == 5

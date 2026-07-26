@@ -671,7 +671,50 @@ tasks:
           - "Full web unit/browser suite => 59 files, 334 tests passed; Svelte check and lint passed."
           - "docs.eneo.ai build => 32 routes and 28 indexed pages; only the pre-existing img warning remained."
           - "Goal board checker, diff checks, and bounded secret scan => passed."
-      next_gate: "Complete exact review-3 validation, same-session Claude commit gate, commit/push gate, then push and post one fresh top-level /review."
+      review_4:
+        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080942430"
+        head: "78021f258b1055ee627e02e977975205ad2d8224"
+        coverage: "complete: 98 of 98 changed paths"
+        findings:
+          - "F10 genuine/in-scope: deployment-policy GET and post-CAS PUT projection can await object-store readiness while a request-owned database transaction remains open, creating a cold-read pool-exhaustion cycle."
+          - "F11 source-supported and under architecture review: File/Icon metadata and concrete references can commit before remote bytes are verified; a process death can leave a permanently invisible failed product aggregate. Compare publication-before-upload cleanup with upload-before-product-publication using the existing object-content orphan reconciler; do not add a generic reaper or marker by default."
+          - "F7/F8/F9 must be explicitly re-audited on the Review 4 head because the reviewer did not recheck them."
+        ci_failures:
+          - "Backend tests job 89729880175: 3 failures after 1160 passed, 83 skipped, 1 xfailed; Icon parity reported storage/DB mismatch and two reconciliation tests observed extra orphan deletions. Root cause must be proven without weakening expected behavior."
+          - "Schema drift job 89729880159 never reached checkout or schema commands because Docker Hub timed out pulling redis:7-alpine three times; verify on the next exact head without changing product behavior to mask external infrastructure."
+          - "Final CI failed only because Backend tests failed."
+        direction_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T081229Z.md"
+          session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
+          result: "Claude iteration 34 changes_required, GREEN_LIGHT no, MIN_SCORE 6; accepted as the pre-implementation direction gate."
+          decision: "Fix F10 at the existing policy projection owner; retain the F11 safety fences and record the available_at discriminator for the later lifecycle slice; fix the CI contamination only at the real-store fixture owner."
+        iteration_35:
+          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T083711Z.md"
+          staged_sha256: "7925737fd0345da906897b2b92ad4caf702fa80402162078e99618ff6becf10f"
+          result: "GREEN_LIGHT yes, MIN_SCORE 8, no blockers."
+          follow_up: "Accepted the proportionality improvement: simplify the synthetic concurrency test and document the deliberate permission and fixture lifetimes. There is no deployment-policy-specific real-pool integration test, and the receipt makes no such claim."
+        dispositions:
+          - "F10 fixed in the intended delta: GET reuses one authenticated non-transactional container, _read_projection owns one short policy+inventory transaction, readiness runs only after that transaction closes, and PUT calls the same projection owner after its CAS transaction."
+          - "F11 remains a genuine residual crash window but upload-before-product-publication is incompatible with three intentional safety fences: pending content must gain its first concrete owner in the creation transaction, commit-time pending ownership is enforced, and upload claims require reference_count >= 1. No fence, marker, product reaper, or PR2 move was added."
+          - "F7/F11 later-slice discriminator is source-supported: never-available object content retains available_at IS NULL while content that was published and later failed retains a non-null available_at. This is design evidence, not PR1 automatic cleanup."
+          - "F8 remains fixed: Icon and signed File routes use non-transactional request containers; their services own short metadata/reference transactions and release them before opening or streaming remote bytes."
+          - "F9 remains fixed: an unclassified policy PUT failure keeps the draft, disables another save, and requires an explicit persisted-policy reload without claiming which revision committed."
+          - "Backend CI failures were test isolation, not lifecycle behavior: the function-scoped database reset deleted its store binding while the session-scoped real store retained the fixed deployment marker and objects. Each real-store test now gets a unique deployment namespace over the same process; exact orphan counts remain unchanged."
+        focused_validation:
+          - "Review 4 F10 RED => transactional GET dependency, projection without owned transaction, and PUT projection inside the post-CAS transaction all failed before the fix."
+          - "Review 4 F10 GREEN => 3 focused transaction/concurrency tests passed; complete deployment-policy unit file => 21 passed."
+          - "Exact three Backend CI failures => 3 passed unchanged."
+          - "Complete real object-content integration directory => 112 passed in 270.84 seconds."
+          - "Whole backend non-integration suite => 3966 passed in 23.82 seconds."
+          - "Real bounded policy projection integration => passed."
+          - "Changed Python Ruff and format checks => passed."
+          - "Canonical uv run pyright => 0 errors, 0 warnings, 0 informations."
+        commit_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T084406Z.md"
+          session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
+          result: "Claude iteration 36 VERDICT green, GREEN_LIGHT yes, MIN_SCORE 9; no P0/P1/P2 or blocker."
+          disposition: "The simplified six-request test now asserts only owned-transaction ordering across concurrent async suspension; the production guard owns the hard invariant and no real-pool integration test is claimed. The GET permission rationale and bounded disposable namespace tradeoff are documented. Reviewer found further deletion would be churn."
+      next_gate: "Freeze the board-inclusive final hash, run the same-session exact-state verification, then commit with normal hooks only if green >= 8."
 
   - id: T007
     type: pm

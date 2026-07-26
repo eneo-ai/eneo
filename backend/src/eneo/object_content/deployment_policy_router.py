@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.auth_dependencies import (
     get_current_active_user,
-    require_permission,
     require_platform_admin,
     require_session_auth,
     require_user_identity,
@@ -31,7 +30,7 @@ from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     object_content_runtime,
 )
-from eneo.roles.permissions import Permission
+from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
@@ -77,7 +76,15 @@ class DeploymentPolicyPublic(BaseModel):
 async def _read_projection(
     session: AsyncSession,
 ) -> DeploymentPolicyPublic:
-    policy = await DeploymentPolicyRepository(session).get()
+    if session.in_transaction():
+        raise RuntimeError("Policy projection requires a non-transactional session")
+
+    async with session.begin():
+        policy = await DeploymentPolicyRepository(session).get()
+        inventory_facts = await ObjectContentReconciliationRepository(
+            session
+        ).inventory_facts()
+
     capabilities = tuple(
         CapabilityPublic(
             target=fact.target,
@@ -95,9 +102,7 @@ async def _read_projection(
             bytes=fact.size_bytes,
             oldest_created_at=fact.oldest_created_at,
         )
-        for fact in await ObjectContentReconciliationRepository(
-            session
-        ).inventory_facts()
+        for fact in inventory_facts
     )
     return DeploymentPolicyPublic(
         policy=DeploymentPolicyPublicValues(
@@ -127,12 +132,17 @@ async def _read_projection(
         "Get the deployment-wide new-write storage target, upload limits, "
         "and sanitized capability and inventory facts."
     ),
-    dependencies=[Depends(require_permission(Permission.ADMIN))],
     responses=responses.get_responses([403]),
 )
 async def get_deployment_policy(
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, with_transaction=False)),
+    ],
 ) -> DeploymentPolicyPublic:
+    # A separate permission dependency would hold its own request transaction
+    # while this endpoint awaits object-store readiness.
+    validate_permission(container.user(), Permission.ADMIN)
     return await _read_projection(cast(AsyncSession, container.session()))
 
 
@@ -186,8 +196,7 @@ async def replace_deployment_policy(
             "new": _log_values(updated),
         },
     )
-    async with session.begin():
-        return await _read_projection(session)
+    return await _read_projection(session)
 
 
 def _log_values(policy: DeploymentPolicy) -> dict[str, str | int]:
