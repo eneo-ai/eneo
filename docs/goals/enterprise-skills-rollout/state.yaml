@@ -1001,7 +1001,7 @@ tasks:
       merge_commit: "2746098cc008f7e9b95eae775ae4501a11cdb5c3"
       merged_at: "2026-07-24T22:56:51Z"
       github_checks: "All required CI passed, including backend tests, frontend E2E, schema drift, route metadata, and coverage diff"
-      review: "Review 2 confirmed F1-F3 resolved and reported no current findings with complete changed-file coverage"
+      final_review: "Review 2 confirmed F1-F3 resolved and reported no current findings with complete changed-file coverage"
       review_url: "https://github.com/eneo-ai/eneo/pull/600#issuecomment-5075095090"
       verification:
         - "backend: 3898 unit tests passed"
