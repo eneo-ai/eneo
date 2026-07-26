@@ -3965,7 +3965,7 @@
   "skills_runtime_policy_max_activations": "On-demand Skills per run",
   "skills_runtime_policy_max_activations_description": "Maximum number of on-demand Skills that may be loaded during one run.",
   "skills_runtime_policy_allowed_range": "Allowed range: {minimum}–{maximum}.",
-  "skills_runtime_policy_invalid": "Use a whole number within each allowed range.",
+  "skills_runtime_policy_invalid": "Use a whole number within the allowed range.",
   "skills_runtime_policy_save": "Save settings",
   "skills_runtime_policy_saving": "Saving…",
   "skills_runtime_policy_reset": "Restore defaults",

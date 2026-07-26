@@ -57,6 +57,24 @@
 
   const valid = $derived(isSkillRuntimePolicyDraftValid(draft, policy.editable_bounds));
   const dirty = $derived(!skillRuntimePolicyDraftEquals(draft, skillRuntimePolicyDraft(policy)));
+  const maxAttachedValid = $derived(
+    isSkillRuntimePolicyFieldValid(
+      draft.max_attached_skills,
+      policy.editable_bounds.max_attached_skills
+    )
+  );
+  const contextShareValid = $derived(
+    isSkillRuntimePolicyFieldValid(
+      draft.context_share_percent,
+      policy.editable_bounds.context_share_percent
+    )
+  );
+  const maxActivationsValid = $derived(
+    isSkillRuntimePolicyFieldValid(
+      draft.max_activations_per_turn,
+      policy.editable_bounds.max_activations_per_turn
+    )
+  );
 
   function applySnapshot(snapshot: SkillRuntimePolicySnapshot) {
     policy = snapshot.policy;
@@ -100,6 +118,7 @@
 
 <div class="flex flex-col gap-6">
   <Field.Set class="gap-5">
+    <Field.Legend class="sr-only">{m.skills_runtime_policy_title()}</Field.Legend>
     <Field.Field orientation="horizontal">
       <Field.Content>
         <Field.Title>{m.skills_runtime_policy_selective_title()}</Field.Title>
@@ -116,7 +135,7 @@
     <Field.Separator />
 
     <Field.Group class="grid gap-5 md:grid-cols-3">
-      <Field.Field>
+      <Field.Field data-invalid={!maxAttachedValid || undefined}>
         <Field.Label for={fieldIds.attached}>{m.skills_runtime_policy_max_attached()}</Field.Label>
         <Input
           id={fieldIds.attached}
@@ -125,10 +144,7 @@
           min={policy.editable_bounds.max_attached_skills.minimum}
           max={policy.editable_bounds.max_attached_skills.maximum}
           bind:value={draft.max_attached_skills}
-          aria-invalid={!isSkillRuntimePolicyFieldValid(
-            draft.max_attached_skills,
-            policy.editable_bounds.max_attached_skills
-          )}
+          aria-invalid={!maxAttachedValid}
           disabled={busy !== null}
         />
         <Field.Description>{m.skills_runtime_policy_max_attached_description()}</Field.Description>
@@ -138,9 +154,12 @@
             maximum: String(policy.editable_bounds.max_attached_skills.maximum)
           })}
         </Field.Description>
+        {#if !maxAttachedValid}
+          <Field.Error>{m.skills_runtime_policy_invalid()}</Field.Error>
+        {/if}
       </Field.Field>
 
-      <Field.Field>
+      <Field.Field data-invalid={!contextShareValid || undefined}>
         <Field.Label for={fieldIds.context}>{m.skills_runtime_policy_context_share()}</Field.Label>
         <Input
           id={fieldIds.context}
@@ -149,10 +168,7 @@
           min={policy.editable_bounds.context_share_percent.minimum}
           max={policy.editable_bounds.context_share_percent.maximum}
           bind:value={draft.context_share_percent}
-          aria-invalid={!isSkillRuntimePolicyFieldValid(
-            draft.context_share_percent,
-            policy.editable_bounds.context_share_percent
-          )}
+          aria-invalid={!contextShareValid}
           disabled={busy !== null}
         />
         <Field.Description>{m.skills_runtime_policy_context_share_description()}</Field.Description>
@@ -162,9 +178,12 @@
             maximum: String(policy.editable_bounds.context_share_percent.maximum)
           })}
         </Field.Description>
+        {#if !contextShareValid}
+          <Field.Error>{m.skills_runtime_policy_invalid()}</Field.Error>
+        {/if}
       </Field.Field>
 
-      <Field.Field>
+      <Field.Field data-invalid={!maxActivationsValid || undefined}>
         <Field.Label for={fieldIds.activations}>
           {m.skills_runtime_policy_max_activations()}
         </Field.Label>
@@ -175,10 +194,7 @@
           min={policy.editable_bounds.max_activations_per_turn.minimum}
           max={policy.editable_bounds.max_activations_per_turn.maximum}
           bind:value={draft.max_activations_per_turn}
-          aria-invalid={!isSkillRuntimePolicyFieldValid(
-            draft.max_activations_per_turn,
-            policy.editable_bounds.max_activations_per_turn
-          )}
+          aria-invalid={!maxActivationsValid}
           disabled={busy !== null}
         />
         <Field.Description
@@ -190,13 +206,12 @@
             maximum: String(policy.editable_bounds.max_activations_per_turn.maximum)
           })}
         </Field.Description>
+        {#if !maxActivationsValid}
+          <Field.Error>{m.skills_runtime_policy_invalid()}</Field.Error>
+        {/if}
       </Field.Field>
     </Field.Group>
   </Field.Set>
-
-  {#if !valid}
-    <p class="text-destructive text-sm" role="alert">{m.skills_runtime_policy_invalid()}</p>
-  {/if}
 
   {#if errorMessage}
     <Alert.Root variant="destructive">
@@ -248,14 +263,14 @@
       </p>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (bounded table must be keyboard-scrollable) -->
       <div
-        class="border-border focus-visible:ring-ring mt-4 max-h-72 overflow-y-auto border-y outline-none focus-visible:ring-2 [scrollbar-gutter:stable]"
+        class="border-border focus-visible:ring-ring mt-4 max-h-72 overflow-auto border-y outline-none focus-visible:ring-2 [scrollbar-gutter:stable]"
         role="region"
         aria-label={m.skills_runtime_models_region({
           count: String(modelProjections.models.length)
         })}
         tabindex="0"
       >
-        <Table.Root>
+        <Table.Root class="min-w-[44rem]">
           <Table.Header class="bg-background sticky top-0 z-[1]">
             <Table.Row>
               <Table.Head>{m.skills_runtime_models_model()}</Table.Head>

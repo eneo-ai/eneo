@@ -3965,7 +3965,7 @@
   "skills_runtime_policy_max_activations": "Skills vid behov per körning",
   "skills_runtime_policy_max_activations_description": "Maximalt antal Skills som får läsas in vid behov under en körning.",
   "skills_runtime_policy_allowed_range": "Tillåtet intervall: {minimum}–{maximum}.",
-  "skills_runtime_policy_invalid": "Ange ett heltal inom varje tillåtet intervall.",
+  "skills_runtime_policy_invalid": "Ange ett heltal inom det tillåtna intervallet.",
   "skills_runtime_policy_save": "Spara inställningar",
   "skills_runtime_policy_saving": "Sparar…",
   "skills_runtime_policy_reset": "Återställ standardvärden",

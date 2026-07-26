@@ -453,7 +453,7 @@
                   {/if}
                 </div>
                 {#if supportsActivationModes}
-                  <div class="mt-3 max-w-48">
+                  <div class="mt-3 w-full sm:max-w-56">
                     <Select.Root
                       type="single"
                       value={activationMode(row)}
@@ -472,26 +472,28 @@
                         </span>
                       </Select.Trigger>
                       <Select.Content>
-                        <Select.Item value="always" label={activationModeLabel("always")}>
-                          <span class="flex flex-col gap-0.5">
-                            <span>{activationModeLabel("always")}</span>
-                            <span class="text-muted-foreground text-xs font-normal">
-                              {m.skills_activation_mode_always_description()}
+                        <Select.Group>
+                          <Select.Item value="always" label={activationModeLabel("always")}>
+                            <span class="flex flex-col gap-0.5">
+                              <span>{activationModeLabel("always")}</span>
+                              <span class="text-muted-foreground text-xs font-normal">
+                                {m.skills_activation_mode_always_description()}
+                              </span>
                             </span>
-                          </span>
-                        </Select.Item>
-                        <Select.Item
-                          value="on_demand"
-                          label={activationModeLabel("on_demand")}
-                          disabled={!canChooseOnDemand}
-                        >
-                          <span class="flex flex-col gap-0.5">
-                            <span>{activationModeLabel("on_demand")}</span>
-                            <span class="text-muted-foreground text-xs font-normal">
-                              {m.skills_activation_mode_on_demand_description()}
+                          </Select.Item>
+                          <Select.Item
+                            value="on_demand"
+                            label={activationModeLabel("on_demand")}
+                            disabled={!canChooseOnDemand}
+                          >
+                            <span class="flex flex-col gap-0.5">
+                              <span>{activationModeLabel("on_demand")}</span>
+                              <span class="text-muted-foreground text-xs font-normal">
+                                {m.skills_activation_mode_on_demand_description()}
+                              </span>
                             </span>
-                          </span>
-                        </Select.Item>
+                          </Select.Item>
+                        </Select.Group>
                       </Select.Content>
                     </Select.Root>
                   </div>
