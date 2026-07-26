@@ -192,7 +192,12 @@ async def test_accept_or_replay_rerun_operation_raises_persistence_invariant_aft
 ) -> None:
     scenario = _prepare_completed_rerun_accept_scenario(monkeypatch)
     operation_row = SimpleNamespace(id=uuid4())
-    scenario.session.scalar.side_effect = [scenario.run_row, operation_row, None]
+    scenario.session.scalar.side_effect = [
+        scenario.run_row,
+        operation_row,
+        operation_row,
+        None,
+    ]
     scenario.session.execute.return_value = SimpleNamespace()
 
     with pytest.raises(FlowRunPersistenceInvariantError) as exc_info:
