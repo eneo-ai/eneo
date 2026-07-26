@@ -305,8 +305,8 @@ async def test_on_demand_revision_upgrade_rejection_rolls_back_parent_and_bindin
 
 @pytest.mark.parametrize(
     ("activated_tokens", "expected_status"),
-    [(8_000, 200), (8_001, 400)],
-    ids=("fits", "overflow"),
+    [(7_000, 200), (7_001, 400)],
+    ids=("fits-reserved-ceiling", "exceeds-reserved-ceiling"),
 )
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -324,7 +324,7 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
 ):
     monkeypatch.setattr(
         "eneo.files.attachment_budget.get_settings",
-        lambda: SimpleNamespace(attachment_context_reserve_tokens=0),
+        lambda: SimpleNamespace(attachment_context_reserve_tokens=1_000),
     )
     monkeypatch.setattr(
         "eneo.files.attachment_budget.count_tokens",
@@ -466,8 +466,8 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
 
 @pytest.mark.parametrize(
     ("activated_tokens", "expected_status"),
-    [(8_000, 200), (8_001, 400)],
-    ids=("fits", "overflow"),
+    [(7_000, 200), (7_001, 400)],
+    ids=("fits-reserved-ceiling", "exceeds-reserved-ceiling"),
 )
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -485,7 +485,7 @@ async def test_mcp_schema_activation_preflight_is_atomic(
 ):
     monkeypatch.setattr(
         "eneo.files.attachment_budget.get_settings",
-        lambda: SimpleNamespace(attachment_context_reserve_tokens=0),
+        lambda: SimpleNamespace(attachment_context_reserve_tokens=1_000),
     )
     monkeypatch.setattr(
         "eneo.files.attachment_budget.count_tokens",

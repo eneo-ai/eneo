@@ -23,7 +23,10 @@ from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
 from eneo.completion_models.infrastructure.web_search import WebSearch
-from eneo.files.attachment_budget import assert_prompt_and_files_fit_context
+from eneo.files.attachment_budget import (
+    assert_prompt_and_files_fit_context,
+    attachment_token_ceiling,
+)
 from eneo.files.file_models import File, FileType
 from eneo.files.file_service import FileService
 from eneo.governance_policy.domain.policy_resolver import (
@@ -608,7 +611,7 @@ class AssistantService:
 
         runtime = skill_plan.to_activation_runtime(
             selected_model_route=model.get_model_route(),
-            max_input_tokens=model.max_input_tokens,
+            max_input_tokens=attachment_token_ceiling(model.max_input_tokens),
             supports_tool_calling=model.supports_tool_calling,
         )
         snapshot = runtime.snapshot()

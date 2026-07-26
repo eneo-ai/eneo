@@ -472,7 +472,7 @@ def test_provider_candidate_assessment_is_exact_and_non_mutating(
     )
     messages = [
         {"role": "system", "content": "Base"},
-        {"role": "user", "content": "Question"},
+        {"role": "user", "content": "Minimal non-empty question"},
     ]
     provider_tools = [
         {
@@ -509,6 +509,7 @@ def test_provider_candidate_assessment_is_exact_and_non_mutating(
     assert len(assessments) == 1
     assert measure_share.call_count == 1
     assert assessments[0].rejection_reason is expected_rejection
+    assert measure.call_args.args[0][1]["content"] == "Minimal non-empty question"
     assert measure.call_args.args[1] == provider_tools
     assert runtime.snapshot() == snapshot_before
     assert messages == messages_before

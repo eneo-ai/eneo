@@ -94,8 +94,10 @@ Before attaching that Skill:
 An Assistant cannot currently use knowledge and MCP at the same time. Eneo
 includes every stored, enabled and approved MCP tool schema available to the
 Assistant—not a user-specific subset—when it validates whether a saved on-demand
-Skill can fit. Live discovery, user permissions, approvals, and tool availability
-can still change later, so runtime remains the source of truth and fails closed.
+Skill can fit. The check reserves the same question headroom used for attachments
+instead of letting saved Skill context fill the model window. Live discovery,
+user permissions, approvals, and tool availability can still change later, so
+runtime remains the source of truth and fails closed.
 
 ## Create and attach a Skill
 
