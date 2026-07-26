@@ -38,6 +38,7 @@ _ContainerWithUploadAdmission = Annotated[
     responses={
         200: {"content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}}},
         404: {"description": "Icon not found"},
+        **responses.get_responses([503]),
     },
 )
 async def get_icon(id: UUID, container: _NonTransactionalContainer) -> Response:

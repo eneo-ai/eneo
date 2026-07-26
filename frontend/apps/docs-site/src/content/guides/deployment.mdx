@@ -426,7 +426,11 @@ eligible new writes only; existing content stays in its recorded backend until
 an explicit verified migration moves it. The product has one provider-neutral
 object-store path, not vendor-specific storage modes. **Admin > Storage** also
 shows the portable multipart envelope when it constrains object-store session
-uploads; File and Icon reject envelope + 1 before capture or spooling.
+uploads. FastAPI/Starlette multipart parsing happens before route admission and
+may use temporary disk. Eneo rejects an oversized File or Icon before its own
+capture/spool or any storage mutation. Operators must use ingress/request-body
+limits and configure and monitor temporary-disk capacity to protect that earlier
+parsing boundary.
 
 Follow [Object Content Storage](/guides/object-content-storage) for the image
 digest, credentials, MinIO policy, TLS, readiness, backup, and troubleshooting

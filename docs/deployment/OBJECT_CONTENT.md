@@ -276,8 +276,11 @@ rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
 of the admin policy and this ceiling. **Admin > Storage** shows the configured
 limit, effective limit, and constraining source. Object-store session uploads
 use the same rule with the portable multipart envelope derived from configured
-transport settings. File and Icon reject envelope + 1 before capture or disk
-spooling.
+transport settings. FastAPI/Starlette multipart parsing happens before route
+admission and may use temporary disk. Eneo rejects an oversized File or Icon
+before its own capture/spool or any storage mutation. Operators must use
+ingress/request-body limits and configure and monitor temporary-disk capacity
+to protect that earlier parsing boundary.
 
 Business limits apply to the user's original upload. Generated text, model
 input, and page variants may be larger and are bounded by the selected

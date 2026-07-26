@@ -401,6 +401,7 @@ def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
         403: {"description": "Unauthorized - Not authorized to view this file"},
         404: {"description": "File content not found or file does not exist"},
         416: {"description": "Range not satisfiable"},
+        **responses.get_responses([503]),
     },
 )
 async def download_file_signed(

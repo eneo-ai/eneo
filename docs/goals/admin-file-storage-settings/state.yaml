@@ -46,7 +46,7 @@ continuity:
   completed_write_tasks_in_thread: 2
   handoff_note: notes/handoff.md
   last_handoff_at: null
-  last_verified_revision: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
+  last_verified_revision: "ef6672a51171b30ab223d4869e46dcc3951f5fcb"
 
 active_task: T006
 
@@ -126,33 +126,12 @@ tasks:
     objective: "Implement Option B authority and the deployment-policy persistence/API foundation using behavior-first tests, leaving producers and legacy runtime settings unchanged."
     allowed_files:
       - "backend/alembic/versions/20260725*_add_object_content_deployment_policy.py"
-      - "backend/src/eneo/database/tables/__init__.py"
-      - "backend/src/eneo/database/tables/object_content_policy_table.py"
-      - "backend/src/eneo/database/tables/users_table.py"
-      - "backend/src/eneo/users/user.py"
-      - "backend/src/eneo/users/user_repo.py"
-      - "backend/src/eneo/users/user_router.py"
-      - "backend/src/eneo/authentication/auth_dependencies.py"
-      - "backend/src/eneo/sysadmin/sysadmin_router.py"
-      - "backend/src/eneo/sysadmin/sysadmin_service.py"
-      - "backend/src/eneo/object_content/deployment_policy*.py"
-      - "backend/src/eneo/object_content/runtime.py"
-      - "backend/src/eneo/object_content/reconciliation_repository.py"
-      - "backend/src/eneo/main/exceptions.py"
-      - "backend/src/eneo/main/container/container.py"
-      - "backend/src/eneo/server/routers.py"
-      - "backend/src/eneo/server/exception_handlers.py"
-      - "backend/src/eneo/admin/admin_router.py"
+      - "backend/src/eneo/database/tables/{__init__.py,object_content_policy_table.py,users_table.py}"
+      - "backend/src/eneo/users/{user.py,user_repo.py,user_router.py}"
+      - "backend/src/eneo/{authentication/auth_dependencies.py,sysadmin/{sysadmin_router.py,sysadmin_service.py},object_content/{deployment_policy*.py,runtime.py,reconciliation_repository.py},main/{exceptions.py,container/container.py},server/{routers.py,exception_handlers.py},admin/admin_router.py}"
       - "backend/tests/test_settings_override.py"
-      - "backend/tests/unittests/object_content/**"
-      - "backend/tests/unittests/users/**"
-      - "backend/tests/unittests/authentication/**"
-      - "backend/tests/unittests/server/**"
-      - "backend/tests/unittests/sysadmin/**"
-      - "backend/tests/integration/object_content/**"
-      - "backend/tests/integration/migrations/**"
-      - "backend/tests/integration/users/**"
-      - "backend/tests/integration/sysadmin/**"
+      - "backend/tests/unittests/{object_content,users,authentication,server,sysadmin}/**"
+      - "backend/tests/integration/{object_content,migrations,users,sysadmin}/**"
     verify:
       - "cd backend && uv run alembic heads"
       - "cd backend && uv run pytest -q tests/unittests/object_content tests/unittests/users tests/unittests/authentication tests/unittests/server tests/unittests/sysadmin"
@@ -321,47 +300,16 @@ tasks:
     reasoning_hint: low
     objective: "Move the closed upload-limit consumers to the persisted policy, implement target-pinned File/Icon writes with product visibility derived from whole-family AVAILABLE content, then remove the four runtime Settings fields plus required_inline_bytes. T004 owns environment templates and documentation cleanup."
     allowed_files:
-      - "backend/src/eneo/object_content/content.py"
-      - "backend/src/eneo/object_content/content_service.py"
-      - "backend/src/eneo/object_content/configuration.py"
-      - "backend/src/eneo/object_content/runtime.py"
-      - "backend/src/eneo/object_content/deployment_policy*.py"
-      - "backend/src/eneo/files/file_protocol.py"
-      - "backend/src/eneo/files/file_router.py"
-      - "backend/src/eneo/files/file_service.py"
-      - "backend/src/eneo/files/file_repo.py"
-      - "backend/src/eneo/icons/icon_service.py"
-      - "backend/src/eneo/icons/api/icon_router.py"
-      - "backend/src/eneo/icons/icon_repo.py"
-      - "backend/src/eneo/jobs/task_service.py"
-      - "backend/src/eneo/limits/*.py"
-      - "backend/src/eneo/apps/apps/api/app_assembler.py"
-      - "backend/src/eneo/apps/apps/api/app_router.py"
-      - "backend/src/eneo/groups_legacy/api/group_router.py"
-      - "backend/src/eneo/spaces/api/space_router.py"
-      - "backend/src/eneo/main/config.py"
-      - "backend/src/eneo/main/exceptions.py"
-      - "backend/src/eneo/main/container/container.py"
-      - "backend/src/eneo/server/dependencies/lifespan.py"
-      - "backend/src/eneo/server/dependencies/container.py"
-      - "backend/src/eneo/server/routers.py"
-      - "backend/src/eneo/server/exception_handlers.py"
-      - "backend/tests/test_settings_override.py"
-      - "backend/tests/integration/conftest.py"
-      - "backend/tests/unittests/object_content/**"
-      - "backend/tests/unittests/files/**"
-      - "backend/tests/unittests/icons/**"
-      - "backend/tests/unittests/jobs/**"
-      - "backend/tests/unittests/limits/**"
-      - "backend/tests/unittests/apps/api/**"
-      - "backend/tests/unittests/server/**"
-      - "backend/tests/integration/object_content/**"
-      - "backend/tests/integration/files/**"
-      - "backend/tests/integration/icons/**"
-      - "backend/tests/integration/server/**"
-      - "backend/tests/unit/test_api_key_route_coverage.py"
-      - "backend/tests/unit/test_endpoint_audit_verification.py"
-      - "backend/tests/unit/test_file_service.py"
+      - "backend/src/eneo/object_content/{content.py,content_service.py,configuration.py,runtime.py,deployment_policy*.py}"
+      - "backend/src/eneo/files/{file_protocol.py,file_router.py,file_service.py,file_repo.py}"
+      - "backend/src/eneo/icons/{icon_service.py,api/icon_router.py,icon_repo.py}"
+      - "backend/src/eneo/{jobs/task_service.py,limits/*.py,apps/apps/api/{app_assembler.py,app_router.py},groups_legacy/api/group_router.py,spaces/api/space_router.py}"
+      - "backend/src/eneo/main/{config.py,exceptions.py,container/container.py}"
+      - "backend/src/eneo/server/{dependencies/{lifespan.py,container.py},routers.py,exception_handlers.py}"
+      - "backend/tests/{test_settings_override.py,integration/conftest.py}"
+      - "backend/tests/unittests/{object_content,files,icons,jobs,limits,apps/api,server}/**"
+      - "backend/tests/integration/{object_content,files,icons,server}/**"
+      - "backend/tests/unit/{test_api_key_route_coverage.py,test_endpoint_audit_verification.py,test_file_service.py}"
     verify:
       - "cd backend && uv run pytest -q tests/unittests/object_content tests/unittests/files tests/unittests/icons tests/unittests/jobs tests/unittests/limits tests/unittests/apps/api tests/unittests/server"
       - "cd backend && uv run pytest -q -m integration tests/integration/object_content tests/integration/test_file_usage_relations.py"
@@ -472,29 +420,13 @@ tasks:
     reasoning_hint: low
     objective: "Complete the generated contracts, editable admin UI, documentation, and exact-head cleanups required by the frozen PR 1 plan, including loading/degraded capability states and restored-without-migration recovery guidance."
     allowed_files:
-      - "frontend/packages/eneo-js/index.*"
-      - "frontend/packages/eneo-js/src/eneo.js"
-      - "frontend/packages/eneo-js/src/types/schema.d.ts"
-      - "frontend/packages/eneo-js/src/types/resources.d.ts"
-      - "frontend/packages/eneo-js/src/endpoints/object-content-policy*"
-      - "frontend/apps/web/src/routes/(app)/admin/+layout.ts"
-      - "frontend/apps/web/src/routes/(app)/admin/AdminMenu.svelte"
-      - "frontend/apps/web/src/routes/(app)/admin/storage/**"
-      - "frontend/apps/web/src/lib/core/AppContext.ts"
-      - "frontend/apps/web/messages/en.json"
-      - "frontend/apps/web/messages/sv.json"
-      - "backend/.env.template"
-      - "backend/README.md"
-      - "backend/tests/unittests/files/test_file_protocol.py"
-      - "docs/INSTALLATION.md"
-      - "docs/DEPLOYMENT.md"
-      - "docs/TROUBLESHOOTING.md"
-      - "docs/deployment/**"
-      - "frontend/apps/docs-site/src/content/guides/deployment.mdx"
-      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "frontend/packages/eneo-js/{index.*,src/{eneo.js,types/{schema.d.ts,resources.d.ts},endpoints/object-content-policy*}}"
+      - "frontend/apps/web/{src/routes/(app)/admin/{+layout.ts,AdminMenu.svelte,storage/**},src/lib/core/AppContext.ts,messages/{en.json,sv.json}}"
+      - "backend/{.env.template,README.md,tests/unittests/files/test_file_protocol.py}"
+      - "docs/{INSTALLATION.md,DEPLOYMENT.md,TROUBLESHOOTING.md,deployment/**}"
+      - "frontend/apps/docs-site/src/content/guides/{deployment.mdx,object-content-storage.mdx}"
       - ".github/workflows/ci.yml"
-      - "docker-compose.e2e*.yml"
-      - "scripts/sync-frontend-with-backend.sh"
+      - "{docker-compose.e2e*.yml,scripts/sync-frontend-with-backend.sh}"
     verify:
       - "Regenerate frontend/packages/eneo-js/src/types/schema.d.ts from the exact backend OpenAPI document."
       - "cd frontend/packages/eneo-js && bun test"
@@ -723,7 +655,52 @@ tasks:
           - "Remove only duplicated transcript-like detail already owned by canonical review comments and immutable evidence artifacts."
           - "Touch no product source, tests, migrations, generated contracts, frontend, docs-site, deployment docs, issue, epic, or PR behavior."
         target: "Goal Maker checker green and state.yaml <= 50 KiB before the board-only commit."
-      next_gate: "Validate and peer-review this board-only compaction, commit and push it normally, then require fresh exact-head CI success and one complete finding-free repository review before activating T007 merge."
+      next_gate: "Independently verify T016, run the same-session Claude commit and push gates, publish one new exact head, then require fresh CI success and one complete finding-free repository review before activating T007 merge."
+
+  - id: T016
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Fix complete Review 11 F17/F18 at existing documentation and FastAPI contract owners."
+    inputs:
+      - "Review 11: https://github.com/eneo-ai/eneo/pull/601#issuecomment-5084085653"
+    constraints:
+      - "F17: state the real multipart boundary; application admission does not protect framework temporary spooling."
+      - "F18: reuse responses.get_responses and GeneralError; add no error adapter or runtime change."
+      - "Keep PostgreSQL complete by default and compatible object storage optional and vendor-neutral."
+      - "Do not broaden into upload transport replacement, reverse-proxy implementation, PR 2, cleanup, knowledge, Flow, or multi-tenant machinery."
+    allowed_files:
+      - "backend/src/eneo/{files/file_router.py,icons/api/icon_router.py}"
+      - "backend/tests/unittests/{files/test_file_router.py,icons/test_icon_router.py}"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      - "docs/{INSTALLATION.md,DEPLOYMENT.md,deployment/OBJECT_CONTENT.md}"
+      - "frontend/apps/docs-site/src/content/guides/{deployment.mdx,object-content-storage.mdx}"
+    verify:
+      - "Focused FastAPI tests fail before production changes and pass afterwards for typed 503 runtime and OpenAPI entries."
+      - "All changed guide copies distinguish framework multipart spooling from Eneo capture and name ingress/body/temp-disk operator controls."
+      - "Canonical OpenAPI regeneration exactly matches committed schema.d.ts."
+      - "Focused backend tests, Ruff/format, Pyright, docs-site build, and Goal Maker checker pass."
+    stop_if:
+      - "A response contract requires a new public error model or runtime behavior."
+      - "Accurate multipart protection requires implementing a new upload transport rather than correcting operator guidance."
+      - "Any required file falls outside allowed_files."
+    receipt:
+      result: done
+      summary: "F17 now documents the real framework-versus-application multipart boundary in every changed guide; F18 reuses the standard GeneralError 503 response contract for signed File download and public Icon GET. No runtime storage behavior or new abstraction was added."
+      review: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5084085653 (complete 107/107 changed-path coverage)"
+      changed_files:
+        - "Exactly the ten allowed paths above."
+      red:
+        - "Focused FastAPI packet => 2 expected failures: runtime returned typed 503 but both OpenAPI operations lacked response 503."
+      commands:
+        - "Focused FastAPI RED/GREEN => 2 failed as expected, then 2 passed."
+        - "Complete File/Icon router tests => 25 passed."
+        - "Changed Python Ruff/format and route metadata => passed; whole-backend Pyright => 0 errors, 0 warnings."
+        - "Offline app.openapi() -> openapi-typescript -> Prettier => byte-identical schema.d.ts."
+        - "Five-guide multipart-boundary audit and docs.eneo.ai build => passed; 32 pages generated."
+      complexity: "O(1) contract metadata only; existing response and documentation owners were deepened, with no transport, proxy, storage, tenancy, or compatibility module added."
+      next_allowed_task: T006
 
   - id: T007
     type: pm
@@ -761,13 +738,14 @@ tasks:
     receipt: null
 
 checks:
-  dirty_fingerprint: "board-only-review-context-compaction"
+  dirty_fingerprint: "review-11-f17-f18-intended-for-commit"
   last_verification:
     result: passed_with_publication_gate
     task: T006
     commands:
-      - "exact source head f3a8fed092316f47f5e2344089b9fa358a1f78e4 => fully green CI run 30203966247"
-      - "Dependency Review 30203966242, Dead code 30203966246, and Deploy Docs 30203966253 => success"
-      - "Review 8-10 => no findings but incomplete because state.yaml exceeded per-file context"
-      - "Goal Maker checker and diff checks must pass after board-only compaction"
-      - "fresh exact-head CI and complete finding-free /review remain required before merge"
+      - "Review 11 on ef6672a => complete 107/107; F17/F18 verified and fixed in T016."
+      - "Focused FastAPI => 2 RED then 2 GREEN; complete router packet => 25 passed."
+      - "Ruff/format, Pyright 0/0, route metadata, exact generated-schema drift, and docs-site build => passed."
+      - "Claude iteration 51 raised P3 follow-ups; iteration 52 verified them applied => GREEN_LIGHT yes, MIN_SCORE 9 (.codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T154110Z.md)."
+      - "Goal Maker checker and diff checks must pass on the final staged hash."
+      - "Fresh exact-head CI and complete finding-free /review remain required before merge."

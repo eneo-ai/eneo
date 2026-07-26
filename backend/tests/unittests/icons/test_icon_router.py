@@ -71,6 +71,41 @@ async def test_public_icon_response_consumes_the_downstream_stream_incrementally
     assert closed
 
 
+def test_public_icon_returns_and_documents_object_store_503() -> None:
+    service = MagicMock()
+    service.open_icon = AsyncMock(
+        side_effect=ObjectContentUnavailableError("injected object-store outage")
+    )
+
+    class Container:
+        @staticmethod
+        def icon_service():
+            return service
+
+    app = FastAPI()
+    add_exception_handlers(app)
+    app.include_router(icon_router.router, prefix="/icons")
+    route = next(
+        route
+        for route in icon_router.router.routes
+        if isinstance(route, APIRoute) and route.endpoint is icon_router.get_icon
+    )
+    app.dependency_overrides[route.dependant.dependencies[0].call] = Container
+
+    response = TestClient(app, raise_server_exceptions=False).get(f"/icons/{uuid4()}/")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "message": "injected object-store outage",
+        "eneo_error_code": 9038,
+        "code": "object_content_unavailable",
+    }
+    response_schema = app.openapi()["paths"]["/icons/{id}/"]["get"]["responses"]["503"][
+        "content"
+    ]["application/json"]["schema"]
+    assert response_schema == {"$ref": "#/components/schemas/GeneralError"}
+
+
 def test_icon_upload_returns_and_documents_object_store_503() -> None:
     service = MagicMock()
     service.create_icon = AsyncMock(
@@ -105,4 +140,7 @@ def test_icon_upload_returns_and_documents_object_store_503() -> None:
 
     assert response.status_code == 503
     assert response.json()["code"] == "object_content_unavailable"
-    assert "503" in app.openapi()["paths"]["/icons/"]["post"]["responses"]
+    response_schema = app.openapi()["paths"]["/icons/"]["post"]["responses"]["503"][
+        "content"
+    ]["application/json"]["schema"]
+    assert response_schema == {"$ref": "#/components/schemas/GeneralError"}

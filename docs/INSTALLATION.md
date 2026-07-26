@@ -177,7 +177,11 @@ is the smaller of the admin policy and the operator's
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. For object-store session uploads,
 the effective limit is the smaller of the admin policy and the configured
 portable multipart envelope. The page identifies which value constrains the
-upload before Eneo captures or spools the file.
+upload. FastAPI/Starlette multipart parsing happens before route admission and
+may use temporary disk. Eneo's admission check rejects an oversized File or
+Icon before its own capture/spool or any storage mutation. Operators must use
+ingress/request-body limits and configure and monitor temporary-disk capacity
+to protect that earlier parsing boundary.
 
 ### Login Issues During Development
 

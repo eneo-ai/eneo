@@ -30,7 +30,9 @@ from eneo.main.exceptions import (
 from eneo.object_content.content import (
     ContentAccessClass,
     ContentRead,
+    ObjectContentUnavailableError,
 )
+from eneo.server.exception_handlers import add_exception_handlers
 from tests.fixtures import TEST_USER
 
 
@@ -296,6 +298,60 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
         await file_router.download_file_signed(
             id=file_id, token="token", range=None, container=Container()
         )
+
+
+def test_processing_download_returns_and_documents_object_store_503(monkeypatch):
+    file_id = uuid4()
+    monkeypatch.setattr(
+        file_router,
+        "verify_signed_token",
+        lambda _: {
+            "file_id": str(file_id),
+            "content_disposition": "inline",
+        },
+    )
+    service = MagicMock()
+    service.get_download_no_auth = AsyncMock(
+        side_effect=ObjectContentUnavailableError("injected object-store outage")
+    )
+
+    class Container:
+        @staticmethod
+        def file_service(*, user):
+            assert user is None
+            return service
+
+    app = FastAPI()
+    add_exception_handlers(app)
+    app.include_router(file_router.router)
+    route = next(
+        route
+        for route in file_router.router.routes
+        if isinstance(route, APIRoute)
+        and route.endpoint is file_router.download_file_signed
+    )
+    container_dependency = next(
+        dependency
+        for dependency in route.dependant.dependencies
+        if dependency.name == "container"
+    )
+    app.dependency_overrides[container_dependency.call] = Container
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        f"/{file_id}/download/",
+        params={"token": "signed"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "message": "injected object-store outage",
+        "eneo_error_code": 9038,
+        "code": "object_content_unavailable",
+    }
+    response_schema = app.openapi()["paths"]["/{id}/download/"]["get"]["responses"][
+        "503"
+    ]["content"]["application/json"]["schema"]
+    assert response_schema == {"$ref": "#/components/schemas/GeneralError"}
 
 
 async def test_original_download_rejects_processing_token(monkeypatch):
