@@ -17,8 +17,6 @@ from pydantic import ValidationError
 import eneo.object_content.deployment_policy_router as deployment_policy_router
 from eneo.authentication.auth_dependencies import (
     require_platform_admin,
-    require_session_auth,
-    require_user_identity,
 )
 from eneo.database.database import get_session, get_session_with_transaction
 from eneo.database.tables.object_content_policy_table import (
@@ -180,11 +178,16 @@ def test_policy_put_boundary_accepts_json_safe_maximum_and_rejects_next_value(
             yield
 
     session = Session()
+    user = TEST_USER.model_copy(update={"is_platform_admin": True})
 
     class Container:
         @staticmethod
         def session():
             return session
+
+        @staticmethod
+        def user():
+            return user
 
     class Repository:
         def __init__(self, _session) -> None:
@@ -235,11 +238,8 @@ def test_policy_put_boundary_accepts_json_safe_maximum_and_rejects_next_value(
         for route in router.routes
         if isinstance(route, APIRoute) and route.endpoint is replace_deployment_policy
     )
-    user = TEST_USER.model_copy(update={"is_platform_admin": True})
     for dependency in route.dependant.dependencies:
-        if dependency.name == "user":
-            app.dependency_overrides[dependency.call] = lambda: user
-        elif dependency.name == "container":
+        if dependency.name == "container":
             app.dependency_overrides[dependency.call] = Container
         else:
             app.dependency_overrides[dependency.call] = lambda: None
@@ -310,9 +310,9 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
         if isinstance(route, APIRoute) and route.endpoint is replace_deployment_policy
     )
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
-    assert require_session_auth in dependency_calls
-    assert require_user_identity in dependency_calls
-    assert require_platform_admin in dependency_calls
+    assert deployment_policy_router._require_policy_session_auth in dependency_calls
+    assert deployment_policy_router._require_policy_user_identity in dependency_calls
+    assert deployment_policy_router._require_policy_platform_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
     assert route.responses[409]["model"].__name__ == "GeneralError"
 
@@ -330,10 +330,31 @@ def test_inventory_read_composes_existing_platform_authority_fences() -> None:
         if isinstance(route, APIRoute) and route.endpoint is endpoint
     )
     dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
-    assert require_session_auth in dependency_calls
-    assert require_user_identity in dependency_calls
-    assert require_platform_admin in dependency_calls
+    assert deployment_policy_router._require_policy_session_auth in dependency_calls
+    assert deployment_policy_router._require_policy_user_identity in dependency_calls
+    assert deployment_policy_router._require_policy_platform_admin in dependency_calls
     assert route.responses[403]["model"].__name__ == "GeneralError"
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [replace_deployment_policy, deployment_policy_router.get_object_content_inventory],
+)
+def test_privileged_policy_routes_use_one_non_transactional_session(endpoint) -> None:
+    route = next(
+        route
+        for route in router.routes
+        if isinstance(route, APIRoute) and route.endpoint is endpoint
+    )
+    dependencies = list(route.dependant.dependencies)
+    dependency_calls = set()
+    while dependencies:
+        dependency = dependencies.pop()
+        dependency_calls.add(dependency.call)
+        dependencies.extend(dependency.dependencies)
+
+    assert get_session in dependency_calls
+    assert get_session_with_transaction not in dependency_calls
 
 
 def test_policy_get_uses_a_non_transactional_request_session() -> None:
@@ -351,6 +372,133 @@ def test_policy_get_uses_a_non_transactional_request_session() -> None:
 
     assert get_session in dependency_calls
     assert get_session_with_transaction not in dependency_calls
+
+
+def test_policy_put_resolves_shared_container_once_before_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = _policy(
+        target=StorageKind.OBJECT_STORE,
+        session_file=101,
+        session_image=102,
+        knowledge_file=103,
+        transcription_audio=104,
+    )
+
+    class Session:
+        def __init__(self) -> None:
+            self.active = False
+
+        def in_transaction(self) -> bool:
+            return self.active
+
+        @asynccontextmanager
+        async def begin(self):
+            assert not self.active
+            self.active = True
+            try:
+                yield
+            finally:
+                self.active = False
+
+    session = Session()
+    resolutions = 0
+
+    class Runtime:
+        inline_maximum_bytes = 100
+        object_store_maximum_bytes = 1_000
+
+        async def storage_capabilities(self) -> tuple[StorageCapability, ...]:
+            assert resolutions == 1
+            assert not session.in_transaction()
+            await asyncio.sleep(0)
+            assert not session.in_transaction()
+            return (
+                StorageCapability(
+                    target=StorageKind.OBJECT_STORE,
+                    configured=True,
+                    selectable=True,
+                    readiness_code=ObjectContentReadinessCode.READY,
+                ),
+            )
+
+    class Repository:
+        def __init__(self, repository_session: Session) -> None:
+            assert repository_session is session
+
+        async def get(self) -> DeploymentPolicy:
+            assert session.in_transaction()
+            return policy
+
+        async def replace(
+            self,
+            _replacement: DeploymentPolicyUpdate,
+            *,
+            actor_user_id,
+        ) -> DeploymentPolicy:
+            del actor_user_id
+            assert session.in_transaction()
+            return policy
+
+    user = TEST_USER.model_copy(update={"is_platform_admin": True})
+    container = SimpleNamespace(session=lambda: session, user=lambda: user)
+
+    async def resolve_container():
+        nonlocal resolutions
+        resolutions += 1
+        return container
+
+    projection = {
+        "policy": {
+            "revision": policy.revision,
+            "new_write_storage_target": policy.new_write_storage_target,
+            "session_file_limit_bytes": policy.session_file_limit_bytes,
+            "session_image_limit_bytes": policy.session_image_limit_bytes,
+            "knowledge_file_limit_bytes": policy.knowledge_file_limit_bytes,
+            "transcription_audio_limit_bytes": policy.transcription_audio_limit_bytes,
+            "updated_by_actor": policy.updated_by_actor,
+            "created_at": policy.created_at,
+            "updated_at": policy.updated_at,
+        },
+        "limits": [],
+        "capabilities": [],
+    }
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "object_content_runtime",
+        Runtime(),
+    )
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "DeploymentPolicyRepository",
+        Repository,
+    )
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "_read_projection",
+        AsyncMock(return_value=projection),
+    )
+
+    app = FastAPI()
+    app.include_router(router, prefix="/admin")
+    app.dependency_overrides[
+        deployment_policy_router._policy_admin_container_dependency
+    ] = resolve_container
+
+    response = TestClient(app).put(
+        "/admin/object-content-policy",
+        json={
+            "expected_revision": 1,
+            "new_write_storage_target": "object_store",
+            "session_file_limit_bytes": 101,
+            "session_image_limit_bytes": 102,
+            "knowledge_file_limit_bytes": 103,
+            "transcription_audio_limit_bytes": 104,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert resolutions == 1
 
 
 @pytest.mark.asyncio
@@ -511,8 +659,10 @@ async def test_policy_put_projects_after_its_compare_and_swap_transaction(
             knowledge_file_limit_bytes=103,
             transcription_audio_limit_bytes=104,
         ),
-        TEST_USER.model_copy(update={"is_platform_admin": True}),
-        SimpleNamespace(session=lambda: session),
+        SimpleNamespace(
+            session=lambda: session,
+            user=lambda: TEST_USER.model_copy(update={"is_platform_admin": True}),
+        ),
     )
 
     assert result is projection

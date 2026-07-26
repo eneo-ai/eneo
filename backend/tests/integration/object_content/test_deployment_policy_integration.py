@@ -216,6 +216,35 @@ async def test_global_inventory_requires_platform_admin_authority(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_privileged_policy_routes_reject_user_api_keys(
+    client,
+    admin_user_api_key,
+) -> None:
+    headers = {"X-API-Key": admin_user_api_key.key}
+    inventory = await client.get(
+        "/api/v1/admin/object-content-inventory",
+        headers=headers,
+    )
+    replacement = await client.put(
+        "/api/v1/admin/object-content-policy",
+        headers=headers,
+        json={
+            "expected_revision": 1,
+            "new_write_storage_target": "postgres_inline",
+            "session_file_limit_bytes": 101,
+            "session_image_limit_bytes": 102,
+            "knowledge_file_limit_bytes": 103,
+            "transcription_audio_limit_bytes": 104,
+        },
+    )
+
+    for response in (inventory, replacement):
+        assert response.status_code == 403, response.text
+        assert "session token" in response.text.lower()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_independent_api_and_worker_containers_observe_committed_revision(
     admin_user,
     db_container,

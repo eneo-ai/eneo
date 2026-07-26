@@ -7,8 +7,9 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
-from eneo.database.database import get_session
+from eneo.database.database import get_session, get_session_with_transaction
 from eneo.files import file_router
 from eneo.files.file_models import (
     ContentDisposition,
@@ -30,6 +31,100 @@ from eneo.object_content.content import (
     ContentAccessClass,
     ContentRead,
 )
+from tests.fixtures import TEST_USER
+
+
+def _dependency_calls(route: APIRoute) -> set[object]:
+    dependencies = list(route.dependant.dependencies)
+    calls: set[object] = set()
+    while dependencies:
+        dependency = dependencies.pop()
+        calls.add(dependency.call)
+        dependencies.extend(dependency.dependencies)
+    return calls
+
+
+def test_upload_route_reuses_one_non_transactional_authenticated_container() -> None:
+    route = next(
+        route
+        for route in file_router.router.routes
+        if isinstance(route, APIRoute) and route.endpoint is file_router.upload_file
+    )
+
+    assert get_session in _dependency_calls(route)
+    assert get_session_with_transaction not in _dependency_calls(route)
+    assert file_router._require_upload_user_for_creation in {
+        dependency.call for dependency in route.dependant.dependencies
+    }
+
+
+def test_upload_request_resolves_shared_container_once_before_file_work() -> None:
+    now = datetime.now(UTC)
+    saved = FileInfo(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="source.txt",
+        checksum="checksum",
+        size=7,
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        user_id=TEST_USER.id,
+        tenant_id=TEST_USER.tenant_id,
+    )
+
+    class Session:
+        def __init__(self) -> None:
+            self.active = False
+
+        def in_transaction(self) -> bool:
+            return self.active
+
+        @asynccontextmanager
+        async def begin(self):
+            assert not self.active
+            self.active = True
+            try:
+                yield
+            finally:
+                self.active = False
+
+    session = Session()
+    file_service = AsyncMock()
+
+    async def save_file(_upload_file):
+        assert not session.in_transaction()
+        return saved
+
+    file_service.save_file.side_effect = save_file
+    audit_service = AsyncMock()
+    container = MagicMock()
+    container.file_service.return_value = file_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = TEST_USER
+    container.session.return_value = session
+    resolutions = 0
+
+    async def resolve_container():
+        nonlocal resolutions
+        resolutions += 1
+        return container
+
+    app = FastAPI()
+    app.include_router(file_router.router)
+    app.dependency_overrides[file_router._file_upload_container_dependency] = (
+        resolve_container
+    )
+
+    response = TestClient(app).post(
+        "/",
+        files={"upload_file": ("source.txt", b"payload", "text/plain")},
+    )
+
+    assert response.status_code == 200, response.text
+    assert resolutions == 1
+    file_service.save_file.assert_awaited_once()
+    audit_service.log_async.assert_awaited_once()
 
 
 async def test_upload_enqueues_audit_only_after_file_success() -> None:
@@ -88,7 +183,6 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
     result = await file_router.upload_file(
         upload_file=MagicMock(),
         container=Container(),
-        _user_for_creation=None,
     )
 
     assert result == file
@@ -102,7 +196,6 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         await file_router.upload_file(
             upload_file=MagicMock(),
             container=Container(),
-            _user_for_creation=None,
         )
 
     audit_service.log_async.assert_awaited_once()

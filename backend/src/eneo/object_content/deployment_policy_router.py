@@ -1,12 +1,11 @@
 from datetime import datetime
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.auth_dependencies import (
-    get_current_active_user,
     require_platform_admin,
     require_session_auth,
     require_user_identity,
@@ -33,10 +32,37 @@ from eneo.object_content.runtime import (
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-from eneo.users.user import UserInDB
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+_policy_admin_container_dependency = get_container(
+    with_user=True,
+    with_transaction=False,
+)
+_PolicyAdminContainer = Annotated[
+    Container,
+    Depends(_policy_admin_container_dependency),
+]
+
+
+async def _require_policy_session_auth(
+    request: Request,
+    container: _PolicyAdminContainer,
+) -> None:
+    await require_session_auth(container.user(), request)
+
+
+async def _require_policy_user_identity(
+    container: _PolicyAdminContainer,
+) -> None:
+    await require_user_identity(container.user())
+
+
+async def _require_policy_platform_admin(
+    container: _PolicyAdminContainer,
+) -> None:
+    await require_platform_admin(container.user())
 
 
 class CapabilityPublic(BaseModel):
@@ -155,8 +181,8 @@ async def get_deployment_policy(
         Depends(get_container(with_user=True, with_transaction=False)),
     ],
 ) -> DeploymentPolicyPublic:
-    # A separate permission dependency would hold its own request transaction
-    # while this endpoint awaits object-store readiness.
+    # Keep this tenant-admin read on its sole authenticated container while it
+    # awaits object-store readiness.
     validate_permission(container.user(), Permission.ADMIN)
     return await _read_projection(cast(AsyncSession, container.session()))
 
@@ -169,17 +195,14 @@ async def get_deployment_policy(
         "Platform administrators only."
     ),
     dependencies=[
-        Depends(require_session_auth),
-        Depends(require_user_identity),
-        Depends(require_platform_admin),
+        Depends(_require_policy_session_auth),
+        Depends(_require_policy_user_identity),
+        Depends(_require_policy_platform_admin),
     ],
     responses=responses.get_responses([403]),
 )
 async def get_object_content_inventory(
-    container: Annotated[
-        Container,
-        Depends(get_container(with_user=True, with_transaction=False)),
-    ],
+    container: _PolicyAdminContainer,
 ) -> ObjectContentInventoryPublic:
     return await _read_inventory(cast(AsyncSession, container.session()))
 
@@ -193,19 +216,15 @@ async def get_object_content_inventory(
         "and never moves existing content."
     ),
     dependencies=[
-        Depends(require_session_auth),
-        Depends(require_user_identity),
-        Depends(require_platform_admin),
+        Depends(_require_policy_session_auth),
+        Depends(_require_policy_user_identity),
+        Depends(_require_policy_platform_admin),
     ],
     responses=responses.get_responses([403, 409]),
 )
 async def replace_deployment_policy(
     replacement: DeploymentPolicyUpdate,
-    user: Annotated[UserInDB, Depends(get_current_active_user)],
-    container: Annotated[
-        Container,
-        Depends(get_container(with_user=True, with_transaction=False)),
-    ],
+    container: _PolicyAdminContainer,
 ) -> DeploymentPolicyPublic:
     if replacement.new_write_storage_target is StorageKind.OBJECT_STORE:
         capability = next(
@@ -218,6 +237,7 @@ async def replace_deployment_policy(
                 "Object-store target is not selectable."
             )
 
+    user = container.user()
     session = cast(AsyncSession, container.session())
     async with session.begin():
         old = await DeploymentPolicyRepository(session).get()

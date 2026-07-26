@@ -334,6 +334,22 @@ async def test_service_key_creation_endpoints_return_403_with_gate_code(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_service_key_cannot_upload_a_user_owned_file(
+    client,
+    tenant_admin_service_secret,
+) -> None:
+    response = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("source.txt", b"payload", "text/plain")},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+
+    assert response.status_code == 403, response.text
+    assert _has_creation_gate_code(response.json()), response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_bearer_user_can_create_space(client, admin_token):
     """Sanity check — the creation gate must NOT regress bearer auth."""
     resp = await client.post(

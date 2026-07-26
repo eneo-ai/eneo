@@ -845,6 +845,49 @@ tasks:
         complexity_and_deletion:
           - "F13 reuses the existing bounded inventory repository and platform-admin dependency; the policy projection loses duplicate inventory ownership instead of adding tenant filtering or an auth framework."
           - "F14 is O(1) admission at the canonical capture owner and reuses existing target ceilings. No second read, provider branch, setting, extractor abstraction, or compatibility path was added."
+      review_7:
+        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083511715"
+        head: "83e5ab1b5de5dfd17cf5bcdebc6ae02845ab6b48"
+        confirmed_resolved:
+          - "F13"
+          - "F14"
+        findings:
+          - "F15 genuine/High: POST /files, policy PUT, and inventory GET authenticate through a non-transactional route container and again through transactional auth dependencies; pool-sized concurrent long requests can occupy every auth connection while waiting for another connection."
+          - "F16 genuine: a stale frontend platform-admin flag combines policy and inventory in Promise.all, so inventory 403 discards the successful policy and every retry repeats the forbidden inventory request."
+        direction_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T124433Z.md"
+          session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
+          result: "Claude iteration 45 changes_required, GREEN_LIGHT no, MIN_SCORE 7; its correction to preserve declarative guards with one shared callable identity was independently verified and accepted."
+        frozen_plan:
+          - "F15: define one module-level non-transactional authenticated container callable for File upload and one for policy mutation/inventory. Reuse the exact callable identity in endpoint Annotated aliases and thin local guard dependencies so FastAPI resolves one authenticated container per request."
+          - "Thin guards call the existing require_user_for_creation, require_session_auth, require_user_identity, and require_platform_admin functions against container.user()/Request. Do not copy their rules, move guards into bodies, add pure-validator duplication, or build a generic auth framework."
+          - "Remove the policy PUT's separate get_current_active_user actor dependency and use the already-authenticated route container user. Exact source scope is POST /files, policy PUT, and inventory GET; policy GET remains unchanged."
+          - "F15 proof: structural dependency graphs retain explicit fences, contain get_session but no get_session_with_transaction, and real FastAPI request instrumentation observes one shared container resolution with no active transaction while file save/readiness suspends. Preserve existing 403 and activation/admission behavior."
+          - "F16: apply policy independently. Request inventory only while the app-context flag is true and authority has not been revoked. Inventory 403 retains policy, clears inventory, marks authority revoked, renders read-only, and is never retried."
+          - "F16 non-403: retain policy and show a scoped retryable inventory error. Retry only inventory; do not convert it to a page-level load failure or silently hide it."
+        non_goals:
+          - "No repo-wide auth refactor, generic permission module, fake pool abstraction, per-tenant policy, PR2 lifecycle work, fallback, provider branch, or docs expansion without a changed public/operator contract."
+        red_evidence:
+          - "Focused backend route tests => 5 expected failures and 42 passes before implementation: each affected graph still exposed get_session_with_transaction, the shared container callables did not exist, and one-container request invariants were not satisfied."
+          - "The focused Chromium component suite could not collect in the managed macOS profile because Chromium's MachPort rendezvous bootstrap was denied; this environment limitation existed before the frontend implementation and is not behavior evidence."
+        implementation:
+          - "F15: File upload and privileged policy routes now define one non-transactional authenticated container callable each. The endpoint and thin declarative guards share that exact FastAPI dependency identity and reuse the canonical creation/session/identity/platform-admin checks."
+          - "Policy PUT now takes its audit actor from the already-authenticated shared container. No permission rule was copied and policy GET remains on its already-safe single-container path."
+          - "F16: the page loads policy independently, owns inventory state separately, converts inventory 403 into an immediate read-only authority-revoked state, and scopes retryable non-403 inventory failures to inventory alone."
+        green_evidence:
+          - "Focused File/policy route behavior => 47 passed; container authentication/admission transaction behavior => 3 passed. Instrumented FastAPI requests resolve the shared container once and observe no active request transaction while file work or readiness is suspended."
+          - "Focused real authorization contracts => 4 passed: user-owned API keys cannot read global inventory or mutate policy, platform authority remains required, committed PUT projection remains correct, and service keys cannot upload user-owned files."
+          - "Complete object-content PostgreSQL/SeaweedFS integrations => 119 passed in 301.24 seconds. Whole backend non-integration => 3979 passed, 1256 deselected in 33.02 seconds."
+          - "Strict whole-backend Pyright => 0 errors, 0 warnings, 0 informations; changed Python Ruff/format => passed."
+          - "OpenAPI-to-generated-schema drift => exact match. Eneo JS => 15 tests passed and lint passed; Svelte check => 0 errors/0 warnings; web lint and message parity/duplicate checks => passed."
+        frontend_behavior:
+          - "Component proofs cover stale platform-admin=true plus inventory 403 retaining policy/read-only state with no inventory retry, and inventory 500 retaining policy with a scoped successful inventory-only retry."
+          - "The focused component suite remains blocked before collection only by the managed Chromium MachPort permission. Orchestrator/CI must execute it in the normal browser-capable profile before publication."
+        complexity_and_deletion:
+          - "F15 removes duplicate authentication/transaction ownership from three routes and reuses existing guards; request work remains O(1) in dependency/session count with no fake pool model or new auth layer."
+          - "F16 uses one page-local inventory state owner and one retry path. It removes Promise.all coupling without a second policy fetch, hidden retry loop, new store, or API contract."
+        docs_disposition:
+          - "No docs-site or deployment-doc change is required in Review 7: public storage policy, PostgreSQL-default/object-store-optional setup, inventory authority, and operator contracts are unchanged; this cycle corrects internal transaction lifetime and frontend error recovery only."
       next_gate: "Orchestrator verifies the exact unstaged freeze and runs the focused Chromium component test in a browser-capable profile before any commit; fresh review and exact-head CI remain mandatory."
 
   - id: T007

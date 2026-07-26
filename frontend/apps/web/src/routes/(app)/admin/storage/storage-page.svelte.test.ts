@@ -188,6 +188,44 @@ describe("admin storage settings page", () => {
     expect(getInventory).not.toHaveBeenCalled();
   });
 
+  test("keeps policy visible and stops inventory retries after platform authority is revoked", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getInventory.mockRejectedValue({ status: 403 });
+
+    render(StoragePage);
+
+    await expect
+      .element(page.getByRole("heading", { name: "storage_settings_target_title" }))
+      .toBeVisible();
+    await expect.element(page.getByText("storage_settings_read_only_title")).toBeVisible();
+    await expect.element(page.getByText("storage_inventory_title")).not.toBeInTheDocument();
+    await expect.element(page.getByText("storage_inventory_error_title")).not.toBeInTheDocument();
+    expect(getPolicy).toHaveBeenCalledTimes(1);
+    expect(getInventory).toHaveBeenCalledTimes(1);
+  });
+
+  test("shows a scoped inventory error and retries only inventory", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getInventory.mockRejectedValueOnce(new Error("inventory unavailable"));
+
+    render(StoragePage);
+
+    await expect
+      .element(page.getByRole("heading", { name: "storage_settings_target_title" }))
+      .toBeVisible();
+    await expect.element(page.getByText("storage_inventory_error_title")).toBeVisible();
+
+    getInventory.mockResolvedValueOnce(inventory());
+    await page.getByRole("button", { name: "retry" }).click();
+
+    await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
+    await expect.element(page.getByText("storage_inventory_error_title")).not.toBeInTheDocument();
+    expect(getPolicy).toHaveBeenCalledTimes(1);
+    expect(getInventory).toHaveBeenCalledTimes(2);
+  });
+
   test("lets a platform administrator replace all policy values and reports pending and success", async () => {
     testUser.isPlatformAdmin = true;
     const initial = policy({

@@ -69,7 +69,51 @@ async def test_inactive_user_setup_uses_non_ambient_authentication_transaction(
 
     assert resolved is container
     assert session.begin_calls == 1
+    assert not session.in_transaction()
     authenticate.assert_awaited_once()
+
+
+async def test_upload_admission_finishes_before_the_route_uses_its_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _Session()
+    user = SimpleNamespace(is_active=True)
+    authenticate = AsyncMock(return_value=user)
+    container = SimpleNamespace(
+        session=lambda: session,
+        user_service=lambda: SimpleNamespace(authenticate=authenticate),
+    )
+
+    async def _load_upload_admission(resolved_container: object) -> None:
+        assert resolved_container is container
+        assert session.in_transaction()
+
+    monkeypatch.setattr(
+        container_dependency,
+        "load_container_upload_admission",
+        _load_upload_admission,
+    )
+    monkeypatch.setattr(
+        container_dependency,
+        "override_user",
+        lambda *, container, user: container,
+    )
+
+    dependency = container_dependency.get_container(
+        with_user=True,
+        with_transaction=False,
+        with_upload_admission=True,
+    )
+    resolved = await dependency(
+        request=SimpleNamespace(method="POST"),
+        token="token",
+        api_key="",
+        container=container,
+    )
+
+    assert resolved is container
+    assert session.begin_calls == 1
+    assert not session.in_transaction()
 
 
 async def test_load_container_upload_admission_binds_one_immutable_snapshot(

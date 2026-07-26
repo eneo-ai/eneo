@@ -42,26 +42,33 @@ from eneo.server.protocol import responses
 
 router = APIRouter()
 
+_file_upload_container_dependency = get_container(
+    with_user=True,
+    with_transaction=False,
+    with_upload_admission=True,
+)
+_FileUploadContainer = Annotated[
+    Container,
+    Depends(_file_upload_container_dependency),
+]
+
+
+async def _require_upload_user_for_creation(
+    container: _FileUploadContainer,
+) -> None:
+    await require_user_for_creation(container.user())
+
 
 @router.post(
     "/",
     response_model=FilePublic,
     responses=responses.get_responses([400, 403, 413, 415, 503]),
     description="Upload a file; rejects unsupported media types and oversized files.",
+    dependencies=[Depends(_require_upload_user_for_creation)],
 )
 async def upload_file(
     upload_file: UploadFile,
-    container: Annotated[
-        Container,
-        Depends(
-            get_container(
-                with_user=True,
-                with_transaction=False,
-                with_upload_admission=True,
-            )
-        ),
-    ],
-    _user_for_creation: None = Depends(require_user_for_creation),
+    container: _FileUploadContainer,
 ):
     service = container.file_service()
     current_user = container.user()

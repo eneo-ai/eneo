@@ -23,6 +23,7 @@
   type ReadinessCode = DeploymentPolicy["capabilities"][number]["readiness_code"];
   type UploadUseCase = DeploymentPolicy["limits"][number]["use_case"];
   type ContentState = ObjectContentInventory["inventory"][number]["state"];
+  type InventoryStatus = "idle" | "loading" | "error";
 
   const DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE = 9046;
   const OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE = 9047;
@@ -32,6 +33,7 @@
 
   let deploymentPolicy = $state<DeploymentPolicy | null>(null);
   let contentInventory = $state<ObjectContentInventory | null>(null);
+  let inventoryStatus = $state<InventoryStatus>("idle");
   let loading = $state(true);
   let reloading = $state(false);
   let loadError = $state(false);
@@ -88,27 +90,50 @@
     if (initialLoad) loading = true;
     else reloading = true;
     loadError = false;
-    contentInventory = null;
 
     try {
-      const [nextPolicy, nextInventory] = await Promise.all([
-        eneo.objectContentPolicy.get(),
-        user.is_platform_admin === true
-          ? eneo.objectContentPolicy.getInventory()
-          : Promise.resolve(null)
-      ]);
+      const nextPolicy = await eneo.objectContentPolicy.get();
       applyPolicy(nextPolicy);
-      contentInventory = nextInventory;
       stale = false;
       targetUnavailable = false;
       saveOutcomeUnknown = false;
       saveSuccess = false;
     } catch (error: unknown) {
-      if (hasStatus(error, 403)) authorityRevoked = true;
+      if (hasStatus(error, 403)) {
+        authorityRevoked = true;
+        contentInventory = null;
+        inventoryStatus = "idle";
+      }
       loadError = true;
+      return;
     } finally {
       loading = false;
       reloading = false;
+    }
+
+    await loadInventory();
+  }
+
+  async function loadInventory() {
+    if (user.is_platform_admin !== true || authorityRevoked) {
+      contentInventory = null;
+      inventoryStatus = "idle";
+      return;
+    }
+
+    contentInventory = null;
+    inventoryStatus = "loading";
+    try {
+      contentInventory = await eneo.objectContentPolicy.getInventory();
+      inventoryStatus = "idle";
+    } catch (error: unknown) {
+      contentInventory = null;
+      if (hasStatus(error, 403)) {
+        authorityRevoked = true;
+        inventoryStatus = "idle";
+      } else {
+        inventoryStatus = "error";
+      }
     }
   }
 
@@ -151,6 +176,7 @@
       if (hasStatus(error, 403)) {
         authorityRevoked = true;
         contentInventory = null;
+        inventoryStatus = "idle";
       } else if (
         error instanceof EneoError &&
         error.code === DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE
@@ -596,7 +622,7 @@
             </div>
           </section>
 
-          {#if contentInventory}
+          {#if user.is_platform_admin === true && !authorityRevoked}
             <section class="space-y-4 pb-8">
               <div class="max-w-3xl space-y-1">
                 <h2 class="text-lg font-semibold">{m.storage_inventory_title()}</h2>
@@ -604,11 +630,27 @@
                   {m.storage_inventory_description()}
                 </p>
               </div>
-              {#if contentInventory.inventory.length === 0}
+              {#if inventoryStatus === "loading"}
+                <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
+                  <Loader2 class="size-4 animate-spin" />
+                  {m.storage_inventory_loading()}
+                </p>
+              {:else if inventoryStatus === "error"}
+                <Alert.Root variant="destructive" aria-live="assertive">
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_inventory_error_title()}</Alert.Title>
+                  <Alert.Description>
+                    <p>{m.storage_inventory_error_description()}</p>
+                    <Button class="mt-3" variant="outline" onclick={loadInventory}>
+                      {m.retry()}
+                    </Button>
+                  </Alert.Description>
+                </Alert.Root>
+              {:else if contentInventory?.inventory.length === 0}
                 <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
                   {m.storage_inventory_empty()}
                 </p>
-              {:else}
+              {:else if contentInventory}
                 <div class="border-default overflow-hidden rounded-lg border">
                   <Table.Root class="min-w-[640px]">
                     <Table.Caption class="sr-only">
