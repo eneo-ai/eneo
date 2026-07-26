@@ -8,7 +8,7 @@ canonical hashes of both sides and the field paths that changed.
 Columns are nullable: operations accepted before this migration have no prior
 payload to backfill, and that absence is honest rather than reconstructed.
 
-Revision ID: 202607250930_rerun_input_revision
+Revision ID: 202607250930_rerun_input_chain
 Revises: 202607232300_flow_run_job_index
 Create Date: 2026-07-25 09:30:00.000000
 """
@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from alembic import op
 
-revision = "202607250930_rerun_input_revision"
+revision = "202607250930_rerun_input_chain"
 down_revision = "202607232300_flow_run_job_index"
 branch_labels = None
 depends_on = None
