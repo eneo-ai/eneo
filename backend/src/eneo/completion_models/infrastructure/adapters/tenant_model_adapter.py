@@ -575,20 +575,22 @@ class TenantModelAdapter(CompletionModelAdapter):
             reasoning_tokens=reasoning_tokens,
         )
 
-    def _accumulate_usage(
-        self, existing: TokenUsage | None, response: _LiteLLMHasUsage
+    @staticmethod
+    def _combine_usage(
+        existing: TokenUsage | None, new: TokenUsage | None
     ) -> TokenUsage:
-        """Accumulate token usage from a follow-up LiteLLM response."""
-        new = self._extract_usage(response)
-        if not existing:
-            return new or TokenUsage()
-        if not new:
-            return existing
+        """Combine provider calls without presenting partial totals as complete.
+
+        A dimension is summed only when both calls report it. An all-``None``
+        result means at least one contributing call omitted usage entirely.
+        """
+        if existing is None or new is None:
+            return TokenUsage()
 
         def _add(a: int | None, b: int | None) -> int | None:
-            if a is None and b is None:
+            if a is None or b is None:
                 return None
-            return (a or 0) + (b or 0)
+            return a + b
 
         return TokenUsage(
             prompt_tokens=_add(existing.prompt_tokens, new.prompt_tokens),
@@ -932,7 +934,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         retry_without_capability_safe=False,
                     )
                     completed_provider_calls += 1
-                    usage = self._accumulate_usage(usage, response)
+                    usage = self._combine_usage(usage, self._extract_usage(response))
                     if not response.choices:
                         break
                     choice = response.choices[0]
@@ -1203,6 +1205,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.has_tool_calls: bool = False
                     self.tool_calls_acc: dict[int, _AccumulatedToolCall] = {}
                     self.usage: TokenUsage | None = None
+                    self.drained_a_stream: bool = False
 
             result = _StreamResult()
 
@@ -1214,6 +1217,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 inside_thinking = False
                 thinking_stripped = False
                 pending_emitted: set[int] = set()
+                stream_usage: TokenUsage | None = None
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
 
@@ -1223,13 +1227,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     # Capture usage from final chunk (when stream_options include_usage is set)
                     chunk_usage_obj = getattr(chunk, "usage", None)
                     if chunk_usage_obj:
-                        chunk_usage = self._extract_usage(chunk)
-                        if chunk_usage:
-                            res.usage = (
-                                self._accumulate_usage(res.usage, chunk)
-                                if res.usage
-                                else chunk_usage
-                            )
+                        # LiteLLM usage chunks are cumulative snapshots. Retain
+                        # the latest snapshot, then fold once when the stream ends.
+                        stream_usage = self._extract_usage(chunk)
 
                     if not chunk.choices:
                         continue
@@ -1344,6 +1344,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                             if cleaned:
                                 yield Completion(text=cleaned)
                         buffer = ""
+
+                res.usage = (
+                    self._combine_usage(res.usage, stream_usage)
+                    if res.drained_a_stream
+                    else stream_usage
+                )
+                res.drained_a_stream = True
 
             # --- Drain initial stream ---
             async for comp in _drain_stream(source_stream, result):

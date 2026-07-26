@@ -45,29 +45,64 @@ def _make_adapter() -> TenantModelAdapter:
     return adapter
 
 
+def _usage(
+    *,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    reasoning_tokens: int | None,
+):
+    return SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=reasoning_tokens),
+    )
+
+
+def _response(
+    *,
+    response_id: str,
+    content: str | None = None,
+    tool_calls: list[SimpleNamespace] | None = None,
+    finish_reason: str = "stop",
+    usage: SimpleNamespace | None = None,
+):
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=content, tool_calls=tool_calls),
+                finish_reason=finish_reason,
+            )
+        ],
+        id=response_id,
+        usage=usage,
+    )
+    return response
+
+
+def _tool_call():
+    return SimpleNamespace(
+        id="call_1",
+        function=SimpleNamespace(
+            name="server__tool",
+            arguments='{"q":"hello"}',
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_response_executes_non_streaming_tool_round():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
 
-    first_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            SimpleNamespace(
-                id="call_1",
-                function=SimpleNamespace(
-                    name="server__tool",
-                    arguments='{"q":"hello"}',
-                ),
-            )
-        ],
+    first_response = _response(
+        response_id="resp-initial",
+        tool_calls=[_tool_call()],
+        finish_reason="tool_calls",
     )
-    first_choice = SimpleNamespace(message=first_message, finish_reason="tool_calls")
-    first_response = SimpleNamespace(choices=[first_choice], id="resp-initial")
-
-    follow_up_message = SimpleNamespace(content="final answer", tool_calls=None)
-    follow_up_choice = SimpleNamespace(message=follow_up_message, finish_reason="stop")
-    follow_up_response = SimpleNamespace(choices=[follow_up_choice], id="resp-final")
+    follow_up_response = _response(
+        response_id="resp-final",
+        content="final answer",
+    )
 
     mocked_acompletion = AsyncMock(side_effect=[first_response, follow_up_response])
 
@@ -85,6 +120,109 @@ async def test_get_response_executes_non_streaming_tool_round():
     assert completion.provider_response_id == "resp-final"
     assert mocked_acompletion.await_count == 2
     assert mcp_proxy.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_response_propagates_unknown_usage_dimensions_across_tool_round():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    first_response = _response(
+        response_id="resp-initial",
+        tool_calls=[_tool_call()],
+        finish_reason="tool_calls",
+        usage=_usage(
+            prompt_tokens=10,
+            completion_tokens=None,
+            reasoning_tokens=0,
+        ),
+    )
+    follow_up_response = _response(
+        response_id="resp-final",
+        content="final answer",
+        usage=_usage(
+            prompt_tokens=None,
+            completion_tokens=4,
+            reasoning_tokens=5,
+        ),
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=[first_response, follow_up_response]),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.usage is not None
+    assert completion.usage.prompt_tokens is None
+    assert completion.usage.completion_tokens is None
+    assert completion.usage.reasoning_tokens == 5
+
+
+@pytest.mark.asyncio
+async def test_get_response_missing_follow_up_usage_makes_aggregate_unknown():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    first_response = _response(
+        response_id="resp-initial",
+        tool_calls=[_tool_call()],
+        finish_reason="tool_calls",
+        usage=_usage(
+            prompt_tokens=10,
+            completion_tokens=4,
+            reasoning_tokens=0,
+        ),
+    )
+    follow_up_response = _response(
+        response_id="resp-final",
+        content="final answer",
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=[first_response, follow_up_response]),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.usage is not None
+    assert completion.usage.prompt_tokens is None
+    assert completion.usage.completion_tokens is None
+    assert completion.usage.reasoning_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_get_response_preserves_single_call_usage():
+    adapter = _make_adapter()
+    response = _response(
+        response_id="resp-single",
+        content="answer",
+        usage=_usage(
+            prompt_tokens=0,
+            completion_tokens=4,
+            reasoning_tokens=None,
+        ),
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=response),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+        )
+
+    assert completion.usage is not None
+    assert completion.usage.prompt_tokens == 0
+    assert completion.usage.completion_tokens == 4
+    assert completion.usage.reasoning_tokens is None
 
 
 @pytest.mark.asyncio

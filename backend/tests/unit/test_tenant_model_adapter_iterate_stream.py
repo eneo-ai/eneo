@@ -88,6 +88,24 @@ def _text_chunk(text: str, finish_reason: str | None = None):
     return SimpleNamespace(choices=[choice])
 
 
+def _usage_chunk(
+    *,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    reasoning_tokens: int | None,
+):
+    return SimpleNamespace(
+        choices=[],
+        usage=SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            completion_tokens_details=SimpleNamespace(
+                reasoning_tokens=reasoning_tokens
+            ),
+        ),
+    )
+
+
 def _response(*, content=None, tool_calls=None, finish_reason="stop"):
     message = SimpleNamespace(
         content=content,
@@ -501,6 +519,147 @@ def _tool_call_events(completions):
         for c in completions
         if c.response_type == ResponseType.TOOL_CALL and c.tool_calls_metadata
     ]
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_remembers_missing_usage_before_known_follow_up():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream(
+        [
+            _text_chunk("done", finish_reason="stop"),
+            _usage_chunk(
+                prompt_tokens=6,
+                completion_tokens=2,
+                reasoning_tokens=0,
+            ),
+        ]
+    )
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    final = next(completion for completion in completions if completion.stop)
+    assert final.usage is not None
+    assert final.usage.prompt_tokens is None
+    assert final.usage.completion_tokens is None
+    assert final.usage.reasoning_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_aggregates_each_usage_dimension_conservatively():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream(
+        [
+            _text_chunk("done", finish_reason="stop"),
+            _usage_chunk(
+                prompt_tokens=6,
+                completion_tokens=2,
+                reasoning_tokens=5,
+            ),
+        ]
+    )
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_chunk(),
+            _usage_chunk(
+                prompt_tokens=10,
+                completion_tokens=None,
+                reasoning_tokens=0,
+            ),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    final = next(completion for completion in completions if completion.stop)
+    assert final.usage is not None
+    assert final.usage.prompt_tokens == 16
+    assert final.usage.completion_tokens is None
+    assert final.usage.reasoning_tokens == 5
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_missing_follow_up_usage_makes_aggregate_unknown():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_chunk(),
+            _usage_chunk(
+                prompt_tokens=10,
+                completion_tokens=4,
+                reasoning_tokens=0,
+            ),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(adapter, stream)
+
+    final = next(completion for completion in completions if completion.stop)
+    assert final.usage is not None
+    assert final.usage.prompt_tokens is None
+    assert final.usage.completion_tokens is None
+    assert final.usage.reasoning_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_preserves_missing_usage_for_single_stream():
+    adapter = _make_adapter()
+    stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+
+    completions = await _collect(adapter, stream)
+
+    final = next(completion for completion in completions if completion.stop)
+    assert final.usage is None
 
 
 @pytest.mark.asyncio
