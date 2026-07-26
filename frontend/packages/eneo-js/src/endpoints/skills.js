@@ -359,16 +359,19 @@ export function initSkills(client) {
     },
 
     /**
-     * List the ordered, revision-pinned Skills bound to an Assistant.
+     * Read an Assistant's saved Skill bindings and exact initial runtime state.
      * @param {{spaceId: string, assistantId: string}} params
-     * @returns {Promise<SkillBindingSummary[]>}
+     * @returns {Promise<import('../types/resources').AssistantSkillConfiguration>}
      * @throws {EneoError}
      */
-    listAssistantBindings: async ({ spaceId, assistantId }) => {
-      return await client.fetch("/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/", {
-        method: "get",
-        params: { path: { space_id: spaceId, assistant_id: assistantId } }
-      });
+    getAssistantConfiguration: async ({ spaceId, assistantId }) => {
+      return await client.fetch(
+        "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
+        {
+          method: "get",
+          params: { path: { space_id: spaceId, assistant_id: assistantId } }
+        }
+      );
     },
 
     /**

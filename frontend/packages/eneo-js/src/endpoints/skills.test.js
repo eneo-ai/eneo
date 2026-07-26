@@ -368,3 +368,38 @@ test("catalogue reads omit absent optional query values", async () => {
 
   assert.deepEqual(urls, ["https://eneo.example/api/v1/skills/catalogue/?limit=25"]);
 });
+
+test("Assistant configuration uses the body-free runtime projection route", async () => {
+  const calls = [];
+  const configuration = {
+    bindings: [],
+    runtime: {
+      effective_model_id: "model-1",
+      effective_mode: "selective",
+      fallback_reason: null,
+      skill_context_tokens: 120,
+      skill_context_token_limit: 800,
+      token_count_source: "litellm"
+    }
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return configuration;
+    }
+  });
+
+  assert.equal(
+    await skills.getAssistantConfiguration({ spaceId: "space-1", assistantId: "assistant-1" }),
+    configuration
+  );
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
+      request: {
+        method: "get",
+        params: { path: { space_id: "space-1", assistant_id: "assistant-1" } }
+      }
+    }
+  ]);
+});

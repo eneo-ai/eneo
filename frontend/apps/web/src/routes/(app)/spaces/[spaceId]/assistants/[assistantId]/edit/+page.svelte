@@ -4,7 +4,7 @@
 
   import { Button, Input, Tooltip } from "@eneo/ui";
   import { IconSparkles } from "@eneo/icons/sparkles";
-  import { afterNavigate, beforeNavigate } from "$app/navigation";
+  import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
   import { fade } from "svelte/transition";
@@ -61,11 +61,17 @@
       assistant: data.assistant,
       skillBindings: data.skillBindings.map((binding) => ({
         skill_id: binding.skill_id,
-        skill_revision_id: binding.skill_revision_id
+        skill_revision_id: binding.skill_revision_id,
+        activation_mode: binding.activation_mode
       })),
       eneo: data.eneo,
-      onUpdateDone() {
-        refreshCurrentSpace("applications");
+      onUpdateDone(_assistant, changes) {
+        void refreshCurrentSpace("applications");
+        if (changes.skill_bindings !== undefined || changes.completion_model !== undefined) {
+          void invalidate("space:skills").catch((error) => {
+            console.error("Failed to refresh Assistant Skill runtime", error);
+          });
+        }
       }
     })
   );
@@ -418,6 +424,8 @@
                 bind:bindings={$update.skill_bindings}
                 initialCatalogPage={data.skills}
                 bindingSummaries={data.skillBindings}
+                supportsActivationModes
+                skillRuntime={data.skillRuntime}
                 canEditBindings={data.assistant.permissions?.includes("edit") ?? false}
                 canCreateSkills={$currentSpace.organization !== true &&
                   $currentSpace.hasPermission("create", "skill")}

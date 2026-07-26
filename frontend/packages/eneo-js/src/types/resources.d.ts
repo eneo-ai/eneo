@@ -14,6 +14,15 @@ export type SkillRevisionSummaryPage =
   components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
 export type SkillBindingSummary = components["schemas"]["SkillBindingSummary"];
 export type SkillBindingReferenceInput = components["schemas"]["SkillBindingReferenceInput"];
+export type SkillActivationMode = components["schemas"]["SkillActivationMode"];
+export type AssistantSkillBindingInput = components["schemas"]["AssistantSkillBindingInput"];
+export type AssistantSkillBindingSummary = components["schemas"]["AssistantSkillBindingSummary"];
+export type AssistantSkillConfiguration =
+  components["schemas"]["AssistantSkillConfigurationPublic"];
+export type AssistantSkillRuntimeSummary = components["schemas"]["AssistantSkillRuntimeSummary"];
+export type SkillRuntimePolicy = components["schemas"]["SkillRuntimePolicyPublic"];
+export type SkillRuntimePolicyUpdate = components["schemas"]["SkillRuntimePolicyUpdate"];
+export type SkillRuntimeModelProjections = components["schemas"]["SkillRuntimeModelProjections"];
 export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPublic"];
 export type OrganizationSkillSummaryPublic =
   components["schemas"]["OrganizationSkillSummaryPublic"];
