@@ -28,6 +28,15 @@ class ExtractionError(Exception):
         super().__init__(self.message)
 
 
+class NoExtractableTextError(ExtractionError):
+    """Raised when extraction or transcription produces no usable text."""
+
+    def __init__(self, filename: str):
+        super().__init__(
+            f"File '{filename}' contains no extractable text", "NO_EXTRACTABLE_TEXT"
+        )
+
+
 class EncryptedFileError(ExtractionError):
     """Raised for password-protected files."""
 
