@@ -175,7 +175,7 @@ class InfoBlobRepository:
         else:
             raise ValueError("InfoBlob publication requires a source owner")
 
-        record = await self.session.scalar(
+        record = await self.delegate.get_record_from_query(
             sa.select(InfoBlobs).where(*conditions).with_for_update()
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None

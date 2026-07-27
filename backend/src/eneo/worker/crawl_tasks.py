@@ -1201,6 +1201,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         crawled_titles.add(filename)
 
                     except Exception:
+                        failed_titles.add(filename)
                         logger.exception(
                             "Exception while uploading file",
                             extra={

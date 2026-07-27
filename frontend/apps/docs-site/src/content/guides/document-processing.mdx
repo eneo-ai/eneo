@@ -21,7 +21,9 @@ All content is:
 Updating a document does not remove the working knowledge first. Eneo publishes
 the replacement text and all vectors together. If extraction or embedding
 fails, search continues to use the previous complete version. Uploading the
-same content again reuses the current version without another embedding call.
+same content again with the same embedding model reuses the current version
+without another embedding call. Changing the model builds compatible vectors
+before the replacement becomes searchable.
 
 This is separate from file-byte placement. PostgreSQL remains the complete
 default; compatible object storage is optional and does not replace pgvector.

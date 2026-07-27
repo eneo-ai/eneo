@@ -5,7 +5,7 @@
 Eneo keeps one complete searchable version active for each logical knowledge
 document. A replacement becomes active only after its text, chunks, and
 embeddings are ready in one transaction. Failure preserves the previous active
-version. Byte-identical input is a no-op.
+version. Byte-identical input is a no-op while the embedding model is unchanged.
 
 PostgreSQL remains a complete default deployment. Compatible object storage is
 optional and only affects original file-byte placement; searchable knowledge
@@ -28,7 +28,8 @@ text, chunks, embeddings, and version state remain in PostgreSQL/pgvector.
 ## Required behavior
 
 1. Lock the logical source identity and current active row.
-2. Return the existing row without embedding when the SHA-256 digest is equal.
+2. Return the existing row without embedding when the SHA-256 digest and
+   embedding model are unchanged.
 3. Otherwise supersede the current row, insert the replacement and all chunks,
    and update size within one savepoint/transaction.
 4. Roll back the whole replacement on quota, embedding, chunking, database, or

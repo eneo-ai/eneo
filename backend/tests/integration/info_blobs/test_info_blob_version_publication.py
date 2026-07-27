@@ -17,9 +17,11 @@ from eneo.database.tables.info_blobs_table import (
 )
 from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.websites_table import Websites
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import InfoBlobAdd
 from eneo.main.exceptions import QuotaExceededException
+from eneo.websites.domain.crawl_run import CrawlType
 
 
 async def _seed_active_document(
@@ -317,6 +319,76 @@ async def test_same_content_is_reembedded_after_model_change(db_container) -> No
             group_ids=[group.id],
         )
         assert [match.info_blob_id for match in matches] == [published.id]
+
+
+async def test_changed_website_file_publishes_from_a_fresh_session(
+    db_container,
+) -> None:
+    title = "downloaded-website-file.txt"
+    previous_text = "Previous downloaded file content"
+    replacement_text = "Replacement downloaded file content"
+
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        embedding_model_id = await session.scalar(
+            sa.select(EmbeddingModels.id).limit(1)
+        )
+        assert embedding_model_id is not None
+        website = Websites(
+            name="Knowledge version website",
+            url="https://knowledge-version.example.com",
+            download_files=True,
+            crawl_type=CrawlType.CRAWL,
+            update_interval="never",
+            size=0,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            embedding_model_id=embedding_model_id,
+        )
+        session.add(website)
+        await session.flush()
+        previous = InfoBlobs(
+            title=title,
+            text=previous_text,
+            size=len(previous_text.encode("utf-8")),
+            content_hash=sha256(previous_text.encode("utf-8")).digest(),
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            website_id=website.id,
+            embedding_model_id=embedding_model_id,
+        )
+        session.add(previous)
+        await session.flush()
+        website_id = website.id
+        previous_id = previous.id
+        source_id = previous.source_id
+
+    async with db_container() as container:
+        embedding_model = await container.embedding_model_repo2().one(
+            embedding_model_id
+        )
+        embeddings = AsyncMock()
+        embeddings.get_embeddings.side_effect = _embedding_result
+        container.create_embeddings_service.override(providers.Object(embeddings))
+
+        published = await container.text_processor().process_text(
+            text=replacement_text,
+            title=title,
+            embedding_model=embedding_model,
+            website_id=website_id,
+        )
+        versions = (
+            await container.session().scalars(
+                sa.select(InfoBlobs).where(InfoBlobs.source_id == source_id)
+            )
+        ).all()
+        assert {version.id: version.version_state for version in versions} == {
+            previous_id: InfoBlobVersionState.SUPERSEDED.value,
+            published.id: InfoBlobVersionState.ACTIVE.value,
+        }
 
 
 async def test_sharepoint_family_delete_reads_only_active_version(
