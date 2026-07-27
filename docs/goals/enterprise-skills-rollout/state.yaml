@@ -33,9 +33,9 @@ continuity:
   completed_write_tasks_in_thread: 7
   handoff_note: null
   last_handoff_at: null
-  last_verified_revision: "d528ec0af6d15a9343090e3e04303d74ce530d9b"
+  last_verified_revision: "fb90e120dd83e33b69f759924783c7cfa2f2fb93"
 
-active_task: T021
+active_task: T020
 
 tasks:
   - id: T001
@@ -1123,7 +1123,7 @@ tasks:
   - id: T021
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Secure the existing Admin Insights message-logging endpoint with tenant-scoped, body-free authorization before any message or attachment hydration."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/608"
@@ -1154,25 +1154,75 @@ tasks:
     stop_if:
       - "The change requires a second Insights authorization owner or a public payload change."
       - "Authorization cannot be proven before full message hydration."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Secured Admin Insights message logging with session-only authentication, canonical Insights and Space access, and authorization before message or attachment hydration."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/608"
+      merged_pr: 610
+      source_head: "87010d995b5d78e35b0e244e0059e828c8a26058"
+      merge_commit: "fb90e120dd83e33b69f759924783c7cfa2f2fb93"
+      merged_at: "2026-07-27T07:45:02Z"
+      github_checks: "All required checks passed, including Backend tests, Frontend, Frontend E2E, schema drift, coverage diff, dependency review, and Docker builds."
+      final_review: "Review 2 found no current in-scope findings with complete changed-file coverage."
+      review_url: "https://github.com/eneo-ai/eneo/pull/610#issuecomment-5088400688"
+      changed_files:
+        - "backend/src/eneo/analysis/analysis_service.py"
+        - "backend/src/eneo/authentication/auth_dependencies.py"
+        - "backend/src/eneo/logging/logging_router.py"
+        - "backend/src/eneo/questions/questions_repo.py"
+        - "backend/tests/"
+        - "frontend/apps/docs-site/src/content/docs/api-key-management.mdx"
+        - "frontend/packages/eneo-js/src/types/schema.d.ts"
+        - "docs/goals/enterprise-skills-rollout/state.yaml"
+      commands:
+        - "Focused unit and contract pytest suites: 82 tests passed; compatibility pass: 39 tests passed."
+        - "Focused PostgreSQL authorization suite: 4 tests passed; object-content hydration regression: 1 test passed."
+        - "Route-coverage pytest suite: 42 tests passed."
+        - "Ruff check and format, Pyright, generated schema drift, Goal Maker validation, and pre-push hooks: passed."
+      verification:
+        - "82 focused unit and contract tests passed."
+        - "4 PostgreSQL authorization tests and the object-content hydration regression passed."
+        - "42 route-coverage tests passed."
+        - "Ruff, Ruff format, Pyright, schema drift, goal validation, and pre-push hooks passed."
+        - "Claude verification passed with score 8."
 
   - id: T020
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
-    objective: "Add permission-gated, body-free Skill activation evidence to the existing chat debug panel without changing normal chat behavior."
+    objective: "Add permission-gated, body-free Skill activation evidence to an opt-in chat debug panel without changing normal chat behavior."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/605"
     inputs:
       - "Completed T016 and T021 receipts"
-      - "Existing SHOW_CHAT_DEBUG_PANEL feature flag and generic chat debug panel"
+      - "User-approved opt-in SHOW_CHAT_DEBUG_PANEL behavior"
       - "Persisted body-free Question Skill activation evidence from T013-T015"
-      - "Current chat page and shadcn-svelte Sheet primitives"
+      - "Current chat page metadata and shadcn-svelte Sheet primitives"
+    allowed_files:
+      - "backend/alembic/versions/202607261730_grant_assistant_debug_permission.py"
+      - "backend/src/eneo/conversations/"
+      - "backend/src/eneo/main/config.py"
+      - "backend/src/eneo/questions/questions_repo.py"
+      - "backend/src/eneo/roles/permissions.py"
+      - "backend/src/eneo/roles/permissions_mapper.py"
+      - "backend/src/eneo/server/dependencies/predefined_roles.yml"
+      - "backend/src/eneo/sessions/"
+      - "backend/tests/"
+      - "docs/deployment/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/apps/web/.env.example"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/core/flags.server.ts"
+      - "frontend/apps/web/src/lib/features/chat/"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/chat/+page.svelte"
+      - "frontend/packages/eneo-js/src/endpoints/conversations.js"
+      - "frontend/packages/eneo-js/src/types/"
+      - "docs/goals/enterprise-skills-rollout/"
     constraints:
       - "Normal chat requests never enable capture, extended logging, or provider-body hydration."
       - "Keep /logging/{message_id}/ and MessageLogging owned by Admin Insights; T020 uses a separate, narrow conversation diagnostics endpoint."
       - "Authorize the session partner and current Assistant access before reading one message's scalar Skill evidence."
-      - "Preserve generic model, token, MCP/tool, knowledge, and file diagnostics already available from the loaded conversation turn."
+      - "Use already-loaded conversation metadata for generic model, token, MCP/tool, knowledge, and file diagnostics."
       - "Never expose message bodies, Skill instructions, administrator incident reasons, credentials, hidden reasoning, tool arguments/results, or file contents."
       - "Use installed shadcn-svelte components and the existing design system; no new UI dependency or parallel debug store."
     verify:
@@ -1361,7 +1411,7 @@ tasks:
     assignee: Judge
     status: queued
     reasoning_hint: high
-    objective: "Audit whether the full accepted Enterprise Skills roadmap is complete without avoidable technical debt."
+    objective: "Audit whether the current Enterprise Skills tranche through T018 is complete without avoidable technical debt; marketplace, import/export, and editable Space copies remain explicitly deferred."
     inputs:
       - "All completed task receipts"
       - "Current roadmap"

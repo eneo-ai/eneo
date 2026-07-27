@@ -298,13 +298,25 @@ Review the adoption view and update or remove unsafe versions before unblocking.
   automatically.
 - This release has no external Skill marketplace or package installation flow.
 
+## Inspect Skill activation
+
+Deployments can expose an opt-in **Debug** panel in Assistant and Personal Chat
+with `SHOW_CHAT_DEBUG_PANEL=true` in both backend and frontend configuration.
+Only owners and users with the Assistant debug permission see it. Select a
+persisted turn to inspect which exact Skill revisions were available, entered
+the model context, were blocked, or were rejected, along with token
+measurement, activation rounds, and selection time.
+
+The panel is for development and support diagnostics. It does not expose Skill
+instructions, model reasoning, credentials, or an administrator's incident
+reason. Group chats and API keys cannot use it. Opening or closing the panel
+does not change what the Assistant records or affect separately configured
+Assistant logging.
+
 ## Planned next steps
 
-The next runtime work will make the existing activation evidence easier to
-inspect in the opt-in chat debug panel, including whether each Skill was always
-included or requested on demand and why a candidate was not loaded. Apps will
-remain eager until their execution contracts can preserve the same frozen-plan
-and audit guarantees.
+Apps remain eager until their execution contracts can preserve the same
+frozen-plan and audit guarantees.
 
 Editable Space copies with explicit source updates come later. External
 Marketplace distribution remains a separate final phase.

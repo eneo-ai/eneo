@@ -1393,6 +1393,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/messages/{message_id}/diagnostics/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Chat Turn Diagnostics
+     * @description Get body-free Skill activation diagnostics for one chat turn.
+     */
+    get: operations["get_chat_turn_diagnostics_api_v1_conversations__session_id__messages__message_id__diagnostics__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/preflight": {
     parameters: {
       query?: never;
@@ -9099,6 +9119,8 @@ export interface components {
     };
     /** AskResponse */
     AskResponse: {
+      /** Id */
+      id?: string | null;
       /**
        * Session Id
        * Format: uuid
@@ -10019,6 +10041,23 @@ export interface components {
        * @description New enabled state
        */
       enabled: boolean;
+    };
+    /**
+     * ChatTurnDiagnostics
+     * @description Body-free Skill activation diagnostics for one persisted chat turn.
+     */
+    ChatTurnDiagnostics: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /**
+       * Message Id
+       * Format: uuid
+       */
+      message_id: string;
+      skill_activation: components["schemas"]["SkillActivationEvidenceV1"] | null;
     };
     /** CollectionMetadata */
     CollectionMetadata: {
@@ -15205,7 +15244,8 @@ export interface components {
       | "websites"
       | "integrations"
       | "shared_spaces"
-      | "api_keys";
+      | "api_keys"
+      | "assistant_debug";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -16554,6 +16594,67 @@ export interface components {
       expires_at: number;
     };
     /**
+     * SkillActivationEvidenceV1
+     * @description Strict, versioned, body-free facts retained with one Question.
+     */
+    SkillActivationEvidenceV1: {
+      /**
+       * Version
+       * @default 1
+       * @constant
+       */
+      version?: 1;
+      effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
+      fallback_reason?: components["schemas"]["SkillActivationFallbackReason"] | null;
+      /** Available */
+      available: components["schemas"]["SkillActivationReference"][];
+      /** Blocked */
+      blocked: components["schemas"]["SkillActivationReference"][];
+      /** Initially Active */
+      initially_active: string[];
+      /**
+       * Accepted
+       * @default []
+       */
+      accepted?: string[];
+      /**
+       * Repeated
+       * @default []
+       */
+      repeated?: string[];
+      /**
+       * Rejected
+       * @default []
+       */
+      rejected?: components["schemas"]["SkillActivationRejection"][];
+      /**
+       * Selected Model Id
+       * Format: uuid
+       */
+      selected_model_id: string;
+      /** Selected Model Route */
+      selected_model_route: string;
+      /** Skill Context Tokens */
+      skill_context_tokens: number;
+      /** Skill Context Token Limit */
+      skill_context_token_limit: number;
+      /**
+       * Token Count Source
+       * @enum {string}
+       */
+      token_count_source: "litellm" | "fallback_estimate";
+      /**
+       * Activation Rounds
+       * @default 0
+       */
+      activation_rounds?: number;
+      /**
+       * Selection Latency Ms
+       * @default 0
+       */
+      selection_latency_ms?: number;
+    };
+    /**
      * SkillActivationFallbackReason
      * @enum {string}
      */
@@ -16569,6 +16670,50 @@ export interface components {
      * @enum {string}
      */
     SkillActivationMode: "always" | "on_demand";
+    /**
+     * SkillActivationReference
+     * @description Body-free exact revision identity safe for retained turn evidence.
+     */
+    SkillActivationReference: {
+      /** Activation Key */
+      activation_key?: string | null;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Content Digest */
+      content_digest: string;
+      /** Position */
+      position: number;
+      source: components["schemas"]["SkillBindingSource"];
+    };
+    /** SkillActivationRejection */
+    SkillActivationRejection: {
+      /** Activation Key */
+      activation_key: string;
+      reason: components["schemas"]["SkillActivationRejectionReason"];
+    };
+    /**
+     * SkillActivationRejectionReason
+     * @enum {string}
+     */
+    SkillActivationRejectionReason:
+      | "unknown_key"
+      | "blocked"
+      | "activation_unavailable"
+      | "activation_limit_exceeded"
+      | "context_limit_exceeded"
+      | "model_context_limit_exceeded"
+      | "token_measurement_unavailable"
+      | "reserved_tool_collision";
     /** SkillActiveUpdateRequest */
     SkillActiveUpdateRequest: {
       /** Is Active */
@@ -20164,6 +20309,11 @@ export interface components {
     };
     /** SSEFirstChunk */
     SSEFirstChunk: {
+      /**
+       * Id
+       * @default null
+       */
+      id?: string | null;
       /**
        * Session Id
        * Format: uuid
@@ -24276,6 +24426,8 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AskResponse"];
           "text/event-stream": {
+            /** Id */
+            id?: string | null;
             /**
              * Session Id
              * Format: uuid
@@ -24692,6 +24844,8 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AskResponse"];
           "text/event-stream": {
+            /** Id */
+            id?: string | null;
             /**
              * Session Id
              * Format: uuid
@@ -25992,6 +26146,8 @@ export interface operations {
                 };
               }
             | {
+                /** Id */
+                id?: string | null;
                 /**
                  * Session Id
                  * Format: uuid
@@ -26157,6 +26313,56 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_chat_turn_diagnostics_api_v1_conversations__session_id__messages__message_id__diagnostics__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatTurnDiagnostics"];
         };
       };
       /** @description Forbidden */

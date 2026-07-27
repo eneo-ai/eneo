@@ -21,6 +21,7 @@ from eneo.authentication.auth_dependencies import (
     KNOWLEDGE_READ_OVERRIDES,
 )
 from eneo.main.config import get_settings
+from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import (
     route_dependency_closures,
     route_has_dependency_named,
@@ -490,6 +491,19 @@ class TestHighRiskExactRouteGuards:
             "GET /skills/organization/{skill_id}/adoption/ must remain "
             "session-only; OrganizationSkillService performs the tenant-admin check"
         )
+
+    def test_chat_turn_diagnostics_is_session_only_and_permission_gated(self):
+        route = _find_route_by_method_and_paths(
+            "GET",
+            "/conversations/{session_id}/messages/{message_id}/diagnostics/",
+            "/conversations/{session_id}/messages/{message_id}/diagnostics",
+        )
+        assert _route_has_dep_name(route, "require_session_auth")
+        granted_permissions = {
+            closure.get("permission")
+            for closure in route_dependency_closures(route, "_dep")
+        }
+        assert Permission.ASSISTANT_DEBUG in granted_permissions
 
     def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths(

@@ -17,12 +17,15 @@
   import { untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import ChatDebugPanel from "$lib/features/chat/components/debug/ChatDebugPanel.svelte";
 
   const { data: rawData } = $props();
   // +page.ts throws when partnerId is missing, so chatPartner is always set here.
   const data = $derived.by(() => ({ ...rawData, chatPartner: rawData.chatPartner! }));
 
   const {
+    featureFlags,
+    user,
     state: { userInfo }
   } = getAppContext();
 
@@ -31,6 +34,12 @@
   } = getSpacesManager();
 
   const chat = untrack(() => initChatService(data));
+
+  const debugAvailable = $derived(
+    featureFlags.showChatDebugPanel &&
+      user.hasPermission("assistant_debug") &&
+      chat.partner.type !== "group-chat"
+  );
 
   let currentTab = writable("chat");
 
@@ -136,6 +145,7 @@
       </Page.Tabbar>
 
       <Page.Flex>
+        <ChatDebugPanel {chat} available={debugAvailable} />
         {#if chat.partner.type !== "default-assistant" && chat.partner.permissions?.includes("edit")}
           <Button href={partnerEditHref()}>{m.edit()}</Button>
         {/if}
