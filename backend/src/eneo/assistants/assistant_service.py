@@ -796,10 +796,11 @@ class AssistantService:
                     ),
                 )
 
-        assistants = await self.repo.get_personal_defaults_for_tenant(
+        validation_inputs = await self.repo.get_personal_defaults_for_tenant(
             tenant_id=self.user.tenant_id
         )
-        for assistant in assistants:
+        for validation_input in validation_inputs:
+            assistant = validation_input.assistant
             # Reuse the policy loaded above; the service wrapper would fetch it again.
             assistant_plan = SkillTurnPlan.create(
                 base_instructions=self._governed_base_instructions(
@@ -815,13 +816,19 @@ class AssistantService:
                 persistent_attachments=assistant.attachments,
                 completion_model=model,
             )
-            # Unenforced per-user MCP selection is resolved for each turn, not
-            # loaded by this tenant-wide save preflight.
-            effective_mcp_servers = (
-                effective_config.available_mcp_servers
-                if candidate_skill_ids and effective_config.mcp_enforced
-                else []
-            )
+            effective_mcp_servers: list["MCPServer"] = []
+            if candidate_skill_ids and not validation_input.has_knowledge:
+                if effective_config.mcp_enforced:
+                    effective_mcp_servers = effective_config.available_mcp_servers
+                elif validation_input.configured_mcp_servers:
+                    assert assistant.id is not None
+                    effective_mcp_servers = (
+                        await self.space_repo.project_assistant_mcp_servers(
+                            space_id=assistant.space_id,
+                            assistant_id=assistant.id,
+                            mcp_servers=list(validation_input.configured_mcp_servers),
+                        )
+                    )
             await self._validate_skill_activation_fit(
                 validation_plan=assistant_plan.for_full_save_validation(),
                 candidate_skill_ids=candidate_skill_ids,

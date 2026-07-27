@@ -1255,7 +1255,14 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
         ),
     )
     service = _service()
-    service.repo.get_personal_defaults_for_tenant.return_value = assistants
+    service.repo.get_personal_defaults_for_tenant.return_value = [
+        SimpleNamespace(
+            assistant=assistant,
+            configured_mcp_servers=(),
+            has_knowledge=False,
+        )
+        for assistant in assistants
+    ]
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_personal_default.return_value = (
         effective_config
@@ -1280,6 +1287,106 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
     )
     service.skill_service.create_turn_plan.assert_awaited_once()
     service.effective_config_service.resolve_personal_default.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_projects_each_personal_assistants_mcp_tools():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    configured_server = MagicMock()
+    projected_server = MagicMock()
+    effective_config = SimpleNamespace(
+        models_enforced=True,
+        available_models=[assistant.completion_model],
+        locked_model=None,
+        policy_default_model=assistant.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        models_bounded_for_on_demand=True,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_for_tenant.return_value = [
+        SimpleNamespace(
+            assistant=assistant,
+            configured_mcp_servers=(configured_server,),
+            has_knowledge=False,
+        )
+    ]
+    service.space_repo.project_assistant_mcp_servers.return_value = [projected_server]
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service.space_repo.project_assistant_mcp_servers.assert_awaited_once_with(
+        space_id=assistant.space_id,
+        assistant_id=assistant.id,
+        mcp_servers=[configured_server],
+    )
+    assert service._validate_skill_activation_fit.await_args_list[-1].kwargs[
+        "effective_mcp_servers"
+    ] == [projected_server]
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    effective_config = SimpleNamespace(
+        models_enforced=True,
+        available_models=[assistant.completion_model],
+        locked_model=None,
+        policy_default_model=assistant.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        models_bounded_for_on_demand=True,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_for_tenant.return_value = [
+        SimpleNamespace(
+            assistant=assistant,
+            configured_mcp_servers=(MagicMock(),),
+            has_knowledge=True,
+        )
+    ]
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service.space_repo.project_assistant_mcp_servers.assert_not_awaited()
+    assert (
+        service._validate_skill_activation_fit.await_args_list[-1].kwargs[
+            "effective_mcp_servers"
+        ]
+        == []
+    )
 
 
 @pytest.mark.asyncio
