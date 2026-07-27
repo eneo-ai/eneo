@@ -120,6 +120,28 @@ def test_tenant_flow_settings_has_canonical_validated_owner() -> None:
     assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE
 
 
+def test_resolved_input_edges_have_one_typed_immutable_owner() -> None:
+    owner = FLOW_JSONB_COLUMN_OWNERS[
+        ("flow_step_attempt_resolved_inputs", "resolved_input_edges_jsonb")
+    ]
+
+    assert owner.owner_module == "eneo.flows.flow_run_provenance"
+    assert owner.envelope_name == "FlowResolvedInputEdges"
+    assert owner.owner_symbols == (
+        "FlowResolvedInputEdges",
+        "parse_resolved_input_edges",
+    )
+    assert owner.storage_category is FlowJsonbStorageCategory.PROVENANCE_EVIDENCE
+    assert (
+        owner.schema_version_policy
+        is FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION
+    )
+    assert (
+        owner.corruption_behavior
+        is FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE
+    )
+
+
 def test_unexecuted_step_result_and_checkpoint_policies_are_plain_descriptions() -> (
     None
 ):

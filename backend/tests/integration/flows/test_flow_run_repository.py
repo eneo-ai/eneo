@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from time import monotonic
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,6 +16,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.flow_tables import (
     FlowRuns,
+    FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -55,6 +57,9 @@ from eneo.flows.flow_run_input_envelope import (
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     FlowAttemptProvenanceWriteError,
+    FlowResolvedInputEdges,
+    FlowResolvedInputEdgesConflictError,
+    FlowResolvedInputEdgesUnavailableError,
     ModelParameterSnapshot,
     parse_attempt_provenance,
 )
@@ -164,6 +169,28 @@ class _AttemptProvenanceTestContext:
     tenant_id: UUID
     trace_id: UUID
     attempt_start: AttemptStartProvenance
+
+
+def _resolved_input_aggregate(*, binding_ref: str) -> FlowResolvedInputEdges:
+    return FlowResolvedInputEdges.model_validate(
+        {
+            "schema_version": 1,
+            "edges": [
+                {
+                    "binding_ref": binding_ref,
+                    "source": {
+                        "kind": "flow_input",
+                        "selector": {"kind": "json_path", "path": ["question"]},
+                    },
+                    "selection": {
+                        "encoding": "utf8",
+                        "sha256": "a" * 64,
+                        "byte_size": 12,
+                    },
+                }
+            ],
+        }
+    )
 
 
 @pytest.fixture
@@ -2790,6 +2817,335 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
         assert parsed.provenance.artifacts is not None
         assert parsed.provenance.artifacts.model_dump() == {"generated_count": 1}
         assert parsed.provenance.attempt_start == context.attempt_start
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_resolved_input_edges_are_written_once_with_idempotent_retry(
+    attempt_provenance_context,
+) -> None:
+    context = attempt_provenance_context
+    aggregate = _resolved_input_aggregate(binding_ref="question")
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="resolved-input-write-once",
+        )
+
+        legacy = await repo.get_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+        )
+        assert legacy is not None
+        assert legacy.status == "not_tracked"
+
+        written = await repo.record_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+            aggregate=aggregate,
+        )
+        assert written is not None
+        assert written.status == "tracked"
+        first_updated_at = await session.scalar(
+            sa.select(FlowStepAttemptResolvedInputs.updated_at).where(
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt.id
+            )
+        )
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == attempt.id)
+            .values(
+                status=FlowStepAttemptStatus.COMPLETED.value,
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+
+        identical_retry = await repo.record_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+            aggregate=FlowResolvedInputEdges.model_validate(
+                aggregate.model_dump(mode="json")
+            ),
+        )
+        assert identical_retry is not None
+        assert identical_retry.status == "tracked"
+        assert (
+            await session.scalar(
+                sa.select(FlowStepAttemptResolvedInputs.updated_at).where(
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt.id
+                )
+            )
+            == first_updated_at
+        )
+
+        with pytest.raises(FlowResolvedInputEdgesConflictError) as exc_info:
+            await repo.record_resolved_input_edges(
+                attempt_id=attempt.id,
+                tenant_id=context.tenant_id,
+                aggregate=_resolved_input_aggregate(binding_ref="other-question"),
+            )
+        assert exc_info.value.attempt_id == attempt.id
+        assert exc_info.value.tenant_id == context.tenant_id
+
+        persisted = await repo.get_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+        )
+        assert persisted is not None
+        assert persisted.aggregate == aggregate
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_resolved_input_edges_reader_marks_corruption_without_repair(
+    attempt_provenance_context,
+) -> None:
+    context = attempt_provenance_context
+    corrupt_payload = {"schema_version": 1, "edges": [{}]}
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="resolved-input-corruption",
+        )
+        await session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=attempt.id,
+                resolved_input_edges_jsonb=corrupt_payload,
+            )
+        )
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == attempt.id)
+            .values(
+                status=FlowStepAttemptStatus.COMPLETED.value,
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+
+        parsed = await repo.get_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+        )
+        assert parsed is not None
+        assert parsed.status == "corrupt"
+        assert parsed.aggregate is None
+
+        with pytest.raises(FlowResolvedInputEdgesUnavailableError) as exc_info:
+            await repo.record_resolved_input_edges(
+                attempt_id=attempt.id,
+                tenant_id=context.tenant_id,
+                aggregate=_resolved_input_aggregate(binding_ref="question"),
+            )
+        assert exc_info.value.attempt_id == attempt.id
+        assert exc_info.value.tenant_id == context.tenant_id
+        assert exc_info.value.error_code == "flow_resolved_input_edges_invalid_payload"
+
+        persisted = await session.scalar(
+            sa.select(FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb).where(
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt.id
+            )
+        )
+        assert persisted == corrupt_payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_resolved_input_edges_reject_initial_write_after_attempt_terminal(
+    attempt_provenance_context,
+) -> None:
+    context = attempt_provenance_context
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="resolved-input-terminal-absent",
+        )
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == attempt.id)
+            .values(
+                status=FlowStepAttemptStatus.COMPLETED.value,
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+
+        written = await repo.record_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+            aggregate=_resolved_input_aggregate(binding_ref="question"),
+        )
+
+        assert written is None
+        assert (await session.get(FlowStepAttemptResolvedInputs, attempt.id)) is None
+        parsed = await repo.get_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+        )
+        assert parsed is not None
+        assert parsed.status == "not_tracked"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("second_binding_ref", "expected_second_result"),
+    [("question", "tracked"), ("conflicting-question", "conflict")],
+)
+async def test_resolved_input_edges_serialize_concurrent_writers(
+    attempt_provenance_context,
+    second_binding_ref: str,
+    expected_second_result: str,
+) -> None:
+    context = attempt_provenance_context
+    aggregate = _resolved_input_aggregate(binding_ref="question")
+    async with sessionmanager.session() as session, session.begin():
+        attempt = await FlowRunRepository(
+            session=session
+        ).create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="resolved-input-concurrent",
+        )
+
+    second_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+
+    async def _second_write() -> str:
+        async with sessionmanager.session() as session, session.begin():
+            pid = await session.scalar(sa.select(sa.func.pg_backend_pid()))
+            assert pid is not None
+            second_pid.set_result(pid)
+            try:
+                result = await FlowRunRepository(
+                    session=session
+                ).record_resolved_input_edges(
+                    attempt_id=attempt.id,
+                    tenant_id=context.tenant_id,
+                    aggregate=_resolved_input_aggregate(binding_ref=second_binding_ref),
+                )
+            except FlowResolvedInputEdgesConflictError:
+                return "conflict"
+            assert result is not None
+            return result.status
+
+    second_task: asyncio.Task[str] | None = None
+    try:
+        async with sessionmanager.session() as session, session.begin():
+            await session.execute(
+                sa.select(FlowStepAttempts.id)
+                .where(FlowStepAttempts.id == attempt.id)
+                .where(FlowStepAttempts.tenant_id == context.tenant_id)
+                .with_for_update()
+            )
+            second_task = asyncio.create_task(_second_write())
+            waiting_pid = await second_pid
+            deadline = monotonic() + 5
+            while monotonic() < deadline:
+                is_blocked = await session.scalar(
+                    sa.text(
+                        "SELECT cardinality(pg_blocking_pids(:waiting_pid)) > 0"
+                    ).bindparams(waiting_pid=waiting_pid)
+                )
+                if is_blocked:
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                pytest.fail("second resolved-input writer did not wait on parent lock")
+
+            first_result = await FlowRunRepository(
+                session=session
+            ).record_resolved_input_edges(
+                attempt_id=attempt.id,
+                tenant_id=context.tenant_id,
+                aggregate=aggregate,
+            )
+            assert first_result is not None
+            assert first_result.status == "tracked"
+
+        assert second_task is not None
+        assert await second_task == expected_second_result
+    finally:
+        if second_task is not None and not second_task.done():
+            second_task.cancel()
+
+    async with sessionmanager.session() as session, session.begin():
+        rows = (
+            await session.scalars(
+                sa.select(FlowStepAttemptResolvedInputs).where(
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt.id
+                )
+            )
+        ).all()
+        assert len(rows) == 1
+        persisted = await FlowRunRepository(session=session).get_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+        )
+        assert persisted is not None
+        assert persisted.aggregate == aggregate
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_normal_attempt_hydration_does_not_load_resolved_input_edges(
+    attempt_provenance_context,
+) -> None:
+    context = attempt_provenance_context
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="resolved-input-deferred",
+        )
+        await repo.record_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+            aggregate=_resolved_input_aggregate(binding_ref="question"),
+        )
+
+    async with sessionmanager.session() as session, session.begin():
+        row = await session.scalar(
+            sa.select(FlowStepAttempts).where(FlowStepAttempts.id == attempt.id)
+        )
+        assert row is not None
+        await session.refresh(row)
+        assert not hasattr(row, "resolved_input_edges_jsonb")
+        assert not hasattr(row, "resolved_input_edge_count")
+        assert (
+            await session.scalar(
+                sa.select(
+                    FlowStepAttemptResolvedInputs.resolved_input_edge_count
+                ).where(
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt.id
+                )
+            )
+            == 1
+        )
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import CheckConstraint
+from sqlalchemy import CheckConstraint, SmallInteger
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql.schema import Column
 
 from eneo.authentication.principal_types import PrincipalType
@@ -14,6 +15,7 @@ from eneo.database.tables.flow_tables import (
     BuilderSessions,
     FlowRuns,
     FlowRuntimeUploadedFiles,
+    FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
     FlowSteps,
@@ -194,6 +196,55 @@ def test_runtime_step_attempt_step_id_is_snapshot_owned_not_draft_step_fk():
 
     assert step_id.nullable is False
     assert not _references_flow_steps(step_id)
+
+
+def test_resolved_input_edges_use_one_to_one_attempt_evidence_table() -> None:
+    attempt_id = FlowStepAttemptResolvedInputs.__table__.columns["flow_step_attempt_id"]
+    aggregate_column = FlowStepAttemptResolvedInputs.__table__.columns[
+        "resolved_input_edges_jsonb"
+    ]
+    count_column = FlowStepAttemptResolvedInputs.__table__.columns[
+        "resolved_input_edge_count"
+    ]
+
+    assert isinstance(aggregate_column.type, JSONB)
+    assert aggregate_column.nullable is False
+    assert isinstance(count_column.type, SmallInteger)
+    assert count_column.nullable is False
+    assert count_column.computed is not None
+    assert count_column.computed.persisted is True
+    assert attempt_id.primary_key is True
+    assert any(
+        foreign_key.column is FlowStepAttempts.__table__.columns["id"]
+        and foreign_key.ondelete == "CASCADE"
+        for foreign_key in attempt_id.foreign_keys
+    )
+    computed_sql = str(count_column.computed.sqltext)
+    assert "jsonb_array_length" in computed_sql
+    assert "jsonb_typeof" in computed_sql
+    assert "schema_version" not in computed_sql
+    assert "ELSE -1" in computed_sql
+    assert "resolved_input_edges_jsonb" not in FlowStepAttempts.__table__.columns
+    assert "resolved_input_edge_count" not in FlowStepAttempts.__table__.columns
+
+
+def test_resolved_input_edges_constraints_match_typed_storage_boundary() -> None:
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in FlowStepAttemptResolvedInputs.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert (
+        "resolved_input_edge_count"
+        in constraints["ck_flow_step_attempt_resolved_input_count"]
+    )
+    assert "2048" in constraints["ck_flow_step_attempt_resolved_input_count"]
+
+
+def test_resolved_input_edges_are_not_part_of_serialized_attempt_dto() -> None:
+    assert "resolved_input_edges_jsonb" not in FlowStepAttempt.model_fields
+    assert "resolved_input_edge_count" not in FlowStepAttempt.model_fields
 
 
 @pytest.mark.parametrize("step_id_shape", ["missing", None])

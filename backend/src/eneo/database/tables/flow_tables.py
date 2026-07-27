@@ -67,6 +67,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_provenance import FLOW_RESOLVED_INPUT_MAX_EDGES
 
 FLOW_STEP_INPUT_SOURCE_VALUES = FLOW_INPUT_SOURCE_VALUES
 FLOW_STEP_INPUT_TYPE_VALUES = FLOW_INPUT_TYPE_VALUES
@@ -1218,6 +1219,37 @@ class FlowStepAttempts(BasePublic):
         Index(
             "ix_flow_step_attempts_superseded_by_attempt",
             "superseded_by_attempt_id",
+        ),
+    )
+
+
+class FlowStepAttemptResolvedInputs(BaseCrossReference):
+    """Stores one immutable resolved-input aggregate per Flow step attempt. Writer: FlowRunRepository. Purpose: preserve exact dependency evidence without widening the hot attempt row."""
+
+    flow_step_attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowStepAttempts.id, ondelete="CASCADE"),
+        primary_key=True,
+    )
+    resolved_input_edges_jsonb: Mapped[dict[str, Any]] = mapped_column(
+        JSONB(none_as_null=True),
+        nullable=False,
+    )
+    resolved_input_edge_count: Mapped[int] = mapped_column(
+        sa.SmallInteger,
+        sa.Computed(
+            "CASE WHEN jsonb_typeof(resolved_input_edges_jsonb) = 'object' AND "
+            "jsonb_typeof(resolved_input_edges_jsonb -> 'edges') = 'array' "
+            "THEN jsonb_array_length(resolved_input_edges_jsonb -> 'edges') "
+            "ELSE -1 END",
+            persisted=True,
+        ),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"resolved_input_edge_count BETWEEN 0 AND {FLOW_RESOLVED_INPUT_MAX_EDGES}",
+            name="ck_flow_step_attempt_resolved_input_count",
         ),
     )
 

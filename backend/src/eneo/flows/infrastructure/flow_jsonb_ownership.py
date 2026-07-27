@@ -464,6 +464,24 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         ),
     ),
     _owner(
+        "flow_step_attempt_resolved_inputs",
+        "resolved_input_edges_jsonb",
+        owner_module="eneo.flows.flow_run_provenance",
+        envelope_name="FlowResolvedInputEdges",
+        owner_symbols=("FlowResolvedInputEdges", "parse_resolved_input_edges"),
+        storage_category=FlowJsonbStorageCategory.PROVENANCE_EVIDENCE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
+        rationale=(
+            "Resolved input edges are one bounded immutable attempt aggregate read "
+            "and written whole. A one-to-one evidence row keeps it off the hot attempt "
+            "row. It is run-debug evidence and must be deleted at the attempt evidence "
+            "retention boundary before a runtime writer is enabled. Per-edge rows are "
+            "not needed without independent edge queries, transitions, or retention "
+            "lifecycle."
+        ),
+    ),
+    _owner(
         "flow_step_attempts",
         "provenance_json",
         owner_module="eneo.flows.flow_run_provenance",

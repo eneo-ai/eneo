@@ -4,16 +4,21 @@ import hashlib
 import json
 
 
-def canonical_json_hash(value: object) -> str:
-    """Hash JSON-compatible data using the canonical Flows serialization."""
+def canonical_json_bytes(value: object) -> bytes:
+    """Serialize JSON-compatible data using the canonical Flows encoding."""
 
-    serialized = json.dumps(
+    return json.dumps(
         value,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-    )
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    ).encode("utf-8")
 
 
-__all__ = ["canonical_json_hash"]
+def canonical_json_hash(value: object) -> str:
+    """Hash JSON-compatible data using the canonical Flows serialization."""
+
+    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+__all__ = ["canonical_json_bytes", "canonical_json_hash"]

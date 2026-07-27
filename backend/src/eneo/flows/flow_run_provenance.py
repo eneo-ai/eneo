@@ -5,11 +5,19 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, TypeAlias, TypeVar, cast
+from typing import Annotated, Any, Literal, TypeAlias, TypeVar, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
+from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_retention_tombstone import (
     FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
@@ -32,6 +40,220 @@ FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION: Literal["flow-attempt-provenance.v1"] = 
 FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION: Literal[
     "flow-attempt-provenance-marker.v1"
 ] = "flow-attempt-provenance-marker.v1"
+FLOW_RESOLVED_INPUT_SCHEMA_VERSION: Literal[1] = 1
+FLOW_RESOLVED_INPUT_MAX_EDGES = 2048
+FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES = 1024 * 1024
+
+
+class _FlowResolvedInputModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class FlowResolvedInputJsonPath(_FlowResolvedInputModel):
+    kind: Literal["json_path"]
+    path: tuple[Annotated[str, Field(min_length=1)], ...]
+
+
+class _FlowResolvedInputSelectedSource(_FlowResolvedInputModel):
+    selector: FlowResolvedInputJsonPath
+
+
+class FlowResolvedInputFlowInputSource(_FlowResolvedInputSelectedSource):
+    kind: Literal["flow_input"]
+
+
+class FlowResolvedInputStepOutputSource(_FlowResolvedInputSelectedSource):
+    kind: Literal["step_output"]
+    source_attempt_id: UUID
+
+
+class FlowResolvedInputRuntimeFileSource(_FlowResolvedInputSelectedSource):
+    kind: Literal["runtime_file"]
+    input_file_ordinal: int = Field(strict=True, ge=0, le=2**31 - 1)
+
+
+class FlowResolvedInputHttpResponseSource(_FlowResolvedInputSelectedSource):
+    kind: Literal["http_response"]
+
+
+FlowResolvedInputSource: TypeAlias = Annotated[
+    FlowResolvedInputFlowInputSource
+    | FlowResolvedInputStepOutputSource
+    | FlowResolvedInputRuntimeFileSource
+    | FlowResolvedInputHttpResponseSource,
+    Field(discriminator="kind"),
+]
+
+
+class FlowResolvedInputHashedSelection(_FlowResolvedInputModel):
+    encoding: Literal["utf8", "canonical_json"]
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    byte_size: int = Field(strict=True, ge=0)
+
+
+class FlowResolvedInputBoundFileSelection(_FlowResolvedInputModel):
+    encoding: Literal["bound_file"]
+
+
+FlowResolvedInputSelection: TypeAlias = (
+    FlowResolvedInputHashedSelection | FlowResolvedInputBoundFileSelection
+)
+
+
+class FlowResolvedInputEdge(_FlowResolvedInputModel):
+    binding_ref: str = Field(min_length=1)
+    source: FlowResolvedInputSource
+    selection: FlowResolvedInputSelection
+
+    @model_validator(mode="after")
+    def _bound_file_selection_matches_runtime_file(self) -> "FlowResolvedInputEdge":
+        is_runtime_file = self.source.kind == "runtime_file"
+        is_bound_file = self.selection.encoding == "bound_file"
+        if is_runtime_file != is_bound_file:
+            raise ValueError(
+                "bound_file selection must be used exactly for runtime_file sources"
+            )
+        return self
+
+
+class FlowResolvedInputEdges(_FlowResolvedInputModel):
+    schema_version: Literal[1]
+    edges: tuple[FlowResolvedInputEdge, ...] = Field(
+        max_length=FLOW_RESOLVED_INPUT_MAX_EDGES
+    )
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def _validate_schema_version_is_integer(cls, value: object) -> object:
+        if type(value) is not int:
+            raise ValueError("schema_version must be the integer 1.")
+        return value
+
+    @model_validator(mode="after")
+    def _canonical_size_is_bounded(self) -> "FlowResolvedInputEdges":
+        canonical_size = len(canonical_json_bytes(self.model_dump(mode="json")))
+        if canonical_size > FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES:
+            raise ValueError(
+                "Resolved input edges canonical JSON exceeds "
+                f"{FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES} bytes."
+            )
+        return self
+
+
+FlowResolvedInputEdgesParseStatus: TypeAlias = Literal[
+    "not_tracked", "tracked", "corrupt"
+]
+FlowResolvedInputEdgesCorruptionCode: TypeAlias = Literal[
+    "flow_resolved_input_edges_invalid_type",
+    "flow_resolved_input_edges_schema_version_missing",
+    "flow_resolved_input_edges_schema_version_unsupported",
+    "flow_resolved_input_edges_invalid_payload",
+]
+
+
+class FlowResolvedInputEdgesCorruptionMarker(_FlowResolvedInputModel):
+    status: Literal["corrupt"] = "corrupt"
+    error_code: FlowResolvedInputEdgesCorruptionCode
+    message: str
+    raw_value_type: str | None = None
+    persisted_schema_version: int | str | None = None
+
+
+@dataclass(frozen=True)
+class FlowResolvedInputEdgesParseResult:
+    status: FlowResolvedInputEdgesParseStatus
+    aggregate: FlowResolvedInputEdges | None = None
+    marker: FlowResolvedInputEdgesCorruptionMarker | None = None
+
+    def __post_init__(self) -> None:
+        if self.status == "tracked" and (
+            self.aggregate is None or self.marker is not None
+        ):
+            raise ValueError("Tracked resolved input edges require an aggregate.")
+        if self.status == "corrupt" and (
+            self.aggregate is not None or self.marker is None
+        ):
+            raise ValueError("Corrupt resolved input edges require a marker.")
+        if self.status == "not_tracked" and (
+            self.aggregate is not None or self.marker is not None
+        ):
+            raise ValueError("Untracked resolved input edges cannot carry evidence.")
+
+
+class FlowResolvedInputEdgesConflictError(RuntimeError):
+    def __init__(self, *, attempt_id: UUID, tenant_id: UUID):
+        self.attempt_id = attempt_id
+        self.tenant_id = tenant_id
+        super().__init__(
+            "Resolved input edges are immutable and a different aggregate is "
+            f"already stored (attempt_id={attempt_id}, tenant_id={tenant_id})."
+        )
+
+
+class FlowResolvedInputEdgesUnavailableError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        attempt_id: UUID,
+        tenant_id: UUID,
+        error_code: FlowResolvedInputEdgesCorruptionCode,
+    ):
+        self.attempt_id = attempt_id
+        self.tenant_id = tenant_id
+        self.error_code = error_code
+        super().__init__(
+            "Resolved input edges cannot be updated because persisted evidence is "
+            f"corrupt (attempt_id={attempt_id}, tenant_id={tenant_id}, "
+            f"error_code={error_code})."
+        )
+
+
+def parse_resolved_input_edges(raw: Any) -> FlowResolvedInputEdgesParseResult:
+    if raw is None:
+        return FlowResolvedInputEdgesParseResult(status="not_tracked")
+    if not isinstance(raw, dict):
+        return FlowResolvedInputEdgesParseResult(
+            status="corrupt",
+            marker=FlowResolvedInputEdgesCorruptionMarker(
+                error_code="flow_resolved_input_edges_invalid_type",
+                message="Resolved input edges must be a JSON object.",
+                raw_value_type=type(raw).__name__,
+            ),
+        )
+
+    raw_payload = cast(dict[str, Any], raw)
+    schema_version = raw_payload.get("schema_version")
+    if not isinstance(schema_version, (int, str)) or isinstance(schema_version, bool):
+        return FlowResolvedInputEdgesParseResult(
+            status="corrupt",
+            marker=FlowResolvedInputEdgesCorruptionMarker(
+                error_code="flow_resolved_input_edges_schema_version_missing",
+                message="Resolved input edges are missing schema_version.",
+            ),
+        )
+    if schema_version != FLOW_RESOLVED_INPUT_SCHEMA_VERSION:
+        return FlowResolvedInputEdgesParseResult(
+            status="corrupt",
+            marker=FlowResolvedInputEdgesCorruptionMarker(
+                error_code="flow_resolved_input_edges_schema_version_unsupported",
+                message="Resolved input edges schema_version is not supported.",
+                persisted_schema_version=schema_version,
+            ),
+        )
+
+    try:
+        aggregate = FlowResolvedInputEdges.model_validate(raw_payload)
+    except (TypeError, ValueError):
+        return FlowResolvedInputEdgesParseResult(
+            status="corrupt",
+            marker=FlowResolvedInputEdgesCorruptionMarker(
+                error_code="flow_resolved_input_edges_invalid_payload",
+                message="Resolved input edges failed current schema validation.",
+                persisted_schema_version=schema_version,
+            ),
+        )
+    return FlowResolvedInputEdgesParseResult(status="tracked", aggregate=aggregate)
+
 
 FlowAttemptProvenanceParseStatus: TypeAlias = Literal[
     "not_tracked", "tracked", "corrupt", "retention_purged"

@@ -17,6 +17,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
+    FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -60,7 +61,12 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
+    FlowResolvedInputEdges,
+    FlowResolvedInputEdgesConflictError,
+    FlowResolvedInputEdgesParseResult,
+    FlowResolvedInputEdgesUnavailableError,
     attempt_provenance_for_write,
+    parse_resolved_input_edges,
     resolve_attempt_terminalization_evidence,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
@@ -1468,6 +1474,82 @@ class FlowRunRepository:
         await self.session.flush()
         await self.session.refresh(row)
         return FlowStepAttempt.model_validate(row)
+
+    async def get_resolved_input_edges(
+        self,
+        *,
+        attempt_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowResolvedInputEdgesParseResult | None:
+        row = (
+            await self.session.execute(
+                sa.select(FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb)
+                .select_from(FlowStepAttempts)
+                .outerjoin(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepAttempts.id == attempt_id)
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return parse_resolved_input_edges(row[0])
+
+    async def record_resolved_input_edges(
+        self,
+        *,
+        attempt_id: UUID,
+        tenant_id: UUID,
+        aggregate: FlowResolvedInputEdges,
+    ) -> FlowResolvedInputEdgesParseResult | None:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepAttempts.id,
+                    FlowStepAttempts.status,
+                )
+                .where(FlowStepAttempts.id == attempt_id)
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+                .with_for_update(of=FlowStepAttempts)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+
+        raw_existing = await self.session.scalar(
+            sa.select(FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb).where(
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt_id
+            )
+        )
+        existing = parse_resolved_input_edges(raw_existing)
+        if existing.status == "corrupt":
+            assert existing.marker is not None
+            raise FlowResolvedInputEdgesUnavailableError(
+                attempt_id=attempt_id,
+                tenant_id=tenant_id,
+                error_code=existing.marker.error_code,
+            )
+        if existing.status == "tracked":
+            assert existing.aggregate is not None
+            if existing.aggregate == aggregate:
+                return existing
+            raise FlowResolvedInputEdgesConflictError(
+                attempt_id=attempt_id,
+                tenant_id=tenant_id,
+            )
+        if row.status not in OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES:
+            return None
+
+        await self.session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=attempt_id,
+                resolved_input_edges_jsonb=aggregate.model_dump(mode="json"),
+            )
+        )
+        return FlowResolvedInputEdgesParseResult(status="tracked", aggregate=aggregate)
 
     async def finish_attempt(
         self,
