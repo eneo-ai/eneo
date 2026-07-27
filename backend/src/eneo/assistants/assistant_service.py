@@ -77,7 +77,6 @@ from eneo.skills.domain.skill import (
     SkillRuntimeResolution,
     SkillTurnEffectiveMode,
     SkillTurnPlan,
-    compose_skill_instructions,
 )
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space_service import SpaceService
@@ -557,6 +556,101 @@ class AssistantService:
 
         return await self.file_service.with_derived_images(persistent_attachments)
 
+    async def _validate_skill_activation_fit(
+        self,
+        *,
+        validation_plan: SkillTurnPlan,
+        candidate_skill_ids: frozenset[UUID],
+        model: "CompletionModel",
+        completion_prompt_files: list[File],
+        effective_mcp_servers: list["MCPServer"],
+    ) -> None:
+        """Validate one model-specific Skill plan using the runtime calculator."""
+        runtime = validation_plan.to_activation_runtime(
+            selected_model_route=model.get_model_route(),
+            max_input_tokens=model.max_input_tokens,
+            supports_tool_calling=model.supports_tool_calling,
+        )
+        snapshot = runtime.snapshot()
+        if (
+            candidate_skill_ids
+            and snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
+        ):
+            message = (
+                _ON_DEMAND_REJECTION_MESSAGES.get(
+                    snapshot.fallback_reason,
+                    _ON_DEMAND_REJECTION_DEFAULT,
+                )
+                if snapshot.fallback_reason is not None
+                else _ON_DEMAND_REJECTION_DEFAULT
+            )
+            raise BadRequestException(message)
+
+        assessments = runtime.assess_on_demand_candidates(candidate_skill_ids)
+        rejected_assessment = next(
+            (
+                assessment
+                for assessment in assessments
+                if assessment.rejection_reason is not None
+            ),
+            None,
+        )
+        if rejected_assessment is not None:
+            rejection_reason = rejected_assessment.rejection_reason
+            assert rejection_reason is not None
+            raise BadRequestException(
+                f'on-demand Skill "{rejected_assessment.display_name}" '
+                + _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
+                    rejection_reason,
+                    _ON_DEMAND_REJECTION_DEFAULT,
+                )
+            )
+
+        assert_prompt_and_files_fit_context(
+            max_input_tokens=model.max_input_tokens,
+            model_name=model.get_model_route(),
+            prompt_text=runtime.prompt,
+            files=completion_prompt_files,
+        )
+
+        if not candidate_skill_ids:
+            return
+
+        provider_input = (
+            await self.completion_service.prepare_skill_activation_preflight(
+                model=cast("AICompletionModel", model),
+                prompt=runtime.prompt,
+                prompt_files=completion_prompt_files,
+                mcp_servers=effective_mcp_servers,
+                skill_runtime=runtime,
+            )
+        )
+        provider_assessments = runtime.assess_provider_payload_candidates(
+            candidate_skill_ids,
+            messages=provider_input.messages,
+            provider_tools=provider_input.tools,
+            provider_input_token_limit=attachment_token_ceiling(model.max_input_tokens),
+        )
+        rejected_provider_assessment = next(
+            (
+                assessment
+                for assessment in provider_assessments
+                if assessment.rejection_reason is not None
+            ),
+            None,
+        )
+        if rejected_provider_assessment is not None:
+            rejection_reason = rejected_provider_assessment.rejection_reason
+            assert rejection_reason is not None
+            message = _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
+                rejection_reason,
+                _ON_DEMAND_REJECTION_DEFAULT,
+            )
+            raise BadRequestException(
+                f'on-demand Skill "{rejected_provider_assessment.display_name}" '
+                f"{message}"
+            )
+
     async def _validate_attachments_fit(
         self,
         assistant: Assistant,
@@ -614,103 +708,27 @@ class AssistantService:
                 )
             return
 
-        runtime = validation_plan.to_activation_runtime(
-            selected_model_route=model.get_model_route(),
-            max_input_tokens=model.max_input_tokens,
-            supports_tool_calling=model.supports_tool_calling,
-        )
-        snapshot = runtime.snapshot()
-        if (
-            candidate_skill_ids
-            and snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
-        ):
-            message = (
-                _ON_DEMAND_REJECTION_MESSAGES.get(
-                    snapshot.fallback_reason,
-                    _ON_DEMAND_REJECTION_DEFAULT,
-                )
-                if snapshot.fallback_reason is not None
-                else _ON_DEMAND_REJECTION_DEFAULT
-            )
-            raise BadRequestException(message)
-
-        assessments = runtime.assess_on_demand_candidates(candidate_skill_ids)
-        rejected_assessment = next(
-            (
-                assessment
-                for assessment in assessments
-                if assessment.rejection_reason is not None
-            ),
-            None,
-        )
-        if rejected_assessment is not None:
-            rejection_reason = rejected_assessment.rejection_reason
-            assert rejection_reason is not None
-            raise BadRequestException(
-                f'on-demand Skill "{rejected_assessment.display_name}" '
-                + _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
-                    rejection_reason,
-                    _ON_DEMAND_REJECTION_DEFAULT,
-                )
-            )
-
         completion_prompt_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
             completion_model=model,
         )
-        await self._assert_persistent_baseline_fits(
-            assistant=assistant,
+        effective_mcp_servers: list["MCPServer"] = []
+        if candidate_skill_ids:
+            if effective_config is not None and effective_config.mcp_enforced:
+                effective_mcp_servers = effective_config.available_mcp_servers
+            elif mcp_servers_override is not None:
+                effective_mcp_servers = mcp_servers_override
+            else:
+                effective_mcp_servers = assistant.mcp_servers
+            if assistant.has_knowledge():
+                effective_mcp_servers = []
+        await self._validate_skill_activation_fit(
+            validation_plan=validation_plan,
+            candidate_skill_ids=candidate_skill_ids,
             model=model,
-            prompt_text=runtime.prompt,
             completion_prompt_files=completion_prompt_files,
+            effective_mcp_servers=effective_mcp_servers,
         )
-
-        if not candidate_skill_ids:
-            return
-
-        if effective_config is not None and effective_config.mcp_enforced:
-            effective_mcp_servers = effective_config.available_mcp_servers
-        elif mcp_servers_override is not None:
-            effective_mcp_servers = mcp_servers_override
-        else:
-            effective_mcp_servers = assistant.mcp_servers
-        if assistant.has_knowledge():
-            effective_mcp_servers = []
-
-        provider_input = (
-            await self.completion_service.prepare_skill_activation_preflight(
-                model=cast("AICompletionModel", model),
-                prompt=runtime.prompt,
-                prompt_files=completion_prompt_files,
-                mcp_servers=effective_mcp_servers,
-                skill_runtime=runtime,
-            )
-        )
-        provider_assessments = runtime.assess_provider_payload_candidates(
-            candidate_skill_ids,
-            messages=provider_input.messages,
-            provider_tools=provider_input.tools,
-            provider_input_token_limit=attachment_token_ceiling(model.max_input_tokens),
-        )
-        rejected_provider_assessment = next(
-            (
-                assessment
-                for assessment in provider_assessments
-                if assessment.rejection_reason is not None
-            ),
-            None,
-        )
-        if rejected_provider_assessment is not None:
-            rejection_reason = rejected_provider_assessment.rejection_reason
-            assert rejection_reason is not None
-            message = _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
-                rejection_reason,
-                _ON_DEMAND_REJECTION_DEFAULT,
-            )
-            raise BadRequestException(
-                f'on-demand Skill "{rejected_provider_assessment.display_name}" '
-                f"{message}"
-            )
 
     @staticmethod
     def _context_model(
@@ -729,26 +747,6 @@ class AssistantService:
             )
         return resolved_model
 
-    async def _assert_persistent_baseline_fits(
-        self,
-        *,
-        assistant: Assistant,
-        model: "CompletionModel",
-        prompt_text: str,
-        completion_prompt_files: list[File] | None = None,
-    ) -> None:
-        if completion_prompt_files is None:
-            completion_prompt_files = await self._completion_prompt_files_for_model(
-                persistent_attachments=assistant.attachments,
-                completion_model=model,
-            )
-        assert_prompt_and_files_fit_context(
-            max_input_tokens=model.max_input_tokens,
-            model_name=model.get_model_route(),
-            prompt_text=prompt_text,
-            files=completion_prompt_files,
-        )
-
     async def assert_personal_default_governance_context_fit(self) -> None:
         """Reject a candidate governance baseline that existing chats cannot run.
 
@@ -765,32 +763,71 @@ class AssistantService:
             raise RuntimeError(
                 "EffectiveConfigService is required for governance context preflight"
             )
+        effective_config = (
+            await self.effective_config_service.resolve_personal_default()
+        )
+        policy_plan = await self.skill_service.create_turn_plan(
+            base_instructions=effective_config.enforced_prompt_text or "",
+            resolution=effective_config.governance_skill_resolution,
+        )
+        policy_validation_plan = policy_plan.for_full_save_validation()
+        candidate_skill_ids = frozenset(
+            frozen.binding.skill_id
+            for frozen in policy_validation_plan.available
+            if frozen.binding.activation_mode is SkillActivationMode.ON_DEMAND
+        )
+        if candidate_skill_ids and not effective_config.models_bounded_for_on_demand:
+            raise BadRequestException(
+                "On-demand Skills require explicit completion models; "
+                "provider-wide or unrestricted model access cannot be validated safely"
+            )
+
+        if candidate_skill_ids:
+            for model in effective_config.available_models:
+                await self._validate_skill_activation_fit(
+                    validation_plan=policy_validation_plan,
+                    candidate_skill_ids=candidate_skill_ids,
+                    model=model,
+                    completion_prompt_files=[],
+                    effective_mcp_servers=(
+                        effective_config.available_mcp_servers
+                        if effective_config.mcp_enforced
+                        else []
+                    ),
+                )
+
         assistants = await self.repo.get_personal_defaults_for_tenant(
             tenant_id=self.user.tenant_id
         )
-        if not assistants:
-            return
-
-        effective_config = await self.effective_config_service.resolve_for(
-            assistants[0], space_is_personal=True
-        )
         for assistant in assistants:
-            # Personal-default binding writes are rejected at their boundary.
-            # Ask/save still detect corrupt direct bindings for one Assistant;
-            # this tenant scan avoids repeating that empty query for every user.
-            composition = compose_skill_instructions(
+            # Reuse the policy loaded above; the service wrapper would fetch it again.
+            assistant_plan = SkillTurnPlan.create(
                 base_instructions=self._governed_base_instructions(
                     assistant, effective_config
                 ),
-                bindings=list(effective_config.governance_skill_resolution.eligible),
+                resolution=effective_config.governance_skill_resolution,
+                policy=policy_plan.policy,
             )
             model = self._context_model(assistant, effective_config=effective_config)
             if model is None:
                 continue
-            await self._assert_persistent_baseline_fits(
-                assistant=assistant,
+            completion_prompt_files = await self._completion_prompt_files_for_model(
+                persistent_attachments=assistant.attachments,
+                completion_model=model,
+            )
+            # Unenforced per-user MCP selection is resolved for each turn, not
+            # loaded by this tenant-wide save preflight.
+            effective_mcp_servers = (
+                effective_config.available_mcp_servers
+                if candidate_skill_ids and effective_config.mcp_enforced
+                else []
+            )
+            await self._validate_skill_activation_fit(
+                validation_plan=assistant_plan.for_full_save_validation(),
+                candidate_skill_ids=candidate_skill_ids,
                 model=model,
-                prompt_text=composition.prompt,
+                completion_prompt_files=completion_prompt_files,
+                effective_mcp_servers=effective_mcp_servers,
             )
 
     async def _assert_message_attachments_fit(

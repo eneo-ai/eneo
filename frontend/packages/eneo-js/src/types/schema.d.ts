@@ -17203,12 +17203,12 @@ export interface components {
     /** SkillsPolicyInput */
     SkillsPolicyInput: {
       /** Bindings */
-      bindings?: components["schemas"]["SkillBindingReferenceInput"][];
+      bindings?: components["schemas"]["AssistantSkillBindingInput"][];
     };
     /** SkillsPolicyPublic */
     SkillsPolicyPublic: {
       /** Bindings */
-      bindings: components["schemas"]["SkillBindingSummary"][];
+      bindings: components["schemas"]["AssistantSkillBindingSummary"][];
     };
     /** SkippedDetail */
     SkippedDetail: {

@@ -39,6 +39,11 @@ class EffectiveConfig:
     prompt_enforced: bool
     enforced_prompt_text: str | None
 
+    # Selective activation must validate every model that policy can route to.
+    # An explicit model list is finite; provider grants include future models
+    # and therefore cannot be proven safe when the policy is saved.
+    models_bounded_for_on_demand: bool = False
+
     # Allowed servers that start switched OFF in the user's chat (UX seed
     # only — the user can still enable them per conversation).
     default_disabled_mcp_server_ids: list[UUID] = field(
@@ -78,6 +83,32 @@ def resolve(
     means "behave as before."
     """
     if not assistant.is_default or not space_is_personal or policy is None:
+        return _EMPTY
+
+    return resolve_personal_default(
+        policy=policy,
+        tenant_completion_models=tenant_completion_models,
+        tenant_mcp_servers=tenant_mcp_servers,
+        library_prompt_text=library_prompt_text,
+        governance_skill_resolution=governance_skill_resolution,
+    )
+
+
+def resolve_personal_default(
+    *,
+    policy: "GovernancePolicy | None",
+    tenant_completion_models: list["CompletionModel"],
+    tenant_mcp_servers: list["MCPServer"],
+    library_prompt_text: str | None,
+    governance_skill_resolution: SkillRuntimeResolution | None = None,
+) -> EffectiveConfig:
+    """Resolve the personal-default policy without requiring an Assistant.
+
+    Policy writes use this form so an invalid on-demand configuration is
+    rejected even before the tenant has created a personal default Assistant.
+    Runtime callers continue to use :func:`resolve`, which owns applicability.
+    """
+    if policy is None:
         return _EMPTY
 
     # ---- MODELS -----------------------------------------------------------
@@ -153,6 +184,11 @@ def resolve(
         available_models=available_models,
         locked_model=locked_model,
         policy_default_model=policy_default_model,
+        models_bounded_for_on_demand=(
+            policy.models_restriction_enabled
+            and bool(policy.completion_models)
+            and not policy.model_provider_ids
+        ),
         mcp_enforced=policy.mcp_restriction_enabled,
         available_mcp_servers=available_mcp_servers,
         default_disabled_mcp_server_ids=default_disabled_mcp_server_ids,

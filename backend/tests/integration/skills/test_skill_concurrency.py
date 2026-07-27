@@ -600,7 +600,7 @@ async def test_block_winning_skill_lock_rejects_concurrent_binding_change(
             await service.replace_governance_bindings(
                 policy_id=policy_id,
                 organization_space_id=organization_space_id,
-                references=[existing_reference],
+                intents=[SkillBindingIntent(reference=existing_reference)],
             )
 
     async def hold_block():
@@ -639,7 +639,9 @@ async def test_block_winning_skill_lock_rejects_concurrent_binding_change(
             return await service.replace_governance_bindings(
                 policy_id=policy_id,
                 organization_space_id=organization_space_id,
-                references=references,
+                intents=[
+                    SkillBindingIntent(reference=reference) for reference in references
+                ],
             )
 
     block_task = asyncio.create_task(hold_block())
