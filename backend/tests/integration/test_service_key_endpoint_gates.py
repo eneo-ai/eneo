@@ -197,6 +197,21 @@ async def test_api_key_lifecycle_mutations_reject_service_keys(
     assert "session token" in resp.text.lower()
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_logging_details_rejects_service_key(
+    client,
+    tenant_read_service_secret,
+):
+    response = await client.get(
+        f"/api/v1/logging/{uuid4()}/",
+        headers={"X-API-Key": tenant_read_service_secret},
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json().get("code") == "session_auth_required"
+
+
 # ---------------------------------------------------------------------------
 # 3. User-identity gate — (b)-class endpoints reject service keys
 # ---------------------------------------------------------------------------

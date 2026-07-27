@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy.dialects import postgresql
 
 from eneo.questions.question import QuestionAdd
-from eneo.questions.questions_repo import QuestionRepository
+from eneo.questions.questions_repo import QuestionRepository, QuestionSessionPartner
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
     SkillActivationReference,
@@ -29,6 +29,55 @@ async def test_get_by_tenant_filters_out_questions_without_session_id():
     compiled = str(stmt.compile(dialect=postgresql.dialect()))
 
     assert "questions.session_id IS NOT NULL" in compiled
+
+
+async def test_get_session_partner_uses_tenant_scoped_scalar_join():
+    question_id = uuid4()
+    tenant_id = uuid4()
+    assistant_id = uuid4()
+    result = MagicMock()
+    result.one_or_none.return_value = (assistant_id, None)
+    session = AsyncMock()
+    session.execute.return_value = result
+    repo = QuestionRepository(session)
+
+    partner = await repo.get_session_partner(
+        id=question_id,
+        tenant_id=tenant_id,
+    )
+
+    assert partner == QuestionSessionPartner(
+        assistant_id=assistant_id,
+        group_chat_id=None,
+    )
+    statement = session.execute.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "FROM questions JOIN sessions" in sql
+    assert "questions.id =" in sql
+    assert "questions.tenant_id =" in sql
+    assert "questions.question" not in sql
+    assert "questions.answer" not in sql
+    assert question_id in compiled.params.values()
+    assert tenant_id in compiled.params.values()
+
+
+async def test_get_is_tenant_scoped_before_hydration():
+    question_id = uuid4()
+    tenant_id = uuid4()
+    repo = QuestionRepository(AsyncMock())
+    repo.delegate.get_model_from_query = AsyncMock(return_value=None)
+
+    question = await repo.get(id=question_id, tenant_id=tenant_id)
+
+    assert question is None
+    statement = repo.delegate.get_model_from_query.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "questions.id =" in sql
+    assert "questions.tenant_id =" in sql
+    assert question_id in compiled.params.values()
+    assert tenant_id in compiled.params.values()
 
 
 async def test_add_serializes_skill_provenance_as_json_safe_revision_references():

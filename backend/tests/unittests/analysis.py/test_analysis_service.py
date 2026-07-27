@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.actors import SpaceActor
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
@@ -13,7 +14,12 @@ from eneo.analysis.analysis_service import (
     NO_QUESTIONS_ANSWER,
     AnalysisService,
 )
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
+from eneo.questions.questions_repo import QuestionSessionPartner
 from eneo.roles.permissions import Permission
 from tests.fixtures import TEST_UUID
 
@@ -42,9 +48,9 @@ def user():
 
 @pytest.fixture(name="mock_actor")
 def mock_actor():
-    """Create a mock actor with the necessary methods."""
-    actor = MagicMock()
-    actor.can_access_insights.return_value = True
+    actor = MagicMock(spec=SpaceActor)
+    actor.can_access_insight_assistant.return_value = True
+    actor.can_access_insight_group_chat.return_value = True
     return actor
 
 
@@ -100,6 +106,104 @@ def analysis_service(user, mock_space_service):
         group_chat_service=group_chat_service,
         completion_service=AsyncMock(),
     )
+
+
+async def test_get_message_for_insights_authorizes_assistant_before_hydration(
+    service: AnalysisService,
+    mock_actor,
+):
+    message_id = uuid4()
+    assistant_id = uuid4()
+    question = MagicMock()
+    service.user.permissions = [Permission.INSIGHTS]
+    service.question_repo.get_session_partner.return_value = QuestionSessionPartner(
+        assistant_id=assistant_id,
+        group_chat_id=None,
+    )
+    service.question_repo.get.return_value = question
+
+    result = await service.get_message_for_insights(message_id=message_id)
+
+    assert result is question
+    mock_actor.can_access_insight_assistant.assert_called_once()
+    service.question_repo.get.assert_awaited_once_with(
+        id=message_id,
+        tenant_id=service.user.tenant_id,
+    )
+
+
+async def test_get_message_for_insights_authorizes_group_chat_before_hydration(
+    service: AnalysisService,
+    mock_actor,
+):
+    message_id = uuid4()
+    group_chat_id = uuid4()
+    question = MagicMock()
+    service.user.permissions = [Permission.INSIGHTS]
+    service.question_repo.get_session_partner.return_value = QuestionSessionPartner(
+        assistant_id=None,
+        group_chat_id=group_chat_id,
+    )
+    service.question_repo.get.return_value = question
+
+    result = await service.get_message_for_insights(message_id=message_id)
+
+    assert result is question
+    mock_actor.can_access_insight_group_chat.assert_called_once()
+    service.question_repo.get.assert_awaited_once_with(
+        id=message_id,
+        tenant_id=service.user.tenant_id,
+    )
+
+
+@pytest.mark.parametrize(
+    "partner",
+    [
+        None,
+        QuestionSessionPartner(assistant_id=None, group_chat_id=None),
+        QuestionSessionPartner(assistant_id=uuid4(), group_chat_id=uuid4()),
+    ],
+)
+async def test_get_message_for_insights_hides_missing_or_malformed_session(
+    service: AnalysisService,
+    partner: QuestionSessionPartner | None,
+):
+    service.user.permissions = [Permission.INSIGHTS]
+    service.question_repo.get_session_partner.return_value = partner
+
+    with pytest.raises(NotFoundException, match="Message not found"):
+        await service.get_message_for_insights(message_id=uuid4())
+
+    service.question_repo.get.assert_not_awaited()
+
+
+async def test_get_message_for_insights_hides_denied_actor_before_hydration(
+    service: AnalysisService,
+    mock_actor,
+):
+    service.user.permissions = [Permission.INSIGHTS]
+    service.question_repo.get_session_partner.return_value = QuestionSessionPartner(
+        assistant_id=uuid4(),
+        group_chat_id=None,
+    )
+    mock_actor.can_access_insight_assistant.return_value = False
+
+    with pytest.raises(NotFoundException, match="Message not found"):
+        await service.get_message_for_insights(message_id=uuid4())
+
+    service.question_repo.get.assert_not_awaited()
+
+
+async def test_get_message_for_insights_requires_permission_before_projection(
+    service: AnalysisService,
+):
+    service.user.permissions = []
+
+    with pytest.raises(UnauthorizedException):
+        await service.get_message_for_insights(message_id=uuid4())
+
+    service.question_repo.get_session_partner.assert_not_awaited()
+    service.question_repo.get.assert_not_awaited()
 
 
 async def test_ask_question_not_in_space(service: AnalysisService):
