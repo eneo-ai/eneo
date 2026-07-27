@@ -573,14 +573,14 @@ class ObjectContentReconciliationRepository:
     ) -> None:
         if size_bytes < 0:
             raise ValueError("Known orphan size must not be negative")
-        now = await self._database_now()
-        eligible_after = now + timedelta(seconds=orphan_grace_seconds)
+        registered_at = func.clock_timestamp()
+        eligible_after = registered_at + timedelta(seconds=orphan_grace_seconds)
         statement = insert(ObjectContentOrphanCandidates).values(
             object_key=object_key,
             size_bytes=size_bytes,
             observed_cycle_id=uuid4(),
             eligible_after=eligible_after,
-            last_observed_at=now,
+            last_observed_at=registered_at,
             completed_observations=0,
             lease_owner="known-former-object",
             lease_until=eligible_after,
@@ -699,6 +699,8 @@ class ObjectContentReconciliationRepository:
         await self._session.execute(
             delete(ObjectContentOrphanCandidates).where(
                 ObjectContentOrphanCandidates.observed_cycle_id != cursor.cycle_id,
+                ObjectContentOrphanCandidates.last_observed_at
+                < cursor.cycle_started_at,
                 or_(
                     ObjectContentOrphanCandidates.lease_until.is_(None),
                     ObjectContentOrphanCandidates.lease_until <= now,

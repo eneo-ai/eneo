@@ -16,6 +16,9 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _MOVE_CANDIDATE_INDEX = "ix_object_contents_move_candidates"
+_AUDIT_ACTOR_FK = "fk_object_content_audit_events_actor_user_id"
+_AUDIT_EVENT_TYPE_CONSTRAINT = "ck_object_content_audit_events_type"
+_AUDIT_EVENT_TYPE_WITH_MOVES = "ck_object_content_audit_events_type_with_storage_moves"
 
 
 def _create_move_candidate_index() -> None:
@@ -44,6 +47,117 @@ def _create_move_candidate_index() -> None:
         WHERE state = 'available'
           AND reference_count > 0
           AND delete_requested_at IS NULL
+    """)
+
+
+def _audit_constraint_state(name: str) -> tuple[str, bool] | None:
+    row = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
+                SELECT pg_get_constraintdef(oid), convalidated
+                FROM pg_constraint
+                WHERE conname = :constraint_name
+                  AND conrelid = 'object_content_audit_events'::regclass
+                """
+            ),
+            {"constraint_name": name},
+        )
+        .one_or_none()
+    )
+    if row is None:
+        return None
+    return str(row[0]), bool(row[1])
+
+
+def _validate_constraint_if_needed(name: str) -> None:
+    state = _audit_constraint_state(name)
+    if state is not None and not state[1]:
+        op.execute(
+            f"ALTER TABLE object_content_audit_events VALIDATE CONSTRAINT {name}"
+        )
+
+
+def _prepare_audit_upgrade() -> None:
+    op.execute(
+        "ALTER TABLE object_content_audit_events "
+        "ADD COLUMN IF NOT EXISTS actor_user_id UUID"
+    )
+    if _audit_constraint_state(_AUDIT_ACTOR_FK) is None:
+        op.create_foreign_key(
+            _AUDIT_ACTOR_FK,
+            "object_content_audit_events",
+            "users",
+            ["actor_user_id"],
+            ["id"],
+            ondelete="SET NULL",
+            postgresql_not_valid=True,
+        )
+    current = _audit_constraint_state(_AUDIT_EVENT_TYPE_CONSTRAINT)
+    if (
+        current is not None
+        and "storage_moved" not in current[0]
+        and _audit_constraint_state(_AUDIT_EVENT_TYPE_WITH_MOVES) is None
+    ):
+        op.create_check_constraint(
+            _AUDIT_EVENT_TYPE_WITH_MOVES,
+            "object_content_audit_events",
+            "event_type IN ('prepared', 'available', 'retained', 'failed', "
+            "'delete_pending', 'tombstoned', 'reference_changed', "
+            "'hold_changed', 'storage_moved')",
+            postgresql_not_valid=True,
+        )
+    _validate_constraint_if_needed(_AUDIT_ACTOR_FK)
+    _validate_constraint_if_needed(_AUDIT_EVENT_TYPE_WITH_MOVES)
+
+
+def _adopt_audit_event_type_constraint(staged_name: str) -> None:
+    if _audit_constraint_state(staged_name) is None:
+        return
+    op.drop_constraint(
+        _AUDIT_EVENT_TYPE_CONSTRAINT,
+        "object_content_audit_events",
+        type_="check",
+    )
+    op.execute(
+        "ALTER TABLE object_content_audit_events "
+        f"RENAME CONSTRAINT {staged_name} TO {_AUDIT_EVENT_TYPE_CONSTRAINT}"
+    )
+
+
+def _restore_legacy_audit_event_type_constraint() -> None:
+    op.drop_constraint(
+        _AUDIT_EVENT_TYPE_CONSTRAINT,
+        "object_content_audit_events",
+        type_="check",
+    )
+    op.create_check_constraint(
+        _AUDIT_EVENT_TYPE_CONSTRAINT,
+        "object_content_audit_events",
+        "event_type IN ('prepared', 'available', 'retained', 'failed', "
+        "'delete_pending', 'tombstoned', 'reference_changed', 'hold_changed')",
+        postgresql_not_valid=True,
+    )
+    _validate_constraint_if_needed(_AUDIT_EVENT_TYPE_CONSTRAINT)
+
+
+def _assert_no_move_evidence() -> None:
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM object_content_moves)
+                OR EXISTS (
+                    SELECT 1
+                    FROM object_content_audit_events
+                    WHERE event_type = 'storage_moved'
+                ) THEN
+                RAISE EXCEPTION
+                    'cannot downgrade object-content moves after durable evidence exists'
+                    USING ERRCODE = '23514';
+            END IF;
+        END;
+        $$
     """)
 
 
@@ -155,11 +269,11 @@ def _replace_guard(*, allow_moves: bool) -> None:
 
 
 def upgrade() -> None:
-    # The autocommit phase must precede feature DDL. A retry can then reuse a
-    # valid committed index or rebuild an interrupted invalid one before the
-    # transactional schema change begins.
+    # The committed prefix makes interruption rerunnable and releases brief
+    # audit-table metadata locks before either populated-table validation.
     with op.get_context().autocommit_block():
         _create_move_candidate_index()
+        _prepare_audit_upgrade()
 
     op.add_column(
         "object_content_deployment_policy",
@@ -275,81 +389,19 @@ def upgrade() -> None:
         "object_content_moves",
         ["target_kind", "state"],
     )
-    op.add_column(
-        "object_content_audit_events",
-        sa.Column("actor_user_id", sa.UUID(), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_object_content_audit_events_actor_user_id",
-        "object_content_audit_events",
-        "users",
-        ["actor_user_id"],
-        ["id"],
-        ondelete="SET NULL",
-        postgresql_not_valid=True,
-    )
-    op.execute(
-        "ALTER TABLE object_content_audit_events VALIDATE CONSTRAINT "
-        "fk_object_content_audit_events_actor_user_id"
-    )
-    op.drop_constraint(
-        "ck_object_content_audit_events_type",
-        "object_content_audit_events",
-        type_="check",
-    )
-    op.create_check_constraint(
-        "ck_object_content_audit_events_type",
-        "object_content_audit_events",
-        "event_type IN ('prepared', 'available', 'retained', 'failed', "
-        "'delete_pending', 'tombstoned', 'reference_changed', "
-        "'hold_changed', 'storage_moved')",
-        postgresql_not_valid=True,
-    )
-    op.execute(
-        "ALTER TABLE object_content_audit_events VALIDATE CONSTRAINT "
-        "ck_object_content_audit_events_type"
-    )
+    _adopt_audit_event_type_constraint(_AUDIT_EVENT_TYPE_WITH_MOVES)
     _replace_guard(allow_moves=True)
 
 
 def downgrade() -> None:
-    op.execute("""
-        DO $$
-        BEGIN
-            IF EXISTS (SELECT 1 FROM object_content_moves)
-                OR EXISTS (
-                    SELECT 1
-                    FROM object_content_audit_events
-                    WHERE event_type = 'storage_moved'
-                ) THEN
-                RAISE EXCEPTION
-                    'cannot downgrade object-content moves after durable evidence exists'
-                    USING ERRCODE = '23514';
-            END IF;
-        END;
-        $$
-    """)
-    with op.get_context().autocommit_block():
-        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {_MOVE_CANDIDATE_INDEX}")
+    _assert_no_move_evidence()
+    op.execute("LOCK TABLE object_content_moves IN ACCESS EXCLUSIVE MODE")
+    _assert_no_move_evidence()
+    op.drop_index(_MOVE_CANDIDATE_INDEX, table_name="object_contents")
     _replace_guard(allow_moves=False)
+    _restore_legacy_audit_event_type_constraint()
     op.drop_constraint(
-        "ck_object_content_audit_events_type",
-        "object_content_audit_events",
-        type_="check",
-    )
-    op.create_check_constraint(
-        "ck_object_content_audit_events_type",
-        "object_content_audit_events",
-        "event_type IN ('prepared', 'available', 'retained', 'failed', "
-        "'delete_pending', 'tombstoned', 'reference_changed', 'hold_changed')",
-        postgresql_not_valid=True,
-    )
-    op.execute(
-        "ALTER TABLE object_content_audit_events VALIDATE CONSTRAINT "
-        "ck_object_content_audit_events_type"
-    )
-    op.drop_constraint(
-        "fk_object_content_audit_events_actor_user_id",
+        _AUDIT_ACTOR_FK,
         "object_content_audit_events",
         type_="foreignkey",
     )

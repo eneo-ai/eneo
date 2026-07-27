@@ -68,6 +68,7 @@
   let transcriptionAudioLimitBytes = $state(1);
 
   const canEdit = $derived(user.is_platform_admin === true && !authorityRevoked);
+  const policyMutationPending = $derived(saving || moveActionPending === "pause");
   const objectStoreCapability = $derived(
     deploymentPolicy?.capabilities.find((capability) => capability.target === "object_store")
   );
@@ -96,23 +97,32 @@
         transcriptionAudioLimitBytes !== deploymentPolicy.policy.transcription_audio_limit_bytes)
   );
 
-  function applyPolicy(next: DeploymentPolicy) {
-    deploymentPolicy = next;
-    if (contentMoves !== null) {
+  function applyPolicy(next: DeploymentPolicy, preserveDraft = false): boolean {
+    const currentRevision = deploymentPolicy?.policy.revision;
+    if (currentRevision !== undefined && next.policy.revision < currentRevision) return true;
+
+    if (contentMoves !== null && next.policy.revision >= contentMoves.policy_revision) {
       contentMoves = {
         ...contentMoves,
         policy_revision: next.policy.revision,
         paused: next.policy.moves_paused
       };
     }
-    storageTarget = next.policy.new_write_storage_target;
-    sessionFileLimitBytes = next.policy.session_file_limit_bytes;
-    sessionImageLimitBytes = next.policy.session_image_limit_bytes;
-    knowledgeFileLimitBytes = next.policy.knowledge_file_limit_bytes;
-    transcriptionAudioLimitBytes = next.policy.transcription_audio_limit_bytes;
+    if (preserveDraft && currentRevision !== undefined && next.policy.revision > currentRevision)
+      return false;
+
+    deploymentPolicy = next;
+    if (!preserveDraft) {
+      storageTarget = next.policy.new_write_storage_target;
+      sessionFileLimitBytes = next.policy.session_file_limit_bytes;
+      sessionImageLimitBytes = next.policy.session_image_limit_bytes;
+      knowledgeFileLimitBytes = next.policy.knowledge_file_limit_bytes;
+      transcriptionAudioLimitBytes = next.policy.transcription_audio_limit_bytes;
+    }
+    return true;
   }
 
-  async function loadPolicy() {
+  async function loadPolicy(preserveDraft = false) {
     const initialLoad = deploymentPolicy === null;
     if (initialLoad) loading = true;
     else reloading = true;
@@ -120,8 +130,8 @@
 
     try {
       const nextPolicy = await eneo.objectContentPolicy.get();
-      applyPolicy(nextPolicy);
-      stale = false;
+      const policyApplied = applyPolicy(nextPolicy, preserveDraft);
+      stale = !policyApplied;
       targetUnavailable = false;
       saveOutcomeUnknown = false;
       saveSuccess = false;
@@ -177,10 +187,25 @@
       return;
     }
 
+    const previousMoves = contentMoves;
     contentMoves = null;
     moveStatus = "loading";
     try {
-      contentMoves = await eneo.objectContentPolicy.getMoves();
+      const nextMoves = await eneo.objectContentPolicy.getMoves();
+      contentMoves =
+        previousMoves !== null &&
+        nextMoves.policy_revision < previousMoves.policy_revision &&
+        (deploymentPolicy === null ||
+          previousMoves.policy_revision >= deploymentPolicy.policy.revision)
+          ? previousMoves
+          : deploymentPolicy !== null &&
+              nextMoves.policy_revision < deploymentPolicy.policy.revision
+            ? {
+                ...nextMoves,
+                policy_revision: deploymentPolicy.policy.revision,
+                paused: deploymentPolicy.policy.moves_paused
+              }
+            : nextMoves;
       moveStatus = "idle";
     } catch (error: unknown) {
       contentMoves = null;
@@ -205,7 +230,7 @@
       !deploymentPolicy ||
       !dirty ||
       !validDraft ||
-      saving ||
+      policyMutationPending ||
       stale ||
       saveOutcomeUnknown
     )
@@ -289,14 +314,17 @@
   }
 
   async function setMovesPaused() {
-    if (!canEdit || !contentMoves || moveStatus !== "idle" || moveActionPending !== null) return;
+    if (!canEdit || !contentMoves || moveStatus !== "idle" || policyMutationPending) return;
 
+    const preservePolicyDraft = dirty;
     moveActionPending = "pause";
     moveActionError = false;
     moveOutcomeUnknown = false;
     moveActionStale = false;
     moveQueueResult = null;
     try {
+      const policyBaselineWasCurrent =
+        deploymentPolicy?.policy.revision === contentMoves.policy_revision;
       const result = await eneo.objectContentPolicy.setMovesPaused({
         expected_revision: contentMoves.policy_revision,
         moves_paused: !contentMoves.paused
@@ -306,7 +334,7 @@
         policy_revision: result.policy_revision,
         paused: result.paused
       };
-      if (deploymentPolicy !== null) {
+      if (deploymentPolicy !== null && policyBaselineWasCurrent) {
         deploymentPolicy = {
           ...deploymentPolicy,
           policy: {
@@ -315,6 +343,8 @@
             moves_paused: result.paused
           }
         };
+      } else if (deploymentPolicy !== null) {
+        await loadPolicy(preservePolicyDraft);
       }
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
@@ -327,7 +357,8 @@
         moveActionStale = true;
       } else {
         moveOutcomeUnknown = true;
-        await loadMoves();
+        await loadPolicy(preservePolicyDraft);
+        moveOutcomeUnknown = true;
       }
     } finally {
       moveActionPending = null;
@@ -438,7 +469,7 @@
             <Alert.Title>{m.storage_settings_load_error_title()}</Alert.Title>
             <Alert.Description>
               <p>{m.storage_settings_load_error_description()}</p>
-              <Button class="mt-3" variant="outline" onclick={loadPolicy}>
+              <Button class="mt-3" variant="outline" onclick={() => loadPolicy()}>
                 {m.retry()}
               </Button>
             </Alert.Description>
@@ -486,7 +517,12 @@
               <Alert.Title>{m.storage_settings_stale_title()}</Alert.Title>
               <Alert.Description>
                 <p>{m.storage_settings_stale_description()}</p>
-                <Button class="mt-3" variant="outline" disabled={reloading} onclick={loadPolicy}>
+                <Button
+                  class="mt-3"
+                  variant="outline"
+                  disabled={reloading}
+                  onclick={() => loadPolicy()}
+                >
                   {#if reloading}
                     <Loader2 class="animate-spin" />
                     {m.storage_settings_reloading()}
@@ -520,7 +556,12 @@
               <Alert.Title>{m.storage_settings_save_outcome_unknown_title()}</Alert.Title>
               <Alert.Description>
                 <p>{m.storage_settings_save_outcome_unknown_description()}</p>
-                <Button class="mt-3" variant="outline" disabled={reloading} onclick={loadPolicy}>
+                <Button
+                  class="mt-3"
+                  variant="outline"
+                  disabled={reloading}
+                  onclick={() => loadPolicy()}
+                >
                   {#if reloading}
                     <Loader2 class="animate-spin" />
                     {m.storage_settings_reloading()}
@@ -564,7 +605,7 @@
                     name="storage-target"
                     value="postgres_inline"
                     checked={storageTarget === "postgres_inline"}
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     onchange={() => (storageTarget = "postgres_inline")}
                   />
                   <Database class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -585,7 +626,7 @@
                     name="storage-target"
                     value="object_store"
                     checked={storageTarget === "object_store"}
-                    disabled={!canEdit || saving || objectStoreUnavailable}
+                    disabled={!canEdit || policyMutationPending || objectStoreUnavailable}
                     onchange={() => (storageTarget = "object_store")}
                   />
                   <HardDrive class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -631,7 +672,7 @@
                     min="1"
                     step="1"
                     required
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     bind:value={sessionFileLimitBytes}
                   />
                   <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
@@ -647,7 +688,7 @@
                     min="1"
                     step="1"
                     required
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     bind:value={sessionImageLimitBytes}
                   />
                   <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
@@ -663,7 +704,7 @@
                     min="1"
                     step="1"
                     required
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     bind:value={knowledgeFileLimitBytes}
                   />
                   <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
@@ -679,7 +720,7 @@
                     min="1"
                     step="1"
                     required
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     bind:value={transcriptionAudioLimitBytes}
                   />
                   <p class="text-muted text-xs">{m.storage_limit_audio_help()}</p>
@@ -732,7 +773,11 @@
                 </p>
                 <Button
                   type="submit"
-                  disabled={!dirty || !validDraft || saving || stale || saveOutcomeUnknown}
+                  disabled={!dirty ||
+                    !validDraft ||
+                    policyMutationPending ||
+                    stale ||
+                    saveOutcomeUnknown}
                 >
                   {#if saving}
                     <Loader2 class="animate-spin" />
@@ -820,7 +865,7 @@
                   <Alert.Title>{m.storage_moves_stale_title()}</Alert.Title>
                   <Alert.Description>
                     <p>{m.storage_moves_stale_description()}</p>
-                    <Button class="mt-3" variant="outline" onclick={loadPolicy}>
+                    <Button class="mt-3" variant="outline" onclick={() => loadPolicy()}>
                       {m.storage_settings_reload_latest()}
                     </Button>
                   </Alert.Description>
@@ -917,9 +962,7 @@
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={contentMoves === null ||
-                    moveStatus !== "idle" ||
-                    moveActionPending !== null}
+                  disabled={contentMoves === null || moveStatus !== "idle" || policyMutationPending}
                   aria-busy={moveActionPending === "pause"}
                   onclick={setMovesPaused}
                 >

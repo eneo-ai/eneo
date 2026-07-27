@@ -315,6 +315,56 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByRole("button", { name: "storage_moves_resume" })).toBeEnabled();
   });
 
+  test("locks policy inputs while pause recovery is pending", async () => {
+    testUser.isPlatformAdmin = true;
+    const initial = policy();
+    getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(
+      policy({
+        policy: {
+          ...initial.policy,
+          revision: 5,
+          session_image_limit_bytes: 12 * 1024 * 1024,
+          moves_paused: true
+        }
+      })
+    );
+    getMoves
+      .mockResolvedValueOnce(moves())
+      .mockResolvedValueOnce(moves({ policy_revision: 5, paused: true }));
+    let rejectPause!: (reason: unknown) => void;
+    setMovesPaused.mockImplementation(
+      () =>
+        new Promise<{ policy_revision: number; paused: boolean }>((_resolve, reject) => {
+          rejectPause = reject;
+        })
+    );
+
+    render(StoragePage);
+
+    const target = page.getByRole("radio", { name: /storage_target_postgres_inline/ });
+    const limits = [
+      page.getByLabelText("storage_limit_session_file"),
+      page.getByLabelText("storage_limit_session_image"),
+      page.getByLabelText("storage_limit_knowledge_file"),
+      page.getByLabelText("storage_limit_transcription_audio")
+    ];
+    await expect.element(target).toBeEnabled();
+    const pause = (async () => {
+      await page.getByRole("button", { name: "storage_moves_pause" }).click();
+    })();
+
+    await expect.element(target).toBeDisabled();
+    for (const limit of limits) await expect.element(limit).toBeDisabled();
+    await expect.element(limits[0]).toHaveValue(20 * 1024 * 1024);
+
+    rejectPause(new Error("response lost"));
+    await pause;
+    await expect.element(page.getByText("storage_moves_outcome_unknown_title")).toBeVisible();
+    await expect.element(target).toBeEnabled();
+    for (const limit of limits) await expect.element(limit).toBeEnabled();
+    await expect.element(limits[1]).toHaveValue(12 * 1024 * 1024);
+  });
+
   test("keeps the selected destination and limit when readiness rejects queueing", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(
@@ -410,20 +460,151 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByText("4", { exact: true })).toBeVisible();
   });
 
-  test("reloads a committed pause when the command outcome is unknown", async () => {
+  test("keeps a dirty draft on its old baseline after a committed pause response is lost", async () => {
     testUser.isPlatformAdmin = true;
-    getPolicy.mockResolvedValue(policy());
+    const initial = policy();
+    getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(
+      policy({
+        policy: {
+          ...initial.policy,
+          revision: 5,
+          session_image_limit_bytes: 12 * 1024 * 1024,
+          moves_paused: true
+        }
+      })
+    );
     getMoves
       .mockResolvedValueOnce(moves())
       .mockResolvedValueOnce(moves({ policy_revision: 5, paused: true }));
     setMovesPaused.mockRejectedValue(new Error("response lost"));
+    render(StoragePage);
+
+    await page.getByLabelText("storage_limit_session_file").fill("31457280");
+    await page.getByRole("button", { name: "storage_moves_pause" }).click();
+    await expect.element(page.getByText("storage_moves_outcome_unknown_title")).toBeVisible();
+    await expect.element(page.getByText("storage_settings_stale_title")).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "storage_moves_resume" })).toBeEnabled();
+    await expect.element(page.getByLabelText("storage_limit_session_file")).toHaveValue(31457280);
+    await expect.element(page.getByLabelText("storage_limit_session_image")).toHaveValue(10485760);
+    await expect
+      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .toBeDisabled();
+    expect(replacePolicy).not.toHaveBeenCalled();
+  });
+
+  test("keeps the full policy revision as the replacement baseline", async () => {
+    testUser.isPlatformAdmin = true;
+    const initial = policy();
+    getPolicy.mockResolvedValue(initial);
+    getMoves.mockResolvedValue(moves({ policy_revision: 5, paused: true }));
+    replacePolicy.mockResolvedValue(
+      policy({
+        policy: {
+          ...initial.policy,
+          revision: 5,
+          session_file_limit_bytes: 30 * 1024 * 1024
+        }
+      })
+    );
+
+    render(StoragePage);
+
+    await page.getByLabelText("storage_limit_session_file").fill("31457280");
+    await page.getByRole("button", { name: "storage_settings_save" }).click();
+
+    expect(replacePolicy).toHaveBeenCalledWith(expect.objectContaining({ expected_revision: 4 }));
+  });
+
+  test("refreshes the full policy after pausing from a newer move projection", async () => {
+    testUser.isPlatformAdmin = true;
+    const initial = policy();
+    getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(
+      policy({
+        policy: {
+          ...initial.policy,
+          revision: 6,
+          session_image_limit_bytes: 12 * 1024 * 1024,
+          moves_paused: true
+        }
+      })
+    );
+    getMoves
+      .mockResolvedValueOnce(moves({ policy_revision: 5 }))
+      .mockResolvedValueOnce(moves({ policy_revision: 6, paused: true }));
+    setMovesPaused.mockResolvedValue({ policy_revision: 6, paused: true });
+    replacePolicy.mockResolvedValue(
+      policy({
+        policy: {
+          ...initial.policy,
+          revision: 7,
+          session_file_limit_bytes: 30 * 1024 * 1024,
+          session_image_limit_bytes: 12 * 1024 * 1024,
+          moves_paused: true
+        }
+      })
+    );
 
     render(StoragePage);
 
     await page.getByRole("button", { name: "storage_moves_pause" }).click();
+    await page.getByLabelText("storage_limit_session_file").fill("31457280");
+    await page.getByRole("button", { name: "storage_settings_save" }).click();
 
-    await expect.element(page.getByText("storage_moves_outcome_unknown_title")).toBeVisible();
-    await expect.element(page.getByRole("button", { name: "storage_moves_resume" })).toBeEnabled();
+    expect(replacePolicy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expected_revision: 6,
+        session_image_limit_bytes: 12 * 1024 * 1024
+      })
+    );
+  });
+
+  test("serializes policy saves and pause commands on their shared revision", async () => {
+    testUser.isPlatformAdmin = true;
+    const initial = policy();
+    getPolicy.mockResolvedValue(initial);
+    let resolveSave!: (value: ReturnType<typeof policy>) => void;
+    replacePolicy.mockImplementation(
+      () => new Promise<ReturnType<typeof policy>>((resolve) => (resolveSave = resolve))
+    );
+    let resolvePause!: (value: { policy_revision: number; paused: boolean }) => void;
+    setMovesPaused.mockImplementation(
+      () =>
+        new Promise<{ policy_revision: number; paused: boolean }>((resolve) => {
+          resolvePause = resolve;
+        })
+    );
+
+    render(StoragePage);
+
+    await page.getByLabelText("storage_limit_session_file").fill("31457280");
+    const saveButton = page.getByRole("button", { name: "storage_settings_save" });
+    const pauseButton = page.getByRole("button", { name: "storage_moves_pause" });
+    const saveClick = (async () => {
+      await saveButton.click();
+    })();
+
+    await expect.element(pauseButton).toBeDisabled();
+    resolveSave(
+      policy({
+        policy: {
+          ...initial.policy,
+          revision: 5,
+          session_file_limit_bytes: 30 * 1024 * 1024
+        }
+      })
+    );
+    await saveClick;
+
+    await page.getByLabelText("storage_limit_session_image").fill("11534336");
+    await expect.element(saveButton).toBeEnabled();
+    const pauseClick = (async () => {
+      await pauseButton.click();
+    })();
+
+    await expect.element(saveButton).toBeDisabled();
+    resolvePause({ policy_revision: 6, paused: true });
+    await pauseClick;
+    await expect.element(saveButton).toBeEnabled();
   });
 
   test("uses the saved policy revision and pause state for the next move command", async () => {
@@ -450,6 +631,61 @@ describe("admin storage settings page", () => {
 
     expect(setMovesPaused).toHaveBeenCalledWith({
       expected_revision: 5,
+      moves_paused: false
+    });
+  });
+
+  test("keeps a newer move projection when an older full policy response finishes later", async () => {
+    testUser.isPlatformAdmin = true;
+    const initial = policy({
+      capabilities: [
+        {
+          target: "postgres_inline",
+          configured: true,
+          selectable: true,
+          readiness_code: "ready"
+        },
+        {
+          target: "object_store",
+          configured: true,
+          selectable: true,
+          readiness_code: "ready"
+        }
+      ]
+    });
+    getPolicy.mockResolvedValue(initial);
+    getMoves
+      .mockResolvedValueOnce(moves())
+      .mockResolvedValueOnce(moves({ policy_revision: 6, paused: true }));
+    let resolveSave!: (value: ReturnType<typeof policy>) => void;
+    replacePolicy.mockImplementation(
+      () => new Promise<ReturnType<typeof policy>>((resolve) => (resolveSave = resolve))
+    );
+    queueMoves.mockResolvedValue({ queued_count: 1, target_too_large_count: 0 });
+    setMovesPaused.mockResolvedValue({ policy_revision: 7, paused: false });
+
+    render(StoragePage);
+
+    await page.getByLabelText("storage_limit_session_file").fill("31457280");
+    const save = (async () => {
+      await page.getByRole("button", { name: "storage_settings_save" }).click();
+    })();
+    await expect.element(page.getByRole("button", { name: "storage_moves_pause" })).toBeDisabled();
+    await page.getByRole("button", { name: "storage_moves_queue" }).click();
+    resolveSave(
+      policy({
+        policy: {
+          ...initial.policy,
+          revision: 5,
+          session_file_limit_bytes: 30 * 1024 * 1024
+        }
+      })
+    );
+    await save;
+    await page.getByRole("button", { name: "storage_moves_resume" }).click();
+
+    expect(setMovesPaused).toHaveBeenCalledWith({
+      expected_revision: 6,
       moves_paused: false
     });
   });

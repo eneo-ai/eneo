@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
+from threading import Event
 from uuid import uuid4
 
 import psycopg2
 import pytest
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
@@ -161,6 +164,7 @@ def _assert_orm_parity(database_url: str) -> None:
 
 def test_move_schema_round_trip_preserves_the_existing_authority_fences(
     migration_database,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database_url, config = migration_database
     connection = psycopg2.connect(database_url)
@@ -184,8 +188,72 @@ def test_move_schema_round_trip_preserves_the_existing_authority_fences(
                 """
             )
 
-        command.upgrade(config, _MOVE_REVISION)
-        with connection.cursor() as cursor:
+        _tenant_id, content_id, payload = _seed_inline_content(connection)
+        validation_ready = Event()
+        allow_validation = Event()
+        downgrade_ready = Event()
+        allow_downgrade = Event()
+        original_execute = Connection.execute
+
+        def pause_at_migration_boundaries(
+            self: Connection,
+            statement,
+            *args,
+            **kwargs,
+        ):
+            if (
+                "VALIDATE CONSTRAINT "
+                "fk_object_content_audit_events_actor_user_id" in str(statement)
+            ):
+                validation_ready.set()
+                if not allow_validation.wait(timeout=10):
+                    raise TimeoutError("audit validation was not released by the test")
+            if "LOCK TABLE object_content_moves IN ACCESS EXCLUSIVE MODE" in str(
+                statement
+            ):
+                downgrade_ready.set()
+                if not allow_downgrade.wait(timeout=10):
+                    raise TimeoutError("downgrade lock was not released by the test")
+            return original_execute(self, statement, *args, **kwargs)
+
+        monkeypatch.setattr(Connection, "execute", pause_at_migration_boundaries)
+        blocker = psycopg2.connect(database_url)
+        probe = psycopg2.connect(database_url)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                upgrade = executor.submit(command.upgrade, config, _MOVE_REVISION)
+                try:
+                    assert validation_ready.wait(timeout=10)
+                    with blocker.cursor() as cursor:
+                        cursor.execute("SET lock_timeout = '1s'")
+                        cursor.execute(
+                            "LOCK TABLE object_content_audit_events "
+                            "IN SHARE UPDATE EXCLUSIVE MODE"
+                        )
+                    allow_validation.set()
+                    with probe, probe.cursor() as cursor:
+                        cursor.execute("SET LOCAL lock_timeout = '1s'")
+                        cursor.execute(
+                            "SELECT count(*) FROM object_content_audit_events"
+                        )
+                        cursor.execute(
+                            """
+                            INSERT INTO object_content_audit_events (
+                                content_id, event_type
+                            )
+                            VALUES (%s, 'available')
+                            """,
+                            (content_id,),
+                        )
+                finally:
+                    allow_validation.set()
+                    blocker.rollback()
+                upgrade.result(timeout=30)
+        finally:
+            blocker.close()
+            probe.close()
+
+        with connection, connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT indisvalid
@@ -195,11 +263,71 @@ def test_move_schema_round_trip_preserves_the_existing_authority_fences(
                 """
             )
             assert cursor.fetchone() == (True,)
+
+        concurrent_writer = psycopg2.connect(database_url)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                downgrade = executor.submit(
+                    command.downgrade,
+                    config,
+                    _PREVIOUS_REVISION,
+                )
+                try:
+                    assert downgrade_ready.wait(timeout=10)
+                    with concurrent_writer, concurrent_writer.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            INSERT INTO object_content_moves (
+                                content_id, target_kind, state
+                            )
+                            VALUES (%s, 'object_store', 'pending')
+                            """,
+                            (content_id,),
+                        )
+                finally:
+                    allow_downgrade.set()
+                with pytest.raises(
+                    DBAPIError,
+                    match=(
+                        "cannot downgrade object-content moves after durable "
+                        "evidence exists"
+                    ),
+                ):
+                    downgrade.result(timeout=30)
+        finally:
+            concurrent_writer.close()
+
+        with connection, connection.cursor() as cursor:
+            cursor.execute("SELECT version_num FROM alembic_version")
+            assert cursor.fetchone() == (_MOVE_REVISION,)
+            cursor.execute("SELECT count(*) FROM object_content_moves")
+            assert cursor.fetchone() == (1,)
+        command.upgrade(config, _MOVE_REVISION)
+
+        with connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO object_content_audit_events (content_id, event_type)
+                VALUES (%s, 'storage_moved')
+                """,
+                (content_id,),
+            )
+            cursor.execute(
+                """
+                DELETE FROM object_content_audit_events
+                WHERE content_id = %s AND event_type = 'storage_moved'
+                """,
+                (content_id,),
+            )
+            cursor.execute(
+                "DELETE FROM object_content_moves WHERE content_id = %s",
+                (content_id,),
+            )
+
         command.downgrade(config, _PREVIOUS_REVISION)
         command.upgrade(config, _MOVE_REVISION)
         _assert_orm_parity(database_url)
 
-        _tenant_id, content_id, payload = _seed_inline_content(connection)
         object_key = f"v1/{uuid4().hex}"
         digest = sha256(payload).digest()
 
