@@ -245,7 +245,7 @@ describe("ChatDebugPanel", () => {
     await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
     expect(chat.pendingDiagnosticsMessageIds).toEqual([]);
     await expect.element(page.getByText(m.chat_debug_live_turn_title())).not.toBeInTheDocument();
-    await expect.element(page.getByText("gpt-4o")).toBeVisible();
+    await expect.element(page.getByText("gpt-4o", { exact: true }).first()).toBeVisible();
   });
 
   test("distinguishes legacy evidence from zero candidates and reveals large lists in chunks", async () => {
