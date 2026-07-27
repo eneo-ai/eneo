@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
@@ -19,6 +18,10 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdge,
+    merge_resolved_input_edges,
+)
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.docx_template_runtime import (
@@ -36,28 +39,42 @@ _STEP_REFERENCE_PATTERN = re.compile(r"step_(\d+)")
 _FULL_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
 
 
-ApplyOutputCap = Callable[
-    [str, FlowRun, RuntimeStep], Awaitable[tuple[str, list[UUID]]]
-]
-
-
 @dataclass(frozen=True)
 class TemplateFillRuntimeDeps:
     variable_resolver: FlowVariableResolver
     file_repo: FileRepository
     template_asset_repo: FlowTemplateAssetRepository
-    apply_output_cap: ApplyOutputCap
     principal: FlowPrincipal
     logger: logging.Logger
 
 
-async def execute_template_fill_step(
+@dataclass(frozen=True)
+class PreparedTemplateFillStep:
+    template_asset_id: UUID
+    template_checksum: str | None
+    template_name: str | None
+    template_file_id: UUID
+    template_file_name: str
+    template_blob: bytes
+    placeholders: tuple[str, ...]
+    resolved_bindings: dict[str, str]
+    persisted_text: str
+    resolved_input_edges: tuple[FlowResolvedInputEdge, ...]
+
+
+@dataclass(frozen=True)
+class ResolvedTemplateBindings:
+    values: dict[str, str]
+    edges: tuple[FlowResolvedInputEdge, ...]
+
+
+async def prepare_template_fill_step(
     *,
     step: RuntimeStep,
     run: FlowRun,
     state: RunExecutionState,
     deps: TemplateFillRuntimeDeps,
-) -> StepExecutionOutput:
+) -> PreparedTemplateFillStep:
     current_stage = "parsing template configuration"
     try:
         (
@@ -83,11 +100,8 @@ async def execute_template_fill_step(
             template_asset_id=template_asset_id,
             template_checksum=template_checksum,
         )
-        template_file_id = template_file.id
         template_blob = template_file.blob
-        if (
-            template_blob is None
-        ):  # defensive narrowing; _load_template_file already rejects this
+        if template_blob is None:
             raise TypedIOValidationException(
                 "The published DOCX template could not be read because the saved file content is missing. Re-upload the template and publish the flow again.",
                 code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
@@ -96,13 +110,13 @@ async def execute_template_fill_step(
             "flow_executor.template_fill.template_loaded run_id=%s step_order=%d template_file_id=%s size=%d checksum=%s",
             run.id,
             step.step_order,
-            template_file_id,
+            template_file.id,
             len(template_blob),
             template_file.checksum,
         )
 
         current_stage = "resolving template bindings"
-        resolved_bindings = _resolve_template_bindings(
+        resolved = _resolve_template_bindings(
             variable_resolver=deps.variable_resolver,
             step=step,
             run=run,
@@ -111,27 +125,66 @@ async def execute_template_fill_step(
         )
         persisted_text = _build_template_fill_summary(
             placeholders=placeholders,
-            resolved_bindings=resolved_bindings,
+            resolved_bindings=resolved.values,
         )
         deps.logger.debug(
             "flow_executor.template_fill.bindings_resolved run_id=%s step_order=%d template_file_id=%s placeholders=%s",
             run.id,
             step.step_order,
-            template_file_id,
-            ",".join(sorted(resolved_bindings)),
+            template_file.id,
+            ",".join(sorted(resolved.values)),
         )
+        return PreparedTemplateFillStep(
+            template_asset_id=template_asset_id,
+            template_checksum=template_checksum,
+            template_name=template_name,
+            template_file_id=template_file.id,
+            template_file_name=template_file.name,
+            template_blob=template_blob,
+            placeholders=tuple(placeholders),
+            resolved_bindings=resolved.values,
+            persisted_text=persisted_text,
+            resolved_input_edges=resolved.edges,
+        )
+    except TypedIOValidationException as exc:
+        deps.logger.info(
+            "flow_executor.template_fill.validation_failed run_id=%s step_order=%d stage=%s code=%s message=%s",
+            run.id,
+            step.step_order,
+            current_stage,
+            exc.code,
+            str(exc),
+        )
+        raise
+    except Exception as exc:
+        deps.logger.exception(
+            "flow_executor.template_fill.stage_failed run_id=%s step_order=%d stage=%s",
+            run.id,
+            step.step_order,
+            current_stage,
+        )
+        raise _template_fill_runtime_error(stage=current_stage, exc=exc) from exc
 
-        current_stage = "rendering the DOCX template"
+
+async def complete_template_fill_step(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prepared: PreparedTemplateFillStep,
+    deps: TemplateFillRuntimeDeps,
+) -> StepExecutionOutput:
+    current_stage = "rendering the DOCX template"
+    try:
         blob, mimetype, filename = render_docx_template(
-            template_bytes=template_blob,
-            context=resolved_bindings,
+            template_bytes=prepared.template_blob,
+            context=prepared.resolved_bindings,
             step_order=step.step_order,
         )
         deps.logger.debug(
             "flow_executor.template_fill.template_rendered run_id=%s step_order=%d template_file_id=%s filename=%s size=%d",
             run.id,
             step.step_order,
-            template_file_id,
+            prepared.template_file_id,
             filename,
             len(blob),
         )
@@ -175,7 +228,7 @@ async def execute_template_fill_step(
             "flow_executor.template_fill.stage_failed run_id=%s step_order=%d stage=save_generated_docx template_file_id=%s",
             run.id,
             step.step_order,
-            template_file_id,
+            prepared.template_file_id,
         )
         raise _template_fill_runtime_error(
             stage="saving the generated DOCX", exc=exc
@@ -188,37 +241,41 @@ async def execute_template_fill_step(
             "flow_executor.template_fill.stage_failed run_id=%s step_order=%d stage=read_generated_docx template_file_id=%s generated_file_id=%s",
             run.id,
             step.step_order,
-            template_file_id,
+            prepared.template_file_id,
             stored_file.id,
         )
         raise _template_fill_runtime_error(
             stage="reading the generated DOCX", exc=exc
         ) from exc
 
-    bindings_text = json.dumps(resolved_bindings, ensure_ascii=False, sort_keys=True)
+    bindings_text = json.dumps(
+        prepared.resolved_bindings,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
 
     deps.logger.info(
         "flow_executor.template_fill.completed run_id=%s step_order=%d template_file_id=%s generated_file_id=%s text_length=%d",
         run.id,
         step.step_order,
-        template_file_id,
+        prepared.template_file_id,
         stored_file.id,
         len(rendered_text),
     )
 
-    template_name_value = template_name or template_file.name
+    template_name_value = prepared.template_name or prepared.template_file_name
     output_payload_extensions: dict[str, Any] = {
         "template_fill_debug": {
             "rendered_docx_text_raw": rendered_text,
             "summary_mode": "resolved_bindings",
-            "placeholder_count": len(placeholders),
+            "placeholder_count": len(prepared.placeholders),
         }
     }
     output_payload_extensions["template_provenance"] = {
         "template_name": template_name_value,
-        "template_asset_id": str(template_asset_id),
-        "template_file_id": str(template_file_id),
-        "template_checksum": template_checksum,
+        "template_asset_id": str(prepared.template_asset_id),
+        "template_file_id": str(prepared.template_file_id),
+        "template_checksum": prepared.template_checksum,
         "published_flow_version": run.flow_version,
     }
 
@@ -228,7 +285,7 @@ async def execute_template_fill_step(
         input_source=step.input_source,
         used_question_binding=False,
         full_text=rendered_text,
-        persisted_text=persisted_text,
+        persisted_text=prepared.persisted_text,
         generated_file_ids=[],
         tool_calls_metadata=None,
         num_tokens_input=0,
@@ -236,9 +293,9 @@ async def execute_template_fill_step(
         effective_prompt="",
         model_parameters_json={
             "mode": "template_fill",
-            "template_file_id": str(template_file_id),
-            "template_asset_id": str(template_asset_id),
-            "template_checksum": template_checksum,
+            "template_file_id": str(prepared.template_file_id),
+            "template_asset_id": str(prepared.template_asset_id),
+            "template_checksum": prepared.template_checksum,
         },
         structured_output=None,
         artifacts=[
@@ -381,8 +438,8 @@ def _resolve_template_bindings(
     run: FlowRun,
     state: RunExecutionState,
     bindings: dict[str, str],
-) -> dict[str, str]:
-    context = variable_resolver.build_context(
+) -> ResolvedTemplateBindings:
+    context = variable_resolver.build_context_with_evidence(
         run.input_payload_json,
         state.prior_results,
         current_step_order=step.step_order,
@@ -390,21 +447,28 @@ def _resolve_template_bindings(
         step_ref_mapping=state.step_ref_mapping,
     )
     resolved: dict[str, str] = {}
+    edges: list[FlowResolvedInputEdge] = []
     for placeholder, expression in bindings.items():
         if not expression.strip():
             resolved[placeholder] = ""
             continue
         try:
+            interpolation = variable_resolver.interpolate_with_evidence(
+                expression,
+                context,
+                binding_ref=f"output_config.bindings.{placeholder}",
+            )
             match = _FULL_TEMPLATE_EXPRESSION_PATTERN.fullmatch(expression)
             if match is not None:
+                # Evidence hashes the raw value, while template fill preserves compact
+                # JSON for bindings that consist of one complete expression.
                 raw_value = variable_resolver.resolve_path(
                     context, match.group(1).strip()
                 )
                 resolved[placeholder] = _stringify_template_binding_value(raw_value)
             else:
-                resolved[placeholder] = variable_resolver.interpolate(
-                    expression, context
-                )
+                resolved[placeholder] = interpolation.text
+            edges.extend(interpolation.edges)
         except BadRequestException as exc:
             failed_step_order = _failed_step_order_for_expression(
                 expression=expression,
@@ -419,7 +483,10 @@ def _resolve_template_bindings(
                 f"Template binding '{placeholder}' could not be resolved: {exc}",
                 code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
             ) from exc
-    return resolved
+    return ResolvedTemplateBindings(
+        values=resolved,
+        edges=merge_resolved_input_edges(edges),
+    )
 
 
 def _build_template_fill_summary(

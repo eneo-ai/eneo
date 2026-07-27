@@ -12,6 +12,13 @@ from pydantic import ValidationError
 from eneo.audit.domain.outcome import Outcome
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdge,
+    FlowResolvedInputHttpResponseSource,
+    FlowResolvedInputJsonPath,
+    build_resolved_input_edge,
+    merge_resolved_input_edges,
+)
 from eneo.flows.flow_run_redaction import redact_string
 from eneo.flows.http_transport import (
     EffectiveHttpRequest,
@@ -21,6 +28,7 @@ from eneo.flows.http_transport import (
     decrypt_authored_config,
     is_authored_config,
 )
+from eneo.flows.variable_resolver import FlowVariableContext
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 
@@ -88,6 +96,13 @@ class WebhookDeliveryError(RuntimeError):
         self.status_code = status_code
 
 
+@dataclass(frozen=True, slots=True)
+class FlowHttpInputResolution:
+    text: str
+    structured: dict[str, Any] | list[Any] | None
+    resolved_input_edges: tuple[FlowResolvedInputEdge, ...]
+
+
 @dataclass(frozen=True)
 class FlowHttpOrchestrationDeps:
     encryption_service: Any
@@ -131,6 +146,11 @@ def _compile_authored_http_request(
         method=method,
         variables=context,
         interpolate=deps.variable_resolver.interpolate,
+        interpolate_with_evidence=(
+            deps.variable_resolver.interpolate_with_evidence
+            if direction == "input"
+            else None
+        ),
     )
     timeout_seconds = deps.resolve_timeout_seconds(
         decrypted.timeout_seconds,
@@ -162,9 +182,9 @@ async def resolve_http_input_source_text(
     *,
     step: RuntimeHttpStep,
     run: RuntimeHttpRun,
-    context: dict[str, Any],
+    context: FlowVariableContext,
     deps: FlowHttpOrchestrationDeps,
-) -> tuple[str, dict[str, Any] | list[Any] | None]:
+) -> FlowHttpInputResolution:
     if step.input_source != "http_get":
         raise TypedIOValidationException(
             f"Step {step.step_order}: HTTP input orchestration only supports input_source 'http_get'.",
@@ -311,7 +331,15 @@ async def resolve_http_input_source_text(
             status_code=response.status_code,
             duration_ms=duration_ms,
         )
-        return json.dumps(parsed, ensure_ascii=False), parsed
+        response_edge = _http_response_edge(parsed)
+        return FlowHttpInputResolution(
+            text=json.dumps(parsed, ensure_ascii=False),
+            structured=parsed,
+            resolved_input_edges=merge_resolved_input_edges(
+                effective_request.resolved_input_edges,
+                (response_edge,),
+            ),
+        )
 
     await deps.audit_http_outbound(
         run=run,
@@ -323,7 +351,28 @@ async def resolve_http_input_source_text(
         status_code=response.status_code,
         duration_ms=duration_ms,
     )
-    return response_text, None
+    response_edge = _http_response_edge(response_text)
+    return FlowHttpInputResolution(
+        text=response_text,
+        structured=None,
+        resolved_input_edges=merge_resolved_input_edges(
+            effective_request.resolved_input_edges,
+            (response_edge,),
+        ),
+    )
+
+
+def _http_response_edge(
+    selected_value: object,
+) -> FlowResolvedInputEdge:
+    return build_resolved_input_edge(
+        binding_ref="http.response",
+        source=FlowResolvedInputHttpResponseSource(
+            kind="http_response",
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=()),
+        ),
+        selected_value=selected_value,
+    )
 
 
 async def deliver_webhook(

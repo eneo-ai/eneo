@@ -6,7 +6,6 @@ input contract validation, file resolution, canary flag, error propagation.
 
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import json
 from datetime import datetime, timezone
@@ -29,6 +28,7 @@ from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
 )
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
@@ -43,6 +43,7 @@ from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
     build_rerun_execution_input_envelope,
 )
+from eneo.flows.flow_run_provenance import FlowAttemptProvenance
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
@@ -91,6 +92,15 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     flow_run_repo = AsyncMock()
     flow_run_rerun_repo = AsyncMock()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+
+    async def _activate_step_attempt(**kwargs):
+        return SimpleNamespace(
+            provenance_json=FlowAttemptProvenance(
+                attempt_start=kwargs["attempt_start"]
+            ).to_payload()
+        )
+
+    flow_run_repo.activate_step_attempt = AsyncMock(side_effect=_activate_step_attempt)
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
@@ -163,6 +173,16 @@ def _runtime_step(
     )
 
 
+def _runtime_file(*, file_id, text: str, name: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=file_id,
+        text=text,
+        name=name,
+        checksum=f"checksum-{file_id}",
+        size=len(text.encode("utf-8")),
+    )
+
+
 def _prompt_for_output_format(
     *,
     output_type: str,
@@ -199,6 +219,7 @@ def _completed_step_result(
         step_id=uuid4(),
         step_order=step_order,
         assistant_id=uuid4(),
+        current_attempt_no=1,
         input_payload_json={"text": f"input-{step_order}"},
         effective_prompt="prompt",
         output_payload_json=payload,
@@ -923,7 +944,10 @@ async def test_resolve_step_input_document_rejects_extracted_text_over_inline_ca
         user=user,
         input_payload={},
     )
-    fake_file = SimpleNamespace(id=file_id, text="detta ar mycket langre an atta bytes")
+    fake_file = _runtime_file(
+        file_id=file_id,
+        text="detta ar mycket langre an atta bytes",
+    )
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
 
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
@@ -1567,7 +1591,7 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
     user,
 ):
     executor, _, _, _ = _build_executor(user)
-    file = SimpleNamespace(id=uuid4(), text="transkriberat innehåll")
+    file = _runtime_file(file_id=uuid4(), text="transkriberat innehåll")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
     run = _run(
         status=FlowRunStatus.RUNNING,
@@ -1597,7 +1621,7 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
 async def test_resolve_step_input_runtime_input_does_not_append_internal_orchestration_metadata():
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
     executor, _, _, _ = _build_executor(user)
-    file = SimpleNamespace(id=uuid4(), text="runtime step upload test")
+    file = _runtime_file(file_id=uuid4(), text="runtime step upload test")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
     step = _runtime_step(
         step_order=1,
@@ -1627,7 +1651,7 @@ async def test_resolve_step_input_runtime_input_does_not_append_internal_orchest
 @pytest.mark.asyncio
 async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
     executor, _, _, _ = _build_executor(user)
-    file = SimpleNamespace(id=uuid4(), text="transkriberat innehåll")
+    file = _runtime_file(file_id=uuid4(), text="transkriberat innehåll")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
     run = _run(
         status=FlowRunStatus.RUNNING,
@@ -1932,7 +1956,7 @@ async def test_empty_document_extraction_uses_source_marker_not_payload_fallback
         user=user,
         input_payload={"text": "fallback payload text"},
     )
-    fake_file = SimpleNamespace(id=file_id, text="", name="empty.pdf")
+    fake_file = _runtime_file(file_id=file_id, text="", name="empty.pdf")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
     executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
     executor._load_assistant = AsyncMock(
@@ -1964,7 +1988,7 @@ async def test_file_input_uses_extracted_file_text(user):
         user=user,
         input_payload={},
     )
-    fake_file = SimpleNamespace(id=file_id, text="Extracted file text")
+    fake_file = _runtime_file(file_id=file_id, text="Extracted file text")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
     executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
     executor._load_assistant = AsyncMock(
@@ -2036,20 +2060,9 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         ]
     )
     executor._load_assistant = AsyncMock(return_value=assistant)
-    original_prepare = executor._prepare_assistant_step
-    prepare_in_progress = False
-
-    async def guarded_prepare(**kwargs):
-        nonlocal prepare_in_progress
-        assert prepare_in_progress is False
-        prepare_in_progress = True
-        await asyncio.sleep(0)
-        try:
-            return await original_prepare(**kwargs)
-        finally:
-            prepare_in_progress = False
-
-    executor._prepare_assistant_step = guarded_prepare
+    executor._prepare_assistant_step = AsyncMock(
+        side_effect=AssertionError("mapped execution must reuse previewed input")
+    )
     output_contract = {
         "type": "object",
         "properties": {
@@ -2097,6 +2110,16 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     ).output
 
     assert assistant.get_response.await_count == 2
+    executor._prepare_assistant_step.assert_not_awaited()
+    flow_run_repo.activate_step_attempt.assert_awaited_once()
+    activation = flow_run_repo.activate_step_attempt.await_args.kwargs
+    runtime_file_ids = {
+        edge.source.file_id
+        for edge in activation["resolved_input_edges"].edges
+        if edge.source.kind == "runtime_file"
+    }
+    assert runtime_file_ids == {first_file_id, second_file_id}
+    assert executor.file_repo.get_list_by_id_for_owner.await_count == 2
     assert state.mapped_admission_by_step[step.step_id].prospective_provider_calls == 2
     questions = [
         call.kwargs["question"] for call in assistant.get_response.await_args_list
@@ -2426,7 +2449,7 @@ async def test_per_item_map_derives_input_array_and_echoes_runtime_source_identi
 async def test_per_item_map_executes_one_model_call_per_previous_document_at_scale(
     user,
 ):
-    executor, _, _, _ = _build_executor(user)
+    executor, _, flow_run_repo, _ = _build_executor(user)
     documents = [
         {
             "title": f"Document {index}",
@@ -2450,6 +2473,9 @@ async def test_per_item_map_executes_one_model_call_per_previous_document_at_sca
         ]
     )
     executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._prepare_assistant_step = AsyncMock(
+        side_effect=AssertionError("mapped execution must reuse previewed input")
+    )
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
     previous = _completed_step_result(
         run_id=run.id,
@@ -2508,6 +2534,37 @@ async def test_per_item_map_executes_one_model_call_per_previous_document_at_sca
     ).output
 
     assert assistant.get_response.await_count == 40
+    executor._prepare_assistant_step.assert_not_awaited()
+    flow_run_repo.activate_step_attempt.assert_awaited_once()
+    activation = flow_run_repo.activate_step_attempt.await_args.kwargs
+    resolved_edges = activation["resolved_input_edges"].edges
+    assert len(resolved_edges) == 40
+    assert {
+        edge.source.source_step_id
+        for edge in resolved_edges
+        if edge.source.kind == "step_result"
+    } == {previous.step_id}
+    assert {
+        edge.source.source_attempt_no
+        for edge in resolved_edges
+        if edge.source.kind == "step_result"
+    } == {1}
+    first_source = resolved_edges[0].source
+    last_source = resolved_edges[-1].source
+    assert first_source.kind == "step_result"
+    assert last_source.kind == "step_result"
+    assert first_source.selector.path == ("output", "structured", "documents", 0)
+    assert last_source.selector.path == (
+        "output",
+        "structured",
+        "documents",
+        39,
+    )
+    assert resolved_edges[0].selection.sha256 == canonical_json_hash(documents[0])
+    assert [
+        call.kwargs["provider_call_observer"].resolved_input_edge_indexes
+        for call in assistant.get_response.await_args_list
+    ] == [(index,) for index in range(40)]
     questions = [
         call.kwargs["question"] for call in assistant.get_response.await_args_list
     ]

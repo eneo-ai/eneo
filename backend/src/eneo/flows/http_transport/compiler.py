@@ -3,8 +3,12 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdge,
+    merge_resolved_input_edges,
+)
 from eneo.flows.http_transport.authored_config import (
     HttpAuthApiKey,
     HttpAuthBasicAuth,
@@ -15,6 +19,17 @@ from eneo.flows.http_transport.authored_config import (
     HttpMethod,
     SecretValue,
 )
+from eneo.flows.variable_resolver import FlowVariableContext, FlowVariableInterpolation
+
+
+class InterpolateWithEvidenceFn(Protocol):
+    def __call__(
+        self,
+        template: str,
+        context: FlowVariableContext,
+        *,
+        binding_ref: str,
+    ) -> FlowVariableInterpolation: ...
 
 
 @dataclass(frozen=True)
@@ -27,6 +42,7 @@ class EffectiveHttpRequest:
     body: bytes | None
     json_body: dict[str, Any] | list[Any] | None
     timeout: float
+    resolved_input_edges: tuple[FlowResolvedInputEdge, ...] = ()
 
 
 def compile_http_config(
@@ -36,6 +52,7 @@ def compile_http_config(
     method: HttpMethod,
     variables: dict[str, Any] | None = None,
     interpolate: Callable[[str, dict[str, Any]], str] | None = None,
+    interpolate_with_evidence: InterpolateWithEvidenceFn | None = None,
 ) -> EffectiveHttpRequest:
     """Pure function. Compiles authored config into an effective request.
 
@@ -57,6 +74,21 @@ def compile_http_config(
             return interpolate(template, ctx)
         return template
 
+    def _interpolate_evidenced(
+        template: str, *, binding_ref: str
+    ) -> FlowVariableInterpolation:
+        if interpolate_with_evidence is not None:
+            if not isinstance(ctx, FlowVariableContext):
+                raise TypeError(
+                    "Evidence interpolation requires a FlowVariableContext."
+                )
+            return interpolate_with_evidence(
+                template,
+                ctx,
+                binding_ref=binding_ref,
+            )
+        return FlowVariableInterpolation(text=_interpolate(template), edges=())
+
     # Auth -> headers
     match authored.auth:
         case HttpAuthBearer(token=token):
@@ -71,23 +103,44 @@ def compile_http_config(
         case HttpAuthNone():
             pass
 
-    # Custom headers
-    for h in authored.custom_headers:
-        headers[h.name] = _interpolate(_secret_text(h.value))
+    custom_header_edges: dict[str, tuple[FlowResolvedInputEdge, ...]] = {}
+    for index, header in enumerate(authored.custom_headers):
+        if header.secret:
+            headers[header.name] = _interpolate(_secret_text(header.value))
+            custom_header_edges.pop(header.name, None)
+            continue
+        interpolation = _interpolate_evidenced(
+            _secret_text(header.value),
+            binding_ref=f"http.custom_headers[{index}].value",
+        )
+        headers[header.name] = interpolation.text
+        custom_header_edges[header.name] = interpolation.edges
 
     # URL interpolation
-    url = _interpolate(authored.url)
+    url_interpolation = _interpolate_evidenced(
+        authored.url,
+        binding_ref="http.url",
+    )
 
     # Body -> payload
-    body_bytes, json_body = _compile_body(authored, direction, ctx, _interpolate)
+    body_bytes, json_body, body_edges = _compile_body(
+        authored,
+        direction,
+        _interpolate_evidenced,
+    )
 
     return EffectiveHttpRequest(
         method=method,
-        url=url,
+        url=url_interpolation.text,
         headers=headers,
         body=body_bytes,
         json_body=json_body,
         timeout=float(authored.timeout_seconds),
+        resolved_input_edges=merge_resolved_input_edges(
+            url_interpolation.edges,
+            *custom_header_edges.values(),
+            body_edges,
+        ),
     )
 
 
@@ -100,35 +153,39 @@ def _secret_text(value: SecretValue) -> str:
 def _compile_body(
     authored: HttpAuthoredConfig,
     direction: str,
-    ctx: dict[str, Any],
-    interpolate_fn: Callable[[str], str],
-) -> tuple[bytes | None, dict[str, Any] | list[Any] | None]:
+    interpolate_fn: Callable[..., FlowVariableInterpolation],
+) -> tuple[
+    bytes | None,
+    dict[str, Any] | list[Any] | None,
+    tuple[FlowResolvedInputEdge, ...],
+]:
     """Compile body mode into (raw_bytes, json_body)."""
     mode = authored.body.mode
 
     if mode == HttpBodyMode.NONE:
-        return None, None
+        return None, None, ()
 
     if mode == HttpBodyMode.AUTO:
         # AUTO leaves fallback body selection to the runtime caller.
-        return None, None
+        return None, None, ()
 
     if mode == HttpBodyMode.JSON_TEMPLATE:
         template = authored.body.template
         if template is None:
-            return None, None
-        rendered = interpolate_fn(template)
+            return None, None, ()
+        interpolation = interpolate_fn(template, binding_ref="http.body")
+        rendered = interpolation.text
         try:
             parsed = json.loads(rendered)
         except (json.JSONDecodeError, ValueError):
-            return rendered.encode("utf-8"), None
-        return None, parsed
+            return rendered.encode("utf-8"), None, interpolation.edges
+        return None, parsed, interpolation.edges
 
     if mode == HttpBodyMode.TEXT_TEMPLATE:
         template = authored.body.template
         if template is None:
-            return None, None
-        rendered = interpolate_fn(template)
-        return rendered.encode("utf-8"), None
+            return None, None, ()
+        interpolation = interpolate_fn(template, binding_ref="http.body")
+        return interpolation.text.encode("utf-8"), None, interpolation.edges
 
-    return None, None
+    return None, None, ()

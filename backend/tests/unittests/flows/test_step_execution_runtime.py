@@ -40,7 +40,12 @@ from eneo.flows.domain.runtime import (
     StepInputValue,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputFlowInputSource,
+    FlowResolvedInputJsonPath,
+    MappedProviderCallProvenance,
+    build_resolved_input_edge,
+)
 from eneo.flows.flow_run_step_result_file import build_step_result_file_references
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
@@ -838,6 +843,17 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
         )
 
     assistant.get_response = AsyncMock(side_effect=_observed_response)
+    resolved_input_edge = build_resolved_input_edge(
+        binding_ref="question",
+        source=FlowResolvedInputFlowInputSource(
+            kind="flow_input",
+            selector=FlowResolvedInputJsonPath(
+                kind="json_path",
+                path=("question",),
+            ),
+        ),
+        selected_value="hello",
+    )
     prepared = PreparedStepExecution(
         assistant=assistant,
         step_input=StepInputValue(text="hello", source_text="hello"),
@@ -846,7 +862,15 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
         contract_validation=None,
         diagnostics=[],
         llm_files=[],
+        resolved_input_edges=(resolved_input_edge,),
+        resolved_input_edge_indexes=(0,),
     )
+
+    observed_builder_arguments = []
+
+    def _build_provider_call_observer(mapped_call, resolved_input_edge_indexes):
+        observed_builder_arguments.append((mapped_call, resolved_input_edge_indexes))
+        return observer
 
     async def _fail_after_receipt(**_kwargs):
         observer.completed.assert_awaited_once()
@@ -860,7 +884,7 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
         retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
         process_typed_output=AsyncMock(side_effect=_fail_after_receipt),
         apply_output_cap=AsyncMock(),
-        build_provider_call_observer=lambda mapped_call: observer,
+        build_provider_call_observer=_build_provider_call_observer,
         mapped_call_context=MappedProviderCallProvenance(
             execution_mode="per_item",
             item_index=1,
@@ -881,6 +905,7 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
     assert result.num_tokens_output is None
     assert observer.started.await_args.args[0].provider_request_hash == "f" * 64
     assert model_names == ["openai/gpt-test"]
+    assert observed_builder_arguments == [(deps.mapped_call_context, (0,))]
 
 
 @pytest.mark.asyncio

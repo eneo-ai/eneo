@@ -4,9 +4,15 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import sqlalchemy as sa
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
-from eneo.database.tables.flow_tables import FlowProviderCalls, FlowStepAttempts
+from eneo.database.tables.flow_tables import (
+    FlowProviderCalls,
+    FlowStepAttemptResolvedInputs,
+    FlowStepAttempts,
+)
 from eneo.flows.domain.provider_call import (
     ProviderCall,
     ProviderCallCompletion,
@@ -18,6 +24,14 @@ from eneo.flows.domain.provider_call import (
     ProviderCallUnknownReason,
 )
 from eneo.flows.enums import FlowStepAttemptStatus
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdgeIndexes,
+    parse_resolved_input_edges,
+)
+
+_RESOLVED_INPUT_EDGE_INDEXES_ADAPTER: TypeAdapter[FlowResolvedInputEdgeIndexes] = (
+    TypeAdapter(FlowResolvedInputEdgeIndexes)
+)
 
 
 class FlowProviderCallAttemptNotOpenError(RuntimeError):
@@ -29,6 +43,10 @@ class FlowProviderCallNotFoundError(RuntimeError):
 
 
 class FlowProviderCallStateConflictError(RuntimeError):
+    pass
+
+
+class FlowProviderCallResolvedInputLinkError(RuntimeError):
     pass
 
 
@@ -180,28 +198,6 @@ class FlowProviderCallRepository:
         )
         return len(result.all())
 
-    async def start_call(
-        self,
-        *,
-        attempt_id: UUID,
-        request: ProviderCallRequest,
-    ) -> ProviderCall:
-        locked_attempt_id = await self.session.scalar(
-            sa.select(FlowStepAttempts.id)
-            .where(FlowStepAttempts.id == attempt_id)
-            .where(FlowStepAttempts.status == FlowStepAttemptStatus.STARTED.value)
-            .with_for_update()
-        )
-        if locked_attempt_id is None:
-            raise FlowProviderCallAttemptNotOpenError(
-                f"Flow step attempt {attempt_id} is not open for a provider call."
-            )
-
-        return await self._insert_started_call(
-            attempt_id=locked_attempt_id,
-            request=request,
-        )
-
     async def start_call_for_execution(
         self,
         *,
@@ -210,30 +206,85 @@ class FlowProviderCallRepository:
         attempt_no: int,
         tenant_id: UUID,
         request: ProviderCallRequest,
+        resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
     ) -> ProviderCall:
-        attempt_id = await self.session.scalar(
-            sa.select(FlowStepAttempts.id)
-            .where(FlowStepAttempts.flow_run_id == run_id)
-            .where(FlowStepAttempts.step_id == step_id)
-            .where(FlowStepAttempts.attempt_no == attempt_no)
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(FlowStepAttempts.status == FlowStepAttemptStatus.STARTED.value)
-            .with_for_update()
+        attempt_id, resolved_input_edge_count = await self._lock_open_attempt(
+            FlowStepAttempts.flow_run_id == run_id,
+            FlowStepAttempts.step_id == step_id,
+            FlowStepAttempts.attempt_no == attempt_no,
+            FlowStepAttempts.tenant_id == tenant_id,
         )
-        if attempt_id is None:
-            raise FlowProviderCallAttemptNotOpenError(
-                "The Flow step attempt is not open for a provider call."
-            )
         return await self._insert_started_call(
             attempt_id=attempt_id,
             request=request,
+            resolved_input_edge_indexes=self._validate_resolved_input_edge_indexes(
+                indexes=resolved_input_edge_indexes,
+                resolved_input_edge_count=resolved_input_edge_count,
+            ),
         )
+
+    async def _lock_open_attempt(
+        self,
+        *identity_predicates: ColumnElement[bool],
+    ) -> tuple[UUID, int]:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepAttempts.id,
+                    FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                )
+                .outerjoin(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(*identity_predicates)
+                .where(FlowStepAttempts.status == FlowStepAttemptStatus.STARTED.value)
+                .with_for_update(of=FlowStepAttempts)
+            )
+        ).one_or_none()
+        if row is None:
+            raise FlowProviderCallAttemptNotOpenError(
+                "The Flow step attempt is not open for a provider call."
+            )
+        attempt_id, raw_resolved_input_edges = row
+        if raw_resolved_input_edges is None:
+            raise FlowProviderCallResolvedInputLinkError(
+                "Provider I/O cannot start before resolved input evidence is activated."
+            )
+        parsed = parse_resolved_input_edges(raw_resolved_input_edges)
+        if parsed.status != "tracked" or parsed.aggregate is None:
+            raise FlowProviderCallResolvedInputLinkError(
+                "Provider I/O cannot start with corrupt resolved input evidence."
+            )
+        return attempt_id, len(parsed.aggregate.edges)
+
+    @staticmethod
+    def _validate_resolved_input_edge_indexes(
+        *,
+        indexes: FlowResolvedInputEdgeIndexes,
+        resolved_input_edge_count: int,
+    ) -> FlowResolvedInputEdgeIndexes:
+        try:
+            canonical_indexes = _RESOLVED_INPUT_EDGE_INDEXES_ADAPTER.validate_python(
+                indexes
+            )
+        except ValidationError as exc:
+            raise FlowProviderCallResolvedInputLinkError(
+                "Provider-call resolved input indexes are not canonical."
+            ) from exc
+        if canonical_indexes and canonical_indexes[-1] >= resolved_input_edge_count:
+            raise FlowProviderCallResolvedInputLinkError(
+                "Provider-call resolved input indexes exceed the activated aggregate."
+            )
+        return canonical_indexes
 
     async def _insert_started_call(
         self,
         *,
         attempt_id: UUID,
         request: ProviderCallRequest,
+        resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
     ) -> ProviderCall:
         current_ordinal = await self.session.scalar(
             sa.select(sa.func.max(FlowProviderCalls.ordinal)).where(
@@ -255,6 +306,7 @@ class FlowProviderCallRepository:
                 requested_capabilities=[
                     capability.value for capability in request.requested_capabilities
                 ],
+                resolved_input_edge_indexes=list(resolved_input_edge_indexes),
                 call_reason=request.call_reason.value,
                 mapped_execution_mode=(
                     (

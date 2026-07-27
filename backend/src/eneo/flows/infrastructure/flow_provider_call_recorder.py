@@ -30,7 +30,10 @@ from eneo.flows.domain.provider_call import (
     ProviderCallUnknownReason,
 )
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
-from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdgeIndexes,
+    MappedProviderCallProvenance,
+)
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
@@ -68,12 +71,14 @@ class FlowProviderCallRecorder:
         attempt_no: int,
         tenant_id: UUID,
         mapped_call: MappedProviderCallProvenance | None,
+        resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
     ):
         self.run_id = run_id
         self.step_id = step_id
         self.attempt_no = attempt_no
         self.tenant_id = tenant_id
         self.mapped_call = mapped_call
+        self.resolved_input_edge_indexes = resolved_input_edge_indexes
         self._started_evidence: dict[UUID, tuple[int, str]] = {}
 
     async def started(self, request: ProviderCallRequestFacts) -> UUID:
@@ -101,6 +106,7 @@ class FlowProviderCallRecorder:
                         call_reason=_flow_call_reason(request.reason),
                         mapped_call=self.mapped_call,
                     ),
+                    resolved_input_edge_indexes=self.resolved_input_edge_indexes,
                 )
 
         started = await self._persist_with_retry(

@@ -57,6 +57,7 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewMultipleActiveCheckpointsError,
     FlowReviewOpenBlockedByActiveCheckpointError,
 )
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
@@ -67,7 +68,12 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
+    FlowAttemptProvenance,
+    FlowResolvedInputEdges,
+    FlowResolvedInputFlowInputSource,
+    FlowResolvedInputJsonPath,
     ModelParameterSnapshot,
+    build_resolved_input_edge,
 )
 from eneo.flows.flow_runtime_policy import FlowRuntimePolicy
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
@@ -417,6 +423,15 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     flow_run_repo.create_or_get_attempt_started = AsyncMock(
         side_effect=_create_or_get_attempt_started
     )
+
+    async def _activate_step_attempt(**kwargs):
+        return SimpleNamespace(
+            provenance_json=FlowAttemptProvenance(
+                attempt_start=kwargs["attempt_start"]
+            ).to_payload()
+        )
+
+    flow_run_repo.activate_step_attempt = AsyncMock(side_effect=_activate_step_attempt)
     space_repo.get_space_by_assistant = AsyncMock(side_effect=_get_space_by_assistant)
     completion_service = AsyncMock()
     file_repo = AsyncMock()
@@ -3325,6 +3340,7 @@ def _completed_step_result(
         step_id=uuid4(),
         step_order=step_order,
         assistant_id=uuid4(),
+        current_attempt_no=1,
         input_payload_json={"text": f"input-{step_order}"},
         effective_prompt="prompt",
         output_payload_json={"text": text},
@@ -3447,7 +3463,14 @@ async def test_resolve_step_input_runtime_question_binding_must_consume_runtime_
     executor, _, _, _ = _build_executor(user)
     file_id = uuid4()
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[SimpleNamespace(id=file_id, text="runtime file text")]
+        return_value=[
+            SimpleNamespace(
+                id=file_id,
+                text="runtime file text",
+                checksum=f"checksum-{file_id}",
+                size=17,
+            )
+        ]
     )
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = RuntimeStep(
@@ -4572,17 +4595,32 @@ async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
     state = _empty_execution_state()
     assistant = _assistant_for_execute_step(has_knowledge=False)
     assistant.get_prompt_text.return_value = "Prompt"
-    flow_run_repo.record_attempt_start_provenance = AsyncMock()
 
-    async def _get_response(**_kwargs):
-        flow_run_repo.record_attempt_start_provenance.assert_awaited_once()
+    async def _get_response(**kwargs):
+        flow_run_repo.activate_step_attempt.assert_awaited_once()
+        executor._commit.assert_awaited_once()
+        assert kwargs["provider_call_observer"].resolved_input_edge_indexes == (0,)
         return SimpleNamespace(completion="answer", total_token_count=42)
 
     assistant.get_response = AsyncMock(side_effect=_get_response)
     executor._load_assistant = AsyncMock(return_value=assistant)
     executor._resolve_step_input = AsyncMock(
         return_value=StepInputValue(
-            text="hello", source_text="hello", input_source="flow_input"
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+            edges=(
+                build_resolved_input_edge(
+                    binding_ref="input",
+                    source=FlowResolvedInputFlowInputSource(
+                        kind="flow_input",
+                        selector=FlowResolvedInputJsonPath(
+                            kind="json_path", path=("text",)
+                        ),
+                    ),
+                    selected_value="hello",
+                ),
+            ),
         )
     )
     executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
@@ -4591,14 +4629,27 @@ async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
 
     await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
-    record_kwargs = flow_run_repo.record_attempt_start_provenance.await_args.kwargs
+    record_kwargs = flow_run_repo.activate_step_attempt.await_args.kwargs
     attempt_start = record_kwargs["attempt_start"]
     assert attempt_start.requested_model == "gpt-4o-mini"
     assert attempt_start.provider == "openai"
     assert attempt_start.resolved_timeout_seconds == 600
     assert attempt_start.input_text_length == 5
     assert attempt_start.effective_prompt_length >= 5
+    assert record_kwargs["resolved_input_edges"].edges[0].binding_ref == "input"
     assert state.attempt_start_by_step[step.step_id] == attempt_start
+    assert state.activated_attempts == {(step.step_id, 1)}
+
+    with pytest.raises(FlowRuntimeInvariantError, match="activated more than once"):
+        await executor._activate_step_attempt(
+            run=run,
+            step=step,
+            state=state,
+            attempt_no=1,
+            resolved_input_edges=FlowResolvedInputEdges(schema_version=1, edges=()),
+            attempt_start=None,
+        )
+    flow_run_repo.activate_step_attempt.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -5588,7 +5639,12 @@ async def test_file_cache_hit(user):
     executor, _, _, _ = _build_executor(user)
     step_id = uuid4()
     file_id = uuid4()
-    fake_file = SimpleNamespace(id=file_id, text="doc text")
+    fake_file = SimpleNamespace(
+        id=file_id,
+        text="doc text",
+        checksum=f"checksum-{file_id}",
+        size=8,
+    )
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
 
     state = RunExecutionState(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
@@ -19,6 +19,18 @@ from eneo.flows.runtime.step_execution_runtime import (
 class PreparedAssistantStep:
     prepared: PreparedStepExecution
     deps: StepExecutionRuntimeDeps
+
+
+ActivatePreparedAssistantStepsFn = Callable[
+    [
+        FlowRun,
+        RuntimeStep,
+        RunExecutionState,
+        int,
+        Sequence[PreparedAssistantStep],
+    ],
+    Awaitable[tuple[PreparedAssistantStep, ...]],
+]
 
 
 class PrepareAssistantStepFn(Protocol):

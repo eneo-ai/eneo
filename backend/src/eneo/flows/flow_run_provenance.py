@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, TypeAlias, TypeVar, cast
 from uuid import UUID
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -49,9 +50,15 @@ class _FlowResolvedInputModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+FlowResolvedInputJsonPathSegment: TypeAlias = (
+    Annotated[str, Field(strict=True, min_length=1)]
+    | Annotated[int, Field(strict=True, ge=0)]
+)
+
+
 class FlowResolvedInputJsonPath(_FlowResolvedInputModel):
     kind: Literal["json_path"]
-    path: tuple[Annotated[str, Field(min_length=1)], ...]
+    path: tuple[FlowResolvedInputJsonPathSegment, ...]
 
 
 class _FlowResolvedInputSelectedSource(_FlowResolvedInputModel):
@@ -62,14 +69,27 @@ class FlowResolvedInputFlowInputSource(_FlowResolvedInputSelectedSource):
     kind: Literal["flow_input"]
 
 
-class FlowResolvedInputStepOutputSource(_FlowResolvedInputSelectedSource):
-    kind: Literal["step_output"]
-    source_attempt_id: UUID
+class FlowResolvedInputStepResultSource(_FlowResolvedInputSelectedSource):
+    kind: Literal["step_result"]
+    source_step_id: UUID
+    source_attempt_no: int = Field(strict=True, ge=1)
+
+
+class FlowResolvedInputSystemValueSource(_FlowResolvedInputModel):
+    kind: Literal["system_value"]
+    name: str = Field(min_length=1)
+
+
+class FlowResolvedInputRuntimeSource(_FlowResolvedInputSelectedSource):
+    kind: Literal["runtime_input"]
 
 
 class FlowResolvedInputRuntimeFileSource(_FlowResolvedInputSelectedSource):
     kind: Literal["runtime_file"]
     input_file_ordinal: int = Field(strict=True, ge=0, le=2**31 - 1)
+    file_id: UUID
+    checksum: str = Field(min_length=1)
+    byte_size: int = Field(strict=True, ge=0)
 
 
 class FlowResolvedInputHttpResponseSource(_FlowResolvedInputSelectedSource):
@@ -78,7 +98,9 @@ class FlowResolvedInputHttpResponseSource(_FlowResolvedInputSelectedSource):
 
 FlowResolvedInputSource: TypeAlias = Annotated[
     FlowResolvedInputFlowInputSource
-    | FlowResolvedInputStepOutputSource
+    | FlowResolvedInputStepResultSource
+    | FlowResolvedInputSystemValueSource
+    | FlowResolvedInputRuntimeSource
     | FlowResolvedInputRuntimeFileSource
     | FlowResolvedInputHttpResponseSource,
     Field(discriminator="kind"),
@@ -138,6 +160,121 @@ class FlowResolvedInputEdges(_FlowResolvedInputModel):
                 f"{FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES} bytes."
             )
         return self
+
+
+FlowResolvedInputEdgeIndex: TypeAlias = Annotated[
+    int,
+    Field(strict=True, ge=0, lt=FLOW_RESOLVED_INPUT_MAX_EDGES),
+]
+
+
+def _require_canonical_resolved_input_edge_indexes(
+    indexes: tuple[FlowResolvedInputEdgeIndex, ...],
+) -> tuple[FlowResolvedInputEdgeIndex, ...]:
+    if indexes != tuple(sorted(set(indexes))):
+        raise ValueError("Resolved input edge indexes must be sorted and unique.")
+    return indexes
+
+
+FlowResolvedInputEdgeIndexes: TypeAlias = Annotated[
+    tuple[FlowResolvedInputEdgeIndex, ...],
+    Field(max_length=FLOW_RESOLVED_INPUT_MAX_EDGES),
+    AfterValidator(_require_canonical_resolved_input_edge_indexes),
+]
+
+
+@dataclass(frozen=True)
+class FlowResolvedInputEdgeGrouping:
+    aggregate: FlowResolvedInputEdges
+    indexes_by_group: tuple[FlowResolvedInputEdgeIndexes, ...]
+
+
+def build_resolved_input_edge(
+    *,
+    binding_ref: str,
+    source: FlowResolvedInputSource,
+    selected_value: object,
+) -> FlowResolvedInputEdge:
+    if isinstance(selected_value, str):
+        encoded = selected_value.encode("utf-8")
+        encoding: Literal["utf8", "canonical_json"] = "utf8"
+    else:
+        encoded = canonical_json_bytes(selected_value)
+        encoding = "canonical_json"
+    return FlowResolvedInputEdge(
+        binding_ref=binding_ref,
+        source=source,
+        selection=FlowResolvedInputHashedSelection(
+            encoding=encoding,
+            sha256=hashlib.sha256(encoded).hexdigest(),
+            byte_size=len(encoded),
+        ),
+    )
+
+
+def build_runtime_file_resolved_input_edge(
+    *,
+    binding_ref: str,
+    input_file_ordinal: int,
+    file_id: UUID,
+    checksum: str,
+    byte_size: int,
+) -> FlowResolvedInputEdge:
+    return FlowResolvedInputEdge(
+        binding_ref=binding_ref,
+        source=FlowResolvedInputRuntimeFileSource(
+            kind="runtime_file",
+            input_file_ordinal=input_file_ordinal,
+            file_id=file_id,
+            checksum=checksum,
+            byte_size=byte_size,
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=()),
+        ),
+        selection=FlowResolvedInputBoundFileSelection(encoding="bound_file"),
+    )
+
+
+def _merge_and_index_resolved_input_edges(
+    *edge_groups: Iterable[FlowResolvedInputEdge],
+) -> tuple[
+    tuple[FlowResolvedInputEdge, ...],
+    tuple[FlowResolvedInputEdgeIndexes, ...],
+]:
+    merged: list[FlowResolvedInputEdge] = []
+    indexes_by_identity: dict[bytes, int] = {}
+    indexes_by_group: list[FlowResolvedInputEdgeIndexes] = []
+    for edge_group in edge_groups:
+        group_indexes: set[int] = set()
+        for edge in edge_group:
+            identity = canonical_json_bytes(edge.model_dump(mode="json"))
+            index = indexes_by_identity.get(identity)
+            if index is None:
+                index = len(merged)
+                indexes_by_identity[identity] = index
+                merged.append(edge)
+            group_indexes.add(index)
+        indexes_by_group.append(tuple(sorted(group_indexes)))
+    return tuple(merged), tuple(indexes_by_group)
+
+
+def merge_resolved_input_edges(
+    *edge_groups: Iterable[FlowResolvedInputEdge],
+) -> tuple[FlowResolvedInputEdge, ...]:
+    merged, _ = _merge_and_index_resolved_input_edges(*edge_groups)
+    return merged
+
+
+def group_resolved_input_edges(
+    *edge_groups: Iterable[FlowResolvedInputEdge],
+) -> FlowResolvedInputEdgeGrouping:
+    merged, indexes_by_group = _merge_and_index_resolved_input_edges(*edge_groups)
+    return FlowResolvedInputEdgeGrouping(
+        aggregate=FlowResolvedInputEdges(
+            schema_version=FLOW_RESOLVED_INPUT_SCHEMA_VERSION,
+            edges=merged,
+        ),
+        indexes_by_group=indexes_by_group,
+    )
 
 
 FlowResolvedInputEdgesParseStatus: TypeAlias = Literal[

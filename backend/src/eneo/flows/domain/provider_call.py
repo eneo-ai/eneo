@@ -15,6 +15,7 @@ from pydantic import (
 )
 
 from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdgeIndexes,
     MappedProviderCallProvenance,
     TokenCountSource,
 )
@@ -194,6 +195,7 @@ class ProviderCall(BaseModel):
     provider: str | None = Field(min_length=1)
     response_format: ProviderCallResponseFormat
     requested_capabilities: ProviderCallRequestedCapabilities
+    resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes
     call_reason: ProviderCallReason
     mapped_execution_mode: Literal["per_item", "per_source"] | None
     mapped_item_index: int | None = Field(default=None, ge=1)

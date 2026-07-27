@@ -13,6 +13,7 @@ from eneo.flows.http_transport.authored_config import (
     HttpBodyMode,
 )
 from eneo.flows.http_transport.compiler import compile_http_config
+from eneo.flows.variable_resolver import FlowVariableResolver
 
 
 def _config(
@@ -200,3 +201,56 @@ def test_method_is_passed_through() -> None:
     result = compile_http_config(cfg, direction="output", method="GET")
 
     assert result.method == "GET"
+
+
+def test_input_evidence_tracks_url_and_body_but_never_credentials() -> None:
+    resolver = FlowVariableResolver()
+    context = resolver.build_context_with_evidence(
+        {"case_id": "A-17", "credential": "do-not-record"},
+        [],
+    )
+    cfg = _config(
+        url="https://example.org/{{ flow_input.case_id }}",
+        auth=HttpAuthBearer(token="{{ flow_input.credential }}"),
+        body=HttpBody(
+            mode=HttpBodyMode.JSON_TEMPLATE,
+            template='{"case_id":"{{ flow_input.case_id }}"}',
+        ),
+        custom_headers=[
+            CustomHeader(
+                name="X-Case-Id",
+                value="{{ flow_input.case_id }}",
+                secret=False,
+            ),
+            CustomHeader(
+                name="X-Secret",
+                value="{{ flow_input.credential }}",
+                secret=True,
+            ),
+        ],
+    )
+
+    result = compile_http_config(
+        cfg,
+        direction="input",
+        method="GET",
+        variables=context,
+        interpolate=resolver.interpolate,
+        interpolate_with_evidence=resolver.interpolate_with_evidence,
+    )
+
+    assert result.url == "https://example.org/A-17"
+    assert result.headers["Authorization"] == "Bearer do-not-record"
+    assert result.headers["X-Case-Id"] == "A-17"
+    assert result.headers["X-Secret"] == "do-not-record"
+    assert [edge.binding_ref for edge in result.resolved_input_edges] == [
+        "http.url:flow_input.case_id",
+        "http.custom_headers[0].value:flow_input.case_id",
+        "http.body:flow_input.case_id",
+    ]
+    assert {edge.source.selector.path for edge in result.resolved_input_edges} == {
+        ("case_id",)
+    }
+    assert "credential" not in str(
+        [edge.model_dump(mode="json") for edge in result.resolved_input_edges]
+    )

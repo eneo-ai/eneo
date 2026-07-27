@@ -38,6 +38,7 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     build_text_overflow_metadata,
@@ -45,7 +46,12 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
-from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdge,
+    FlowResolvedInputEdgeIndexes,
+    MappedProviderCallProvenance,
+    merge_resolved_input_edges,
+)
 from eneo.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
     collect_inherited_citation_context,
@@ -62,6 +68,10 @@ from eneo.flows.runtime.step_input_resolution import (
 from eneo.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
+)
+from eneo.flows.variable_resolver import (
+    FlowVariableContext,
+    FlowVariableInterpolation,
 )
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.exceptions import (
@@ -160,6 +170,25 @@ class VariableResolverProtocol(Protocol):
 
     def interpolate(self, template: str, context: dict[str, Any]) -> str: ...
 
+    def build_context_with_evidence(
+        self,
+        flow_input: dict[str, Any] | None,
+        prior_results: list[FlowStepResult],
+        *,
+        current_step_order: int | None = None,
+        step_names_by_order: dict[int, str] | None = None,
+        step_ref_mapping: dict[str, int] | None = None,
+        current_step_input: dict[str, Any] | None = None,
+    ) -> FlowVariableContext: ...
+
+    def interpolate_with_evidence(
+        self,
+        template: str,
+        context: FlowVariableContext,
+        *,
+        binding_ref: str,
+    ) -> FlowVariableInterpolation: ...
+
 
 class LoadAssistantFn(Protocol):
     def __call__(
@@ -234,6 +263,7 @@ class BuildProviderCallObserverFn(Protocol):
     def __call__(
         self,
         mapped_call: MappedProviderCallProvenance | None,
+        resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
     ) -> ProviderCallObserver: ...
 
 
@@ -250,6 +280,8 @@ class PreparedStepExecution:
     contract_validation: dict[str, Any] | None
     diagnostics: list[StepDiagnostic]
     llm_files: list[File]
+    resolved_input_edges: tuple[FlowResolvedInputEdge, ...] = ()
+    resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes | None = None
 
 
 @dataclass(frozen=True)
@@ -480,6 +512,17 @@ async def call_assistant_with_timeout(
             effective_prompt=prepared.effective_prompt,
         )
 
+    provider_call_observer: ProviderCallObserver | None = None
+    if deps.build_provider_call_observer is not None:
+        if prepared.resolved_input_edge_indexes is None:
+            raise FlowRuntimeInvariantError(
+                "Provider I/O cannot start before resolved input evidence is activated."
+            )
+        provider_call_observer = deps.build_provider_call_observer(
+            deps.mapped_call_context,
+            prepared.resolved_input_edge_indexes,
+        )
+
     llm_task: asyncio.Task[Any] = asyncio.create_task(
         prepared.assistant.get_response(
             question=prepared.step_input.text,
@@ -491,11 +534,7 @@ async def call_assistant_with_timeout(
             prompt_override=prompt_override,
             version=version,
             reject_context_over_limit=True,
-            provider_call_observer=(
-                deps.build_provider_call_observer(deps.mapped_call_context)
-                if deps.build_provider_call_observer is not None
-                else None
-            ),
+            provider_call_observer=provider_call_observer,
             provider_call_reason=provider_call_reason,
         )
     )
@@ -953,7 +992,7 @@ async def prepare_step_execution(
         for item in state.prior_results
         if item.status == FlowStepResultStatus.COMPLETED
     ]
-    context = deps.variable_resolver.build_context(
+    context = deps.variable_resolver.build_context_with_evidence(
         run.input_payload_json,
         context_results,
         current_step_order=step.step_order,
@@ -1027,7 +1066,7 @@ async def prepare_step_execution(
             effective_prompt=effective_prompt,
         ) from exc
 
-    prompt_context = deps.variable_resolver.build_context(
+    prompt_context = deps.variable_resolver.build_context_with_evidence(
         run.input_payload_json,
         context_results,
         current_step_order=step.step_order,
@@ -1035,11 +1074,16 @@ async def prepare_step_execution(
         step_ref_mapping=state.step_ref_mapping,
         current_step_input=step_input.runtime_input_metadata,
     )
-    effective_prompt = (
-        deps.variable_resolver.interpolate(prompt_text, prompt_context)
+    prompt_interpolation = (
+        deps.variable_resolver.interpolate_with_evidence(
+            prompt_text,
+            prompt_context,
+            binding_ref="assistant_prompt",
+        )
         if prompt_text
-        else ""
+        else FlowVariableInterpolation(text="", edges=())
     )
+    effective_prompt = prompt_interpolation.text
     output_format_spec = resolve_format_spec(step.output_type)
     effective_prompt = append_output_format_instructions(
         effective_prompt,
@@ -1104,6 +1148,10 @@ async def prepare_step_execution(
         contract_validation=contract_validation,
         diagnostics=diagnostics,
         llm_files=llm_files,
+        resolved_input_edges=merge_resolved_input_edges(
+            step_input.edges,
+            prompt_interpolation.edges,
+        ),
     )
 
 

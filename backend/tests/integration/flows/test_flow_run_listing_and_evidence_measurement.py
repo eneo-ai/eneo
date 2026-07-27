@@ -61,6 +61,7 @@ from eneo.flows.domain.provider_call import (
     ProviderCallRequest,
 )
 from eneo.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
+from eneo.flows.flow_run_provenance import FlowResolvedInputEdges
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFileProjection
 from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
@@ -319,8 +320,23 @@ async def _write_representative_evidence(
                     predecessor_attempt_id=predecessor_attempt_id,
                     target_attempt_no=attempt_no,
                 )
-            provider_call = await provider_repo.start_call(
-                attempt_id=attempt.id,
+            activated = await run_repo.activate_step_attempt(
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                tenant_id=tenant_id,
+                resolved_input_edges=FlowResolvedInputEdges(
+                    schema_version=1,
+                    edges=(),
+                ),
+                attempt_start=None,
+            )
+            assert activated is not None
+            provider_call = await provider_repo.start_call_for_execution(
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                tenant_id=tenant_id,
                 request=ProviderCallRequest(
                     provider_request_hash=_digest(
                         f"provider-{step_order}-{attempt_no}"
@@ -329,6 +345,7 @@ async def _write_representative_evidence(
                     provider="openai",
                     requested_capabilities=(),
                 ),
+                resolved_input_edge_indexes=(),
             )
             await provider_repo.complete_call(
                 call_id=provider_call.id,

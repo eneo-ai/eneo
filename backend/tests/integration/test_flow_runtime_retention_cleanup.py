@@ -2689,6 +2689,7 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
         provider="openai",
         response_format="none",
         requested_capabilities=[],
+        resolved_input_edge_indexes=([0] if resolved_input_edge_count else []),
         call_reason="initial",
         mapped_execution_mode=None,
         mapped_item_index=None,
@@ -2731,7 +2732,9 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
             ),
         },
     )
-    async_session.add_all([provider_call, resolved_inputs])
+    async_session.add(resolved_inputs)
+    await async_session.flush()
+    async_session.add(provider_call)
     await async_session.flush()
 
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()

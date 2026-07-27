@@ -29,6 +29,7 @@ from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStep,
+    FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
@@ -195,6 +196,23 @@ def _resolved_input_aggregate(*, binding_ref: str) -> FlowResolvedInputEdges:
                 }
             ],
         }
+    )
+
+
+async def _activate_test_attempt(
+    *,
+    repo: FlowRunRepository,
+    context: _AttemptProvenanceTestContext,
+    aggregate: FlowResolvedInputEdges,
+    attempt_start: AttemptStartProvenance | None = None,
+) -> FlowStepAttempt | None:
+    return await repo.activate_step_attempt(
+        run_id=context.run_id,
+        step_id=context.step_id,
+        attempt_no=1,
+        tenant_id=context.tenant_id,
+        resolved_input_edges=aggregate,
+        attempt_start=attempt_start,
     )
 
 
@@ -2731,13 +2749,14 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
         )
 
         with pytest.raises(FlowAttemptProvenanceWriteError) as start_error:
-            await run_repo.record_attempt_start_provenance(
+            await run_repo.activate_step_attempt(
                 run_id=context.run_id,
                 step_id=context.step_id,
                 attempt_no=1,
                 tenant_id=context.tenant_id,
-                requested_model="openai/gpt-4o-mini",
-                provider="openai",
+                resolved_input_edges=_resolved_input_aggregate(
+                    binding_ref="unavailable-input"
+                ),
                 attempt_start=context.attempt_start,
             )
         assert start_error.value.status == unavailable_status
@@ -2749,6 +2768,7 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
         persisted = await session.get(FlowStepAttempts, attempt.id)
         assert persisted is not None
         assert persisted.provenance_json == persisted_provenance
+        assert (await session.get(FlowStepAttemptResolvedInputs, attempt.id)) is None
         assert persisted.requested_model is None
         assert persisted.provider is None
 
@@ -2804,13 +2824,14 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
             )
         )
         for _ in range(2):
-            updated = await run_repo.record_attempt_start_provenance(
+            updated = await run_repo.activate_step_attempt(
                 run_id=context.run_id,
                 step_id=context.step_id,
                 attempt_no=1,
                 tenant_id=context.tenant_id,
-                requested_model="openai/gpt-4o-mini",
-                provider="openai",
+                resolved_input_edges=_resolved_input_aggregate(
+                    binding_ref="tracked-input"
+                ),
                 attempt_start=context.attempt_start,
             )
             assert updated is not None
@@ -2822,6 +2843,14 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
         assert parsed.provenance.artifacts is not None
         assert parsed.provenance.artifacts.model_dump() == {"generated_count": 1}
         assert parsed.provenance.attempt_start == context.attempt_start
+        resolved_input = await run_repo.get_resolved_input_edges(
+            attempt_id=attempt.id,
+            tenant_id=context.tenant_id,
+        )
+        assert resolved_input is not None
+        assert resolved_input.aggregate == _resolved_input_aggregate(
+            binding_ref="tracked-input"
+        )
 
 
 @pytest.mark.asyncio
@@ -2850,36 +2879,32 @@ async def test_resolved_input_edges_are_written_once_with_idempotent_retry(
         assert legacy is not None
         assert legacy.status == "not_tracked"
 
-        written = await repo.record_resolved_input_edges(
-            attempt_id=attempt.id,
-            tenant_id=context.tenant_id,
+        written = await _activate_test_attempt(
+            repo=repo,
+            context=context,
             aggregate=aggregate,
+            attempt_start=context.attempt_start,
         )
         assert written is not None
-        assert written.status == "tracked"
         first_updated_at = await session.scalar(
             sa.select(FlowStepAttemptResolvedInputs.updated_at).where(
                 FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt.id
             )
         )
-        await session.execute(
-            sa.update(FlowStepAttempts)
-            .where(FlowStepAttempts.id == attempt.id)
-            .values(
-                status=FlowStepAttemptStatus.COMPLETED.value,
-                finished_at=datetime.now(timezone.utc),
-            )
-        )
-
-        identical_retry = await repo.record_resolved_input_edges(
-            attempt_id=attempt.id,
-            tenant_id=context.tenant_id,
+        identical_retry = await _activate_test_attempt(
+            repo=repo,
+            context=context,
             aggregate=FlowResolvedInputEdges.model_validate(
                 aggregate.model_dump(mode="json")
             ),
+            attempt_start=context.attempt_start.model_copy(
+                update={
+                    "deadline_at": context.attempt_start.deadline_at
+                    + timedelta(minutes=5)
+                }
+            ),
         )
         assert identical_retry is not None
-        assert identical_retry.status == "tracked"
         assert (
             await session.scalar(
                 sa.select(FlowStepAttemptResolvedInputs.updated_at).where(
@@ -2888,11 +2913,18 @@ async def test_resolved_input_edges_are_written_once_with_idempotent_retry(
             )
             == first_updated_at
         )
+        persisted_attempt = await session.get(FlowStepAttempts, attempt.id)
+        assert persisted_attempt is not None
+        persisted_provenance = parse_attempt_provenance(
+            persisted_attempt.provenance_json
+        )
+        assert persisted_provenance.provenance is not None
+        assert persisted_provenance.provenance.attempt_start == context.attempt_start
 
         with pytest.raises(FlowResolvedInputEdgesConflictError) as exc_info:
-            await repo.record_resolved_input_edges(
-                attempt_id=attempt.id,
-                tenant_id=context.tenant_id,
+            await _activate_test_attempt(
+                repo=repo,
+                context=context,
                 aggregate=_resolved_input_aggregate(binding_ref="other-question"),
             )
         assert exc_info.value.attempt_id == attempt.id
@@ -2930,15 +2962,6 @@ async def test_resolved_input_edges_reader_marks_corruption_without_repair(
                 resolved_input_edges_jsonb=corrupt_payload,
             )
         )
-        await session.execute(
-            sa.update(FlowStepAttempts)
-            .where(FlowStepAttempts.id == attempt.id)
-            .values(
-                status=FlowStepAttemptStatus.COMPLETED.value,
-                finished_at=datetime.now(timezone.utc),
-            )
-        )
-
         parsed = await repo.get_resolved_input_edges(
             attempt_id=attempt.id,
             tenant_id=context.tenant_id,
@@ -2948,9 +2971,9 @@ async def test_resolved_input_edges_reader_marks_corruption_without_repair(
         assert parsed.aggregate is None
 
         with pytest.raises(FlowResolvedInputEdgesUnavailableError) as exc_info:
-            await repo.record_resolved_input_edges(
-                attempt_id=attempt.id,
-                tenant_id=context.tenant_id,
+            await _activate_test_attempt(
+                repo=repo,
+                context=context,
                 aggregate=_resolved_input_aggregate(binding_ref="question"),
             )
         assert exc_info.value.attempt_id == attempt.id
@@ -2991,9 +3014,9 @@ async def test_resolved_input_edges_reject_initial_write_after_attempt_terminal(
             )
         )
 
-        written = await repo.record_resolved_input_edges(
-            attempt_id=attempt.id,
-            tenant_id=context.tenant_id,
+        written = await _activate_test_attempt(
+            repo=repo,
+            context=context,
             aggregate=_resolved_input_aggregate(binding_ref="question"),
         )
 
@@ -3041,17 +3064,15 @@ async def test_resolved_input_edges_serialize_concurrent_writers(
             assert pid is not None
             second_pid.set_result(pid)
             try:
-                result = await FlowRunRepository(
-                    session=session
-                ).record_resolved_input_edges(
-                    attempt_id=attempt.id,
-                    tenant_id=context.tenant_id,
+                result = await _activate_test_attempt(
+                    repo=FlowRunRepository(session=session),
+                    context=context,
                     aggregate=_resolved_input_aggregate(binding_ref=second_binding_ref),
                 )
             except FlowResolvedInputEdgesConflictError:
                 return "conflict"
             assert result is not None
-            return result.status
+            return "tracked"
 
     second_task: asyncio.Task[str] | None = None
     try:
@@ -3077,15 +3098,12 @@ async def test_resolved_input_edges_serialize_concurrent_writers(
             else:
                 pytest.fail("second resolved-input writer did not wait on parent lock")
 
-            first_result = await FlowRunRepository(
-                session=session
-            ).record_resolved_input_edges(
-                attempt_id=attempt.id,
-                tenant_id=context.tenant_id,
+            first_result = await _activate_test_attempt(
+                repo=FlowRunRepository(session=session),
+                context=context,
                 aggregate=aggregate,
             )
             assert first_result is not None
-            assert first_result.status == "tracked"
 
         assert second_task is not None
         assert await second_task == expected_second_result
@@ -3127,9 +3145,9 @@ async def test_normal_attempt_hydration_does_not_load_resolved_input_edges(
             attempt_no=1,
             celery_task_id="resolved-input-deferred",
         )
-        await repo.record_resolved_input_edges(
-            attempt_id=attempt.id,
-            tenant_id=context.tenant_id,
+        await _activate_test_attempt(
+            repo=repo,
+            context=context,
             aggregate=_resolved_input_aggregate(binding_ref="question"),
         )
 

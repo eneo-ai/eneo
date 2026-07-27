@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -55,7 +54,7 @@ def _make_deps(
     variable_resolver: object | None = None,
     resolve_timeout_seconds: object | None = None,
 ) -> _Deps:
-    resolver = SimpleNamespace(interpolate=lambda value, context: value)
+    resolver = FlowVariableResolver()
     return _Deps(
         encryption_service=encryption_service or object(),
         variable_resolver=variable_resolver or resolver,
@@ -84,17 +83,57 @@ async def test_resolve_http_input_source_text_json_success_audits_success() -> N
         send_http_request=send_http_request, read_response_text=lambda **_: '{"a":1}'
     )
 
-    text, structured = await resolve_http_input_source_text(
+    resolution = await resolve_http_input_source_text(
         step=step,
         run=run,
-        context={},
+        context=FlowVariableResolver().build_context_with_evidence({}, []),
         deps=deps,
     )
 
-    assert text == '{"a": 1}'
-    assert structured == {"a": 1}
+    assert resolution.text == '{"a": 1}'
+    assert resolution.structured == {"a": 1}
     deps.audit_http_outbound.assert_awaited()
     assert deps.audit_http_outbound.await_args.kwargs["call_type"] == "http_input"
+
+
+@pytest.mark.asyncio
+async def test_http_input_resolution_includes_request_and_successful_response_edges() -> (
+    None
+):
+    step = _Step(
+        step_order=1,
+        step_id="s1",
+        input_type="text",
+        input_source="http_get",
+        input_config={
+            "url": "https://example.org/{{ flow_input.case_id }}",
+            "auth": {"mode": "none"},
+        },
+    )
+    request = httpx.Request("GET", "https://example.org/A-17")
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="remote value")
+    )
+    resolver = FlowVariableResolver()
+    deps = _make_deps(
+        send_http_request=send_http_request,
+        read_response_text=lambda **_: "remote value",
+        variable_resolver=resolver,
+    )
+
+    resolution = await resolve_http_input_source_text(
+        step=step,
+        run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+        context=resolver.build_context_with_evidence({"case_id": "A-17"}, []),
+        deps=deps,
+    )
+
+    assert resolution.text == "remote value"
+    assert resolution.structured is None
+    assert [edge.source.kind for edge in resolution.resolved_input_edges] == [
+        "flow_input",
+        "http_response",
+    ]
 
 
 @pytest.mark.asyncio
@@ -118,7 +157,7 @@ async def test_resolve_http_input_source_text_rejects_legacy_post_before_send() 
         await resolve_http_input_source_text(
             step=step,
             run=run,
-            context={},
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
             deps=deps,
         )
 
@@ -145,7 +184,7 @@ async def test_resolve_http_input_source_text_rejects_flat_config_before_send() 
         await resolve_http_input_source_text(
             step=step,
             run=_Run(id="run-12", flow_id="flow-1", tenant_id="tenant-1"),
-            context={},
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
             deps=deps,
         )
 
@@ -184,7 +223,7 @@ async def test_resolve_http_input_source_text_authored_timeout_uses_runtime_cap(
         await resolve_http_input_source_text(
             step=step,
             run=_Run(id="run-21", flow_id="flow-1", tenant_id="tenant-1"),
-            context={},
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
             deps=deps,
         )
 
@@ -205,7 +244,12 @@ async def test_resolve_http_input_source_text_timeout_maps_to_typed_code() -> No
     deps = _make_deps(send_http_request=send_http_request)
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await resolve_http_input_source_text(step=step, run=run, context={}, deps=deps)
+        await resolve_http_input_source_text(
+            step=step,
+            run=run,
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
 
     assert exc.value.code == "typed_io_http_timeout"
     deps.audit_http_outbound.assert_awaited()
@@ -228,7 +272,12 @@ async def test_resolve_http_input_source_text_non_success_maps_to_typed_code() -
     deps = _make_deps(send_http_request=send_http_request)
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await resolve_http_input_source_text(step=step, run=run, context={}, deps=deps)
+        await resolve_http_input_source_text(
+            step=step,
+            run=run,
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
 
     assert exc.value.code == "typed_io_http_non_success"
 
@@ -254,7 +303,12 @@ async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code(
     )
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await resolve_http_input_source_text(step=step, run=run, context={}, deps=deps)
+        await resolve_http_input_source_text(
+            step=step,
+            run=run,
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
 
     assert exc.value.code == "typed_io_http_malformed_response"
     deps.audit_http_outbound.assert_awaited()

@@ -1,28 +1,35 @@
 from __future__ import annotations
 
+import hashlib
 import io
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from docx import Document
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
-from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
+from eneo.flows.domain.runtime import (
+    RunExecutionState,
+    RuntimeStep,
+    StepExecutionOutput,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
+from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
-    execute_template_fill_step,
+    prepare_template_fill_step,
 )
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import (
@@ -96,6 +103,7 @@ def _completed_result(*, run: FlowRun) -> FlowStepResult:
         num_tokens_input=10,
         num_tokens_output=20,
         status=FlowStepResultStatus.COMPLETED,
+        current_attempt_no=4,
         flow_step_execution_hash="hash",
         created_at=now,
         updated_at=now,
@@ -160,6 +168,173 @@ def _logger() -> SimpleNamespace:
     )
 
 
+async def execute_template_fill_step(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    deps: TemplateFillRuntimeDeps,
+) -> StepExecutionOutput:
+    handler = TemplateFillStepHandler(
+        deps=deps,
+        activate_resolved_input_edges=AsyncMock(),
+    )
+    result = await handler.execute(
+        step=step,
+        run=run,
+        state=state,
+        version_metadata=None,
+        attempt_no=1,
+    )
+    return result.output
+
+
+@pytest.mark.asyncio
+async def test_prepare_template_fill_step_static_binding_adds_no_resolved_input_edge() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    file_repo.get_list_by_id_and_tenant.return_value = [
+        SimpleNamespace(
+            id=template_file_id,
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        )
+    ]
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    deps = TemplateFillRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        principal=FlowPrincipal.from_run(run),
+        logger=_logger(),
+    )
+    step = _step()
+    step.output_config["bindings"] = {"title": "Statisk titel"}
+    step.output_config["placeholders"] = ["title"]
+
+    prepared = await prepare_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert prepared.resolved_bindings == {"title": "Statisk titel"}
+    assert prepared.resolved_input_edges == ()
+
+
+@pytest.mark.asyncio
+async def test_prepare_template_fill_step_records_exact_dynamic_binding_source() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    file_repo.get_list_by_id_and_tenant.return_value = [
+        SimpleNamespace(
+            id=template_file_id,
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        )
+    ]
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    deps = TemplateFillRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        principal=FlowPrincipal.from_run(run),
+        logger=_logger(),
+    )
+    step = _step()
+    step.output_config["bindings"] = {
+        "summary": "{{step_1.output.text}}",
+    }
+    step.output_config["placeholders"] = ["summary"]
+
+    prepared = await prepare_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert prepared.resolved_bindings == {"summary": "Detta är sammanfattningen."}
+    assert len(prepared.resolved_input_edges) == 1
+    edge = prepared.resolved_input_edges[0]
+    assert edge.binding_ref == "output_config.bindings.summary:step_1.output.text"
+    assert edge.source.kind == "step_result"
+    assert edge.source.source_step_id == result.step_id
+    assert edge.source.source_attempt_no == 4
+    assert edge.source.selector.path == ("output", "text")
+    selected = "Detta är sammanfattningen.".encode("utf-8")
+    assert edge.selection.encoding == "utf8"
+    assert edge.selection.byte_size == len(selected)
+    assert edge.selection.sha256 == hashlib.sha256(selected).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_template_fill_activation_failure_prevents_render_and_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    file_repo.get_list_by_id_and_tenant.return_value = [
+        SimpleNamespace(
+            id=template_file_id,
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        )
+    ]
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    deps = TemplateFillRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        principal=FlowPrincipal.from_run(run),
+        logger=_logger(),
+    )
+    render_docx_template = MagicMock()
+    monkeypatch.setattr(
+        template_fill_runtime_module,
+        "render_docx_template",
+        render_docx_template,
+    )
+    handler = TemplateFillStepHandler(
+        deps=deps,
+        activate_resolved_input_edges=AsyncMock(
+            side_effect=RuntimeError("activation failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="activation failed"):
+        await handler.execute(
+            step=_step(),
+            run=run,
+            state=state,
+            version_metadata=None,
+            attempt_no=1,
+        )
+
+    render_docx_template.assert_not_called()
+    file_repo.add.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     run = _run()
@@ -178,14 +353,12 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
         )
     ]
     file_repo.add.return_value = SimpleNamespace(id=uuid4())
-    apply_output_cap = AsyncMock()
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
     deps = TemplateFillRuntimeDeps(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        apply_output_cap=apply_output_cap,
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -236,7 +409,6 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
         asset_id=template_asset_id,
         tenant_id=run.tenant_id,
     )
-    apply_output_cap.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -262,7 +434,6 @@ async def test_execute_template_fill_step_loads_template_asset_by_tenant() -> No
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -320,7 +491,6 @@ async def test_execute_template_fill_step_resolves_asset_id_only_config() -> Non
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -365,7 +535,6 @@ async def test_execute_template_fill_step_reports_missing_template_asset() -> No
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -399,7 +568,6 @@ async def test_execute_template_fill_step_reports_missing_template_asset_file() 
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -434,7 +602,6 @@ async def test_execute_template_fill_step_rejects_template_file_id_identity() ->
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -477,7 +644,6 @@ async def test_execute_template_fill_step_reports_missing_template_asset_content
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -519,7 +685,6 @@ async def test_execute_template_fill_step_reports_template_asset_checksum_drift(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -557,7 +722,6 @@ async def test_execute_template_fill_step_rejects_checksum_drift() -> None:
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -593,7 +757,6 @@ async def test_execute_template_fill_step_allows_explicit_empty_binding() -> Non
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -633,6 +796,7 @@ async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_
         num_tokens_input=10,
         num_tokens_output=20,
         status=FlowStepResultStatus.COMPLETED,
+        current_attempt_no=4,
         flow_step_execution_hash="hash",
         created_at=now,
         updated_at=now,
@@ -660,7 +824,6 @@ async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -727,7 +890,6 @@ async def test_execute_template_fill_step_reports_failed_upstream_step_clearly()
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -762,7 +924,6 @@ async def test_execute_template_fill_step_reports_missing_template_blob_clearly(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -801,7 +962,6 @@ async def test_execute_template_fill_step_reports_generated_document_save_failur
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -842,7 +1002,6 @@ async def test_execute_template_fill_step_reports_generated_document_read_failur
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -867,7 +1026,6 @@ async def test_execute_template_fill_step_rejects_template_file_id_key() -> None
         variable_resolver=FlowVariableResolver(),
         file_repo=AsyncMock(),
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -894,7 +1052,6 @@ async def test_execute_template_fill_step_rejects_non_string_binding_values() ->
         variable_resolver=FlowVariableResolver(),
         file_repo=AsyncMock(),
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -921,7 +1078,6 @@ async def test_execute_template_fill_step_reports_missing_published_template_fil
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -963,7 +1119,6 @@ async def test_execute_template_fill_step_reports_render_stage_failure(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -997,7 +1152,6 @@ async def test_execute_template_fill_step_supports_datum_system_variable() -> No
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -1045,12 +1199,27 @@ async def test_execute_template_fill_step_formats_json_binding_in_summary() -> N
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
     step = _step()
     step.output_config["bindings"]["summary"] = "{{step_1.output.structured}}"
+
+    prepared = await prepare_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+    structured_edge = next(
+        edge
+        for edge in prepared.resolved_input_edges
+        if edge.binding_ref.endswith(":step_1.output.structured")
+    )
+    selected = canonical_json_bytes({"status": "approved", "score": 5})
+    assert structured_edge.selection.encoding == "canonical_json"
+    assert structured_edge.selection.byte_size == len(selected)
+    assert structured_edge.selection.sha256 == hashlib.sha256(selected).hexdigest()
 
     output = await execute_template_fill_step(
         step=step, run=run, state=state, deps=deps
@@ -1079,7 +1248,6 @@ async def test_execute_template_fill_step_supports_unicode_placeholder_names() -
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=AsyncMock(),
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -1100,7 +1268,7 @@ async def test_execute_template_fill_step_supports_unicode_placeholder_names() -
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_bypasses_output_cap_for_long_summary() -> (
+async def test_execute_template_fill_step_preserves_long_summary_in_persisted_text() -> (
     None
 ):
     run = _run()
@@ -1121,12 +1289,10 @@ async def test_execute_template_fill_step_bypasses_output_cap_for_long_summary()
         )
     ]
     file_repo.add.return_value = SimpleNamespace(id=uuid4())
-    apply_output_cap = AsyncMock(side_effect=RuntimeError("should not be called"))
     deps = TemplateFillRuntimeDeps(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        apply_output_cap=apply_output_cap,
         principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
@@ -1139,4 +1305,4 @@ async def test_execute_template_fill_step_bypasses_output_cap_for_long_summary()
     )
 
     assert "## summary" in output.persisted_text
-    apply_output_cap.assert_not_awaited()
+    assert "L" * 10000 in output.persisted_text

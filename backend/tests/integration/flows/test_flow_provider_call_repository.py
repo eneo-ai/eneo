@@ -11,20 +11,32 @@ from eneo.completion_models.domain.provider_call_observer import (
     ProviderCallResultFacts,
 )
 from eneo.database.database import sessionmanager
-from eneo.database.tables.flow_tables import FlowProviderCalls
+from eneo.database.tables.flow_tables import (
+    FlowProviderCalls,
+    FlowStepAttemptResolvedInputs,
+)
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.provider_call import (
+    ProviderCall,
     ProviderCallCompletion,
     ProviderCallRequest,
     ProviderCallResponseFormat,
 )
-from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdgeIndexes,
+    FlowResolvedInputEdges,
+    FlowResolvedInputFlowInputSource,
+    FlowResolvedInputJsonPath,
+    MappedProviderCallProvenance,
+    build_resolved_input_edge,
+)
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
     FlowProviderCallRecorder,
 )
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallNotFoundError,
     FlowProviderCallRepository,
+    FlowProviderCallResolvedInputLinkError,
     FlowProviderCallStateConflictError,
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -39,6 +51,40 @@ class _StartedAttempt:
     step_id: UUID
     attempt_no: int
     tenant_id: UUID
+
+
+async def _activate_resolved_inputs(
+    *,
+    repo: FlowRunRepository,
+    context: _StartedAttempt,
+    aggregate: FlowResolvedInputEdges,
+) -> None:
+    activated = await repo.activate_step_attempt(
+        run_id=context.run_id,
+        step_id=context.step_id,
+        attempt_no=context.attempt_no,
+        tenant_id=context.tenant_id,
+        resolved_input_edges=aggregate,
+        attempt_start=None,
+    )
+    assert activated is not None
+
+
+async def _start_provider_call(
+    *,
+    repo: FlowProviderCallRepository,
+    context: _StartedAttempt,
+    request: ProviderCallRequest,
+    resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes = (),
+) -> ProviderCall:
+    return await repo.start_call_for_execution(
+        run_id=context.run_id,
+        step_id=context.step_id,
+        attempt_no=context.attempt_no,
+        tenant_id=context.tenant_id,
+        request=request,
+        resolved_input_edge_indexes=resolved_input_edge_indexes,
+    )
 
 
 def _build_flow(
@@ -91,6 +137,7 @@ async def _create_started_attempt(
     completion_model_factory,
     space_factory,
     assistant_factory,
+    activate_resolved_inputs: bool = True,
 ) -> _StartedAttempt:
     model = await completion_model_factory(
         session, f"provider-call-model-{uuid4().hex}"
@@ -152,13 +199,20 @@ async def _create_started_attempt(
         attempt_no=1,
         celery_task_id="provider-call-lifecycle-test",
     )
-    return _StartedAttempt(
+    context = _StartedAttempt(
         attempt_id=attempt.id,
         run_id=run.id,
         step_id=step.id,
         attempt_no=attempt.attempt_no,
         tenant_id=admin_user.tenant_id,
     )
+    if activate_resolved_inputs:
+        await _activate_resolved_inputs(
+            repo=run_repo,
+            context=context,
+            aggregate=FlowResolvedInputEdges(schema_version=1, edges=()),
+        )
+    return context
 
 
 @pytest.mark.asyncio
@@ -180,6 +234,169 @@ async def test_provider_call_table_check_constraints_are_valid_postgresql(
                 sa.select(constraint.sqltext).select_from(FlowProviderCalls).limit(0)
             )
             await session.execute(statement)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_links_only_the_resolved_inputs_consumed_by_that_call(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+        )
+        question_edge = build_resolved_input_edge(
+            binding_ref="question",
+            source=FlowResolvedInputFlowInputSource(
+                kind="flow_input",
+                selector=FlowResolvedInputJsonPath(
+                    kind="json_path",
+                    path=("question",),
+                ),
+            ),
+            selected_value="What happened?",
+        )
+        instruction_edge = build_resolved_input_edge(
+            binding_ref="assistant_prompt",
+            source=FlowResolvedInputFlowInputSource(
+                kind="flow_input",
+                selector=FlowResolvedInputJsonPath(
+                    kind="json_path",
+                    path=("instruction",),
+                ),
+            ),
+            selected_value="Be concise.",
+        )
+        await _activate_resolved_inputs(
+            repo=FlowRunRepository(session),
+            context=context,
+            aggregate=FlowResolvedInputEdges(
+                schema_version=1,
+                edges=(question_edge, instruction_edge),
+            ),
+        )
+
+        started = await FlowProviderCallRepository(session).start_call_for_execution(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            tenant_id=context.tenant_id,
+            request=ProviderCallRequest(
+                provider_request_hash="e" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                response_format="none",
+                requested_capabilities=(),
+            ),
+            resolved_input_edge_indexes=(1,),
+        )
+
+        assert started.resolved_input_edge_indexes == (1,)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("activate_resolved_inputs", "indexes", "message"),
+    [
+        (False, (), "before resolved input evidence is activated"),
+        (True, (0,), "exceed the activated aggregate"),
+    ],
+)
+async def test_provider_call_refuses_unverifiable_resolved_input_links(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    activate_resolved_inputs: bool,
+    indexes: tuple[int, ...],
+    message: str,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=activate_resolved_inputs,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        with pytest.raises(FlowProviderCallResolvedInputLinkError, match=message):
+            await repo.start_call_for_execution(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=context.attempt_no,
+                tenant_id=context.tenant_id,
+                request=ProviderCallRequest(
+                    provider_request_hash="f" * 64,
+                    requested_model="openai/gpt-4o-mini",
+                    provider="openai",
+                    response_format="none",
+                    requested_capabilities=(),
+                ),
+                resolved_input_edge_indexes=indexes,
+            )
+
+        assert await session.scalar(sa.select(sa.func.count(FlowProviderCalls.id))) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_refuses_corrupt_resolved_input_evidence(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+        )
+        await session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=context.attempt_id,
+                resolved_input_edges_jsonb={"schema_version": 1, "edges": [{}]},
+            )
+        )
+
+        with pytest.raises(
+            FlowProviderCallResolvedInputLinkError,
+            match="corrupt resolved input evidence",
+        ):
+            await _start_provider_call(
+                repo=FlowProviderCallRepository(session),
+                context=context,
+                request=ProviderCallRequest(
+                    provider_request_hash="f" * 64,
+                    requested_model="openai/gpt-4o-mini",
+                    provider="openai",
+                    response_format="none",
+                    requested_capabilities=(),
+                ),
+            )
+
+        assert await session.scalar(sa.select(sa.func.count(FlowProviderCalls.id))) == 0
 
 
 @pytest.mark.asyncio
@@ -208,13 +425,16 @@ async def test_provider_call_ordinals_resume_from_persisted_attempt_rows(
             requested_capabilities=("reasoning", "structured_output"),
         )
 
-        first = await FlowProviderCallRepository(session).start_call(
-            attempt_id=context.attempt_id,
+        repo = FlowProviderCallRepository(session)
+        first = await _start_provider_call(
+            repo=repo,
+            context=context,
             request=request,
         )
         await session.flush()
-        second = await FlowProviderCallRepository(session).start_call(
-            attempt_id=context.attempt_id,
+        second = await _start_provider_call(
+            repo=repo,
+            context=context,
             request=request.model_copy(
                 update={
                     "provider_request_hash": "b" * 64,
@@ -266,8 +486,9 @@ async def test_provider_call_evidence_rejects_noncanonical_persisted_capabilitie
             space_factory=space_factory,
             assistant_factory=assistant_factory,
         )
-        started = await FlowProviderCallRepository(session).start_call(
-            attempt_id=context.attempt_id,
+        started = await _start_provider_call(
+            repo=FlowProviderCallRepository(session),
+            context=context,
             request=ProviderCallRequest(
                 provider_request_hash="c" * 64,
                 requested_model="openai/gpt-4o-mini",
@@ -323,8 +544,9 @@ async def test_provider_call_completion_is_idempotent_and_rejects_conflicts(
             assistant_factory=assistant_factory,
         )
         repo = FlowProviderCallRepository(session)
-        started = await repo.start_call(
-            attempt_id=context.attempt_id,
+        started = await _start_provider_call(
+            repo=repo,
+            context=context,
             request=ProviderCallRequest(
                 provider_request_hash="c" * 64,
                 requested_model="openai/gpt-4o-mini",
@@ -379,16 +601,18 @@ async def test_provider_call_known_rejection_and_unknown_outcome_are_distinct(
             assistant_factory=assistant_factory,
         )
         repo = FlowProviderCallRepository(session)
-        rejected_start = await repo.start_call(
-            attempt_id=context.attempt_id,
+        rejected_start = await _start_provider_call(
+            repo=repo,
+            context=context,
             request=ProviderCallRequest(
                 provider_request_hash="d" * 64,
                 requested_model="openai/gpt-4o-mini",
                 requested_capabilities=(),
             ),
         )
-        unknown_start = await repo.start_call(
-            attempt_id=context.attempt_id,
+        unknown_start = await _start_provider_call(
+            repo=repo,
+            context=context,
             request=ProviderCallRequest(
                 provider_request_hash="e" * 64,
                 requested_model="openai/gpt-4o-mini",
@@ -437,6 +661,7 @@ async def test_provider_call_recorder_commits_outside_executor_session(
         attempt_no=context.attempt_no,
         tenant_id=context.tenant_id,
         mapped_call=None,
+        resolved_input_edge_indexes=(),
     )
     call_id = await recorder.started(
         ProviderCallRequestFacts(
@@ -492,8 +717,9 @@ async def test_provider_call_evidence_page_is_stable_bounded_and_cursor_checked(
         )
         repo = FlowProviderCallRepository(session)
         calls = [
-            await repo.start_call(
-                attempt_id=context.attempt_id,
+            await _start_provider_call(
+                repo=repo,
+                context=context,
                 request=ProviderCallRequest(
                     provider_request_hash=f"{index:x}" * 64,
                     requested_model="openai/gpt-4o-mini",
@@ -569,16 +795,18 @@ async def test_stale_run_recovery_marks_only_started_provider_calls_unknown(
             assistant_factory=assistant_factory,
         )
         repo = FlowProviderCallRepository(session)
-        completed_start = await repo.start_call(
-            attempt_id=context.attempt_id,
+        completed_start = await _start_provider_call(
+            repo=repo,
+            context=context,
             request=ProviderCallRequest(
                 provider_request_hash="a" * 64,
                 requested_model="openai/gpt-4o-mini",
                 requested_capabilities=(),
             ),
         )
-        started = await repo.start_call(
-            attempt_id=context.attempt_id,
+        started = await _start_provider_call(
+            repo=repo,
+            context=context,
             request=ProviderCallRequest(
                 provider_request_hash="b" * 64,
                 requested_model="openai/gpt-4o-mini",

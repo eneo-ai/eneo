@@ -2283,6 +2283,7 @@ class DataRetentionService:
         provider_call_counts: dict[UUID, int] = {}
         resolved_input_counts: dict[UUID, tuple[int, int]] = {}
         if attempt_ids:
+            # Provider calls reference the resolved-input row; delete them first.
             provider_delete_result = await self.session.execute(
                 sa.delete(FlowProviderCalls)
                 .where(FlowProviderCalls.flow_step_attempt_id.in_(attempt_ids))

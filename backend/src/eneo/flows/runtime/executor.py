@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Sequence, assert_never, cast
+from typing import TYPE_CHECKING, Any, Iterable, Sequence, assert_never, cast
 from uuid import UUID
 
 import httpx
@@ -76,10 +76,15 @@ from eneo.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     FlowAttemptProvenance,
+    FlowResolvedInputEdge,
+    FlowResolvedInputEdgeGrouping,
+    FlowResolvedInputEdges,
     LlmProvenance,
     ModelParameterSnapshot,
+    group_resolved_input_edges,
     normalize_json_preview,
     normalize_text_preview,
+    parse_attempt_provenance,
 )
 from eneo.flows.flow_run_step_result_file import build_step_result_file_references
 from eneo.flows.flow_runtime_policy import (
@@ -132,6 +137,7 @@ from eneo.flows.runtime.http_audit import (
     audit_http_outbound as audit_http_outbound_runtime,
 )
 from eneo.flows.runtime.http_orchestration import (
+    FlowHttpInputResolution,
     FlowHttpOrchestrationDeps,
 )
 from eneo.flows.runtime.http_orchestration import (
@@ -184,7 +190,7 @@ from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
 )
 from eneo.flows.runtime_input import build_runtime_input_config
-from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.flows.variable_resolver import FlowVariableContext, FlowVariableResolver
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
@@ -217,6 +223,18 @@ _PROVIDER_WORK_AMBIGUITY_DISCLOSURE = (
     "Provider work may or may not have started; rerunning can repeat provider work "
     "and spend."
 )
+
+
+def _group_attempt_resolved_inputs(
+    *edge_groups: Iterable[FlowResolvedInputEdge],
+) -> FlowResolvedInputEdgeGrouping:
+    try:
+        return group_resolved_input_edges(*edge_groups)
+    except ValueError as exc:
+        raise TypedIOValidationException(
+            "Resolved step input evidence exceeded its bounded runtime contract.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        ) from exc
 
 
 def _with_provider_work_disclosure(message: str, *, step: RuntimeStep) -> str:
@@ -1257,6 +1275,9 @@ class FlowRunExecutor:
                     prepare_assistant_step=self._prepare_assistant_step,
                     preview_assistant_step=self._preview_assistant_step,
                     list_step_input_file_ids=self._list_step_input_file_ids,
+                    activate_prepared_assistant_steps=(
+                        self._activate_prepared_assistant_steps
+                    ),
                     mapped_execution_policy=self.mapped_execution_policy,
                 )
             case FlowOutputMode.COMPOSE_TEXT:
@@ -1269,6 +1290,9 @@ class FlowRunExecutor:
                         prepare_assistant_step=self._prepare_assistant_step,
                         preview_assistant_step=self._preview_assistant_step,
                         list_step_input_file_ids=self._list_step_input_file_ids,
+                        activate_prepared_assistant_steps=(
+                            self._activate_prepared_assistant_steps
+                        ),
                         mapped_execution_policy=self.mapped_execution_policy,
                     )
                 )
@@ -1277,7 +1301,10 @@ class FlowRunExecutor:
                     prepare_assistant_step=self._prepare_assistant_step
                 )
             case FlowOutputMode.TEMPLATE_FILL:
-                return TemplateFillStepHandler(deps=self._template_fill_runtime_deps())
+                return TemplateFillStepHandler(
+                    deps=self._template_fill_runtime_deps(),
+                    activate_resolved_input_edges=self._activate_resolved_input_edges,
+                )
             case FlowOutputMode.RENDER_VERBATIM:
                 return RenderVerbatimStepHandler(
                     prepare_assistant_step=self._prepare_assistant_step
@@ -1289,7 +1316,6 @@ class FlowRunExecutor:
             variable_resolver=self.variable_resolver,
             file_repo=self.file_repo,
             template_asset_repo=self.template_asset_repo,
-            apply_output_cap=self._apply_output_cap_positional,
             principal=self.principal,
             logger=logger,
         )
@@ -1323,12 +1349,14 @@ class FlowRunExecutor:
             llm_request_timeout_seconds=llm_timeout_seconds,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
             run_cancelled=self._run_is_cancelled,
-            build_provider_call_observer=lambda mapped_call: FlowProviderCallRecorder(
+            build_provider_call_observer=lambda mapped_call,
+            resolved_input_edge_indexes: FlowProviderCallRecorder(
                 run_id=run.id,
                 step_id=step.step_id,
                 attempt_no=attempt_no,
                 tenant_id=run.tenant_id,
                 mapped_call=mapped_call,
+                resolved_input_edge_indexes=resolved_input_edge_indexes,
             ),
         )
 
@@ -1365,22 +1393,14 @@ class FlowRunExecutor:
             deps=execution_deps,
             step_input_override=step_input_override,
         )
-        requested_model = _requested_model_from_assistant(prepared.assistant)
-        provider = _provider_from_assistant(prepared.assistant)
-        resolved_timeout_seconds = int(execution_deps.llm_request_timeout_seconds)
-        attempt_start = AttemptStartProvenance(
-            requested_model=requested_model,
-            provider=provider,
-            deadline_at=datetime.now(timezone.utc)
-            + timedelta(seconds=resolved_timeout_seconds),
-            resolved_timeout_seconds=resolved_timeout_seconds,
-            effective_prompt_length=len(prepared.effective_prompt),
-            input_text_length=len(prepared.step_input.text),
-            input_tokens_estimate=count_tokens(prepared.step_input.text),
-            model_parameter_snapshot=_model_parameter_snapshot(prepared.assistant),
-            mapped_admission=state.mapped_admission_by_step.get(step.step_id),
+        prepared_step = PreparedAssistantStep(prepared=prepared, deps=execution_deps)
+        attempt_start = self._build_attempt_start_provenance(
+            step=step,
+            state=state,
+            prepared_step=prepared_step,
         )
-        state.attempt_start_by_step[step.step_id] = attempt_start
+        requested_model = attempt_start.requested_model
+        provider = attempt_start.provider
         contract_validation = prepared.contract_validation or {}
         logger.info(
             "flow_executor.step_prepared run_id=%s step_order=%d requested_model=%s "
@@ -1402,17 +1422,151 @@ class FlowRunExecutor:
             contract_validation.get("parse_attempted"),
             contract_validation.get("parse_succeeded"),
         )
-        await self.flow_run_repo.record_attempt_start_provenance(
+        grouping = _group_attempt_resolved_inputs(prepared.resolved_input_edges)
+        await self._activate_step_attempt(
+            run=run,
+            step=step,
+            state=state,
+            attempt_no=attempt_no,
+            resolved_input_edges=grouping.aggregate,
+            attempt_start=attempt_start,
+        )
+        return PreparedAssistantStep(
+            prepared=replace(
+                prepared,
+                resolved_input_edge_indexes=grouping.indexes_by_group[0],
+            ),
+            deps=execution_deps,
+        )
+
+    @staticmethod
+    def _build_attempt_start_provenance(
+        *,
+        step: RuntimeStep,
+        state: RunExecutionState,
+        prepared_step: PreparedAssistantStep,
+    ) -> AttemptStartProvenance:
+        prepared = prepared_step.prepared
+        resolved_timeout_seconds = int(prepared_step.deps.llm_request_timeout_seconds)
+        return AttemptStartProvenance(
+            requested_model=_requested_model_from_assistant(prepared.assistant),
+            provider=_provider_from_assistant(prepared.assistant),
+            deadline_at=datetime.now(timezone.utc)
+            + timedelta(seconds=resolved_timeout_seconds),
+            resolved_timeout_seconds=resolved_timeout_seconds,
+            effective_prompt_length=len(prepared.effective_prompt),
+            input_text_length=len(prepared.step_input.text),
+            input_tokens_estimate=count_tokens(prepared.step_input.text),
+            model_parameter_snapshot=_model_parameter_snapshot(prepared.assistant),
+            mapped_admission=state.mapped_admission_by_step.get(step.step_id),
+        )
+
+    async def _activate_prepared_assistant_steps(
+        self,
+        run: FlowRun,
+        step: RuntimeStep,
+        state: RunExecutionState,
+        attempt_no: int,
+        prepared_steps: Sequence[PreparedAssistantStep],
+    ) -> tuple[PreparedAssistantStep, ...]:
+        if not prepared_steps:
+            raise FlowRuntimeInvariantError(
+                "Mapped Flow step attempt has no prepared provider calls."
+            )
+        grouping = _group_attempt_resolved_inputs(
+            *(prepared.prepared.resolved_input_edges for prepared in prepared_steps)
+        )
+        await self._activate_step_attempt(
+            run=run,
+            step=step,
+            state=state,
+            attempt_no=attempt_no,
+            resolved_input_edges=grouping.aggregate,
+            attempt_start=self._build_attempt_start_provenance(
+                step=step,
+                state=state,
+                prepared_step=prepared_steps[0],
+            ),
+        )
+        return tuple(
+            PreparedAssistantStep(
+                prepared=replace(
+                    prepared_step.prepared,
+                    resolved_input_edge_indexes=indexes,
+                ),
+                deps=prepared_step.deps,
+            )
+            for prepared_step, indexes in zip(
+                prepared_steps,
+                grouping.indexes_by_group,
+                strict=True,
+            )
+        )
+
+    async def _activate_step_attempt(
+        self,
+        *,
+        run: FlowRun,
+        step: RuntimeStep,
+        state: RunExecutionState,
+        attempt_no: int,
+        resolved_input_edges: FlowResolvedInputEdges,
+        attempt_start: AttemptStartProvenance | None,
+    ) -> None:
+        activation_key = (step.step_id, attempt_no)
+        if activation_key in state.activated_attempts:
+            raise FlowRuntimeInvariantError(
+                "Flow step attempt input evidence was activated more than once "
+                f"(step_id={step.step_id}, attempt_no={attempt_no})."
+            )
+        activated = await self.flow_run_repo.activate_step_attempt(
             run_id=run.id,
             step_id=step.step_id,
             attempt_no=attempt_no,
             tenant_id=run.tenant_id,
-            requested_model=requested_model,
-            provider=provider,
+            resolved_input_edges=resolved_input_edges,
             attempt_start=attempt_start,
         )
+        if activated is None:
+            raise FlowRuntimeInvariantError(
+                "Flow step attempt closed before input evidence activation "
+                f"(step_id={step.step_id}, attempt_no={attempt_no})."
+            )
         await self._commit()
-        return PreparedAssistantStep(prepared=prepared, deps=execution_deps)
+        if attempt_start is not None:
+            persisted_provenance = parse_attempt_provenance(
+                activated.provenance_json
+            ).provenance
+            if (
+                persisted_provenance is None
+                or persisted_provenance.attempt_start is None
+            ):
+                raise FlowRuntimeInvariantError(
+                    "Flow step attempt input evidence was activated without "
+                    "attempt-start provenance."
+                )
+            state.attempt_start_by_step[step.step_id] = (
+                persisted_provenance.attempt_start
+            )
+        state.activated_attempts.add(activation_key)
+
+    async def _activate_resolved_input_edges(
+        self,
+        run: FlowRun,
+        step: RuntimeStep,
+        state: RunExecutionState,
+        attempt_no: int,
+        resolved_input_edges: tuple[FlowResolvedInputEdge, ...],
+    ) -> None:
+        aggregate = _group_attempt_resolved_inputs(resolved_input_edges).aggregate
+        await self._activate_step_attempt(
+            run=run,
+            step=step,
+            state=state,
+            attempt_no=attempt_no,
+            resolved_input_edges=aggregate,
+            attempt_start=None,
+        )
 
     async def _preview_assistant_step(
         self,
@@ -2072,8 +2226,8 @@ class FlowRunExecutor:
         *,
         step: RuntimeStep,
         run: FlowRun,
-        context: dict[str, Any],
-    ) -> tuple[str, dict[str, Any] | list[Any] | None]:
+        context: FlowVariableContext,
+    ) -> FlowHttpInputResolution:
         deps = FlowHttpOrchestrationDeps(
             encryption_service=self.encryption_service,
             variable_resolver=self.variable_resolver,
@@ -2324,14 +2478,6 @@ class FlowRunExecutor:
             )
         )
         return _utf8_prefix(text, max_bytes=self.max_inline_text_bytes), [file_row.id]
-
-    async def _apply_output_cap_positional(
-        self,
-        text: str,
-        run: FlowRun,
-        step: RuntimeStep,
-    ) -> tuple[str, list[UUID]]:
-        return await self._apply_output_cap(text=text, run=run, step=step)
 
     @staticmethod
     def _requires_assistant_snapshots(definition_json: dict[str, Any]) -> bool:

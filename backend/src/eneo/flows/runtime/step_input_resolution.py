@@ -24,6 +24,16 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdge,
+    FlowResolvedInputFlowInputSource,
+    FlowResolvedInputJsonPath,
+    FlowResolvedInputRuntimeSource,
+    FlowResolvedInputStepResultSource,
+    build_resolved_input_edge,
+    build_runtime_file_resolved_input_edge,
+    merge_resolved_input_edges,
+)
 from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     effective_question_binding,
@@ -32,6 +42,7 @@ from eneo.flows.input_binding_contract_rules import (
     source_ref_bindings,
 )
 from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.input_files import load_files_by_requested_ids
 from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeDeps,
@@ -57,9 +68,7 @@ RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE: Final = (
 @dataclass(frozen=True)
 class StepInputResolutionDeps:
     variable_resolver: Any
-    resolve_http_input_source_text: Callable[
-        ..., Awaitable[tuple[str, dict[str, Any] | list[Any] | None]]
-    ]
+    resolve_http_input_source_text: Callable[..., Awaitable[FlowHttpInputResolution]]
     file_repo: Any
     principal: FlowPrincipal
     transcriber: Any | None
@@ -78,6 +87,7 @@ class ResolvedSourceRefsInput:
     text: str
     reference_count: int
     template_reference_count: int
+    edges: tuple[FlowResolvedInputEdge, ...]
 
 
 async def resolve_step_input(
@@ -111,12 +121,22 @@ async def resolve_step_input(
             code=FlowApiErrorCode.TYPED_IO_AUDIO_SOURCE_UNSUPPORTED.value,
         )
     structured: dict[str, Any] | list[Any] | None = None
+    http_edges: tuple[FlowResolvedInputEdge, ...] = ()
     if step.input_source == "http_get":
-        source_text, structured = await deps.resolve_http_input_source_text(
+        http_resolution = await deps.resolve_http_input_source_text(
             step=step,
             run=run,
-            context=context,
+            context=deps.variable_resolver.build_context_with_evidence(
+                run.input_payload_json,
+                prior_results,
+                current_step_order=step.step_order,
+                step_names_by_order=state.step_names_by_order if state else None,
+                step_ref_mapping=state.step_ref_mapping if state else None,
+            ),
         )
+        source_text = http_resolution.text
+        structured = http_resolution.structured
+        http_edges = http_resolution.resolved_input_edges
     else:
         source_text = resolve_input_source_text(
             input_source=step.input_source,
@@ -136,6 +156,7 @@ async def resolve_step_input(
     files = None
     runtime_input_config = build_runtime_input_config(step.input_config)
     runtime_input_text = ""
+    runtime_file_edges: tuple[FlowResolvedInputEdge, ...] = ()
     requested_ids = list(requested_file_ids) if runtime_input_config.enabled else []
 
     if requested_ids:
@@ -200,8 +221,10 @@ async def resolve_step_input(
             files=files,
             capture_mode="runtime_input",
         )
+        runtime_file_edges = _runtime_file_edges(files)
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
+    explicit_binding_edges: tuple[FlowResolvedInputEdge, ...] = ()
     if bindings is not None:
         source_refs_input = (
             _resolve_compose_source_refs_input(
@@ -219,6 +242,7 @@ async def resolve_step_input(
         if source_refs_input is not None:
             input_text = source_refs_input.text
             used_question_binding = True
+            explicit_binding_edges = source_refs_input.edges
             diagnostics.append(
                 StepDiagnostic(
                     code="flow_underlag_summary",
@@ -245,26 +269,34 @@ async def resolve_step_input(
                     consuming_step_order=step.step_order,
                     input_source="input_bindings.question",
                 )
-                interpolation_context = deps.variable_resolver.build_context(
-                    run.input_payload_json,
-                    prior_results,
-                    current_step_order=step.step_order,
-                    step_names_by_order=state.step_names_by_order if state else None,
-                    step_ref_mapping=state.step_ref_mapping if state else None,
-                    current_step_input=runtime_input_metadata,
+                interpolation_context = (
+                    deps.variable_resolver.build_context_with_evidence(
+                        run.input_payload_json,
+                        prior_results,
+                        current_step_order=step.step_order,
+                        step_names_by_order=state.step_names_by_order
+                        if state
+                        else None,
+                        step_ref_mapping=state.step_ref_mapping if state else None,
+                        current_step_input=runtime_input_metadata,
+                    )
                 )
-                interpolated_question = deps.variable_resolver.interpolate(
-                    question_template,
-                    interpolation_context,
+                interpolated_question = (
+                    deps.variable_resolver.interpolate_with_evidence(
+                        question_template,
+                        interpolation_context,
+                        binding_ref="input_bindings.question",
+                    )
                 )
-                input_text = interpolated_question
+                input_text = interpolated_question.text
+                explicit_binding_edges = interpolated_question.edges
                 used_question_binding = True
                 diagnostics.append(
                     StepDiagnostic(
                         code="flow_underlag_summary",
                         message=(
                             f"Resolved underlag from {len(references)} template sources "
-                            f"({len(interpolated_question.encode('utf-8'))} bytes)."
+                            f"({len(interpolated_question.text.encode('utf-8'))} bytes)."
                         ),
                         severity="info",
                     )
@@ -277,6 +309,11 @@ async def resolve_step_input(
                         code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
                     )
 
+    runtime_input_replaces_chain = (
+        runtime_input_metadata is not None
+        and runtime_input_config.input_format == "audio"
+        and step.output_mode == "transcribe_only"
+    )
     if (
         runtime_input_config.enabled
         and runtime_input_metadata is not None
@@ -285,10 +322,7 @@ async def resolve_step_input(
         input_text = _compose_runtime_and_chained_input(
             runtime_text=runtime_input_text,
             chained_text=source_text,
-            replace_chain=(
-                runtime_input_config.input_format == "audio"
-                and step.output_mode == "transcribe_only"
-            ),
+            replace_chain=runtime_input_replaces_chain,
         )
         if runtime_input_text:
             raw_extracted_text = runtime_input_text or raw_extracted_text
@@ -318,6 +352,32 @@ async def resolve_step_input(
                 structured = json.loads(input_text)
             except (json.JSONDecodeError, ValueError):
                 pass
+
+    implicit_edges = _implicit_input_source_edges(
+        step=step,
+        run=run,
+        prior_results=prior_results,
+        state=state,
+        source_text=source_text,
+        http_edges=http_edges,
+    )
+    if used_question_binding:
+        resolved_edges = merge_resolved_input_edges(
+            explicit_binding_edges,
+            runtime_file_edges,
+        )
+    elif runtime_input_metadata is not None:
+        runtime_input_edges = _runtime_input_edges(
+            runtime_input_text=runtime_input_text,
+            runtime_file_edges=runtime_file_edges,
+        )
+        resolved_edges = (
+            runtime_input_edges
+            if runtime_input_replaces_chain
+            else merge_resolved_input_edges(runtime_input_edges, implicit_edges)
+        )
+    else:
+        resolved_edges = implicit_edges
 
     enforce_inline_input_cap(
         text=input_text,
@@ -383,7 +443,182 @@ async def resolve_step_input(
         diagnostics=diagnostics,
         transcription_metadata=transcription_metadata,
         runtime_input_metadata=runtime_input_metadata,
+        edges=resolved_edges,
     )
+
+
+def _implicit_input_source_edges(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    source_text: str,
+    http_edges: tuple[FlowResolvedInputEdge, ...],
+) -> tuple[FlowResolvedInputEdge, ...]:
+    if step.input_source == "http_get":
+        return http_edges
+    if step.input_source == "flow_input":
+        payload = run.input_payload_json or {}
+        text_value = payload.get("text")
+        if isinstance(text_value, str):
+            return (
+                _flow_input_edge(
+                    binding_ref="input_source",
+                    selector_path=("text",),
+                    selected_value=text_value,
+                ),
+            )
+        semantic_payload = read_semantic_flow_input_payload(run.input_payload_json)
+        return tuple(
+            _flow_input_edge(
+                binding_ref="input_source",
+                selector_path=(key,),
+                selected_value=value,
+            )
+            for key, value in sorted(semantic_payload.items())
+        )
+    if step.input_source == "previous_step":
+        previous = next(
+            (
+                result
+                for result in prior_results
+                if result.step_order == step.step_order - 1
+            ),
+            None,
+        )
+        if previous is None:
+            return ()
+        previous_payload = (
+            previous.output_payload_json
+            if isinstance(previous.output_payload_json, dict)
+            else {}
+        )
+        previous_structured = previous_payload.get("structured")
+        if step.input_type == "json" and isinstance(previous_structured, (dict, list)):
+            return (
+                _step_result_edge(
+                    binding_ref="input_source",
+                    result=previous,
+                    selector_path=("output", "structured"),
+                    selected_value=cast(
+                        dict[str, Any] | list[Any], previous_structured
+                    ),
+                ),
+            )
+        return (
+            _step_result_edge(
+                binding_ref="input_source",
+                result=previous,
+                selector_path=("output", "text"),
+                selected_value=source_text,
+            ),
+        )
+    if step.input_source == "all_previous_steps":
+        previous_results = (
+            state.completed_by_order.values() if state is not None else prior_results
+        )
+        return tuple(
+            _step_result_edge(
+                binding_ref="input_source",
+                result=result,
+                selector_path=("output", "text"),
+                selected_value=_read_complete_output_text(
+                    result,
+                    consuming_step_order=step.step_order,
+                    input_source=step.input_source,
+                ),
+            )
+            for result in sorted(previous_results, key=lambda item: item.step_order)
+            if result.step_order < step.step_order
+        )
+    return ()
+
+
+def _flow_input_edge(
+    *,
+    binding_ref: str,
+    selector_path: tuple[str | int, ...],
+    selected_value: object,
+) -> FlowResolvedInputEdge:
+    return build_resolved_input_edge(
+        binding_ref=binding_ref,
+        source=FlowResolvedInputFlowInputSource(
+            kind="flow_input",
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=selector_path),
+        ),
+        selected_value=selected_value,
+    )
+
+
+def _step_result_edge(
+    *,
+    binding_ref: str,
+    result: FlowStepResult,
+    selector_path: tuple[str | int, ...],
+    selected_value: object,
+) -> FlowResolvedInputEdge:
+    if result.current_attempt_no is None:
+        raise TypedIOValidationException(
+            "Consumed prior step result is missing its current attempt identity.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    return build_resolved_input_edge(
+        binding_ref=binding_ref,
+        source=FlowResolvedInputStepResultSource(
+            kind="step_result",
+            source_step_id=result.step_id,
+            source_attempt_no=result.current_attempt_no,
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=selector_path),
+        ),
+        selected_value=selected_value,
+    )
+
+
+def _runtime_input_edges(
+    *,
+    runtime_input_text: str,
+    runtime_file_edges: tuple[FlowResolvedInputEdge, ...],
+) -> tuple[FlowResolvedInputEdge, ...]:
+    text_edge = build_resolved_input_edge(
+        binding_ref="runtime_input",
+        source=FlowResolvedInputRuntimeSource(
+            kind="runtime_input",
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=("text",)),
+        ),
+        selected_value=runtime_input_text,
+    )
+    return merge_resolved_input_edges((text_edge,), runtime_file_edges)
+
+
+def _runtime_file_edges(files: list[Any]) -> tuple[FlowResolvedInputEdge, ...]:
+    edges: list[FlowResolvedInputEdge] = []
+    for ordinal, file in enumerate(files):
+        file_id = getattr(file, "id", None)
+        checksum = getattr(file, "checksum", None)
+        byte_size = getattr(file, "size", None)
+        if (
+            not isinstance(file_id, UUID)
+            or not isinstance(checksum, str)
+            or not checksum
+            or not isinstance(byte_size, int)
+            or isinstance(byte_size, bool)
+            or byte_size < 0
+        ):
+            raise TypedIOValidationException(
+                "Runtime file is missing immutable evidence identity.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        edges.append(
+            build_runtime_file_resolved_input_edge(
+                binding_ref=f"runtime_files[{ordinal}]",
+                input_file_ordinal=ordinal,
+                file_id=file_id,
+                checksum=checksum,
+                byte_size=byte_size,
+            )
+        )
+    return tuple(edges)
 
 
 def _resolve_compose_source_refs_input(
@@ -407,6 +642,7 @@ def _resolve_compose_source_refs_input(
         return None
 
     sections: list[str] = []
+    edges: list[FlowResolvedInputEdge] = []
     template_reference_count = 0
     question_template = question_binding(bindings)
     if question_template is not None:
@@ -424,7 +660,7 @@ def _resolve_compose_source_refs_input(
             consuming_step_order=step.step_order,
             input_source="input_bindings.question",
         )
-        interpolation_context = deps.variable_resolver.build_context(
+        interpolation_context = deps.variable_resolver.build_context_with_evidence(
             run.input_payload_json,
             prior_results,
             current_step_order=step.step_order,
@@ -432,15 +668,17 @@ def _resolve_compose_source_refs_input(
             step_ref_mapping=state.step_ref_mapping if state else None,
             current_step_input=runtime_input_metadata,
         )
-        rendered_question = deps.variable_resolver.interpolate(
+        rendered_question = deps.variable_resolver.interpolate_with_evidence(
             question_template,
             interpolation_context,
+            binding_ref="input_bindings.question",
         )
-        if rendered_question.strip():
-            sections.append(rendered_question)
+        edges.extend(rendered_question.edges)
+        if rendered_question.text.strip():
+            sections.append(rendered_question.text)
 
     results_by_order = _prior_results_by_order(prior_results=prior_results, state=state)
-    for ref in source_refs:
+    for ref_index, ref in enumerate(source_refs):
         referenced_order = _source_ref_step_order(ref.step_ref, state=state)
         if referenced_order is None:
             raise TypedIOValidationException(
@@ -459,6 +697,19 @@ def _resolve_compose_source_refs_input(
             result=result,
             consuming_step_order=step.step_order,
         )
+        selector_path = (
+            ("output", "text")
+            if ref.output == "text"
+            else ("output", "structured", *ref.field_path)
+        )
+        edges.append(
+            _step_result_edge(
+                binding_ref=f"input_bindings.source_refs[{ref_index}]",
+                result=result,
+                selector_path=selector_path,
+                selected_value=value,
+            )
+        )
         rendered = _render_source_ref_value(
             value=value,
             item_template=ref.item_template,
@@ -473,6 +724,7 @@ def _resolve_compose_source_refs_input(
         text="\n\n".join(sections),
         reference_count=len(source_refs),
         template_reference_count=template_reference_count,
+        edges=merge_resolved_input_edges(edges),
     )
 
 

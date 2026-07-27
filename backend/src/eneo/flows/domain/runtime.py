@@ -19,6 +19,7 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
+    FlowResolvedInputEdge,
     MappedAdmissionProvenance,
 )
 
@@ -49,6 +50,10 @@ def _empty_space_cache() -> dict[UUID, Space]:
 
 def _empty_mapped_admission_by_step() -> dict[UUID, MappedAdmissionProvenance]:
     return {}
+
+
+def _empty_activated_attempts() -> set[tuple[UUID, int]]:
+    return set()
 
 
 @dataclass(frozen=True)
@@ -129,6 +134,7 @@ class StepInputValue:
     diagnostics: list[StepDiagnostic] = field(default_factory=_empty_step_diagnostics)
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
+    edges: tuple[FlowResolvedInputEdge, ...] = ()
 
 
 @dataclass
@@ -145,6 +151,9 @@ class RunExecutionState:
     in_flight_llm_task: asyncio.Task[Any] | None = None
     mapped_admission_by_step: dict[UUID, MappedAdmissionProvenance] = field(
         default_factory=_empty_mapped_admission_by_step
+    )
+    activated_attempts: set[tuple[UUID, int]] = field(
+        default_factory=_empty_activated_attempts
     )
     step_names_by_order: dict[int, str] = field(
         default_factory=_empty_step_names_by_order

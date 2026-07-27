@@ -5,6 +5,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, cast
+from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.mapped_execution_policy import (
@@ -20,7 +21,10 @@ from eneo.flows.domain.runtime import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputJsonPath,
+    FlowResolvedInputStepResultSource,
     MappedProviderCallProvenance,
+    build_resolved_input_edge,
     sum_complete_token_counts,
 )
 from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
@@ -33,7 +37,8 @@ from eneo.flows.runtime.step_execution_runtime import (
     resolve_json_response_format_plan,
 )
 from eneo.flows.runtime.step_handlers.base import (
-    PrepareAssistantStepFn,
+    ActivatePreparedAssistantStepsFn,
+    PreparedAssistantStep,
     PreviewAssistantStepFn,
 )
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
@@ -79,8 +84,8 @@ async def execute_per_item_map(
     state: RunExecutionState,
     version_metadata: dict[str, object] | None,
     attempt_no: int,
-    prepare_assistant_step: PrepareAssistantStepFn,
     preview_assistant_step: PreviewAssistantStepFn,
+    activate_prepared_assistant_steps: ActivatePreparedAssistantStepsFn,
     mapped_execution_policy: FlowMappedExecutionPolicy,
 ) -> StepExecutionResult:
     output_array_key = _single_output_array_key(step.output_contract)
@@ -104,7 +109,7 @@ async def execute_per_item_map(
         ),
     )
 
-    input_items = _previous_items(
+    source_step_id, source_attempt_no, input_items = _previous_items(
         step=step,
         state=state,
         input_array_key=input_array_key,
@@ -133,6 +138,7 @@ async def execute_per_item_map(
         )
 
     estimates: list[int] = []
+    prepared_items: list[tuple[int, dict[str, Any], PreparedAssistantStep]] = []
     native_json_fallback_possible = False
     for item_number, input_item in enumerate(input_items, start=1):
         preview_step = await preview_assistant_step(
@@ -146,8 +152,11 @@ async def execute_per_item_map(
                 item_number=item_number,
                 input_array_key=input_array_key,
                 input_item=input_item,
+                source_step_id=source_step_id,
+                source_attempt_no=source_attempt_no,
             ),
         )
+        prepared_items.append((item_number, input_item, preview_step))
         estimates.append(
             await preview_step_execution_context(
                 step=per_call_step,
@@ -169,9 +178,24 @@ async def execute_per_item_map(
         native_json_fallback_possible=native_json_fallback_possible,
         policy=mapped_execution_policy,
     )
+    activated_steps = await activate_prepared_assistant_steps(
+        run,
+        step,
+        state,
+        attempt_no,
+        tuple(prepared for _, _, prepared in prepared_items),
+    )
+    prepared_items = [
+        (item_number, input_item, activated_step)
+        for (item_number, input_item, _), activated_step in zip(
+            prepared_items,
+            activated_steps,
+            strict=True,
+        )
+    ]
 
     item_calls: list[PerItemMapCall] = []
-    for item_number, input_item in enumerate(input_items, start=1):
+    for item_number, input_item, prepared_step in prepared_items:
         item_calls.append(
             await _execute_one_item(
                 item_number=item_number,
@@ -180,9 +204,7 @@ async def execute_per_item_map(
                 step=per_call_step,
                 run=run,
                 state=state,
-                version_metadata=version_metadata,
-                attempt_no=attempt_no,
-                prepare_assistant_step=prepare_assistant_step,
+                prepared_step=prepared_step,
             )
         )
 
@@ -205,25 +227,9 @@ async def _execute_one_item(
     step: RuntimeStep,
     run: FlowRun,
     state: RunExecutionState,
-    version_metadata: dict[str, object] | None,
-    attempt_no: int,
-    prepare_assistant_step: PrepareAssistantStepFn,
+    prepared_step: PreparedAssistantStep,
 ) -> PerItemMapCall:
     started = time.perf_counter()
-    step_input = _step_input_for_item(
-        item_number=item_number,
-        input_array_key=input_array_key,
-        input_item=input_item,
-    )
-    prepared_step = await prepare_assistant_step(
-        step=step,
-        run=run,
-        state=state,
-        version_metadata=version_metadata,
-        attempt_no=attempt_no,
-        requested_file_ids_override=(),
-        step_input_override=step_input,
-    )
     output = await complete_step_execution(
         step=step,
         run=run,
@@ -368,6 +374,8 @@ def _step_input_for_item(
     item_number: int,
     input_array_key: str,
     input_item: dict[str, Any],
+    source_step_id: UUID,
+    source_attempt_no: int,
 ) -> StepInputValue:
     structured = {input_array_key: [input_item]}
     text = json.dumps(structured, ensure_ascii=False)
@@ -385,6 +393,26 @@ def _step_input_for_item(
             "source_file_id": _optional_string(input_item.get("source_file_id")),
             "input_text_length": len(text),
         },
+        edges=(
+            build_resolved_input_edge(
+                binding_ref="input",
+                source=FlowResolvedInputStepResultSource(
+                    kind="step_result",
+                    source_step_id=source_step_id,
+                    source_attempt_no=source_attempt_no,
+                    selector=FlowResolvedInputJsonPath(
+                        kind="json_path",
+                        path=(
+                            "output",
+                            "structured",
+                            input_array_key,
+                            item_number - 1,
+                        ),
+                    ),
+                ),
+                selected_value=input_item,
+            ),
+        ),
     )
 
 
@@ -393,7 +421,7 @@ def _previous_items(
     step: RuntimeStep,
     state: RunExecutionState,
     input_array_key: str,
-) -> list[dict[str, Any]]:
+) -> tuple[UUID, int, list[dict[str, Any]]]:
     previous_result = state.completed_by_order.get(step.step_order - 1)
     if previous_result is None:
         raise TypedIOValidationException(
@@ -403,6 +431,11 @@ def _previous_items(
     if not isinstance(previous_result.output_payload_json, dict):
         raise TypedIOValidationException(
             f"Step {step.step_order}: per-item map requires a completed previous step.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
+    if previous_result.current_attempt_no is None:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-item map requires exact source attempt identity.",
             code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
         )
     structured = previous_result.output_payload_json.get("structured")
@@ -428,7 +461,7 @@ def _previous_items(
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
         result.append(dict(cast(dict[str, Any], raw_item)))
-    return result
+    return previous_result.step_id, previous_result.current_attempt_no, result
 
 
 def _single_output_array_key(output_contract: dict[str, Any] | None) -> str | None:

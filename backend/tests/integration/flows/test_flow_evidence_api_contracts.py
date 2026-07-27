@@ -63,11 +63,13 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+    FlowResolvedInputEdges,
     MappedProviderCallProvenance,
 )
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.published_definition import (
     build_published_definition_json,
     published_definition_checksum,
@@ -975,9 +977,21 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
         assert attempt is not None
         attempt.status = "started"
         await session.flush()
+        activated = await FlowRunRepository(session).activate_step_attempt(
+            run_id=attempt.flow_run_id,
+            step_id=attempt.step_id,
+            attempt_no=attempt.attempt_no,
+            tenant_id=admin_user.tenant_id,
+            resolved_input_edges=FlowResolvedInputEdges(schema_version=1, edges=()),
+            attempt_start=None,
+        )
+        assert activated is not None
         provider_call_repo = FlowProviderCallRepository(session=session)
-        rejected = await provider_call_repo.start_call(
-            attempt_id=attempt_id,
+        rejected = await provider_call_repo.start_call_for_execution(
+            run_id=attempt.flow_run_id,
+            step_id=attempt.step_id,
+            attempt_no=attempt.attempt_no,
+            tenant_id=admin_user.tenant_id,
             request=ProviderCallRequest(
                 provider_request_hash="a" * 64,
                 requested_model="openai/gpt-4o-mini",
@@ -986,13 +1000,17 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
                 requested_capabilities=("structured_output",),
                 call_reason="initial",
             ),
+            resolved_input_edge_indexes=(),
         )
         await provider_call_repo.reject_call(
             call_id=rejected.id,
             reason="response_format_rejected",
         )
-        completed = await provider_call_repo.start_call(
-            attempt_id=attempt_id,
+        completed = await provider_call_repo.start_call_for_execution(
+            run_id=attempt.flow_run_id,
+            step_id=attempt.step_id,
+            attempt_no=attempt.attempt_no,
+            tenant_id=admin_user.tenant_id,
             request=ProviderCallRequest(
                 provider_request_hash="b" * 64,
                 requested_model="openai/gpt-4o-mini",
@@ -1006,6 +1024,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
                     source_id="source-file-1",
                 ),
             ),
+            resolved_input_edge_indexes=(),
         )
         await provider_call_repo.complete_call(
             call_id=completed.id,

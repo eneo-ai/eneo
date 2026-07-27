@@ -1436,16 +1436,15 @@ class FlowRunRepository:
             )
         )
 
-    async def record_attempt_start_provenance(
+    async def activate_step_attempt(
         self,
         *,
         run_id: UUID,
         step_id: UUID,
         attempt_no: int,
         tenant_id: UUID,
-        requested_model: str | None,
-        provider: str | None,
-        attempt_start: AttemptStartProvenance,
+        resolved_input_edges: FlowResolvedInputEdges,
+        attempt_start: AttemptStartProvenance | None,
     ) -> FlowStepAttempt | None:
         row = await self.session.scalar(
             sa.select(FlowStepAttempts)
@@ -1459,18 +1458,30 @@ class FlowRunRepository:
         )
         if row is None:
             return None
-        provenance = attempt_provenance_for_write(
-            row.provenance_json,
-            run_id=run_id,
-            step_id=step_id,
-            attempt_no=attempt_no,
+        activated_provenance_json: dict[str, Any] | None = None
+        if attempt_start is not None:
+            provenance = attempt_provenance_for_write(
+                row.provenance_json,
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                tenant_id=tenant_id,
+            )
+            activated_provenance_json = provenance.model_copy(
+                update={"attempt_start": attempt_start}
+            ).to_payload()
+        created = await self._record_resolved_input_edges_for_locked_attempt(
+            attempt_id=row.id,
+            attempt_status=row.status,
             tenant_id=tenant_id,
+            aggregate=resolved_input_edges,
         )
-        row.requested_model = requested_model
-        row.provider = provider
-        row.provenance_json = provenance.model_copy(
-            update={"attempt_start": attempt_start}
-        ).to_payload()
+        if created is None:
+            return None
+        if created and attempt_start is not None:
+            row.requested_model = attempt_start.requested_model
+            row.provider = attempt_start.provider
+            row.provenance_json = activated_provenance_json
         await self.session.flush()
         await self.session.refresh(row)
         return FlowStepAttempt.model_validate(row)
@@ -1498,27 +1509,14 @@ class FlowRunRepository:
             return None
         return parse_resolved_input_edges(row[0])
 
-    async def record_resolved_input_edges(
+    async def _record_resolved_input_edges_for_locked_attempt(
         self,
         *,
         attempt_id: UUID,
+        attempt_status: str,
         tenant_id: UUID,
         aggregate: FlowResolvedInputEdges,
-    ) -> FlowResolvedInputEdgesParseResult | None:
-        row = (
-            await self.session.execute(
-                sa.select(
-                    FlowStepAttempts.id,
-                    FlowStepAttempts.status,
-                )
-                .where(FlowStepAttempts.id == attempt_id)
-                .where(FlowStepAttempts.tenant_id == tenant_id)
-                .with_for_update(of=FlowStepAttempts)
-            )
-        ).one_or_none()
-        if row is None:
-            return None
-
+    ) -> bool | None:
         raw_existing = await self.session.scalar(
             sa.select(FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb).where(
                 FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt_id
@@ -1535,12 +1533,12 @@ class FlowRunRepository:
         if existing.status == "tracked":
             assert existing.aggregate is not None
             if existing.aggregate == aggregate:
-                return existing
+                return False
             raise FlowResolvedInputEdgesConflictError(
                 attempt_id=attempt_id,
                 tenant_id=tenant_id,
             )
-        if row.status not in OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES:
+        if attempt_status not in OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES:
             return None
 
         await self.session.execute(
@@ -1549,7 +1547,7 @@ class FlowRunRepository:
                 resolved_input_edges_jsonb=aggregate.model_dump(mode="json"),
             )
         )
-        return FlowResolvedInputEdgesParseResult(status="tracked", aggregate=aggregate)
+        return True
 
     async def finish_attempt(
         self,

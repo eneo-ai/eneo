@@ -13,6 +13,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import complete_step_execution
 from eneo.flows.runtime.step_handlers.base import (
+    ActivatePreparedAssistantStepsFn,
     ListStepInputFileIdsFn,
     PrepareAssistantStepFn,
     PreviewAssistantStepFn,
@@ -35,6 +36,7 @@ class PassThroughStepHandler:
     prepare_assistant_step: PrepareAssistantStepFn
     preview_assistant_step: PreviewAssistantStepFn | None = None
     list_step_input_file_ids: ListStepInputFileIdsFn | None = None
+    activate_prepared_assistant_steps: ActivatePreparedAssistantStepsFn | None = None
     mapped_execution_policy: FlowMappedExecutionPolicy = (
         resolve_flow_mapped_execution_policy(None)
     )
@@ -58,14 +60,20 @@ class PassThroughStepHandler:
                 raise RuntimeError(
                     "Per-source reader execution requires side-effect-free preview."
                 )
+            if self.activate_prepared_assistant_steps is None:
+                raise RuntimeError(
+                    "Per-source reader execution requires attempt activation."
+                )
             return await execute_per_source_reader(
                 step=step,
                 run=run,
                 state=state,
                 version_metadata=version_metadata,
                 attempt_no=attempt_no,
-                prepare_assistant_step=self.prepare_assistant_step,
                 preview_assistant_step=self.preview_assistant_step,
+                activate_prepared_assistant_steps=(
+                    self.activate_prepared_assistant_steps
+                ),
                 list_step_input_file_ids=self.list_step_input_file_ids,
                 mapped_execution_policy=self.mapped_execution_policy,
             )
@@ -74,14 +82,20 @@ class PassThroughStepHandler:
                 raise RuntimeError(
                     "Per-item map execution requires side-effect-free preview."
                 )
+            if self.activate_prepared_assistant_steps is None:
+                raise RuntimeError(
+                    "Per-item map execution requires attempt activation."
+                )
             return await execute_per_item_map(
                 step=step,
                 run=run,
                 state=state,
                 version_metadata=version_metadata,
                 attempt_no=attempt_no,
-                prepare_assistant_step=self.prepare_assistant_step,
                 preview_assistant_step=self.preview_assistant_step,
+                activate_prepared_assistant_steps=(
+                    self.activate_prepared_assistant_steps
+                ),
                 mapped_execution_policy=self.mapped_execution_policy,
             )
         runtime_input = build_runtime_input_config(step.input_config)

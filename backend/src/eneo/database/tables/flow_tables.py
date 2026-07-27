@@ -1270,6 +1270,9 @@ class FlowProviderCalls(BasePublic):
     requested_capabilities: Mapped[list[str]] = mapped_column(
         ARRAY(sa.String(32)), nullable=False
     )
+    resolved_input_edge_indexes: Mapped[list[int]] = mapped_column(
+        ARRAY(sa.SmallInteger), nullable=False
+    )
     call_reason: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     mapped_execution_mode: Mapped[Optional[str]] = mapped_column(sa.String(32))
     mapped_item_index: Mapped[Optional[int]] = mapped_column()
@@ -1288,6 +1291,11 @@ class FlowProviderCalls(BasePublic):
     finished_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_step_attempt_id"],
+            ["flow_step_attempt_resolved_inputs.flow_step_attempt_id"],
+            name="fk_flow_provider_calls_resolved_inputs",
+        ),
         UniqueConstraint(
             "flow_step_attempt_id",
             "ordinal",
@@ -1317,6 +1325,15 @@ class FlowProviderCalls(BasePublic):
             "(('structured_output' = ANY(requested_capabilities)) = "
             "(response_format IN ('json_object', 'json_schema')))",
             name="ck_flow_provider_calls_capabilities_response_format",
+        ),
+        CheckConstraint(
+            "(cardinality(resolved_input_edge_indexes) = 0 OR "
+            "array_ndims(resolved_input_edge_indexes) = 1) AND "
+            "array_position(resolved_input_edge_indexes, NULL) IS NULL AND "
+            f"cardinality(resolved_input_edge_indexes) <= {FLOW_RESOLVED_INPUT_MAX_EDGES} "
+            "AND 0 <= ALL(resolved_input_edge_indexes) AND "
+            f"{FLOW_RESOLVED_INPUT_MAX_EDGES} > ALL(resolved_input_edge_indexes)",
+            name="ck_flow_provider_calls_resolved_input_indexes",
         ),
         CheckConstraint(
             f"call_reason IN ({_check_values(PROVIDER_CALL_REASON_VALUES)})",

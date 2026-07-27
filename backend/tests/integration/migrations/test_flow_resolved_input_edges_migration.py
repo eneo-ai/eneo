@@ -31,7 +31,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRIOR_REVISION = "202607270830_call_capabilities"
 MIGRATION_REVISION = "202607271130_resolved_edges"
-REPOSITORY_HEAD = "202607271530_provider_call_v2"
+REPOSITORY_HEAD = "202607271700_call_input_indexes"
 EVIDENCE_TABLE = "flow_step_attempt_resolved_inputs"
 
 

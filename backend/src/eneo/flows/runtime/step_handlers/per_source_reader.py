@@ -34,8 +34,9 @@ from eneo.flows.runtime.step_execution_runtime import (
     resolve_json_response_format_plan,
 )
 from eneo.flows.runtime.step_handlers.base import (
+    ActivatePreparedAssistantStepsFn,
     ListStepInputFileIdsFn,
-    PrepareAssistantStepFn,
+    PreparedAssistantStep,
     PreviewAssistantStepFn,
 )
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
@@ -84,8 +85,8 @@ async def execute_per_source_reader(
     state: RunExecutionState,
     version_metadata: dict[str, object] | None,
     attempt_no: int,
-    prepare_assistant_step: PrepareAssistantStepFn,
     preview_assistant_step: PreviewAssistantStepFn,
+    activate_prepared_assistant_steps: ActivatePreparedAssistantStepsFn,
     list_step_input_file_ids: ListStepInputFileIdsFn,
     mapped_execution_policy: FlowMappedExecutionPolicy,
 ) -> StepExecutionResult:
@@ -125,6 +126,7 @@ async def execute_per_source_reader(
     estimates: list[int] = []
     native_json_fallback_possible = False
     preview_file_ids: list[UUID | None] = list(file_ids) if file_ids else [None]
+    prepared_sources: list[tuple[UUID | None, PreparedAssistantStep]] = []
     for file_id in preview_file_ids:
         preview_step = await preview_assistant_step(
             step=per_call_step,
@@ -134,6 +136,7 @@ async def execute_per_source_reader(
             attempt_no=attempt_no,
             requested_file_ids_override=(file_id,) if file_id is not None else (),
         )
+        prepared_sources.append((file_id, preview_step))
         estimates.append(
             await preview_step_execution_context(
                 step=per_call_step,
@@ -155,15 +158,23 @@ async def execute_per_source_reader(
         native_json_fallback_possible=native_json_fallback_possible,
         policy=mapped_execution_policy,
     )
-    if not file_ids:
-        prepared_step = await prepare_assistant_step(
-            step=per_call_step,
-            run=run,
-            state=state,
-            version_metadata=version_metadata,
-            attempt_no=attempt_no,
-            requested_file_ids_override=(),
+    activated_steps = await activate_prepared_assistant_steps(
+        run,
+        step,
+        state,
+        attempt_no,
+        tuple(prepared for _, prepared in prepared_sources),
+    )
+    prepared_sources = [
+        (file_id, activated_step)
+        for (file_id, _), activated_step in zip(
+            prepared_sources,
+            activated_steps,
+            strict=True,
         )
+    ]
+    if not file_ids:
+        prepared_step = prepared_sources[0][1]
         output = await complete_step_execution(
             step=per_call_step,
             run=run,
@@ -180,7 +191,8 @@ async def execute_per_source_reader(
         return StepExecutionResult(output=output)
 
     per_source_calls: list[PerSourceReaderCall] = []
-    for source_number, file_id in enumerate(file_ids, start=1):
+    for source_number, (file_id, prepared_step) in enumerate(prepared_sources, start=1):
+        assert file_id is not None
         per_source_calls.append(
             await _execute_one_source(
                 source_number=source_number,
@@ -189,9 +201,7 @@ async def execute_per_source_reader(
                 per_call_step=per_call_step,
                 run=run,
                 state=state,
-                version_metadata=version_metadata,
-                attempt_no=attempt_no,
-                prepare_assistant_step=prepare_assistant_step,
+                prepared_step=prepared_step,
             )
         )
     per_source_calls = _with_deduped_source_labels(per_source_calls)
@@ -212,19 +222,9 @@ async def _execute_one_source(
     per_call_step: RuntimeStep,
     run: FlowRun,
     state: RunExecutionState,
-    version_metadata: dict[str, object] | None,
-    attempt_no: int,
-    prepare_assistant_step: PrepareAssistantStepFn,
+    prepared_step: PreparedAssistantStep,
 ) -> PerSourceReaderCall:
     started = time.perf_counter()
-    prepared_step = await prepare_assistant_step(
-        step=per_call_step,
-        run=run,
-        state=state,
-        version_metadata=version_metadata,
-        attempt_no=attempt_no,
-        requested_file_ids_override=(file_id,),
-    )
     output = await complete_step_execution(
         step=per_call_step,
         run=run,

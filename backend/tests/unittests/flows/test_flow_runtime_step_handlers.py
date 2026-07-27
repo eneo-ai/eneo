@@ -179,6 +179,8 @@ def test_executor_builds_expected_step_handler(
             _preview_assistant_step=AsyncMock(),
             _list_step_input_file_ids=AsyncMock(),
             _template_fill_runtime_deps=MagicMock(),
+            _activate_resolved_input_edges=AsyncMock(),
+            _activate_prepared_assistant_steps=AsyncMock(),
             mapped_execution_policy=resolve_flow_mapped_execution_policy(None),
         ),
     )
@@ -260,19 +262,45 @@ async def test_pass_through_handler_wraps_completion_output(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_template_fill_handler_wraps_template_fill_output(monkeypatch) -> None:
+async def test_template_fill_handler_activates_resolved_inputs_once_before_render(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     template_output = _step_output()
-    execute_template_fill_step = AsyncMock(return_value=template_output)
+    resolved_input_edges = (MagicMock(),)
+    prepared = MagicMock(resolved_input_edges=resolved_input_edges)
+    call_order: list[str] = []
+
+    async def _prepare(**kwargs: object) -> object:
+        call_order.append("prepare")
+        return prepared
+
+    async def _activate(*args: object) -> None:
+        call_order.append("activate")
+
+    async def _complete(**kwargs: object) -> StepExecutionOutput:
+        call_order.append("complete")
+        return template_output
+
+    prepare_template_fill_step = AsyncMock(side_effect=_prepare)
+    activate_resolved_input_edges = AsyncMock(side_effect=_activate)
+    complete_template_fill_step = AsyncMock(side_effect=_complete)
     monkeypatch.setattr(
-        "eneo.flows.runtime.step_handlers.template_fill.execute_template_fill_step",
-        execute_template_fill_step,
+        "eneo.flows.runtime.step_handlers.template_fill.prepare_template_fill_step",
+        prepare_template_fill_step,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_handlers.template_fill.complete_template_fill_step",
+        complete_template_fill_step,
     )
 
     run = _run()
     step = _step(output_mode="template_fill")
     state = _state()
     deps = MagicMock()
-    handler = TemplateFillStepHandler(deps=deps)
+    handler = TemplateFillStepHandler(
+        deps=deps,
+        activate_resolved_input_edges=activate_resolved_input_edges,
+    )
 
     result = await handler.execute(
         step=step,
@@ -283,12 +311,62 @@ async def test_template_fill_handler_wraps_template_fill_output(monkeypatch) -> 
     )
 
     assert result == StepExecutionResult(output=template_output)
-    execute_template_fill_step.assert_awaited_once_with(
+    assert call_order == ["prepare", "activate", "complete"]
+    prepare_template_fill_step.assert_awaited_once_with(
         step=step,
         run=run,
         state=state,
         deps=deps,
     )
+    activate_resolved_input_edges.assert_awaited_once_with(
+        run,
+        step,
+        state,
+        1,
+        resolved_input_edges,
+    )
+    complete_template_fill_step.assert_awaited_once_with(
+        step=step,
+        run=run,
+        prepared=prepared,
+        deps=deps,
+    )
+
+
+@pytest.mark.asyncio
+async def test_template_fill_handler_activation_failure_prevents_render(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared = MagicMock(resolved_input_edges=(MagicMock(),))
+    prepare_template_fill_step = AsyncMock(return_value=prepared)
+    activate_resolved_input_edges = AsyncMock(
+        side_effect=RuntimeError("activation failed")
+    )
+    complete_template_fill_step = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_handlers.template_fill.prepare_template_fill_step",
+        prepare_template_fill_step,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_handlers.template_fill.complete_template_fill_step",
+        complete_template_fill_step,
+    )
+    handler = TemplateFillStepHandler(
+        deps=MagicMock(),
+        activate_resolved_input_edges=activate_resolved_input_edges,
+    )
+
+    with pytest.raises(RuntimeError, match="activation failed"):
+        await handler.execute(
+            step=_step(output_mode="template_fill"),
+            run=_run(),
+            state=_state(),
+            version_metadata=None,
+            attempt_no=1,
+        )
+
+    activate_resolved_input_edges.assert_awaited_once()
+    complete_template_fill_step.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from eneo.flows.flow_run_provenance import (
     FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES,
     FLOW_RESOLVED_INPUT_MAX_EDGES,
     FlowResolvedInputEdges,
+    group_resolved_input_edges,
     parse_resolved_input_edges,
 )
 
@@ -23,8 +24,9 @@ def _edge_payload(*, binding_ref: str = "question") -> dict[str, object]:
     return {
         "binding_ref": binding_ref,
         "source": {
-            "kind": "step_output",
-            "source_attempt_id": str(uuid4()),
+            "kind": "step_result",
+            "source_step_id": str(uuid4()),
+            "source_attempt_no": 3,
             "selector": {"kind": "json_path", "path": ["summary"]},
         },
         "selection": {
@@ -173,6 +175,45 @@ def test_resolved_input_edges_allows_empty_path_for_whole_value_selection() -> N
     aggregate = FlowResolvedInputEdges.model_validate(payload)
 
     assert aggregate.edges[0].source.selector.path == ()
+
+
+def test_resolved_input_edges_preserves_numeric_json_path_segments() -> None:
+    payload = {"schema_version": 1, "edges": [_edge_payload()]}
+    edge = payload["edges"][0]
+    assert isinstance(edge, dict)
+    source = edge["source"]
+    assert isinstance(source, dict)
+    selector = source["selector"]
+    assert isinstance(selector, dict)
+    selector["path"] = ["rows", 1, "title"]
+
+    aggregate = FlowResolvedInputEdges.model_validate(payload)
+
+    assert aggregate.edges[0].source.selector.path == ("rows", 1, "title")
+
+
+def test_resolved_input_edge_grouping_returns_stable_call_indexes() -> None:
+    shared_edge = FlowResolvedInputEdges.model_validate(
+        {"schema_version": 1, "edges": [_edge_payload(binding_ref="shared")]}
+    ).edges[0]
+    first_only_edge = FlowResolvedInputEdges.model_validate(
+        {"schema_version": 1, "edges": [_edge_payload(binding_ref="first")]}
+    ).edges[0]
+    second_only_edge = FlowResolvedInputEdges.model_validate(
+        {"schema_version": 1, "edges": [_edge_payload(binding_ref="second")]}
+    ).edges[0]
+
+    grouping = group_resolved_input_edges(
+        (shared_edge, first_only_edge),
+        (second_only_edge, shared_edge),
+    )
+
+    assert grouping.aggregate.edges == (
+        shared_edge,
+        first_only_edge,
+        second_only_edge,
+    )
+    assert grouping.indexes_by_group == ((0, 1), (0, 2))
 
 
 def test_parse_resolved_input_edges_preserves_null_as_not_tracked() -> None:
