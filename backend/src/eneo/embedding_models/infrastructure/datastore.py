@@ -131,10 +131,9 @@ class Datastore:
         info_blob_chunks = self._chunk_text(info_blob)
 
         if not info_blob_chunks:
-            logger.warning(
-                f"Info Blob {info_blob.id} did not yield any chunks after splitting."
+            raise ValueError(
+                f"InfoBlob {info_blob.id} did not yield searchable content"
             )
-            return
 
         logger.debug(f"Embedding {len(info_blob_chunks)} info-blob chunks.")
         chunk_embedding_list = await self.create_embeddings_service.get_embeddings(

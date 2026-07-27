@@ -24,7 +24,7 @@ from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
 )
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.integration_table import (
     TenantIntegration as TenantIntegrationDBModel,
@@ -394,7 +394,13 @@ class AssistantRepository:
                 CollectionsTable,
                 sa.func.coalesce(sa.func.count(InfoBlobs.id).label("infoblob_count")),
             )
-            .outerjoin(InfoBlobs, CollectionsTable.id == InfoBlobs.group_id)
+            .outerjoin(
+                InfoBlobs,
+                sa.and_(
+                    CollectionsTable.id == InfoBlobs.group_id,
+                    active_info_blob_version(),
+                ),
+            )
             .outerjoin(
                 AssistantsGroups, AssistantsGroups.group_id == CollectionsTable.id
             )
