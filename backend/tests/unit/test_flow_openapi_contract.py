@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterator
 from typing import Any, cast
 
@@ -2275,6 +2277,24 @@ def test_openapi_provider_call_evidence_is_typed_and_cursor_paginated(
     item_schema = _resolve_component_ref(openapi_spec, item_ref)
     assert item_schema.get("additionalProperties") is False
     assert "mapped_source_id" in item_schema.get("required", [])
+    assert "requested_capabilities" in item_schema.get("required", [])
+    capability_property = item_schema["properties"]["requested_capabilities"]
+    capability_options = (
+        capability_property.get("anyOf") or capability_property.get("oneOf") or []
+    )
+    capability_array = next(
+        option for option in capability_options if option.get("type") == "array"
+    )
+    assert _extract_enum_values(
+        openapi_spec,
+        capability_array["items"],
+    ) == {"image_input", "reasoning", "structured_output", "tool_calling"}
+    assert any(option.get("type") == "null" for option in capability_options)
+    capability_description = capability_property.get("description", "")
+    assert "request intent" in capability_description
+    assert "not proof of provider support" in capability_description
+    assert "null means not observed" in capability_description
+    assert "[] means observed with none" in capability_description
     assert _extract_enum_values(
         openapi_spec,
         item_schema["properties"]["status"],
@@ -3469,6 +3489,16 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     headers = response.get("headers", {})
 
     assert resolved.get("title") == "FlowRunEvidenceExportResponse"
+    example = resolved.get("example", {})
+    serialized_bundle = json.dumps(
+        example["bundle"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    example_content_hash = hashlib.sha256(serialized_bundle).hexdigest()
+    assert example["content_hash"] == example_content_hash
+    assert example["manifest"]["content_hash"] == example_content_hash
     manifest_schema = resolved.get("properties", {}).get("manifest", {})
     manifest = _resolve_component_ref(openapi_spec, manifest_schema)
     assert manifest.get("title") == "EvidenceExportManifest"
@@ -3493,7 +3523,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v12"}
+    ) == {"flow-evidence-export.v13"}
     assert "actor" in manifest.get("required", [])
     assert "exported_by_user_id" not in manifest_properties
     actor_schema = cast(dict[str, Any], manifest_properties["actor"])

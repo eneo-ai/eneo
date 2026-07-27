@@ -21,6 +21,9 @@ from eneo.authentication.auth_models import (
     ServicePrincipalState,
 )
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.provider_call_observer import (
+    ProviderCallObserverError,
+)
 from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
@@ -1468,6 +1471,44 @@ async def test_provider_call_persistence_gap_is_typed_and_not_auto_retryable(use
     assert terminal_error.details is not None
     assert terminal_error.details.provider_call_evidence_gap == facts
     assert "the call was not repeated" in terminal_error.message
+
+
+@pytest.mark.asyncio
+async def test_observer_failure_reports_that_the_current_request_was_not_sent(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+    step = _step_for_execute_step()
+    run_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+
+    await executor._handle_generic_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=_empty_execution_state(),
+        exc=ProviderCallObserverError("request facts failed"),
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["error_code"] == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
+    assert finish_kwargs["error_message"] == (
+        "Flow step 1 did not send the current provider request because request "
+        "evidence could not be recorded safely."
+    )
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert terminal_error.code is FlowApiErrorCode.STEP_EXECUTION_FAILED
+    assert "may or may not have started" not in terminal_error.message
 
 
 @pytest.mark.asyncio

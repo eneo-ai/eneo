@@ -11,7 +11,7 @@ from eneo.completion_models.domain.provider_call_observer import (
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
-from eneo.main.exceptions import ProviderCapabilityRejectedException
+from eneo.main.exceptions import OpenAIException, ProviderCapabilityRejectedException
 
 
 class _FakeMCPProxy:
@@ -329,6 +329,12 @@ async def test_provider_call_observer_records_each_tool_round_separately():
         "initial",
         "tool_round",
     ]
+    assert [
+        call.args[0].requested_capabilities for call in observer.started.await_args_list
+    ] == [
+        ("tool_calling",),
+        ("tool_calling",),
+    ]
     assert [call.args[0] for call in observer.completed.await_args_list] == [
         initial_call_id,
         tool_round_call_id,
@@ -457,3 +463,66 @@ async def test_provider_call_observer_start_failure_prevents_provider_io():
         )
 
     completion_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unserializable_request_evidence_prevents_provider_io():
+    adapter = _make_adapter()
+    adapter._prepare_kwargs = lambda model_kwargs, **kwargs: kwargs
+    observer = SimpleNamespace(
+        started=AsyncMock(),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(),
+        ) as completion_call,
+        pytest.raises(
+            ProviderCallObserverError,
+            match="Provider request evidence could not be serialized safely",
+        ),
+    ):
+        await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=observer,
+            stop=object(),
+        )
+
+    observer.started.assert_not_awaited()
+    completion_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_base_observer_error_from_completion_is_not_reported_as_pre_io():
+    adapter = _make_adapter()
+    provider_response = _response(response_id="provider-work-completed")
+    observer = SimpleNamespace(
+        started=AsyncMock(return_value=uuid4()),
+        completed=AsyncMock(
+            side_effect=ProviderCallObserverError("observer completed failed")
+        ),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(return_value=provider_response),
+        ) as completion_call,
+        pytest.raises(OpenAIException) as exc_info,
+    ):
+        await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=observer,
+        )
+
+    completion_call.assert_awaited_once()
+    observer.completed.assert_awaited_once()
+    assert exc_info.value.code == "provider_error"

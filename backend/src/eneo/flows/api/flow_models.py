@@ -2007,11 +2007,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v12",
+                "schema_version": "flow-evidence-export.v13",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+                "content_hash": "303533022162d538e9c10e2bdec84dec42ed92aa9e73b80b703784f476baa03d",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v12",
+                    "schema_version": "flow-evidence-export.v13",
                     "app_version": "DEV",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
@@ -2021,7 +2021,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+                    "content_hash": "303533022162d538e9c10e2bdec84dec42ed92aa9e73b80b703784f476baa03d",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {
@@ -2389,7 +2389,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v12"]
+    schema_version: Literal["flow-evidence-export.v13"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

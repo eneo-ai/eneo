@@ -1036,19 +1036,29 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         if observer is not None and call_id is not None:
             usage = self._extract_usage(response)
-            await observer.completed(
-                call_id,
-                ProviderCallResultFacts(
-                    response_model=getattr(response, "model", None),
-                    provider_response_id=extract_provider_response_id(response),
-                    num_tokens_input=(
-                        usage.prompt_tokens if usage is not None else None
+            try:
+                await observer.completed(
+                    call_id,
+                    ProviderCallResultFacts(
+                        response_model=getattr(response, "model", None),
+                        provider_response_id=extract_provider_response_id(response),
+                        num_tokens_input=(
+                            usage.prompt_tokens if usage is not None else None
+                        ),
+                        num_tokens_output=(
+                            usage.completion_tokens if usage is not None else None
+                        ),
                     ),
-                    num_tokens_output=(
-                        usage.completion_tokens if usage is not None else None
-                    ),
-                ),
-            )
+                )
+            except ProviderCallObserverError as exc:
+                # The plain base error is reserved for failures before provider I/O.
+                # Keep typed persistence subclasses intact, but contain a custom or
+                # test observer that violates the phase contract after work completed.
+                if type(exc) is ProviderCallObserverError:
+                    raise RuntimeError(
+                        "Provider-call observation failed after provider I/O."
+                    ) from exc
+                raise
         return response
 
     @override

@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 from eneo.audit.domain.outcome import Outcome
+from eneo.completion_models.domain.provider_call_observer import (
+    ProviderCallObserverError,
+)
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.files.file_models import FileCreate, FileType
@@ -1752,8 +1755,8 @@ class FlowRunExecutor:
         if evidence_persistence_error is not None:
             if evidence_persistence_error.facts.call_id is None:
                 public_error = (
-                    f"Flow step {step.step_order} stopped before provider I/O because "
-                    "request evidence could not be persisted."
+                    f"Flow step {step.step_order} did not send the current provider "
+                    "request because request evidence could not be persisted."
                 )
             else:
                 public_error = (
@@ -1761,6 +1764,13 @@ class FlowRunExecutor:
                     "provider-call evidence could not be persisted; the call was not "
                     "repeated."
                 )
+        elif isinstance(exc, ProviderCallObserverError):
+            # This request was not sent, but an earlier fallback or tool-round request
+            # may already have reached the provider.
+            public_error = (
+                f"Flow step {step.step_order} did not send the current provider "
+                "request because request evidence could not be recorded safely."
+            )
         elif isinstance(exc, ProviderRejectedRequestException) and not (
             late_capability_rejection
         ):

@@ -11,7 +11,7 @@ from sqlalchemy import (
     Index,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.authentication.principal_types import PrincipalType
@@ -35,6 +35,7 @@ from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_EVIDENCE_SOURCE_VALUES,
     PROVIDER_CALL_REASON_VALUES,
     PROVIDER_CALL_REJECTION_REASON_VALUES,
+    PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES,
     PROVIDER_CALL_RESPONSE_FORMAT_VALUES,
     PROVIDER_CALL_STATUS_VALUES,
     PROVIDER_CALL_TOKEN_SOURCE_VALUES,
@@ -1240,6 +1241,9 @@ class FlowProviderCalls(BasePublic):
     requested_model: Mapped[Optional[str]] = mapped_column(sa.String(255))
     provider: Mapped[Optional[str]] = mapped_column(sa.String(128))
     response_format: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    requested_capabilities: Mapped[Optional[list[str]]] = mapped_column(
+        ARRAY(sa.String(32)), nullable=True
+    )
     call_reason: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     mapped_execution_mode: Mapped[Optional[str]] = mapped_column(sa.String(32))
     mapped_item_index: Mapped[Optional[int]] = mapped_column()
@@ -1278,6 +1282,21 @@ class FlowProviderCalls(BasePublic):
             "response_format IS NULL OR response_format IN "
             f"({_check_values(PROVIDER_CALL_RESPONSE_FORMAT_VALUES)})",
             name="ck_flow_provider_calls_response_format",
+        ),
+        CheckConstraint(
+            "requested_capabilities IS NULL OR ("
+            "(cardinality(requested_capabilities) = 0 OR "
+            "array_ndims(requested_capabilities) = 1) AND "
+            "requested_capabilities <@ ARRAY["
+            f"{_check_values(PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES)}"
+            "]::varchar(32)[] AND cardinality(requested_capabilities) <= 4)",
+            name="ck_flow_provider_calls_capabilities_allowed",
+        ),
+        CheckConstraint(
+            "requested_capabilities IS NULL OR (response_format IS NOT NULL AND "
+            "(('structured_output' = ANY(requested_capabilities)) = "
+            "(response_format IN ('json_object', 'json_schema'))))",
+            name="ck_flow_provider_calls_capabilities_response_format",
         ),
         CheckConstraint(
             f"call_reason IN ({_check_values(PROVIDER_CALL_REASON_VALUES)})",

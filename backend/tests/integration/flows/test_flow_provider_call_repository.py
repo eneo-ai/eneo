@@ -4,16 +4,19 @@ from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.completion_models.domain.provider_call_observer import (
     ProviderCallRequestFacts,
     ProviderCallResultFacts,
 )
 from eneo.database.database import sessionmanager
+from eneo.database.tables.flow_tables import FlowProviderCalls
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.provider_call import (
     ProviderCallCompletion,
     ProviderCallRequest,
+    ProviderCallResponseFormat,
 )
 from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
@@ -181,6 +184,7 @@ async def test_provider_call_ordinals_resume_from_persisted_attempt_rows(
             requested_model="openai/gpt-4o-mini",
             provider="openai",
             response_format="json_object",
+            requested_capabilities=("reasoning", "structured_output"),
         )
 
         first = await FlowProviderCallRepository(session).start_call(
@@ -190,7 +194,13 @@ async def test_provider_call_ordinals_resume_from_persisted_attempt_rows(
         await session.flush()
         second = await FlowProviderCallRepository(session).start_call(
             attempt_id=context.attempt_id,
-            request=request.model_copy(update={"provider_request_hash": "b" * 64}),
+            request=request.model_copy(
+                update={
+                    "provider_request_hash": "b" * 64,
+                    "response_format": ProviderCallResponseFormat.NONE,
+                    "requested_capabilities": (),
+                }
+            ),
         )
 
         assert first.ordinal == 1
@@ -199,6 +209,79 @@ async def test_provider_call_ordinals_resume_from_persisted_attempt_rows(
         assert second.status == "started"
         assert first.flow_step_attempt_id == context.attempt_id
         assert second.flow_step_attempt_id == context.attempt_id
+        assert first.requested_capabilities == (
+            "reasoning",
+            "structured_output",
+        )
+        assert second.requested_capabilities == ()
+
+        page = await FlowProviderCallRepository(session).list_evidence_page(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            limit=2,
+        )
+        assert page.items[0].requested_capabilities == (
+            "reasoning",
+            "structured_output",
+        )
+        assert page.items[1].requested_capabilities == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_evidence_canonicalizes_raw_capabilities(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        started = await FlowProviderCallRepository(session).start_call(
+            attempt_id=context.attempt_id,
+            request=ProviderCallRequest(
+                provider_request_hash="c" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                response_format="json_schema",
+                requested_capabilities=("reasoning", "structured_output"),
+            ),
+        )
+        await session.flush()
+
+        await session.execute(
+            sa.update(FlowProviderCalls)
+            .where(FlowProviderCalls.id == started.id)
+            .values(
+                requested_capabilities=[
+                    "structured_output",
+                    "reasoning",
+                    "reasoning",
+                ]
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await session.flush()
+        session.expire_all()
+
+        page = await FlowProviderCallRepository(session).list_evidence_page(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            limit=1,
+        )
+
+        assert page.items[0].requested_capabilities == (
+            "reasoning",
+            "structured_output",
+        )
 
 
 @pytest.mark.asyncio
@@ -226,6 +309,7 @@ async def test_provider_call_completion_is_idempotent_and_rejects_conflicts(
                 provider_request_hash="c" * 64,
                 requested_model="openai/gpt-4o-mini",
                 provider="openai",
+                requested_capabilities=(),
             ),
         )
         receipt = ProviderCallCompletion(
@@ -277,11 +361,17 @@ async def test_provider_call_known_rejection_and_unknown_outcome_are_distinct(
         repo = FlowProviderCallRepository(session)
         rejected_start = await repo.start_call(
             attempt_id=context.attempt_id,
-            request=ProviderCallRequest(provider_request_hash="d" * 64),
+            request=ProviderCallRequest(
+                provider_request_hash="d" * 64,
+                requested_capabilities=(),
+            ),
         )
         unknown_start = await repo.start_call(
             attempt_id=context.attempt_id,
-            request=ProviderCallRequest(provider_request_hash="e" * 64),
+            request=ProviderCallRequest(
+                provider_request_hash="e" * 64,
+                requested_capabilities=(),
+            ),
         )
 
         rejected = await repo.reject_call(
@@ -333,6 +423,7 @@ async def test_provider_call_recorder_commits_outside_executor_session(
             requested_model="openai/gpt-4o-mini",
             provider="openai",
             response_format="none",
+            requested_capabilities=(),
             reason="initial",
         )
     )
@@ -383,6 +474,7 @@ async def test_provider_call_evidence_page_is_stable_bounded_and_cursor_checked(
                 attempt_id=context.attempt_id,
                 request=ProviderCallRequest(
                     provider_request_hash=f"{index:x}" * 64,
+                    requested_capabilities=(),
                     mapped_call=(
                         MappedProviderCallProvenance(
                             execution_mode="per_source_reader",
@@ -456,11 +548,17 @@ async def test_stale_run_recovery_marks_only_started_provider_calls_unknown(
         repo = FlowProviderCallRepository(session)
         completed_start = await repo.start_call(
             attempt_id=context.attempt_id,
-            request=ProviderCallRequest(provider_request_hash="a" * 64),
+            request=ProviderCallRequest(
+                provider_request_hash="a" * 64,
+                requested_capabilities=(),
+            ),
         )
         started = await repo.start_call(
             attempt_id=context.attempt_id,
-            request=ProviderCallRequest(provider_request_hash="b" * 64),
+            request=ProviderCallRequest(
+                provider_request_hash="b" * 64,
+                requested_capabilities=(),
+            ),
         )
         await repo.complete_call(
             call_id=completed_start.id,

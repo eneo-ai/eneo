@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Literal, get_args
+from typing import Annotated, Literal, get_args
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    model_validator,
+)
 
 from eneo.flows.flow_run_provenance import (
     MappedProviderCallProvenance,
@@ -30,6 +37,7 @@ PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE: dict[str, JsonValue] = {
             "requested_model": "gpt-5-mini",
             "provider": "openai",
             "response_format": "json_schema",
+            "requested_capabilities": ["structured_output"],
             "call_reason": "initial",
             "mapped_execution_mode": "per_item",
             "mapped_item_index": 1,
@@ -63,6 +71,28 @@ class ProviderCallResponseFormat(str, Enum):
     JSON_OBJECT = "json_object"
     JSON_SCHEMA = "json_schema"
     OTHER = "other"
+
+
+class ProviderCallRequestedCapability(str, Enum):
+    IMAGE_INPUT = "image_input"
+    REASONING = "reasoning"
+    STRUCTURED_OUTPUT = "structured_output"
+    TOOL_CALLING = "tool_calling"
+
+
+def _require_canonical_requested_capabilities(
+    capabilities: tuple[ProviderCallRequestedCapability, ...],
+) -> tuple[ProviderCallRequestedCapability, ...]:
+    canonical = tuple(sorted(set(capabilities)))
+    if capabilities != canonical:
+        raise ValueError("Requested provider capabilities must be sorted and unique.")
+    return capabilities
+
+
+ProviderCallRequestedCapabilities = Annotated[
+    tuple[ProviderCallRequestedCapability, ...],
+    AfterValidator(_require_canonical_requested_capabilities),
+]
 
 
 class ProviderCallReason(str, Enum):
@@ -101,6 +131,7 @@ class ProviderCallRequest(BaseModel):
     requested_model: str | None = Field(default=None, max_length=255)
     provider: str | None = Field(default=None, max_length=128)
     response_format: ProviderCallResponseFormat = ProviderCallResponseFormat.NONE
+    requested_capabilities: ProviderCallRequestedCapabilities
     call_reason: ProviderCallReason = ProviderCallReason.INITIAL
     mapped_call: MappedProviderCallProvenance | None = None
 
@@ -142,6 +173,7 @@ class ProviderCall(BaseModel):
     requested_model: str | None
     provider: str | None
     response_format: ProviderCallResponseFormat | None
+    requested_capabilities: ProviderCallRequestedCapabilities | None
     call_reason: ProviderCallReason
     mapped_execution_mode: Literal["per_item", "per_source"] | None
     mapped_item_index: int | None = Field(default=None, ge=1)
@@ -198,6 +230,13 @@ class ProviderCallEvidence(BaseModel):
     requested_model: str | None
     provider: str | None
     response_format: ProviderCallResponseFormat | None
+    requested_capabilities: ProviderCallRequestedCapabilities | None = Field(
+        description=(
+            "Sorted request intent for capabilities Eneo attempted in this provider "
+            "request. null means not observed; [] means observed with none. This is "
+            "not proof of provider support, acceptance, or completion."
+        )
+    )
     call_reason: ProviderCallReason
     mapped_execution_mode: Literal["per_item", "per_source"] | None
     mapped_item_index: int | None = Field(default=None, ge=1)
@@ -243,6 +282,9 @@ class ProviderCallEvidencePage(BaseModel):
 PROVIDER_CALL_STATUS_VALUES = tuple(item.value for item in ProviderCallStatus)
 PROVIDER_CALL_RESPONSE_FORMAT_VALUES = tuple(
     item.value for item in ProviderCallResponseFormat
+)
+PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES = tuple(
+    item.value for item in ProviderCallRequestedCapability
 )
 PROVIDER_CALL_REASON_VALUES = tuple(item.value for item in ProviderCallReason)
 PROVIDER_CALL_EVIDENCE_SOURCE_VALUES = tuple(

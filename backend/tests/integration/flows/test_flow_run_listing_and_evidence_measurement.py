@@ -326,6 +326,7 @@ async def _write_representative_evidence(
                         f"provider-{step_order}-{attempt_no}"
                     ),
                     provider="openai",
+                    requested_capabilities=(),
                 ),
             )
             await provider_repo.complete_call(

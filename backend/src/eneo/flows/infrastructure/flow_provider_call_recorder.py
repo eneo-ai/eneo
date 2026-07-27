@@ -25,6 +25,7 @@ from eneo.flows.domain.provider_call import (
     ProviderCallReason,
     ProviderCallRejectionReason,
     ProviderCallRequest,
+    ProviderCallRequestedCapability,
     ProviderCallResponseFormat,
     ProviderCallUnknownReason,
 )
@@ -92,6 +93,10 @@ class FlowProviderCallRecorder:
                         provider=request.provider,
                         response_format=ProviderCallResponseFormat(
                             request.response_format
+                        ),
+                        requested_capabilities=tuple(
+                            ProviderCallRequestedCapability(capability)
+                            for capability in request.requested_capabilities
                         ),
                         call_reason=_flow_call_reason(request.reason),
                         mapped_call=self.mapped_call,

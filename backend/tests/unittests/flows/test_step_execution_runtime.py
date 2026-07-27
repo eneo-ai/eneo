@@ -817,6 +817,7 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
                 requested_model="openai/gpt-test",
                 provider="openai",
                 response_format="none",
+                requested_capabilities=(),
                 reason="initial",
             )
         )

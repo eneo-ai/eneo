@@ -3705,7 +3705,7 @@ def test_flow_api_guide_documents_evidence_export_actor_contract() -> None:
         maxsplit=1,
     )[0]
 
-    assert "`flow-evidence-export.v12`" in evidence_export
+    assert "`flow-evidence-export.v13`" in evidence_export
     assert "`actor.type`" in evidence_export
     assert "`user_id`" in evidence_export
     assert "`key_id`" in evidence_export
@@ -3758,6 +3758,17 @@ def test_flow_api_guide_documents_unknown_provider_token_usage() -> None:
     ):
         assert lifecycle_status in evidence_view
     assert "`mapped_source_id`" in evidence_view
+    assert "`requested_capabilities`" in evidence_view
+    for capability in (
+        "`image_input`",
+        "`reasoning`",
+        "`structured_output`",
+        "`tool_calling`",
+    ):
+        assert capability in evidence_view
+    assert "`null` means the row predates" in evidence_view
+    assert "empty list means Eneo observed" in evidence_view
+    assert "does not claim that the provider supports" in evidence_view
     assert "credential-free" in evidence_view
     assert "`flow_provider_call_evidence_persistence_failed`" in evidence_view
     assert "`not_reported`" in evidence_view

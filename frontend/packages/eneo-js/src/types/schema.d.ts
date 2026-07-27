@@ -13075,7 +13075,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v12";
+      schema_version: "flow-evidence-export.v13";
       /** App Version */
       app_version: string;
       /** Provenance Schema Version Min */
@@ -16724,6 +16724,9 @@ export interface components {
      *               "provider_response_id": "resp_01HZXAMPLE",
      *               "request_schema_version": 1,
      *               "requested_at": "2026-07-26T12:00:00Z",
+     *               "requested_capabilities": [
+     *                 "structured_output"
+     *               ],
      *               "requested_model": "gpt-5-mini",
      *               "response_format": "json_schema",
      *               "response_model": "gpt-5-mini-2025-08-07",
@@ -16875,7 +16878,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+     *       "content_hash": "303533022162d538e9c10e2bdec84dec42ed92aa9e73b80b703784f476baa03d",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -16911,7 +16914,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+     *         "content_hash": "303533022162d538e9c10e2bdec84dec42ed92aa9e73b80b703784f476baa03d",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -16948,7 +16951,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v12",
+     *         "schema_version": "flow-evidence-export.v13",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -16968,7 +16971,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v12",
+     *       "schema_version": "flow-evidence-export.v13",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -17286,7 +17289,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v12";
+      schema_version: "flow-evidence-export.v13";
       /**
        * Generated At
        * Format: date-time
@@ -17432,6 +17435,9 @@ export interface components {
      *             "provider_response_id": "resp_01HZXAMPLE",
      *             "request_schema_version": 1,
      *             "requested_at": "2026-07-26T12:00:00Z",
+     *             "requested_capabilities": [
+     *               "structured_output"
+     *             ],
      *             "requested_model": "gpt-5-mini",
      *             "response_format": "json_schema",
      *             "response_model": "gpt-5-mini-2025-08-07",
@@ -24223,6 +24229,11 @@ export interface components {
       /** Provider */
       provider: string | null;
       response_format: components["schemas"]["ProviderCallResponseFormat"] | null;
+      /**
+       * Requested Capabilities
+       * @description Sorted request intent for capabilities Eneo attempted in this provider request. null means not observed; [] means observed with none. This is not proof of provider support, acceptance, or completion.
+       */
+      requested_capabilities: components["schemas"]["ProviderCallRequestedCapability"][] | null;
       call_reason: components["schemas"]["ProviderCallReason"];
       /** Mapped Execution Mode */
       mapped_execution_mode: ("per_item" | "per_source") | null;
@@ -24314,6 +24325,9 @@ export interface components {
      *           "provider_response_id": "resp_01HZXAMPLE",
      *           "request_schema_version": 1,
      *           "requested_at": "2026-07-26T12:00:00Z",
+     *           "requested_capabilities": [
+     *             "structured_output"
+     *           ],
      *           "requested_model": "gpt-5-mini",
      *           "response_format": "json_schema",
      *           "response_model": "gpt-5-mini-2025-08-07",
@@ -24353,6 +24367,12 @@ export interface components {
      * @enum {string}
      */
     ProviderCallRejectionReason: "response_format_rejected" | "provider_rejected";
+    /**
+     * ProviderCallRequestedCapability
+     * @enum {string}
+     */
+    ProviderCallRequestedCapability:
+      "image_input" | "reasoning" | "structured_output" | "tool_calling";
     /**
      * ProviderCallResponseFormat
      * @enum {string}

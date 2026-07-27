@@ -1160,6 +1160,15 @@ timestamps explain the dispatch. Mapped calls additionally expose
 `mapped_execution_mode`, the item or source index, and `mapped_source_id` when the
 runtime had one.
 
+`requested_capabilities` is a sorted list of the capabilities Eneo attempted in
+that provider request: `image_input`, `reasoning`, `structured_output`, and
+`tool_calling`. It is derived at the provider boundary after Eneo's adapter has
+removed an unsupported or empty `reasoning_effort`. The list explains request
+intent; it does not claim that the provider supports, honored, or completed the
+capability. `null` means the row predates this observation or was otherwise not
+observed. An empty list means Eneo observed the request and none of these four
+capabilities were requested. Preserve that distinction in UI labels and metrics.
+
 Input and output usage are independent: each completed row has a count and a
 matching `*_source`.
 
@@ -1243,12 +1252,13 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
-The JSON response uses manifest schema `flow-evidence-export.v12`. Version 12 adds
-all provider-call lifecycle rows to the hashed bundle while retaining the typed
-rerun `input_revision` evidence introduced in version 11. A synchronous export
-supports at most `10,000` provider-call rows. Larger runs return `413` with code
-`flow_evidence_export_too_large`; consume the paginated `provider-calls/` endpoint
-or request an offline administrative export instead.
+The JSON response uses manifest schema `flow-evidence-export.v13`. Version 13 adds
+provider-request capability evidence to all provider-call lifecycle rows in the
+hashed bundle. This intentionally changes content hashes compared with version 12.
+A synchronous export supports at most `10,000` provider-call rows. Larger runs
+return `413` with code `flow_evidence_export_too_large`; consume the
+paginated `provider-calls/` endpoint or request an offline administrative export
+instead.
 
 The manifest's required
 `actor` identifies the caller that performed the export, not the run owner.

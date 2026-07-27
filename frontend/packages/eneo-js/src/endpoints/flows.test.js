@@ -375,7 +375,7 @@ describe("flows templates endpoint", () => {
 
   it("exports evidence from the canonical flow run route", async () => {
     const fetch = vi.fn(async () => ({
-      schema_version: "flow-evidence-export.v12",
+      schema_version: "flow-evidence-export.v13",
       content_hash: "abc123"
     }));
     const flows = initFlows({ fetch });
@@ -394,7 +394,7 @@ describe("flows templates endpoint", () => {
     const fetch = vi.fn(
       async () =>
         new Response(
-          JSON.stringify({ schema_version: "flow-evidence-export.v12", content_hash: "abc123" })
+          JSON.stringify({ schema_version: "flow-evidence-export.v13", content_hash: "abc123" })
         )
     );
     const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));

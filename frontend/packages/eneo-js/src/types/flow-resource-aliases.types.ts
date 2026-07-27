@@ -627,6 +627,7 @@ const validProviderCallEvidence: FlowProviderCallEvidence = {
   requested_model: "openai/gpt-4o-mini",
   provider: "openai",
   response_format: "json_schema",
+  requested_capabilities: ["structured_output"],
   call_reason: "initial",
   mapped_execution_mode: null,
   mapped_item_index: null,
@@ -642,6 +643,21 @@ const validProviderCallEvidence: FlowProviderCallEvidence = {
   requested_at: isoTimestamp,
   finished_at: isoTimestamp
 };
+const validProviderCallEvidenceWithUnobservedCapabilities: FlowProviderCallEvidence = {
+  ...validProviderCallEvidence,
+  requested_capabilities: null
+};
+const validProviderCallEvidenceWithNoRequestedCapabilities: FlowProviderCallEvidence = {
+  ...validProviderCallEvidence,
+  requested_capabilities: []
+};
+const {
+  requested_capabilities: observedProviderCallCapabilities,
+  ...providerCallEvidenceWithoutRequestedCapabilities
+} = validProviderCallEvidence;
+// @ts-expect-error provider-call evidence requires explicit null or an observed capability array.
+const invalidProviderCallEvidenceWithoutRequestedCapabilities: FlowProviderCallEvidence =
+  providerCallEvidenceWithoutRequestedCapabilities;
 const validProviderCallEvidencePage: FlowProviderCallEvidencePage = {
   items: [validProviderCallEvidence],
   count: 1,
@@ -695,11 +711,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 const validUntypedFlowEvidence: FlowRunEvidence = validFlowEvidence;
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v12",
+  schema_version: "flow-evidence-export.v13",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v12",
+    schema_version: "flow-evidence-export.v13",
     app_version: "DEV",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",
@@ -957,6 +973,10 @@ void validReviewCheckpointState;
 void validReviewCheckpointResumeResponse;
 void validFlowEvidence;
 void validListFlowRunProviderCallsResponse;
+void validProviderCallEvidenceWithUnobservedCapabilities;
+void validProviderCallEvidenceWithNoRequestedCapabilities;
+void observedProviderCallCapabilities;
+void invalidProviderCallEvidenceWithoutRequestedCapabilities;
 void validUntypedFlowEvidence;
 void validFlowEvidenceExport;
 void invalidRunCreateRequest;

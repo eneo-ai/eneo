@@ -254,6 +254,9 @@ class FlowProviderCallRepository:
                 requested_model=request.requested_model,
                 provider=request.provider,
                 response_format=request.response_format.value,
+                requested_capabilities=[
+                    capability.value for capability in request.requested_capabilities
+                ],
                 call_reason=request.call_reason.value,
                 mapped_execution_mode=(
                     (
@@ -412,6 +415,11 @@ def _to_evidence(
             "requested_model": call.requested_model,
             "provider": call.provider,
             "response_format": call.response_format,
+            "requested_capabilities": (
+                tuple(sorted(set(call.requested_capabilities)))
+                if call.requested_capabilities is not None
+                else None
+            ),
             "call_reason": call.call_reason,
             "mapped_execution_mode": call.mapped_execution_mode,
             "mapped_item_index": call.mapped_item_index,

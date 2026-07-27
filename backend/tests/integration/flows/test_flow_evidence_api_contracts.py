@@ -22,6 +22,7 @@ from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
+    FlowProviderCalls,
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
@@ -978,8 +979,14 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
                 requested_model="openai/gpt-4o-mini",
                 provider="openai",
                 response_format="json_schema",
+                requested_capabilities=("structured_output",),
                 call_reason="initial",
             ),
+        )
+        await session.execute(
+            sa.update(FlowProviderCalls)
+            .where(FlowProviderCalls.id == rejected.id)
+            .values(requested_capabilities=None)
         )
         await provider_call_repo.reject_call(
             call_id=rejected.id,
@@ -992,6 +999,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
                 requested_model="openai/gpt-4o-mini",
                 provider="openai",
                 response_format="json_object",
+                requested_capabilities=("structured_output",),
                 call_reason="response_format_fallback",
                 mapped_call=MappedProviderCallProvenance(
                     execution_mode="per_source_reader",
@@ -1029,6 +1037,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     assert first_page["items"][0]["status"] == "rejected"
     assert first_page["items"][0]["outcome_reason"] == ("response_format_rejected")
     assert first_page["items"][0]["provider_request_hash"] == "a" * 64
+    assert first_page["items"][0]["requested_capabilities"] is None
 
     second_response = await client.get(
         endpoint,
@@ -1049,6 +1058,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     assert second_page["items"][0]["event_id"] == str(completed.id)
     assert second_page["items"][0]["status"] == "completed"
     assert second_page["items"][0]["call_reason"] == "response_format_fallback"
+    assert second_page["items"][0]["requested_capabilities"] == ["structured_output"]
     assert second_page["items"][0]["num_tokens_input"] == 14
     assert second_page["items"][0]["num_tokens_output"] is None
     assert second_page["items"][0]["output_source"] == "not_reported"
@@ -1076,6 +1086,26 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
         str(rejected.id),
         str(completed.id),
     ]
+    assert [item["requested_capabilities"] for item in embedded["items"]] == [
+        None,
+        ["structured_output"],
+    ]
+
+    export_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export",
+        headers=headers,
+    )
+    assert export_response.status_code == 200, export_response.text
+    evidence_export = export_response.json()
+    assert evidence_export["schema_version"] == "flow-evidence-export.v13"
+    assert (
+        evidence_export["manifest"]["schema_version"]
+        == evidence_export["schema_version"]
+    )
+    assert [
+        item["requested_capabilities"]
+        for item in evidence_export["bundle"]["provider_calls"]["items"]
+    ] == [None, ["structured_output"]]
 
 
 @pytest.mark.asyncio
