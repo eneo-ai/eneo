@@ -19,6 +19,9 @@ _MOVE_CANDIDATE_INDEX = "ix_object_contents_move_candidates"
 _AUDIT_ACTOR_FK = "fk_object_content_audit_events_actor_user_id"
 _AUDIT_EVENT_TYPE_CONSTRAINT = "ck_object_content_audit_events_type"
 _AUDIT_EVENT_TYPE_WITH_MOVES = "ck_object_content_audit_events_type_with_storage_moves"
+_AUDIT_EVENT_TYPE_WITHOUT_MOVES = (
+    "ck_object_content_audit_events_type_without_storage_moves"
+)
 
 
 def _create_move_candidate_index() -> None:
@@ -126,20 +129,25 @@ def _adopt_audit_event_type_constraint(staged_name: str) -> None:
     )
 
 
-def _restore_legacy_audit_event_type_constraint() -> None:
-    op.drop_constraint(
-        _AUDIT_EVENT_TYPE_CONSTRAINT,
-        "object_content_audit_events",
-        type_="check",
-    )
-    op.create_check_constraint(
-        _AUDIT_EVENT_TYPE_CONSTRAINT,
-        "object_content_audit_events",
-        "event_type IN ('prepared', 'available', 'retained', 'failed', "
-        "'delete_pending', 'tombstoned', 'reference_changed', 'hold_changed')",
-        postgresql_not_valid=True,
-    )
-    _validate_constraint_if_needed(_AUDIT_EVENT_TYPE_CONSTRAINT)
+def _prepare_audit_downgrade() -> None:
+    if _audit_constraint_state(_AUDIT_EVENT_TYPE_WITHOUT_MOVES) is None:
+        op.create_check_constraint(
+            _AUDIT_EVENT_TYPE_WITHOUT_MOVES,
+            "object_content_audit_events",
+            "event_type IN ('prepared', 'available', 'retained', 'failed', "
+            "'delete_pending', 'tombstoned', 'reference_changed', 'hold_changed')",
+            postgresql_not_valid=True,
+        )
+    _validate_constraint_if_needed(_AUDIT_EVENT_TYPE_WITHOUT_MOVES)
+
+
+def _drop_staged_audit_downgrade() -> None:
+    if _audit_constraint_state(_AUDIT_EVENT_TYPE_WITHOUT_MOVES) is not None:
+        op.drop_constraint(
+            _AUDIT_EVENT_TYPE_WITHOUT_MOVES,
+            "object_content_audit_events",
+            type_="check",
+        )
 
 
 def _assert_no_move_evidence() -> None:
@@ -156,6 +164,18 @@ def _assert_no_move_evidence() -> None:
                     'cannot downgrade object-content moves after durable evidence exists'
                     USING ERRCODE = '23514';
             END IF;
+        END;
+        $$
+    """)
+
+
+def _raise_move_evidence_error() -> None:
+    op.execute("""
+        DO $$
+        BEGIN
+            RAISE EXCEPTION
+                'cannot downgrade object-content moves after durable evidence exists'
+                USING ERRCODE = '23514';
         END;
         $$
     """)
@@ -394,12 +414,39 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    _assert_no_move_evidence()
+    with op.get_context().autocommit_block():
+        try:
+            _assert_no_move_evidence()
+            _prepare_audit_downgrade()
+        except Exception:
+            _drop_staged_audit_downgrade()
+            raise
+
     op.execute("LOCK TABLE object_content_moves IN ACCESS EXCLUSIVE MODE")
-    _assert_no_move_evidence()
+    move_evidence_exists = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
+            SELECT EXISTS (SELECT 1 FROM object_content_moves)
+                OR EXISTS (
+                    SELECT 1
+                    FROM object_content_audit_events
+                    WHERE event_type = 'storage_moved'
+                )
+            """
+            )
+        )
+        .scalar_one()
+    )
+    if move_evidence_exists:
+        with op.get_context().autocommit_block():
+            _drop_staged_audit_downgrade()
+        _raise_move_evidence_error()
+
     op.drop_index(_MOVE_CANDIDATE_INDEX, table_name="object_contents")
     _replace_guard(allow_moves=False)
-    _restore_legacy_audit_event_type_constraint()
+    _adopt_audit_event_type_constraint(_AUDIT_EVENT_TYPE_WITHOUT_MOVES)
     op.drop_constraint(
         _AUDIT_ACTOR_FK,
         "object_content_audit_events",

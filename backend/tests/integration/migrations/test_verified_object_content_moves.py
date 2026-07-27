@@ -191,8 +191,12 @@ def test_move_schema_round_trip_preserves_the_existing_authority_fences(
         _tenant_id, content_id, payload = _seed_inline_content(connection)
         validation_ready = Event()
         allow_validation = Event()
+        downgrade_validation_ready = Event()
+        allow_downgrade_validation = Event()
         downgrade_ready = Event()
         allow_downgrade = Event()
+        downgrade_cleanup_ready = Event()
+        allow_downgrade_cleanup = Event()
         original_execute = Connection.execute
 
         def pause_at_migration_boundaries(
@@ -208,12 +212,30 @@ def test_move_schema_round_trip_preserves_the_existing_authority_fences(
                 validation_ready.set()
                 if not allow_validation.wait(timeout=10):
                     raise TimeoutError("audit validation was not released by the test")
+            if (
+                "VALIDATE CONSTRAINT "
+                "ck_object_content_audit_events_type_without_storage_moves"
+                in str(statement)
+            ):
+                downgrade_validation_ready.set()
+                if not allow_downgrade_validation.wait(timeout=10):
+                    raise TimeoutError(
+                        "downgrade validation was not released by the test"
+                    )
             if "LOCK TABLE object_content_moves IN ACCESS EXCLUSIVE MODE" in str(
                 statement
             ):
                 downgrade_ready.set()
                 if not allow_downgrade.wait(timeout=10):
                     raise TimeoutError("downgrade lock was not released by the test")
+            if (
+                "DROP CONSTRAINT "
+                "ck_object_content_audit_events_type_without_storage_moves"
+                in str(statement)
+            ):
+                downgrade_cleanup_ready.set()
+                if not allow_downgrade_cleanup.wait(timeout=10):
+                    raise TimeoutError("downgrade cleanup was not released by the test")
             return original_execute(self, statement, *args, **kwargs)
 
         monkeypatch.setattr(Connection, "execute", pause_at_migration_boundaries)
@@ -264,6 +286,7 @@ def test_move_schema_round_trip_preserves_the_existing_authority_fences(
             )
             assert cursor.fetchone() == (True,)
 
+        allow_downgrade_validation.set()
         concurrent_writer = psycopg2.connect(database_url)
         try:
             with ThreadPoolExecutor(max_workers=1) as executor:
@@ -286,6 +309,13 @@ def test_move_schema_round_trip_preserves_the_existing_authority_fences(
                         )
                 finally:
                     allow_downgrade.set()
+                assert downgrade_cleanup_ready.wait(timeout=10)
+                with concurrent_writer, concurrent_writer.cursor() as cursor:
+                    cursor.execute(
+                        "DELETE FROM object_content_moves WHERE content_id = %s",
+                        (content_id,),
+                    )
+                allow_downgrade_cleanup.set()
                 with pytest.raises(
                     DBAPIError,
                     match=(
@@ -296,12 +326,14 @@ def test_move_schema_round_trip_preserves_the_existing_authority_fences(
                     downgrade.result(timeout=30)
         finally:
             concurrent_writer.close()
+        downgrade_validation_ready.clear()
+        allow_downgrade_validation.clear()
 
         with connection, connection.cursor() as cursor:
             cursor.execute("SELECT version_num FROM alembic_version")
             assert cursor.fetchone() == (_MOVE_REVISION,)
             cursor.execute("SELECT count(*) FROM object_content_moves")
-            assert cursor.fetchone() == (1,)
+            assert cursor.fetchone() == (0,)
         command.upgrade(config, _MOVE_REVISION)
 
         with connection, connection.cursor() as cursor:
@@ -324,7 +356,45 @@ def test_move_schema_round_trip_preserves_the_existing_authority_fences(
                 (content_id,),
             )
 
-        command.downgrade(config, _PREVIOUS_REVISION)
+        blocker = psycopg2.connect(database_url)
+        probe = psycopg2.connect(database_url)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                downgrade = executor.submit(
+                    command.downgrade,
+                    config,
+                    _PREVIOUS_REVISION,
+                )
+                try:
+                    assert downgrade_validation_ready.wait(timeout=10)
+                    with blocker.cursor() as cursor:
+                        cursor.execute("SET lock_timeout = '1s'")
+                        cursor.execute(
+                            "LOCK TABLE object_content_audit_events "
+                            "IN SHARE UPDATE EXCLUSIVE MODE"
+                        )
+                    allow_downgrade_validation.set()
+                    with probe, probe.cursor() as cursor:
+                        cursor.execute("SET LOCAL lock_timeout = '1s'")
+                        cursor.execute(
+                            "SELECT count(*) FROM object_content_audit_events"
+                        )
+                        cursor.execute(
+                            """
+                            INSERT INTO object_content_audit_events (
+                                content_id, event_type
+                            )
+                            VALUES (%s, 'available')
+                            """,
+                            (content_id,),
+                        )
+                finally:
+                    allow_downgrade_validation.set()
+                    blocker.rollback()
+                downgrade.result(timeout=30)
+        finally:
+            blocker.close()
+            probe.close()
         command.upgrade(config, _MOVE_REVISION)
         _assert_orm_parity(database_url)
 
