@@ -45,6 +45,8 @@ class IntegrationKnowledgeMapper(
             "drive_id": entity.drive_id,
             "wrapper_id": entity.wrapper_id,
             "wrapper_name": entity.wrapper_name,
+            "chunk_size": entity.chunk_size,
+            "chunk_overlap": entity.chunk_overlap,
         }
 
     @override

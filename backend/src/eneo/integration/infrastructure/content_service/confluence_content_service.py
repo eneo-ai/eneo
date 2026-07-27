@@ -150,6 +150,8 @@ class ConfluenceContentService:
             await self.datastore.add(
                 info_blob=info_blob,
                 embedding_model=integration_knowledge.embedding_model,
+                chunk_size=integration_knowledge.chunk_size,
+                chunk_overlap=integration_knowledge.chunk_overlap,
             )
 
             integration_knowledge_size += info_blob.size

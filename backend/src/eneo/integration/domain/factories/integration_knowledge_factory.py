@@ -68,6 +68,8 @@ class IntegrationKnowledgeFactory:
             drive_id=getattr(record, "drive_id", None),
             wrapper_id=getattr(record, "wrapper_id", None),
             wrapper_name=getattr(record, "wrapper_name", None),
+            chunk_size=record.chunk_size,
+            chunk_overlap=record.chunk_overlap,
         )
 
     @classmethod
