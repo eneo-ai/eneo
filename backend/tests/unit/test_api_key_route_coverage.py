@@ -112,7 +112,7 @@ INTENTIONALLY_UNGUARDED = {
     "/integrations": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/jobs": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer authorization",
     "/analysis": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer role checks",
-    "/logging": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); router-level auth",
+    "/logging": "Tenant-scope guard plus session-only authentication",
     "/completion-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/embedding-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/transcription-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
@@ -575,6 +575,12 @@ class TestHighRiskExactRouteGuards:
         assert not _route_has_dep_name(route, "_api_key_permission_dep"), (
             f"{label} should not require _api_key_permission_dep"
         )
+
+    def test_logging_details_requires_bearer_session(self):
+        route = _find_route_by_method_and_paths(
+            "GET", "/logging/{message_id}/", "/logging/{message_id}"
+        )
+        assert _route_has_dep_name(route, "require_session_auth")
 
     def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")

@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -43,6 +43,11 @@ if TYPE_CHECKING:
 
 
 _SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
+
+
+class QuestionSessionPartner(NamedTuple):
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 class QuestionRepository:
@@ -186,11 +191,46 @@ class QuestionRepository:
 
         await self.session.execute(stmt)
 
-    async def get(self, id: UUID):
+    async def get(self, id: UUID) -> Question | None:
         question = await self.delegate.get(id)
         if question is None:
             return None
         return (await self._hydrate_questions([question]))[0]
+
+    async def get_for_tenant(self, *, id: UUID, tenant_id: UUID) -> Question | None:
+        question = await self.delegate.get_model_from_query(
+            sa.select(Questions).where(
+                Questions.id == id,
+                Questions.tenant_id == tenant_id,
+            )
+        )
+        if question is None:
+            return None
+        return (await self._hydrate_questions([question]))[0]
+
+    async def get_session_partner(
+        self,
+        *,
+        id: UUID,
+        tenant_id: UUID,
+    ) -> QuestionSessionPartner | None:
+        result = await self.session.execute(
+            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
+            .select_from(Questions)
+            .join(Sessions, Sessions.id == Questions.session_id)
+            .where(
+                Questions.id == id,
+                Questions.tenant_id == tenant_id,
+            )
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        assistant_id, group_chat_id = row
+        return QuestionSessionPartner(
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
 
     async def get_with_skill_activation(
         self,
