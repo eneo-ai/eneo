@@ -52,8 +52,6 @@ class GroupInDBBase(InDB):
     embedding_model_id: UUID
     user_id: UUID
     tenant_id: UUID
-    chunk_size: Optional[int] = None
-    chunk_overlap: Optional[int] = None
 
 
 class GroupMetadata(BaseModel):
@@ -61,8 +59,6 @@ class GroupMetadata(BaseModel):
     size: int
 
 
-# `Group` is the domain model for a collection — the table is named `groups` for
-# legacy reasons (hence the "collection (legacy group)" naming across endpoints).
 # TODO: Make into real domain object
 class Group(GroupInDBBase, ResourcePermissionsMixin):
     embedding_model: EmbeddingModelLegacy
