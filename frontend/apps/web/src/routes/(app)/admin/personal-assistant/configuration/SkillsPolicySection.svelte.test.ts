@@ -17,6 +17,7 @@ describe("SkillsPolicySection", () => {
       summary: "0 Skills",
       skillsValid: true,
       canSelectOnDemand: false,
+      selectiveActivationEnabled: true,
       badgeVariant,
       onListCatalog: vi.fn(),
       onGetSkillPreview: vi.fn()
@@ -35,6 +36,7 @@ describe("SkillsPolicySection", () => {
       summary: "0 Skills",
       skillsValid: true,
       canSelectOnDemand: false,
+      selectiveActivationEnabled: true,
       badgeVariant,
       onListCatalog: vi.fn(),
       onGetSkillPreview: vi.fn()
@@ -58,6 +60,7 @@ describe("SkillsPolicySection", () => {
       summary: "0 Skills",
       skillsValid: true,
       canSelectOnDemand: true,
+      selectiveActivationEnabled: true,
       badgeVariant,
       onListCatalog: vi.fn(),
       onGetSkillPreview: vi.fn()
@@ -69,6 +72,25 @@ describe("SkillsPolicySection", () => {
           exact: true
         })
       )
+      .toBeVisible();
+  });
+
+  test("explains that the tenant runtime, not the model set, blocks On demand", async () => {
+    render(SkillsPolicySection, {
+      skillBindings: [],
+      initialCatalogPage: emptySkillBindingCatalogPage(),
+      bindingSummaries: [],
+      summary: "0 Skills",
+      skillsValid: true,
+      canSelectOnDemand: false,
+      selectiveActivationEnabled: false,
+      badgeVariant,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: vi.fn()
+    });
+
+    await expect
+      .element(page.getByText(m.skills_activation_runtime_disabled(), { exact: true }))
       .toBeVisible();
   });
 
@@ -86,6 +108,7 @@ describe("SkillsPolicySection", () => {
       summary: "1 Skill",
       skillsValid: false,
       canSelectOnDemand: false,
+      selectiveActivationEnabled: true,
       badgeVariant,
       onListCatalog: vi.fn(),
       onGetSkillPreview: vi.fn()

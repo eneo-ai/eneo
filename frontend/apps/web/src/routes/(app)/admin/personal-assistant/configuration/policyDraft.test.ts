@@ -31,7 +31,8 @@ describe("PolicyDraft", () => {
           { id: "prompt-2", name: "Two" }
         ]
       },
-      skills: emptySkillBindingCatalogPage()
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
     });
 
     draft.selectedPromptId = "prompt-2";
@@ -93,7 +94,8 @@ describe("PolicyDraft", () => {
       modelProviders: [],
       mcpSettings: { items: [] },
       promptLibrary: { items: [] },
-      skills: emptySkillBindingCatalogPage()
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
     });
 
     draft.skillBindings = [
@@ -175,7 +177,8 @@ describe("PolicyDraft", () => {
       modelProviders: [],
       mcpSettings: { items: [] },
       promptLibrary: { items: [] },
-      skills: emptySkillBindingCatalogPage()
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
     });
 
     draft.skillBindings = [{ ...draft.skillBindings[0], activation_mode: "on_demand" }];
@@ -202,6 +205,66 @@ describe("PolicyDraft", () => {
         ]
       }
     });
+  });
+
+  it("keeps On demand unavailable while the tenant disables selective activation", () => {
+    const binding = {
+      skill_id: "skill-1",
+      skill_revision_id: "revision-1",
+      attachable_revision_id: "revision-1",
+      slug: "analysis",
+      revision_number: 1,
+      attachable_revision_number: 1,
+      display_name: "Analysis",
+      description: "Analysis guidance",
+      content_digest: "digest-1",
+      position: 0,
+      is_active: true,
+      execution_blocked: false,
+      activation_mode: "always" as const,
+      source: "organization" as const
+    };
+    // A bounded, tool-capable model selection — the only prerequisite the page
+    // used to check before the tenant runtime switch was consulted.
+    const pageData = (selectiveActivationEnabled: boolean) => ({
+      eneo: { governancePolicy: { update: vi.fn(async () => {}) } } as never,
+      policy: {
+        models_restriction: {
+          enabled: true,
+          models: [{ completion_model_id: "model-1", is_default: true }],
+          provider_ids: []
+        },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        skills: { bindings: [binding] }
+      },
+      models: {
+        completionModels: [
+          { id: "model-1", name: "Model", can_access: true, supports_tool_calling: true }
+        ]
+      },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: selectiveActivationEnabled }
+    });
+
+    const draft = new PolicyDraft();
+    draft.sync(pageData(false));
+    draft.skillBindings = [{ ...draft.skillBindings[0], activation_mode: "on_demand" }];
+
+    expect(draft.canSelectOnDemand).toBe(false);
+    expect(draft.dirty).toBe(true);
+    expect(draft.skillsValid).toBe(false);
+    expect(draft.canSave).toBe(false);
+
+    draft.sync(pageData(true));
+    draft.skillBindings = [{ ...draft.skillBindings[0], activation_mode: "on_demand" }];
+
+    expect(draft.canSelectOnDemand).toBe(true);
+    expect(draft.skillsValid).toBe(true);
+    expect(draft.canSave).toBe(true);
   });
 
   it("seeds the bounded Skill catalogue supplied by the page loader", () => {
@@ -236,7 +299,8 @@ describe("PolicyDraft", () => {
       modelProviders: [],
       mcpSettings: { items: [] },
       promptLibrary: { items: [] },
-      skills
+      skills,
+      skillRuntimePolicy: { selective_activation_enabled: true }
     });
 
     expect(draft.skillCatalogPage).toEqual(skills);

@@ -79,6 +79,7 @@
         summary={draft.skillsSummary}
         skillsValid={draft.skillsValid}
         canSelectOnDemand={draft.canSelectOnDemand}
+        selectiveActivationEnabled={draft.selectiveActivationEnabled}
         badgeVariant={draft.badgeVariant}
         onListCatalog={(params) =>
           loadSkillBindingCatalogPage({

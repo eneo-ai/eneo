@@ -95,6 +95,7 @@ export type PolicyPageData = {
   mcpSettings?: { items?: McpServer[] | null } | null;
   promptLibrary: { items: PromptOption[] };
   skills: SkillBindingCatalogPage;
+  skillRuntimePolicy: { selective_activation_enabled: boolean };
 };
 
 export type BadgeVariant = "default" | "outline" | "destructive";
@@ -125,6 +126,9 @@ export class PolicyDraft {
     next_cursor: null
   });
   skillBindingSummaries = $state<AssistantSkillBindingSummary[]>([]);
+  // Tenant runtime prerequisite for On demand: with selective activation off the
+  // backend rejects every on-demand candidate, so the picker must too.
+  selectiveActivationEnabled = $state(false);
 
   // ---- Editable state ------------------------------------------------------
   modelsEnabled = $state(false);
@@ -158,6 +162,7 @@ export class PolicyDraft {
     this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
     this.promptOptions = data.promptLibrary.items;
     this.skillCatalogPage = data.skills;
+    this.selectiveActivationEnabled = data.skillRuntimePolicy.selective_activation_enabled;
     this.#seed(data.policy, selectableModels);
   }
 
@@ -257,7 +262,8 @@ export class PolicyDraft {
     this.selectedModels.find((entry) => entry.is_default)?.completion_model_id ?? null
   );
   canSelectOnDemand = $derived(
-    this.modelsEnabled &&
+    this.selectiveActivationEnabled &&
+      this.modelsEnabled &&
       this.providerSelections.size === 0 &&
       this.selectedModels.length > 0 &&
       this.selectedModels.every(

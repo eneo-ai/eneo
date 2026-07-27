@@ -19,6 +19,7 @@
     summary: string;
     skillsValid: boolean;
     canSelectOnDemand: boolean;
+    selectiveActivationEnabled: boolean;
     badgeVariant: (enabled: boolean, valid: boolean) => "default" | "outline" | "destructive";
     onListCatalog: ListSkillBindingCatalog;
     onGetSkillPreview: GetSkillBindingPreview;
@@ -31,6 +32,7 @@
     summary,
     skillsValid,
     canSelectOnDemand,
+    selectiveActivationEnabled,
     badgeVariant,
     onListCatalog,
     onGetSkillPreview
@@ -77,6 +79,7 @@
       canCreateSkills={false}
       supportsActivationModes
       {canSelectOnDemand}
+      {selectiveActivationEnabled}
       {onListCatalog}
       {onGetSkillPreview}
     />

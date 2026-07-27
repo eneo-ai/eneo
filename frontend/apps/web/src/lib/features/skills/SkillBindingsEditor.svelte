@@ -51,6 +51,9 @@
     canCreateSkills: boolean;
     supportsActivationModes?: boolean;
     canSelectOnDemand?: boolean;
+    /** Tenant runtime prerequisite, supplied by policy editors that validate a
+        draft before any turn exists. `undefined` when unknown. */
+    selectiveActivationEnabled?: boolean;
     skillRuntime?: AssistantSkillRuntimeSummary | null;
     onListCatalog: ListSkillBindingCatalog;
     onGetSkillPreview: GetSkillBindingPreview;
@@ -65,6 +68,7 @@
     canCreateSkills,
     supportsActivationModes = false,
     canSelectOnDemand,
+    selectiveActivationEnabled,
     skillRuntime = null,
     onListCatalog,
     onGetSkillPreview,
@@ -238,6 +242,9 @@
 
   function runtimeStatus(): string {
     if (skillRuntime === null) {
+      // The tenant switch outranks the model requirements: it cannot be fixed
+      // from a policy editor, so naming only the model rules would misdirect.
+      if (selectiveActivationEnabled === false) return m.skills_activation_runtime_disabled();
       if (canSelectOnDemand === true) return m.skills_activation_runtime_policy_selective();
       if (canSelectOnDemand === false) return m.skills_activation_runtime_policy_requirements();
       return m.skills_activation_runtime_no_model();

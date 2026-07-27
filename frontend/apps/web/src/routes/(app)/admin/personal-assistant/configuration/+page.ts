@@ -19,16 +19,27 @@ export const load = async (event) => {
       organizationSpace: true
     })
   );
-  const [policy, models, mcpSettings, promptLibrary, modelProviders, organizationSpace, skills] =
-    await Promise.all([
-      eneo.governancePolicy.get(),
-      eneo.models.list(),
-      eneo.mcpServers.listSettings(),
-      eneo.promptLibrary.list(),
-      eneo.modelProviders.list(),
-      organizationSpacePromise,
-      skillsPromise
-    ]);
+  const [
+    policy,
+    models,
+    mcpSettings,
+    promptLibrary,
+    modelProviders,
+    organizationSpace,
+    skills,
+    skillRuntimePolicy
+  ] = await Promise.all([
+    eneo.governancePolicy.get(),
+    eneo.models.list(),
+    eneo.mcpServers.listSettings(),
+    eneo.promptLibrary.list(),
+    eneo.modelProviders.list(),
+    organizationSpacePromise,
+    skillsPromise,
+    // On demand is only saveable when the tenant runtime policy allows selective
+    // activation; the draft needs it to keep the picker and the PUT in agreement.
+    eneo.settings.getSkillRuntimePolicy()
+  ]);
   return {
     policy,
     models,
@@ -36,6 +47,7 @@ export const load = async (event) => {
     promptLibrary,
     modelProviders,
     organizationSpace,
-    skills
+    skills,
+    skillRuntimePolicy
   };
 };
