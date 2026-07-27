@@ -527,6 +527,7 @@ class Container(containers.DeclarativeContainer):
     session = providers.Dependency()
     user = providers.Dependency(instance_of=UserInDB)
     tenant = providers.Dependency(instance_of=TenantInDB)
+    upload_admission = providers.Dependency(default=providers.Object(None))
     aiohttp_client = providers.Object(aiohttp_client)
 
     # Encryption service (singleton - shared across all repositories)
@@ -594,6 +595,7 @@ class Container(containers.DeclarativeContainer):
         AppAssembler,
         user=user,
         prompt_assembler=prompt_assembler,
+        upload_admission=upload_admission,
     )
     app_run_assembler = providers.Factory(AppRunAssembler)
     app_template_assembler = providers.Factory(AppTemplateAssembler)
@@ -1069,6 +1071,7 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         file_size_service=file_size_service,
         object_content=object_content_service,
+        upload_admission=upload_admission,
     )
     quota_service = providers.Factory(
         QuotaService, user=user, info_blob_repo=info_blob_repo
@@ -1079,6 +1082,7 @@ class Container(containers.DeclarativeContainer):
         file_size_service=file_size_service,
         job_service=job_service,
         quota_service=quota_service,
+        upload_admission=upload_admission,
     )
     group_service = providers.Factory(
         GroupService,
@@ -1180,6 +1184,7 @@ class Container(containers.DeclarativeContainer):
         repo=file_repo,
         protocol=file_protocol,
         object_content=object_content_service,
+        upload_admission=upload_admission,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,
@@ -1372,7 +1377,10 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
     )
-    limit_service = providers.Factory(LimitService)
+    limit_service = providers.Factory(
+        LimitService,
+        upload_admission=upload_admission,
+    )
 
     integration_service = providers.Factory(
         IntegrationService,

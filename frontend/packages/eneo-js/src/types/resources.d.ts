@@ -14,6 +14,15 @@ export type SkillRevisionSummaryPage =
   components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
 export type SkillBindingSummary = components["schemas"]["SkillBindingSummary"];
 export type SkillBindingReferenceInput = components["schemas"]["SkillBindingReferenceInput"];
+export type SkillActivationMode = components["schemas"]["SkillActivationMode"];
+export type AssistantSkillBindingInput = components["schemas"]["AssistantSkillBindingInput"];
+export type AssistantSkillBindingSummary = components["schemas"]["AssistantSkillBindingSummary"];
+export type AssistantSkillConfiguration =
+  components["schemas"]["AssistantSkillConfigurationPublic"];
+export type AssistantSkillRuntimeSummary = components["schemas"]["AssistantSkillRuntimeSummary"];
+export type SkillRuntimePolicy = components["schemas"]["SkillRuntimePolicyPublic"];
+export type SkillRuntimePolicyUpdate = components["schemas"]["SkillRuntimePolicyUpdate"];
+export type SkillRuntimeModelProjections = components["schemas"]["SkillRuntimeModelProjections"];
 export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPublic"];
 export type OrganizationSkillSummaryPublic =
   components["schemas"]["OrganizationSkillSummaryPublic"];
@@ -73,6 +82,9 @@ export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];
 export type CurrentUser = components["schemas"]["UserPublic"];
+export type DeploymentPolicy = components["schemas"]["DeploymentPolicyPublic"];
+export type DeploymentPolicyUpdate = components["schemas"]["DeploymentPolicyUpdate"];
+export type ObjectContentInventory = components["schemas"]["ObjectContentInventoryPublic"];
 export type Role = components["schemas"]["RolePublic"];
 export type Permission = components["schemas"]["Permission"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];

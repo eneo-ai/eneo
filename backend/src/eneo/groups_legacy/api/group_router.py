@@ -354,7 +354,10 @@ async def get_info_blobs(
 async def upload_file(
     id: UUID,
     file: UploadFile,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, with_upload_admission=True)),
+    ],
     _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Starts a job, use the job operations to keep track of this job"""

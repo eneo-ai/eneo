@@ -1,11 +1,18 @@
-from dataclasses import replace
+import json
+from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
+from eneo.completion_models.domain.skill_activation import (
+    SKILL_ACTIVATION_TOOL_NAME,
+    ProviderToolCall,
+)
 from eneo.main.exceptions import BadRequestException
+from eneo.model_providers.domain.model_route import MAX_MODEL_ROUTE_LENGTH
 from eneo.skills import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     ResolvedSkillBinding,
@@ -18,6 +25,7 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     NormalizedSkillContent,
     Skill,
+    SkillActivationEvidenceV1,
     SkillActivationMode,
     SkillBindingReference,
     SkillBindingSource,
@@ -27,7 +35,12 @@ from eneo.skills.domain.skill import (
     SkillPublicationState,
     SkillRevision,
     SkillRuntimePolicy,
+    SkillRuntimeResolution,
+    SkillTurnEffectiveMode,
+    SkillTurnPlan,
 )
+
+SKILL_ACTIVATION_EVIDENCE_SIZE_BUDGET_BYTES = 400_000
 
 
 def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
@@ -44,6 +57,24 @@ def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
         content_digest="a" * 64,
         position=position,
         source=SkillBindingSource.SPACE,
+    )
+
+
+def _activation_evidence(
+    plan: SkillTurnPlan,
+    *,
+    selected_model_id: UUID | None = None,
+    selected_model_route: str = "openai/gpt-4o",
+) -> SkillActivationEvidenceV1:
+    runtime = plan.to_activation_runtime(
+        selected_model_route=selected_model_route,
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    return plan.activation_evidence(
+        selected_model_id=selected_model_id or uuid4(),
+        selected_model_route=selected_model_route,
+        snapshot=runtime.snapshot(),
     )
 
 
@@ -252,6 +283,311 @@ def test_activation_mode_is_dormant_in_composition():
     )
 
 
+def test_turn_plan_freezes_bindings_and_starts_with_required_skills():
+    always = _binding(position=0, name="Payroll")
+    on_demand = replace(
+        _binding(position=1, name="Leave"),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    blocked = _binding(position=2, name="Incident")
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=15,
+        max_activations_per_turn=5,
+    )
+
+    plan = SkillTurnPlan.create(
+        base_instructions="Base instructions",
+        resolution=SkillRuntimeResolution(
+            eligible=(always, on_demand),
+            blocked=(blocked,),
+        ),
+        policy=policy,
+    )
+
+    assert plan.composition == compose_skill_instructions(
+        base_instructions="Base instructions",
+        bindings=[always],
+    )
+    assert [binding.binding for binding in plan.available] == [always, on_demand]
+    assert [binding.activation_key for binding in plan.available] == [
+        "skill-1",
+        "skill-2",
+    ]
+    assert all(
+        str(binding.binding.skill_id) not in binding.activation_key
+        for binding in plan.available
+    )
+    with pytest.raises(FrozenInstanceError):
+        plan.base_instructions = "Changed"  # type: ignore[misc]
+
+    evidence = _activation_evidence(plan)
+    assert evidence.effective_mode == "selective"
+    assert [reference.skill_id for reference in evidence.available] == [
+        always.skill_id,
+        on_demand.skill_id,
+    ]
+    assert [reference.skill_id for reference in evidence.blocked] == [blocked.skill_id]
+    assert evidence.initially_active == ("skill-1",)
+    assert evidence.accepted == ()
+    assert evidence.repeated == ()
+    assert evidence.rejected == ()
+    assert "Instructions for" not in evidence.model_dump_json()
+    assert "Confirmed unsafe instructions" not in evidence.model_dump_json()
+
+
+def test_turn_plan_stages_all_blocked_bindings_for_full_save_validation():
+    blocked_always = replace(
+        _binding(position=0, name="Blocked required"),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    blocked_on_demand = replace(
+        _binding(position=1, name="Blocked optional"),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    available_always = replace(
+        _binding(position=2, name="Available required"),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    available_on_demand = replace(
+        _binding(position=3, name="Available optional"),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=15,
+        max_activations_per_turn=5,
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base instructions",
+        resolution=SkillRuntimeResolution(
+            eligible=(available_always, available_on_demand),
+            blocked=(blocked_always, blocked_on_demand),
+        ),
+        policy=policy,
+    )
+
+    validation_plan = plan.for_full_save_validation()
+
+    assert [binding.binding for binding in validation_plan.available] == [
+        blocked_always,
+        blocked_on_demand,
+        available_always,
+        available_on_demand,
+    ]
+    assert [binding.activation_key for binding in validation_plan.available] == [
+        "skill-1",
+        "skill-2",
+        "skill-3",
+        "skill-4",
+    ]
+    assert validation_plan.initially_active_keys == ("skill-1", "skill-3")
+    assert validation_plan.blocked == ()
+    assert [binding.binding for binding in plan.available] == [
+        available_always,
+        available_on_demand,
+    ]
+    assert [binding.binding for binding in plan.blocked] == [
+        blocked_always,
+        blocked_on_demand,
+    ]
+
+
+def test_zero_skill_turn_plan_preserves_base_and_records_empty_evidence():
+    plan = SkillTurnPlan.create(
+        base_instructions="  Base instructions\n",
+        resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+
+    evidence = _activation_evidence(plan)
+
+    assert plan.composition.prompt == "  Base instructions\n"
+    assert plan.composition.provenance == ()
+    assert evidence.available == ()
+    assert evidence.blocked == ()
+    assert evidence.initially_active == ()
+    assert evidence.skill_context_tokens >= 0
+
+
+def test_skill_activation_evidence_round_trips_strict_versioned_body_free_json():
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(_binding(position=0),),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = _activation_evidence(plan)
+
+    assert type(evidence).model_validate_json(evidence.model_dump_json()) == evidence
+
+    dumped = evidence.model_dump(mode="json")
+    for invalid in (
+        {**dumped, "version": 2},
+        {**dumped, "effective_mode": "unknown"},
+        {**dumped, "unexpected": True},
+        {
+            **dumped,
+            "rejected": [
+                {
+                    "activation_key": "skill-1",
+                    "reason": "unknown_reason",
+                }
+            ],
+        },
+    ):
+        with pytest.raises(ValidationError):
+            type(evidence).model_validate(invalid)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("skill_context_tokens", "42"),
+        ("skill_context_token_limit", "100"),
+        ("activation_rounds", "0"),
+        ("selection_latency_ms", "0"),
+    ],
+)
+def test_skill_activation_evidence_rejects_coerced_numeric_counters(
+    field: str,
+    value: str,
+):
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(_binding(position=0),),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = _activation_evidence(plan)
+    dumped = evidence.model_dump(mode="json")
+
+    with pytest.raises(ValidationError):
+        type(evidence).model_validate({**dumped, field: value})
+
+
+def test_skill_activation_reference_rejects_coerced_numeric_identity():
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(_binding(position=0),),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = _activation_evidence(plan)
+    dumped = evidence.model_dump(mode="json")
+    dumped["available"][0]["revision_number"] = "1"
+
+    with pytest.raises(ValidationError):
+        type(evidence).model_validate(dumped)
+
+
+def test_skill_activation_evidence_rejects_duplicate_reference_catalogue_entries():
+    binding = _binding(position=0)
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(binding,),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = _activation_evidence(plan)
+    dumped = evidence.model_dump(mode="json")
+    dumped["blocked"] = dumped["available"]
+
+    with pytest.raises(ValidationError, match="both available and blocked"):
+        type(evidence).model_validate(dumped)
+
+
+def test_skill_activation_evidence_stays_compact_at_attachment_ceiling():
+    bindings = tuple(
+        _binding(position=position, name=f"Skill-{position}")
+        for position in range(1000)
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=bindings,
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=1000,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = _activation_evidence(
+        plan,
+        selected_model_route="m" * MAX_MODEL_ROUTE_LENGTH,
+    )
+
+    serialized = json.dumps(evidence.model_dump(mode="json"), separators=(",", ":"))
+
+    assert len(serialized) < SKILL_ACTIVATION_EVIDENCE_SIZE_BUDGET_BYTES
+
+
+def test_skill_activation_evidence_rejects_an_oversized_model_route():
+    binding = _binding(position=0)
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(binding,),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="selected_model_route"):
+        plan.activation_evidence(
+            selected_model_id=uuid4(),
+            selected_model_route="m" * (MAX_MODEL_ROUTE_LENGTH + 1),
+            snapshot=plan.to_activation_runtime(
+                selected_model_route="openai/gpt-4o",
+                max_input_tokens=128_000,
+                supports_tool_calling=True,
+            ).snapshot(),
+        )
+
+
 def test_composition_orders_skills_and_builds_matching_provenance():
     second = _binding(position=1, name="Absence")
     first = _binding(position=0, name="Payroll")
@@ -366,9 +702,12 @@ async def test_assistant_composition_excludes_blocked_skill_without_changing_bin
     service = _service(repo)
     service.user.tenant_id = tenant_id
 
-    composition = await service.compose_for_assistant(
-        assistant_id=uuid4(),
+    resolution = await service.resolve_assistant_bindings_for_runtime(
+        assistant_id=uuid4()
+    )
+    composition = compose_skill_instructions(
         base_instructions="Base",
+        bindings=list(resolution.eligible),
     )
 
     assert "Payroll" not in composition.prompt
@@ -388,9 +727,12 @@ async def test_runtime_composition_keeps_all_bindings_without_execution_blocks()
     repo.list_active_execution_blocks.return_value = {}
     service = _service(repo)
 
-    assistant = await service.compose_for_assistant(
-        assistant_id=uuid4(),
+    assistant_resolution = await service.resolve_assistant_bindings_for_runtime(
+        assistant_id=uuid4()
+    )
+    assistant = compose_skill_instructions(
         base_instructions="Assistant base",
+        bindings=list(assistant_resolution.eligible),
     )
     app = await service.compose_for_app(
         app_id=uuid4(),
@@ -408,7 +750,7 @@ async def test_runtime_composition_keeps_all_bindings_without_execution_blocks()
     assert [reference.skill_id for reference in policy.provenance] == [binding.skill_id]
 
 
-async def test_policy_runtime_bindings_exclude_blocked_skill():
+async def test_policy_runtime_resolution_retains_blocked_revision_without_reason():
     blocked = _binding(position=0, name="Payroll")
     allowed = _binding(position=1, name="Absence")
     tenant_id = uuid4()
@@ -420,10 +762,121 @@ async def test_policy_runtime_bindings_exclude_blocked_skill():
     service = _service(repo)
     service.user.tenant_id = tenant_id
 
-    bindings = await service.list_governance_bindings_for_runtime(policy_id=uuid4())
+    resolution = await service.resolve_governance_bindings_for_runtime(
+        policy_id=uuid4()
+    )
 
-    assert bindings == [allowed]
+    assert resolution.eligible == (allowed,)
+    assert resolution.blocked == (blocked,)
+    assert "Confirmed unsafe instructions" not in repr(resolution)
     repo.replace_policy_bindings.assert_not_awaited()
+
+
+async def test_turn_plan_reads_stored_policy_once_and_preserves_dormant_modes():
+    binding = replace(
+        _binding(position=0),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=20,
+        max_activations_per_turn=5,
+    )
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [binding]
+    repo.list_active_execution_blocks.return_value = {}
+    repo.get_or_seed_runtime_policy.return_value = policy
+    service = _service(repo)
+
+    resolution = await service.resolve_assistant_bindings_for_runtime(
+        assistant_id=uuid4()
+    )
+    plan = await service.create_turn_plan(
+        base_instructions="Base",
+        resolution=resolution,
+    )
+
+    assert plan.policy is policy
+    assert plan.available[0].binding is binding
+    assert plan.composition == compose_skill_instructions(
+        base_instructions="Base",
+        bindings=[],
+    )
+    runtime = plan.to_activation_runtime(
+        selected_model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    assert runtime.tool_definition is not None
+    assert binding.instructions not in runtime.prompt
+    repo.get_or_seed_runtime_policy.assert_awaited_once_with(
+        tenant_id=service.user.tenant_id
+    )
+
+
+def test_turn_plan_freezes_hidden_blocked_keys_and_maps_runtime_evidence():
+    always = replace(
+        _binding(position=0, name="Safety"),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    optional = replace(
+        _binding(position=1, name="Payroll"),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    blocked = replace(
+        _binding(position=2, name="Blocked"),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=20,
+        max_activations_per_turn=2,
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(always, optional),
+            blocked=(blocked,),
+        ),
+        policy=policy,
+    )
+
+    assert plan.initially_active_keys == ("skill-1",)
+    assert plan.blocked[0].activation_key == "blocked-skill-1"
+    assert plan.blocked[0].activation_key not in {
+        binding.activation_key for binding in plan.available
+    }
+    runtime = plan.to_activation_runtime(
+        selected_model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    runtime.apply_provider_tool_calls(
+        calls=(
+            ProviderToolCall(
+                call_id="activate",
+                name=SKILL_ACTIVATION_TOOL_NAME,
+                arguments='{"skill_key":"skill-2"}',
+            ),
+        ),
+        messages=[{"role": "system", "content": runtime.prompt}],
+    )
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="openai/gpt-4o",
+        snapshot=runtime.snapshot(),
+    )
+
+    assert evidence.effective_mode is SkillTurnEffectiveMode.SELECTIVE
+    assert evidence.initially_active == ("skill-1",)
+    assert evidence.accepted == ("skill-2",)
+    assert evidence.blocked[0].activation_key == "blocked-skill-1"
+    assert [
+        reference.skill_revision_id
+        for reference in plan.active_provenance(runtime.snapshot())
+    ] == [always.skill_revision_id, optional.skill_revision_id]
 
 
 async def test_execution_snapshot_hides_incident_reason_when_skill_is_blocked():

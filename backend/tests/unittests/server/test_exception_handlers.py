@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from eneo.files.file_models import FileOriginalNotFoundError
 from eneo.main.exceptions import (
     BadRequestException,
     EncryptionNotConfiguredException,
@@ -82,15 +83,14 @@ def test_file_too_large_exception_includes_structured_details():
     exception = FileTooLargeException(
         file_size=12_582_912,
         max_size=10_485_760,
-        setting_name="UPLOAD_MAX_FILE_SIZE",
+        limit_name="knowledge_file",
     )
 
-    # setting_name and docs_hint should be in the message (for logs) but not in details
-    assert "UPLOAD_MAX_FILE_SIZE" in str(exception)
-    assert "README" in str(exception)
+    assert "knowledge_file" in str(exception)
+    assert "platform administrator" in str(exception)
     assert exception.details["file_size_bytes"] == 12_582_912
     assert exception.details["max_size_bytes"] == 10_485_760
-    assert "setting_name" not in exception.details
+    assert exception.details["limit_name"] == "knowledge_file"
     assert "docs_hint" not in exception.details
 
 
@@ -103,7 +103,7 @@ def test_exception_handler_returns_file_size_details_for_413():
         raise FileTooLargeException(
             file_size=2_048,
             max_size=1_024,
-            setting_name="UPLOAD_MAX_FILE_SIZE",
+            limit_name="knowledge_file",
         )
 
     client = TestClient(app)
@@ -114,8 +114,7 @@ def test_exception_handler_returns_file_size_details_for_413():
     assert body["eneo_error_code"] == ErrorCodes.FILE_TOO_LARGE
     assert body["details"]["file_size_bytes"] == 2_048
     assert body["details"]["max_size_bytes"] == 1_024
-    # Internal config (setting_name) should not leak to clients
-    assert "setting_name" not in body["details"]
+    assert body["details"]["limit_name"] == "knowledge_file"
 
 
 def test_exception_handler_omits_details_for_exceptions_without_details():
@@ -134,6 +133,24 @@ def test_exception_handler_omits_details_for_exceptions_without_details():
     assert body["message"] == "Bad input"
     assert body["eneo_error_code"] == ErrorCodes.BAD_REQUEST
     assert "details" not in body
+
+
+def test_original_not_found_has_stable_public_contract():
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/original")
+    async def original():
+        raise FileOriginalNotFoundError()
+
+    response = TestClient(app).get("/original")
+
+    assert response.status_code == 404
+    assert response.json()["eneo_error_code"] == ErrorCodes.FILE_ORIGINAL_NOT_FOUND
+    assert response.json()["code"] == "file_original_not_found"
+    assert response.json()["message"] == (
+        "The exact original is not available for this file."
+    )
 
 
 def test_encryption_not_configured_returns_actionable_503_and_logs_it(caplog):

@@ -12,6 +12,8 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
+from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
+from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -150,6 +152,57 @@ class CompletionService:
             provider_type=provider.provider_type,
         )
 
+    async def prepare_skill_activation_preflight(
+        self,
+        *,
+        model: CompletionModel,
+        prompt: str,
+        prompt_files: list[File],
+        mcp_servers: list["MCPServer"],
+        skill_runtime: SkillActivationRuntime,
+    ) -> ProviderInput:
+        """Build a deterministic upper bound for save-time activation checks.
+
+        The persisted, permission-filtered MCP catalogue is used without live
+        discovery or a network connection. Runtime still performs the final
+        per-user check after live tool narrowing.
+        """
+        adapter = await self._get_adapter(model)
+        enabled_servers = [server for server in mcp_servers if server.is_enabled]
+        mcp_proxy: MCPProxySession | None = None
+        if enabled_servers and model.supports_tool_calling:
+            mcp_proxy = self._mcp_proxy_factory.create(
+                enabled_servers,
+                identity_headers=build_identity_headers(self.user, self.tenant),
+                mcp_server_tool_repo=self.mcp_server_tool_repo,
+            )
+
+        try:
+            context = self.context_builder.build_context(
+                input_str="",
+                max_tokens=adapter.get_token_limit_of_model(),
+                model_name=adapter.get_model_route(),
+                prompt=prompt,
+                prompt_files=prompt_files,
+                mcp_tools=(
+                    [skill_runtime.tool_definition]
+                    if skill_runtime.tool_definition is not None
+                    else None
+                ),
+                extra_tool_dicts=(
+                    mcp_proxy.get_tools_for_llm() if mcp_proxy is not None else None
+                ),
+                vision=model.vision,
+            )
+            return adapter.prepare_provider_input(
+                context,
+                mcp_proxy=mcp_proxy,
+                skill_runtime=skill_runtime,
+            )
+        finally:
+            if mcp_proxy is not None:
+                await mcp_proxy.close()
+
     @staticmethod
     def is_valid_arguments(arguments: str):
         try:
@@ -234,6 +287,7 @@ class CompletionService:
         use_image_generation: bool = False,
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
+        skill_runtime: SkillActivationRuntime | None = None,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -258,6 +312,11 @@ class CompletionService:
         # (effective_config_service), so re-filtering here is idempotent.
         mcp_servers = [server for server in mcp_servers if server.is_enabled]
         model_adapter = await self._get_adapter(model)
+        initial_skill_tokens = (
+            skill_runtime.snapshot().measurement.tokens
+            if skill_runtime is not None
+            else 0
+        )
 
         # Make sure everything fits in the context of the model
         max_tokens = model_adapter.get_token_limit_of_model()
@@ -306,6 +365,12 @@ class CompletionService:
                 version=version,
                 use_image_generation=use_image_generation,
                 web_search_results=web_search_results,
+                mcp_tools=(
+                    [skill_runtime.tool_definition]
+                    if skill_runtime is not None
+                    and skill_runtime.tool_definition is not None
+                    else None
+                ),
                 vision=model.vision,
                 extra_tool_dicts=(
                     mcp_proxy.get_tools_for_llm()
@@ -334,7 +399,10 @@ class CompletionService:
                     context=context,
                     model_kwargs=model_kwargs,
                     mcp_proxy=mcp_proxy,
+                    skill_runtime=skill_runtime,
                 )
+                adapter_input_estimate = completion.input_token_estimate
+                usage = completion.usage
             finally:
                 # Ensure cleanup for non-streaming
                 if mcp_proxy:
@@ -348,6 +416,7 @@ class CompletionService:
                     context=context,
                     model_kwargs=model_kwargs,
                     mcp_proxy=mcp_proxy,
+                    skill_runtime=skill_runtime,
                 )
             except BaseException:
                 # If stream prep fails, close the proxy here — the streaming_wrapper's
@@ -421,12 +490,27 @@ class CompletionService:
                         await mcp_proxy.close()
 
             completion = self._handle_tool_call(streaming_wrapper())
+            adapter_input_estimate = None
+            usage = None
 
-        usage = getattr(completion, "usage", None) if not stream else None
+        final_skill_tokens = (
+            skill_runtime.snapshot().measurement.tokens
+            if skill_runtime is not None
+            else 0
+        )
+        total_token_count = (
+            adapter_input_estimate
+            if adapter_input_estimate is not None
+            else context.token_count
+            + max(
+                final_skill_tokens - initial_skill_tokens,
+                0,
+            )
+        )
         if usage is not None:
             log_token_count_drift(
                 model_name=model_adapter.get_model_route(),
-                predicted=context.token_count,
+                predicted=total_token_count,
                 actual=usage.prompt_tokens,
             )
 
@@ -434,7 +518,7 @@ class CompletionService:
             completion=completion,
             model=model_adapter.model,
             extended_logging=logging_details,
-            total_token_count=context.token_count,
+            total_token_count=total_token_count,
             usage=usage,
         )
 

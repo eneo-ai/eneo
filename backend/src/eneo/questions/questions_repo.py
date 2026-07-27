@@ -1,9 +1,11 @@
+from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.orm import selectinload
+from pydantic import TypeAdapter
+from sqlalchemy.orm import selectinload, undefer
 
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
@@ -28,12 +30,24 @@ from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.questions.question import Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+)
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.logging.logging import LoggingDetails
     from eneo.questions.question import ToolCallInfo
+
+
+_SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
+
+
+class QuestionSessionPartner(NamedTuple):
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 class QuestionRepository:
@@ -177,8 +191,61 @@ class QuestionRepository:
 
         await self.session.execute(stmt)
 
-    async def get(self, id: UUID):
+    async def get(self, id: UUID) -> Question | None:
         question = await self.delegate.get(id)
+        if question is None:
+            return None
+        return (await self._hydrate_questions([question]))[0]
+
+    async def get_for_tenant(self, *, id: UUID, tenant_id: UUID) -> Question | None:
+        question = await self.delegate.get_model_from_query(
+            sa.select(Questions).where(
+                Questions.id == id,
+                Questions.tenant_id == tenant_id,
+            )
+        )
+        if question is None:
+            return None
+        return (await self._hydrate_questions([question]))[0]
+
+    async def get_session_partner(
+        self,
+        *,
+        id: UUID,
+        tenant_id: UUID,
+    ) -> QuestionSessionPartner | None:
+        result = await self.session.execute(
+            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
+            .select_from(Questions)
+            .join(Sessions, Sessions.id == Questions.session_id)
+            .where(
+                Questions.id == id,
+                Questions.tenant_id == tenant_id,
+            )
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        assistant_id, group_chat_id = row
+        return QuestionSessionPartner(
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
+
+    async def get_with_skill_activation(
+        self,
+        *,
+        id: UUID,
+        tenant_id: UUID,
+    ) -> Question | None:
+        """Load hidden Skill evidence through an explicit tenant-scoped read."""
+        stmt = (
+            sa.select(Questions)
+            .where(Questions.id == id)
+            .where(Questions.tenant_id == tenant_id)
+            .options(undefer(Questions.skill_activation_data))
+        )
+        question = await self.delegate.get_model_from_query(stmt)
         if question is None:
             return None
         return (await self._hydrate_questions([question]))[0]
@@ -199,6 +266,8 @@ class QuestionRepository:
         web_search_results: list["WebSearchResult"] | None = None,
         logging_details: "LoggingDetails | None" = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
+        skill_activation: SkillActivationEvidenceV1 | None = None,
     ) -> None:
         """Update an existing placeholder Question row with the final or partial answer.
 
@@ -232,6 +301,12 @@ class QuestionRepository:
             update_values["reasoning"] = reasoning
         if logging_details_id is not None:
             update_values["logging_details_id"] = logging_details_id
+        update_values.update(
+            self._serialize_skill_runtime_state(
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
+            )
+        )
 
         update_stmt = (
             sa.update(Questions)
@@ -263,6 +338,48 @@ class QuestionRepository:
                 question_id=question_id,
             )
 
+    @staticmethod
+    def _serialize_skill_runtime_state(
+        *,
+        skill_provenance: Sequence[SkillExecutionReference] | None,
+        skill_activation: SkillActivationEvidenceV1 | None,
+    ) -> dict[str, object]:
+        values: dict[str, object] = {}
+        if skill_provenance is not None:
+            values["skill_provenance"] = cast(
+                "list[dict[str, object]]",
+                _SKILL_PROVENANCE_ADAPTER.dump_python(
+                    tuple(skill_provenance),
+                    mode="json",
+                ),
+            )
+        if skill_activation is not None:
+            values["skill_activation_data"] = skill_activation.model_dump(mode="json")
+        return values
+
+    async def update_skill_runtime_state(
+        self,
+        *,
+        question_id: UUID,
+        tenant_id: UUID,
+        skill_provenance: Sequence[SkillExecutionReference],
+        skill_activation: SkillActivationEvidenceV1,
+    ) -> None:
+        """Persist final Skill state when provider work fails before an answer."""
+
+        update_stmt = (
+            sa.update(Questions)
+            .where(Questions.id == question_id)
+            .where(Questions.tenant_id == tenant_id)
+            .values(
+                **self._serialize_skill_runtime_state(
+                    skill_provenance=skill_provenance,
+                    skill_activation=skill_activation,
+                )
+            )
+        )
+        await self.session.execute(update_stmt)
+
     async def add(
         self,
         question: QuestionAdd,
@@ -273,7 +390,12 @@ class QuestionRepository:
         mcp_tool_references: list["McpToolReference"] | None = None,
     ):
         question_values = question.model_dump(
-            exclude={"info_blobs", "logging_details", "skill_provenance"}
+            exclude={
+                "info_blobs",
+                "logging_details",
+                "skill_provenance",
+                "skill_activation",
+            }
         )
         if question.skill_provenance:
             question_values["skill_provenance"] = question.model_dump(
@@ -281,6 +403,11 @@ class QuestionRepository:
             )["skill_provenance"]
         else:
             question_values["skill_provenance"] = None
+        question_values["skill_activation_data"] = (
+            question.skill_activation.model_dump(mode="json")
+            if question.skill_activation is not None
+            else None
+        )
         stmt = sa.insert(Questions).values(**question_values).returning(Questions)
 
         stmt = self._add_options(stmt)

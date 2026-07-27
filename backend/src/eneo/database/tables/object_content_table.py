@@ -206,6 +206,17 @@ class ObjectStoreObjects(BaseCrossReference):
             "multipart_upload_id IS NULL OR char_length(multipart_upload_id) <= 1024",
             name="ck_object_store_objects_multipart_upload_id_length",
         ),
+        CheckConstraint(
+            "verification_chunk_size_bytes IS NOT NULL "
+            "AND verification_chunk_size_bytes > 0",
+            name="ck_object_store_objects_verification_chunk_size",
+        ),
+        CheckConstraint(
+            "verification_chunk_sha256 IS NOT NULL "
+            "AND octet_length(verification_chunk_sha256) BETWEEN 32 AND 320000 "
+            "AND octet_length(verification_chunk_sha256) % 32 = 0",
+            name="ck_object_store_objects_verification_chunk_sha256",
+        ),
         ForeignKeyConstraint(
             ["content_id", "storage_kind"],
             ["object_contents.id", "object_contents.storage_kind"],
@@ -225,6 +236,15 @@ class ObjectStoreObjects(BaseCrossReference):
         server_default=text("'object_store'"),
     )
     object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    verification_chunk_size_bytes: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    verification_chunk_sha256: Mapped[bytes] = mapped_column(
+        BYTEA,
+        nullable=False,
+        deferred=True,
+    )
     remote_observed_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True)
     )

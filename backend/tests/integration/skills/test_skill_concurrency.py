@@ -8,8 +8,10 @@ import sqlalchemy as sa
 from eneo.apps.app_runs.app_run_repo import _serialize_skill_provenance
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.governance_policy_table import GovernancePolicies
 from eneo.database.tables.job_table import Jobs
-from eneo.database.tables.spaces_table import SpacesUsers
+from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.jobs.job_models import Task
 from eneo.main.exceptions import (
     BadRequestException,
@@ -18,7 +20,11 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import Status
 from eneo.roles.permissions import Permission
-from eneo.skills.domain.skill import SkillBindingReference, SkillRuntimePolicy
+from eneo.skills.domain.skill import (
+    SkillBindingIntent,
+    SkillBindingReference,
+    SkillRuntimePolicy,
+)
 
 
 @dataclass(frozen=True)
@@ -195,7 +201,7 @@ async def test_binding_projection_keeps_pinned_and_current_revision_identity(
         await container.skill_service().replace_assistant_bindings(
             space_id=resources.space_id,
             assistant_id=resources.assistant_id,
-            references=[resources.first_reference],
+            intents=[SkillBindingIntent(reference=resources.first_reference)],
         )
         change = await container.skill_service().create_revision(
             skill_id=resources.first_skill_id,
@@ -237,7 +243,9 @@ async def test_parent_binding_replacements_are_serialized(
             return await service.replace_assistant_bindings(
                 space_id=resources.space_id,
                 assistant_id=resources.assistant_id,
-                references=references,
+                intents=[
+                    SkillBindingIntent(reference=reference) for reference in references
+                ],
             )
         return await service.replace_app_bindings(
             space_id=resources.space_id,
@@ -304,7 +312,7 @@ async def test_assistant_move_and_skill_binding_update_are_serialized(
         return await container.skill_service().replace_assistant_bindings(
             space_id=resources.space_id,
             assistant_id=resources.assistant_id,
-            references=[resources.first_reference],
+            intents=[SkillBindingIntent(reference=resources.first_reference)],
         )
 
     first_action = move if first_operation == "move" else bind
@@ -501,6 +509,164 @@ async def test_new_binding_serializes_before_delete_validation(
         )
     assert skill is not None
     assert [binding.skill_id for binding in persisted] == [resources.first_skill_id]
+
+
+@pytest.mark.parametrize("parent_kind", ["assistant", "app", "governance"])
+async def test_block_winning_skill_lock_rejects_concurrent_binding_change(
+    parent_kind: str,
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+    admin_user,
+):
+    resources = skill_concurrency_resources
+    block_locked = asyncio.Event()
+    release_block = asyncio.Event()
+    binding_pid = asyncio.get_running_loop().create_future()
+
+    async with db_container() as container:
+        session = container.session()
+        organization_space = await session.scalar(
+            sa.select(Spaces).where(
+                Spaces.tenant_id == resources.tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert organization_space is not None
+        session.add(
+            SpacesUsers(
+                space_id=organization_space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        policy = GovernancePolicies(
+            tenant_id=resources.tenant_id,
+            scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
+        )
+        session.add(policy)
+        await session.flush()
+        repo = container.skill_repo()
+        existing_skill = await repo.create(
+            space_id=organization_space.id,
+            slug=f"existing-concurrent-block-{uuid4().hex[:8]}",
+            display_name="Existing concurrent binding",
+            description="Remains bound when a blocked replacement is rejected.",
+            instructions="Use the existing approved guidance.",
+            content_digest="a" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        blocked_skill = await repo.create(
+            space_id=organization_space.id,
+            slug=f"blocked-concurrent-binding-{uuid4().hex[:8]}",
+            display_name="Concurrent block target",
+            description="Must not become bound after its block commits.",
+            instructions="Use the target approved guidance.",
+            content_digest="b" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        for skill in (existing_skill, blocked_skill):
+            await repo.publish_organization(
+                tenant_id=resources.tenant_id,
+                skill_id=skill.id,
+                expected_revision_id=skill.current_revision.id,
+            )
+        organization_space_id = organization_space.id
+        policy_id = policy.id
+        existing_reference = SkillBindingReference(
+            skill_id=existing_skill.id,
+            skill_revision_id=existing_skill.current_revision.id,
+        )
+        blocked_reference = SkillBindingReference(
+            skill_id=blocked_skill.id,
+            skill_revision_id=blocked_skill.current_revision.id,
+        )
+
+        service = container.skill_service()
+        if parent_kind == "assistant":
+            await service.replace_assistant_bindings(
+                space_id=resources.space_id,
+                assistant_id=resources.assistant_id,
+                intents=[SkillBindingIntent(reference=existing_reference)],
+            )
+        elif parent_kind == "app":
+            await service.replace_app_bindings(
+                space_id=resources.space_id,
+                app_id=resources.app_id,
+                references=[existing_reference],
+            )
+        else:
+            await service.replace_governance_bindings(
+                policy_id=policy_id,
+                organization_space_id=organization_space_id,
+                references=[existing_reference],
+            )
+
+    async def hold_block():
+        async with db_container() as container:
+            change = await container.skill_repo().block_organization_skill(
+                tenant_id=resources.tenant_id,
+                skill_id=blocked_skill.id,
+                blocked_by_user_id=admin_user.id,
+                reason="Concurrent incident",
+            )
+            assert change is not None
+            block_locked.set()
+            await release_block.wait()
+            return change
+
+    async def replace_while_block_commits():
+        async with db_container() as container:
+            binding_pid.set_result(await _backend_pid(container))
+            service = container.skill_service()
+            references = [existing_reference, blocked_reference]
+            if parent_kind == "assistant":
+                return await service.replace_assistant_bindings(
+                    space_id=resources.space_id,
+                    assistant_id=resources.assistant_id,
+                    intents=[
+                        SkillBindingIntent(reference=reference)
+                        for reference in references
+                    ],
+                )
+            if parent_kind == "app":
+                return await service.replace_app_bindings(
+                    space_id=resources.space_id,
+                    app_id=resources.app_id,
+                    references=references,
+                )
+            return await service.replace_governance_bindings(
+                policy_id=policy_id,
+                organization_space_id=organization_space_id,
+                references=references,
+            )
+
+    block_task = asyncio.create_task(hold_block())
+    await _wait_for_held_write(block_locked, block_task)
+    binding_task = asyncio.create_task(replace_while_block_commits())
+    pid = await asyncio.wait_for(binding_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_block.set()
+
+    await block_task
+    with pytest.raises(BadRequestException, match="Blocked organisation Skills"):
+        await binding_task
+
+    async with db_container() as container:
+        repo = container.skill_repo()
+        if parent_kind == "assistant":
+            bindings = await repo.list_assistant_bindings(
+                assistant_id=resources.assistant_id
+            )
+        elif parent_kind == "app":
+            bindings = await repo.list_app_bindings(app_id=resources.app_id)
+        else:
+            bindings = await repo.list_policy_bindings(policy_id=policy_id)
+
+    assert [binding.skill_id for binding in bindings] == [existing_skill.id]
 
 
 @pytest.mark.parametrize("terminal_status", [Status.COMPLETE, Status.FAILED])
@@ -882,7 +1048,10 @@ async def test_binding_write_waits_for_concurrent_policy_lowering(
             return await container.skill_service().replace_assistant_bindings(
                 space_id=resources.space_id,
                 assistant_id=resources.assistant_id,
-                references=[resources.first_reference, resources.second_reference],
+                intents=[
+                    SkillBindingIntent(reference=resources.first_reference),
+                    SkillBindingIntent(reference=resources.second_reference),
+                ],
             )
 
     admin_task = asyncio.create_task(holding_admin_lowerer())

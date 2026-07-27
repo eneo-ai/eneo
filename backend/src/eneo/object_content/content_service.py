@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator, AsyncIterable, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from secrets import token_hex
 from time import monotonic
@@ -28,6 +29,7 @@ from eneo.object_content.content import (
     StorageKind,
     capture_content,
     content_request_fingerprint,
+    verification_chunk_window,
 )
 from eneo.object_content.content_repository import (
     ObjectContentRepository,
@@ -40,6 +42,7 @@ from eneo.object_content.inline_content_store import InlineContentStore
 from eneo.object_content.lease import OperationLeaseCheckpoint
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
+    PublicationReservation,
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
@@ -66,6 +69,21 @@ def retry_delay_seconds(
 # This is an internal PostgreSQL bind/query chunk, not a user-visible content
 # limit. Larger requests are processed across multiple bounded pages.
 _READ_BATCH_MAX_ITEMS = 500
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedObjectUpload:
+    object_key: str
+    sha256: bytes
+    size_bytes: int
+    declared_media_type: str
+    verified_media_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedObjectPublication:
+    lease_owner: str
+    uploads: tuple[VerifiedObjectUpload, ...]
 
 
 class ObjectContentService:
@@ -211,33 +229,213 @@ class ObjectContentService:
             ) from error
 
     @asynccontextmanager
-    async def capture_inline(
+    async def capture_for_target(
         self,
         source: AsyncIterable[bytes],
         *,
+        storage_kind: StorageKind,
         declared_media_type: str,
         verified_media_type: str,
         business_maximum_bytes: int | None = None,
     ) -> AsyncGenerator[CapturedContent]:
-        """Capture one producer stream within both business and inline limits."""
-        maximum_size_bytes = self._core_settings.inline_maximum_bytes
-        if business_maximum_bytes is not None:
-            if business_maximum_bytes < 1:
-                raise ValueError("business_maximum_bytes must be positive")
-            maximum_size_bytes = min(
-                maximum_size_bytes,
-                business_maximum_bytes,
+        if business_maximum_bytes is not None and business_maximum_bytes < 1:
+            raise ValueError("business_maximum_bytes must be positive")
+        if storage_kind is StorageKind.POSTGRES_INLINE:
+            maximum_size_bytes = (
+                self._core_settings.inline_maximum_bytes
+                if business_maximum_bytes is None
+                else min(
+                    business_maximum_bytes,
+                    self._core_settings.inline_maximum_bytes,
+                )
             )
-
+            spool_memory_bytes = self._core_settings.inline_io_chunk_bytes
+            multipart_part_bytes = self._core_settings.inline_io_chunk_bytes
+        else:
+            settings, _store = self._require_object_store()
+            maximum_size_bytes = (
+                settings.maximum_multipart_bytes
+                if business_maximum_bytes is None
+                else min(
+                    business_maximum_bytes,
+                    settings.maximum_multipart_bytes,
+                )
+            )
+            spool_memory_bytes = settings.spool_memory_bytes
+            multipart_part_bytes = settings.multipart_part_bytes
         async with capture_content(
             source,
             declared_media_type=declared_media_type,
             verified_media_type=verified_media_type,
             maximum_size_bytes=maximum_size_bytes,
-            spool_memory_bytes=self._core_settings.inline_io_chunk_bytes,
-            multipart_part_bytes=self._core_settings.inline_io_chunk_bytes,
+            spool_memory_bytes=spool_memory_bytes,
+            multipart_part_bytes=multipart_part_bytes,
         ) as captured:
             yield captured
+
+    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+        if storage_kind is StorageKind.OBJECT_STORE:
+            await self.check_object_store_ready()
+
+    @asynccontextmanager
+    async def upload_for_publication(
+        self,
+        contents: Sequence[CapturedContent],
+    ) -> AsyncGenerator[VerifiedObjectPublication]:
+        if not contents:
+            raise ValueError("Object publication requires at least one content item")
+        settings, store = self._require_object_store()
+        lease_owner = token_hex(16)
+        reservations = tuple(
+            PublicationReservation(
+                object_key=new_object_key(settings),
+                size_bytes=content.size_bytes,
+            )
+            for content in contents
+        )
+        lease_started_at = monotonic()
+        try:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentReconciliationRepository(
+                    session
+                ).reserve_publication_objects(
+                    reservations,
+                    lease_owner=lease_owner,
+                    lease_seconds=settings.reconciliation_lease_seconds,
+                    orphan_grace_seconds=settings.orphan_grace_seconds,
+                )
+        except ObjectContentBusyError as error:
+            raise ObjectContentUnavailableError(
+                "Durable object publication is temporarily unavailable"
+            ) from error
+        except (OSError, SQLAlchemyError) as error:
+            raise ObjectContentUnavailableError(
+                "Unable to reserve durable object publication"
+            ) from error
+
+        async def renew_publication_reservations() -> None:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentReconciliationRepository(
+                    session
+                ).renew_publication_reservations(
+                    reservations,
+                    lease_owner=lease_owner,
+                    lease_seconds=settings.reconciliation_lease_seconds,
+                )
+
+        checkpoint = OperationLeaseCheckpoint(
+            lease_started_at=lease_started_at,
+            lease_seconds=settings.reconciliation_lease_seconds,
+            request_budget_seconds=settings.sdk_request_budget_seconds,
+            renew=renew_publication_reservations,
+        )
+        try:
+            try:
+                uploads: list[VerifiedObjectUpload] = []
+                for reservation, content in zip(reservations, contents, strict=True):
+                    await store.upload(
+                        reservation.object_key,
+                        content,
+                        operation_checkpoint=checkpoint,
+                    )
+                    uploads.append(
+                        VerifiedObjectUpload(
+                            object_key=reservation.object_key,
+                            sha256=content.sha256,
+                            size_bytes=content.size_bytes,
+                            declared_media_type=content.declared_media_type,
+                            verified_media_type=content.verified_media_type,
+                        )
+                    )
+            except ObjectStoreIntegrityError as error:
+                raise ObjectContentIntegrityError(
+                    "Durable object verification failed"
+                ) from error
+            except (ObjectContentBusyError, ObjectStoreUnavailableError) as error:
+                raise ObjectContentUnavailableError(
+                    "Durable object content is temporarily unavailable"
+                ) from error
+            except (OSError, SQLAlchemyError) as error:
+                raise ObjectContentUnavailableError(
+                    "Unable to renew durable object publication"
+                ) from error
+
+            yield VerifiedObjectPublication(
+                lease_owner=lease_owner,
+                uploads=tuple(uploads),
+            )
+        finally:
+            try:
+                async with self._database.session() as session, session.begin():
+                    await ObjectContentReconciliationRepository(
+                        session
+                    ).release_publication_reservations(
+                        reservations,
+                        lease_owner=lease_owner,
+                    )
+            except (OSError, SQLAlchemyError):
+                # The bounded lease expires after a process or database failure;
+                # the existing orphan inventory remains the durable cleanup owner.
+                pass
+
+    async def adopt_verified_in_transaction(
+        self,
+        session: AsyncSession,
+        *,
+        intents: Sequence[ContentIntent],
+        contents: Sequence[CapturedContent],
+        publication: VerifiedObjectPublication,
+    ) -> tuple[PreparedContent, ...]:
+        if not session.in_transaction():
+            raise RuntimeError("Verified publication requires an owning transaction")
+        if len(intents) != len(contents) or len(contents) != len(publication.uploads):
+            raise ValueError("Verified publication inputs must have equal lengths")
+
+        reservations: list[PublicationReservation] = []
+        for content, upload in zip(contents, publication.uploads, strict=True):
+            if (
+                upload.sha256 != content.sha256
+                or upload.size_bytes != content.size_bytes
+                or upload.declared_media_type != content.declared_media_type
+                or upload.verified_media_type != content.verified_media_type
+            ):
+                raise ObjectContentStateError(
+                    "Verified publication does not match captured content"
+                )
+            reservations.append(
+                PublicationReservation(
+                    object_key=upload.object_key,
+                    size_bytes=upload.size_bytes,
+                )
+            )
+
+        await ObjectContentReconciliationRepository(
+            session
+        ).consume_publication_reservations(
+            reservations,
+            lease_owner=publication.lease_owner,
+        )
+        repository = ObjectContentRepository(session)
+        prepared: list[PreparedContent] = []
+        for intent, content, upload in zip(
+            intents,
+            contents,
+            publication.uploads,
+            strict=True,
+        ):
+            prepared.append(
+                await repository.prepare_verified_object_store(
+                    intent=intent,
+                    content=content,
+                    object_key=upload.object_key,
+                    request_fingerprint=content_request_fingerprint(
+                        intent,
+                        content,
+                        StorageKind.OBJECT_STORE,
+                    ),
+                )
+            )
+        return tuple(prepared)
 
     async def prepare_in_transaction(
         self,
@@ -269,6 +467,9 @@ class ObjectContentService:
                     request_fingerprint=request_fingerprint,
                 )
             case StorageKind.OBJECT_STORE:
+                # Keep PENDING for persisted rows and explicit store_and_verify
+                # recovery. Delete it only after a database audit finds no such
+                # rows and every live producer/cutover uses verified publication.
                 settings, _store = self._require_object_store()
                 return await repository.prepare_object_store(
                     intent=intent,
@@ -377,35 +578,39 @@ class ObjectContentService:
         range_header: str | None = None,
     ) -> AsyncGenerator[ContentRead]:
         async with self._database.session() as session, session.begin():
-            repository = ObjectContentRepository(session)
-            content = await repository.get_readable(
-                content_id=grant.content_id,
-                tenant_id=grant.tenant_id,
-                access_class=grant.access_class,
+            sources = await ObjectContentRepository(session).get_readable_sources(
+                [grant]
             )
-            inline_payload = (
-                await repository.get_inline_payload(content.content_id)
-                if content.storage_kind is StorageKind.POSTGRES_INLINE
-                else None
-            )
-            object_store_descriptor = (
-                await repository.get_object_store_descriptor(content.content_id)
-                if content.storage_kind is StorageKind.OBJECT_STORE
-                else None
-            )
+        source = sources[grant.content_id]
         byte_range = (
             None
             if range_header is None
-            else ByteRange.parse(range_header, size_bytes=content.size_bytes)
+            else ByteRange.parse(
+                range_header,
+                size_bytes=source.content.size_bytes,
+            )
         )
+        async with self._open_readable_source(
+            source,
+            byte_range=byte_range,
+        ) as opened:
+            yield opened
 
+    @asynccontextmanager
+    async def _open_readable_source(
+        self,
+        source: ReadableContentSource,
+        *,
+        byte_range: ByteRange | None = None,
+    ) -> AsyncGenerator[ContentRead]:
+        content = source.content
         match content.storage_kind:
             case StorageKind.POSTGRES_INLINE:
-                if inline_payload is None:
+                if source.inline_payload is None:
                     raise RuntimeError("Inline content dispatch lost its payload")
                 try:
                     async with self._inline_store.open_verified_read(
-                        inline_payload,
+                        source.inline_payload,
                         expected_sha256=content.sha256,
                         expected_size_bytes=content.size_bytes,
                         expected_media_type=content.media_type,
@@ -419,20 +624,49 @@ class ObjectContentService:
                     )
                     raise
             case StorageKind.OBJECT_STORE:
-                if object_store_descriptor is None:
+                if source.object_store_descriptor is None:
                     raise RuntimeError(
                         "Object-store content dispatch lost its descriptor"
                     )
                 _settings, store = self._require_object_store()
                 try:
+                    verification_chunk_sha256: tuple[bytes, ...] = ()
+                    descriptor = source.object_store_descriptor
+                    if byte_range is not None:
+                        window = verification_chunk_window(
+                            byte_range,
+                            chunk_size_bytes=(descriptor.verification_chunk_size_bytes),
+                            chunk_count=descriptor.verification_chunk_count,
+                        )
+                        async with self._database.session() as session, session.begin():
+                            verification_chunk_sha256 = await (
+                                ObjectContentRepository(session)
+                            ).get_object_store_verification_chunks(
+                                content_id=content.content_id,
+                                first_chunk_index=window.first_chunk_index,
+                                chunk_count=window.chunk_count,
+                            )
                     async with store.open_verified_read(
-                        object_store_descriptor.object_key,
+                        descriptor.object_key,
                         expected_sha256=content.sha256,
                         expected_size_bytes=content.size_bytes,
                         expected_media_type=content.media_type,
                         byte_range=byte_range,
+                        verification_chunk_size_bytes=(
+                            descriptor.verification_chunk_size_bytes
+                        ),
+                        verification_chunk_count=(descriptor.verification_chunk_count),
+                        verification_chunk_sha256=verification_chunk_sha256,
                     ) as opened:
                         yield opened
+                except (ValueError, ObjectContentStateError) as error:
+                    await self._mark_backend_failure(
+                        content.content_id,
+                        ContentFailureCode.BACKEND_CORRUPT,
+                    )
+                    raise ObjectContentIntegrityError(
+                        "Durable object verification metadata is invalid"
+                    ) from error
                 except ObjectStoreNotFoundError as error:
                     await self._mark_backend_failure(
                         content.content_id,
@@ -458,11 +692,11 @@ class ObjectContentService:
         self,
         grants: Sequence[ContentReadGrant],
     ) -> dict[UUID, bytes]:
-        """Materialize authorized content with one inline query per bounded page.
+        """Materialize authorized content with one source query per bounded page.
 
-        PostgreSQL-inline controls and payloads are loaded and access-validated
-        together. Object-store content keeps the verified streaming path behind
-        ``open_content``; callers do not branch on storage placement.
+        Controls plus inline payloads or private object-store descriptors are
+        loaded and access-validated together. Both storage kinds then use the
+        same verified backend dispatch; callers do not branch on placement.
         """
         unique_grants: dict[UUID, ContentReadGrant] = {}
         for grant in grants:
@@ -485,37 +719,16 @@ class ObjectContentService:
             for grant in page:
                 source = sources[grant.content_id]
                 payloads[grant.content_id] = await self._read_source_bytes(
-                    grant,
                     source,
                 )
         return payloads
 
     async def _read_source_bytes(
         self,
-        grant: ContentReadGrant,
         source: ReadableContentSource,
     ) -> bytes:
-        content = source.content
-        if content.storage_kind is StorageKind.OBJECT_STORE:
-            async with self.open_content(grant) as opened:
-                return b"".join([chunk async for chunk in opened.chunks])
-
-        if source.inline_payload is None:
-            raise ObjectContentStateError("Inline content payload is missing")
-        try:
-            async with self._inline_store.open_verified_read(
-                source.inline_payload,
-                expected_sha256=content.sha256,
-                expected_size_bytes=content.size_bytes,
-                expected_media_type=content.media_type,
-            ) as opened:
-                return b"".join([chunk async for chunk in opened.chunks])
-        except ObjectContentIntegrityError:
-            await self._mark_backend_failure(
-                content.content_id,
-                ContentFailureCode.BACKEND_CORRUPT,
-            )
-            raise
+        async with self._open_readable_source(source) as opened:
+            return b"".join([chunk async for chunk in opened.chunks])
 
     async def apply_hold(
         self,

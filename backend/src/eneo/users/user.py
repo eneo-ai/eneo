@@ -281,6 +281,7 @@ class UserInDB(UserInDBBase):
         default=None,
         description="Timestamp when user was soft-deleted (null for active users)",
     )
+    is_platform_admin: bool = False
 
     @computed_field
     @property
@@ -320,6 +321,7 @@ class UserPublicBase(InDB, UserBase):
 
 
 class UserPublic(UserPublicBase):
+    is_platform_admin: bool = False
     truncated_api_key: Optional[str] = None
     quota_limit: Optional[int] = None
     roles: list[RolePublic]

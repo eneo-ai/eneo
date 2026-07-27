@@ -1,6 +1,10 @@
+from eneo.main.models import is_provided
 from eneo.skills.domain.skill import (
-    PublishedSkill,
-    PublishedSkillSummary,
+    AssistantSkillConfigurationProjection,
+    OrganizationSkillProjection,
+    OrganizationSkillSummaryProjection,
+    PublishedSkillProjection,
+    PublishedSkillSummaryProjection,
     ResolvedSkillBinding,
     Skill,
     SkillAdoptionPersonalChat,
@@ -8,13 +12,18 @@ from eneo.skills.domain.skill import (
     SkillAdoptionResource,
     SkillAdoptionRevisionCount,
     SkillAdoptionSummary,
+    SkillBindingIntent,
+    SkillBindingProjection,
     SkillBindingReference,
     SkillCatalogEntry,
     SkillRevision,
     SkillRevisionSummary,
-    SkillSummary,
 )
 from eneo.skills.presentation.skill_models import (
+    AssistantSkillBindingInput,
+    AssistantSkillBindingSummary,
+    AssistantSkillConfigurationPublic,
+    AssistantSkillRuntimeSummary,
     OrganizationSkillPublic,
     OrganizationSkillSummaryPublic,
     PublishedSkillPublic,
@@ -46,6 +55,25 @@ def skill_binding_references_from_input(
     ]
 
 
+def assistant_skill_binding_intents_from_input(
+    bindings: list[AssistantSkillBindingInput],
+) -> list[SkillBindingIntent]:
+    return [
+        SkillBindingIntent(
+            reference=SkillBindingReference(
+                skill_id=binding.skill_id,
+                skill_revision_id=binding.skill_revision_id,
+            ),
+            activation_mode=(
+                binding.activation_mode
+                if is_provided(binding.activation_mode)
+                else None
+            ),
+        )
+        for binding in bindings
+    ]
+
+
 def skill_binding_audit_entries(
     bindings: list[ResolvedSkillBinding],
 ) -> list[dict[str, object]]:
@@ -56,6 +84,7 @@ def skill_binding_audit_entries(
             "revision_number": binding.revision_number,
             "content_digest": binding.content_digest,
             "position": binding.position,
+            "activation_mode": binding.activation_mode.value,
         }
         for binding in bindings
     ]
@@ -209,8 +238,9 @@ class SkillAssembler:
 
     @staticmethod
     def organization_summary_to_public(
-        skill: SkillSummary,
+        projection: OrganizationSkillSummaryProjection,
     ) -> OrganizationSkillSummaryPublic:
+        skill = projection.skill
         return OrganizationSkillSummaryPublic(
             id=skill.id,
             space_id=skill.space_id,
@@ -227,22 +257,29 @@ class SkillAssembler:
             published_revision_number=skill.published_revision_number,
             first_published_at=skill.first_published_at,
             publication_state=skill.publication_state,
+            execution_blocked=projection.execution_blocked,
         )
 
     @classmethod
-    def organization_to_public(cls, skill: Skill) -> OrganizationSkillPublic:
+    def organization_to_public(
+        cls,
+        projection: OrganizationSkillProjection,
+    ) -> OrganizationSkillPublic:
+        skill = projection.skill
         return OrganizationSkillPublic(
             **cls.to_sparse(skill).model_dump(),
             published_revision_number=skill.published_revision_number,
             first_published_at=skill.first_published_at,
             publication_state=skill.publication_state,
+            execution_blocked=projection.execution_blocked,
             current_revision=cls.revision_to_public(skill.current_revision),
         )
 
     @staticmethod
     def published_summary_to_public(
-        skill: PublishedSkillSummary,
+        projection: PublishedSkillSummaryProjection,
     ) -> PublishedSkillSummaryPublic:
+        skill = projection.skill
         return PublishedSkillSummaryPublic(
             id=skill.id,
             slug=skill.slug,
@@ -252,12 +289,22 @@ class SkillAssembler:
             description=skill.description,
             content_digest=skill.content_digest,
             first_published_at=skill.first_published_at,
+            execution_blocked=projection.execution_blocked,
         )
 
     @classmethod
-    def published_to_public(cls, skill: PublishedSkill) -> PublishedSkillPublic:
+    def published_to_public(
+        cls,
+        projection: PublishedSkillProjection,
+    ) -> PublishedSkillPublic:
+        skill = projection.skill
         return PublishedSkillPublic(
-            **cls.published_summary_to_public(skill.summary).model_dump(),
+            **cls.published_summary_to_public(
+                PublishedSkillSummaryProjection(
+                    skill=skill.summary,
+                    execution_blocked=projection.execution_blocked,
+                )
+            ).model_dump(),
             revision=PublishedSkillRevisionPublic(
                 id=skill.revision.id,
                 skill_id=skill.revision.skill_id,
@@ -271,7 +318,8 @@ class SkillAssembler:
         )
 
     @staticmethod
-    def binding_to_summary(binding: ResolvedSkillBinding) -> SkillBindingSummary:
+    def binding_to_summary(projection: SkillBindingProjection) -> SkillBindingSummary:
+        binding = projection.binding
         return SkillBindingSummary(
             skill_id=binding.skill_id,
             skill_revision_id=binding.skill_revision_id,
@@ -285,4 +333,38 @@ class SkillAssembler:
             position=binding.position,
             is_active=binding.is_active,
             source=binding.source,
+            execution_blocked=projection.execution_blocked,
+        )
+
+    @classmethod
+    def assistant_binding_to_summary(
+        cls, projection: SkillBindingProjection
+    ) -> AssistantSkillBindingSummary:
+        return AssistantSkillBindingSummary(
+            **cls.binding_to_summary(projection).model_dump(),
+            activation_mode=projection.binding.activation_mode,
+        )
+
+    @classmethod
+    def assistant_configuration_to_public(
+        cls, projection: AssistantSkillConfigurationProjection
+    ) -> AssistantSkillConfigurationPublic:
+        runtime = projection.runtime
+        return AssistantSkillConfigurationPublic(
+            bindings=[
+                cls.assistant_binding_to_summary(binding)
+                for binding in projection.bindings
+            ],
+            runtime=(
+                AssistantSkillRuntimeSummary(
+                    effective_model_id=runtime.effective_model_id,
+                    effective_mode=runtime.snapshot.effective_mode,
+                    fallback_reason=runtime.snapshot.fallback_reason,
+                    skill_context_tokens=runtime.snapshot.measurement.tokens,
+                    skill_context_token_limit=runtime.snapshot.measurement.limit,
+                    token_count_source=runtime.snapshot.measurement.source,
+                )
+                if runtime is not None
+                else None
+            ),
         )

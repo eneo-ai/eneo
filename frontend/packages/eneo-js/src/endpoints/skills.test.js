@@ -368,3 +368,50 @@ test("catalogue reads omit absent optional query values", async () => {
 
   assert.deepEqual(urls, ["https://eneo.example/api/v1/skills/catalogue/?limit=25"]);
 });
+
+test("Assistant binding list and configuration preserve their independent contracts", async () => {
+  const calls = [];
+  const bindings = [{ skill_id: "skill-1", revision_id: "revision-1", position: 0 }];
+  const configuration = {
+    bindings: [],
+    runtime: {
+      effective_model_id: "model-1",
+      effective_mode: "selective",
+      fallback_reason: null,
+      skill_context_tokens: 120,
+      skill_context_token_limit: 800,
+      token_count_source: "litellm"
+    }
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return endpoint.endsWith("/configuration/") ? configuration : bindings;
+    }
+  });
+
+  assert.equal(
+    await skills.listAssistantBindings({ spaceId: "space-1", assistantId: "assistant-1" }),
+    bindings
+  );
+  assert.equal(
+    await skills.getAssistantConfiguration({ spaceId: "space-1", assistantId: "assistant-1" }),
+    configuration
+  );
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/",
+      request: {
+        method: "get",
+        params: { path: { space_id: "space-1", assistant_id: "assistant-1" } }
+      }
+    },
+    {
+      endpoint: "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
+      request: {
+        method: "get",
+        params: { path: { space_id: "space-1", assistant_id: "assistant-1" } }
+      }
+    }
+  ]);
+});

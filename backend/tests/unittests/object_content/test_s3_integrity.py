@@ -13,7 +13,11 @@ from botocore.exceptions import ClientError, FlexibleChecksumError, ReadTimeoutE
 from botocore.response import StreamingBody
 
 from eneo.object_content.configuration import ObjectContentSettings
-from eneo.object_content.content import ByteRange, CapturedContent
+from eneo.object_content.content import (
+    ByteRange,
+    CapturedContent,
+    verification_chunk_window,
+)
 from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
     ObjectStoreIntegrityError,
@@ -214,6 +218,18 @@ class _DownloadClient:
 
     def get_object(self, **request: object) -> dict[str, object]:
         self.requests.append(request)
+        range_header = request.get("Range")
+        if isinstance(range_header, str):
+            match = re.fullmatch(r"bytes=(\d+)-(\d+)", range_header)
+            assert match is not None
+            start, end = (int(value) for value in match.groups())
+            payload = self._payload[start : end + 1]
+            return {
+                "Body": StreamingBody(BytesIO(payload), len(payload)),
+                "ContentLength": len(payload),
+                "ContentRange": f"bytes {start}-{end}/{len(self._payload)}",
+                "ContentType": "application/octet-stream",
+            }
         return {
             "Body": StreamingBody(BytesIO(self._payload), len(self._payload)),
             "ContentLength": len(self._payload),
@@ -349,6 +365,7 @@ async def test_single_upload_checkpoints_before_each_sdk_request() -> None:
         declared_media_type="text/plain",
         verified_media_type="text/plain",
         part_sha256=(digest,),
+        part_size_bytes=len(payload),
     )
 
     checkpoint = _RecordingCheckpoint(lambda: events.append("checkpoint"))
@@ -482,6 +499,7 @@ async def test_multipart_upload_emits_bounded_lease_checkpoints() -> None:
         declared_media_type="application/octet-stream",
         verified_media_type="application/octet-stream",
         part_sha256=part_digests,
+        part_size_bytes=part_bytes,
     )
 
     checkpoint = _RecordingCheckpoint(lambda: events.append("checkpoint"))
@@ -604,17 +622,7 @@ async def test_multipart_abort_checkpoints_before_the_sdk_request() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "byte_range",
-    [
-        None,
-        ByteRange(start=2, end=5, total=10),
-    ],
-    ids=("full", "range"),
-)
-async def test_verified_read_rejects_replacement_before_yielding_full_or_range(
-    byte_range: ByteRange | None,
-) -> None:
+async def test_verified_full_read_rejects_replacement_before_yielding() -> None:
     original = b"abcdefghij"
     replacement = b"0123456789"
     client = _DownloadClient(replacement)
@@ -630,13 +638,115 @@ async def test_verified_read_rejects_replacement_before_yielding_full_or_range(
             expected_sha256=sha256(original).digest(),
             expected_size_bytes=len(original),
             expected_media_type="application/octet-stream",
-            byte_range=byte_range,
         ) as opened:
             async for chunk in opened.chunks:
                 emitted.extend(chunk)
 
     assert emitted == b""
     assert all("Range" not in request for request in client.requests)
+
+
+def test_verification_chunk_window_rejects_inconsistent_manifest() -> None:
+    with pytest.raises(ValueError, match="chunk count"):
+        verification_chunk_window(
+            ByteRange(start=2, end=4, total=11),
+            chunk_size_bytes=4,
+            chunk_count=2,
+        )
+
+
+@pytest.mark.asyncio
+async def test_verified_range_fetches_and_spools_only_covering_chunks() -> None:
+    payload = b"abcdefghijklmnopq"
+    chunk_size = 4
+    digests = tuple(
+        sha256(payload[offset : offset + chunk_size]).digest()
+        for offset in range(0, len(payload), chunk_size)
+    )
+    requested = ByteRange(start=5, end=10, total=len(payload))
+    client = _DownloadClient(payload)
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+
+    async with store.open_verified_read(
+        new_object_key(_settings()),
+        expected_sha256=sha256(payload).digest(),
+        expected_size_bytes=len(payload),
+        expected_media_type="application/octet-stream",
+        byte_range=requested,
+        verification_chunk_size_bytes=chunk_size,
+        verification_chunk_count=len(digests),
+        verification_chunk_sha256=digests[1:3],
+    ) as opened:
+        body = b"".join([chunk async for chunk in opened.chunks])
+
+    assert body == payload[5:11]
+    assert opened.content_range == requested.response_header
+    assert [request["Range"] for request in client.requests] == ["bytes=4-11"]
+
+
+@pytest.mark.asyncio
+async def test_verified_range_rejects_covering_corruption_before_yielding() -> None:
+    original = b"abcdefghijklmnopq"
+    replacement = original[:7] + b"X" + original[8:]
+    chunk_size = 4
+    digests = tuple(
+        sha256(original[offset : offset + chunk_size]).digest()
+        for offset in range(0, len(original), chunk_size)
+    )
+    requested = ByteRange(start=5, end=6, total=len(original))
+    store = S3ObjectStore(
+        _settings(),
+        client=cast("S3Client", _DownloadClient(replacement)),
+    )
+    emitted = bytearray()
+
+    with pytest.raises(ObjectStoreIntegrityError, match="verification chunk"):
+        async with store.open_verified_read(
+            new_object_key(_settings()),
+            expected_sha256=sha256(original).digest(),
+            expected_size_bytes=len(original),
+            expected_media_type="application/octet-stream",
+            byte_range=requested,
+            verification_chunk_size_bytes=chunk_size,
+            verification_chunk_count=len(digests),
+            verification_chunk_sha256=digests[1:2],
+        ) as opened:
+            async for chunk in opened.chunks:
+                emitted.extend(chunk)
+
+    assert emitted == b""
+
+
+@pytest.mark.asyncio
+async def test_verified_range_does_not_read_corruption_outside_covering_chunks() -> (
+    None
+):
+    original = b"abcdefghijklmnopq"
+    replacement = b"X" + original[1:]
+    chunk_size = 4
+    digests = tuple(
+        sha256(original[offset : offset + chunk_size]).digest()
+        for offset in range(0, len(original), chunk_size)
+    )
+    requested = ByteRange(start=9, end=10, total=len(original))
+    store = S3ObjectStore(
+        _settings(),
+        client=cast("S3Client", _DownloadClient(replacement)),
+    )
+
+    async with store.open_verified_read(
+        new_object_key(_settings()),
+        expected_sha256=sha256(original).digest(),
+        expected_size_bytes=len(original),
+        expected_media_type="application/octet-stream",
+        byte_range=requested,
+        verification_chunk_size_bytes=chunk_size,
+        verification_chunk_count=len(digests),
+        verification_chunk_sha256=digests[2:3],
+    ) as opened:
+        body = b"".join([chunk async for chunk in opened.chunks])
+
+    assert body == original[9:11]
 
 
 @pytest.mark.asyncio

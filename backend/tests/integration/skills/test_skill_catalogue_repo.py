@@ -12,9 +12,11 @@ from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.jobs.job_models import Task
 from eneo.main.exceptions import NameCollisionException, NotFoundException
 from eneo.main.models import Status
+from eneo.skills import compose_skill_instructions
 from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
     SkillActivationMode,
+    SkillBindingIntent,
     SkillBindingReference,
     SkillBindingSource,
     SkillExecutionReference,
@@ -293,7 +295,7 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
         assistant_bindings = await service.replace_assistant_bindings(
             space_id=target_space.id,
             assistant_id=assistant.id,
-            references=[approved_reference],
+            intents=[SkillBindingIntent(reference=approved_reference)],
         )
         app_bindings = await service.replace_app_bindings(
             space_id=target_space.id,
@@ -301,23 +303,24 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
             references=[approved_reference],
         )
 
-        assert assistant_bindings[0].skill_space_id == organization.id
+        assert assistant_bindings.bindings[0].skill_space_id == organization.id
         assert app_bindings[0].skill_space_id == organization.id
-        assert assistant_bindings[0].source is SkillBindingSource.ORGANIZATION
+        assert assistant_bindings.bindings[0].source is SkillBindingSource.ORGANIZATION
         assert app_bindings[0].source is SkillBindingSource.ORGANIZATION
-        assert assistant_bindings[0].current_revision_id == draft.revision.id
+        assert assistant_bindings.bindings[0].current_revision_id == draft.revision.id
         assert (
-            assistant_bindings[0].attachable_revision_id
+            assistant_bindings.bindings[0].attachable_revision_id
             == published.current_revision.id
         )
-        assert assistant_bindings[0].attachable_revision_number == 1
+        assert assistant_bindings.bindings[0].attachable_revision_number == 1
+        assistant_resolution = await service.resolve_assistant_bindings_for_runtime(
+            assistant_id=assistant.id
+        )
         assert (
             "approved catalogue instructions"
-            in (
-                await service.compose_for_assistant(
-                    assistant_id=assistant.id,
-                    base_instructions="Assistant base",
-                )
+            in compose_skill_instructions(
+                base_instructions="Assistant base",
+                bindings=list(assistant_resolution.eligible),
             ).prompt
         )
         app_composition = await service.compose_for_app(
@@ -366,7 +369,7 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
                 await service.replace_assistant_bindings(
                     space_id=target_space.id,
                     assistant_id=assistant.id,
-                    references=[reference],
+                    intents=[SkillBindingIntent(reference=reference)],
                 )
             with pytest.raises(NotFoundException, match="unavailable"):
                 await service.replace_app_bindings(
@@ -402,7 +405,7 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
         await service.replace_assistant_bindings(
             space_id=target_space.id,
             assistant_id=assistant.id,
-            references=[approved_reference],
+            intents=[SkillBindingIntent(reference=approved_reference)],
         )
         await service.replace_app_bindings(
             space_id=target_space.id,
@@ -421,7 +424,7 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
         await service.replace_assistant_bindings(
             space_id=target_space.id,
             assistant_id=assistant.id,
-            references=[],
+            intents=[],
         )
         await service.replace_app_bindings(
             space_id=target_space.id,

@@ -7,6 +7,7 @@ from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublic
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.completion_models.domain.skill_context import skill_context_token_allowance
 from eneo.main.config import get_settings as get_app_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -301,8 +302,9 @@ class SettingService:
                     nickname=model.nickname,
                     max_input_tokens=model.max_input_tokens,
                     supports_tool_calling=model.supports_tool_calling,
-                    skill_context_token_allowance=(
-                        model.max_input_tokens * policy.context_share_percent // 100
+                    skill_context_token_allowance=skill_context_token_allowance(
+                        max_input_tokens=model.max_input_tokens,
+                        context_share_percent=policy.context_share_percent,
                     ),
                 )
                 for model in models

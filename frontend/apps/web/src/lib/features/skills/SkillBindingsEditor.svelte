@@ -1,5 +1,10 @@
 <script lang="ts">
-  import type { SkillBindingReferenceInput, SkillBindingSummary, SkillPublic } from "@eneo/eneo-js";
+  import type {
+    AssistantSkillRuntimeSummary,
+    SkillActivationMode,
+    SkillBindingSummary,
+    SkillPublic
+  } from "@eneo/eneo-js";
   import { useId } from "bits-ui";
   import { ArrowDown, ArrowUp, Info, Plus, RefreshCw, Trash2 } from "lucide-svelte";
   import { onDestroy, tick, untrack } from "svelte";
@@ -9,6 +14,7 @@
   import * as Command from "$lib/components/ui/command/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
   import SkillForm from "./SkillForm.svelte";
   import SkillPreview from "./SkillPreview.svelte";
@@ -28,19 +34,23 @@
     mergeSkillCatalog,
     moveSkillBinding,
     removeSkillBinding,
+    setSkillActivationMode,
     upgradeSkillBinding,
     type SkillBindingCandidate,
+    type SkillBindingDraftReference,
     type SkillBindingRevisionMetadata,
     type SkillBindingRow,
     type SkillFormValue
   } from "./skillBindings";
 
   type Props = {
-    bindings: SkillBindingReferenceInput[];
+    bindings: SkillBindingDraftReference[];
     initialCatalogPage: SkillBindingCatalogPage;
     bindingSummaries: SkillBindingSummary[];
     canEditBindings: boolean;
     canCreateSkills: boolean;
+    supportsActivationModes?: boolean;
+    skillRuntime?: AssistantSkillRuntimeSummary | null;
     onListCatalog: ListSkillBindingCatalog;
     onGetSkillPreview: GetSkillBindingPreview;
     onCreateSkill?: (value: SkillFormValue) => Promise<SkillPublic>;
@@ -52,6 +62,8 @@
     bindingSummaries,
     canEditBindings,
     canCreateSkills,
+    supportsActivationModes = false,
+    skillRuntime = null,
     onListCatalog,
     onGetSkillPreview,
     onCreateSkill
@@ -60,6 +72,8 @@
   const id = useId();
   const addExistingTriggerId = `${id}-add-existing`;
   const createTriggerId = `${id}-create`;
+  const runtimeStatusId = `${id}-runtime-status`;
+  const runtimeHintId = `${id}-runtime-hint`;
 
   let addExistingOpen = $state(false);
   let createOpen = $state(false);
@@ -99,13 +113,21 @@
   });
   const catalog = $derived(mergeSkillCatalog(skillCatalog.items, matchingCreatedSkills));
   const addExistingChoices = $derived(getAvailableSkills(catalog, bindings));
+  const allCatalogSkillsAttached = $derived.by(() => {
+    if (catalog.length === 0) return false;
+    const boundSkillIds = new Set(bindings.map((binding) => binding.skill_id));
+    return catalog.every((skill) => boundSkillIds.has(skill.id));
+  });
   const rows = $derived(
     getSkillBindingRows(bindings, bindingSummaries, catalog, loadedRevisionMetadata)
+  );
+  const canChooseOnDemand = $derived(
+    skillRuntime !== null && skillRuntime.fallback_reason === null
   );
   const emptyChoiceMessage = $derived.by(() => {
     if (skillCatalog.loading) return m.skills_search_loading();
     if (skillCatalog.query.trim()) return m.skills_search_no_results();
-    if (catalog.length > 0 && addExistingChoices.length === 0) return m.skills_all_attached();
+    if (allCatalogSkillsAttached) return m.skills_all_attached();
     return m.skills_no_available();
   });
 
@@ -140,10 +162,14 @@
 
   function addPreviewedSkill() {
     if (!canEditBindings || preview === null) return;
-    bindings = appendSkillRevisionBinding(bindings, {
-      id: preview.id,
-      revisionId: preview.revisionId
-    });
+    bindings = appendSkillRevisionBinding(
+      bindings,
+      {
+        id: preview.id,
+        revisionId: preview.revisionId
+      },
+      supportsActivationModes ? "always" : undefined
+    );
     previewOpen = false;
     announcement = m.skills_added_to_draft_announcement({ name: preview.displayName });
     focusElement(addExistingTriggerId);
@@ -154,10 +180,14 @@
     const created = await onCreateSkill(value);
     const candidate = { ...created, source: "space" as const };
     createdSkills = [...createdSkills.filter((skill) => skill.id !== created.id), candidate];
-    bindings = appendSkillRevisionBinding(bindings, {
-      id: created.id,
-      revisionId: created.current_revision_id
-    });
+    bindings = appendSkillRevisionBinding(
+      bindings,
+      {
+        id: created.id,
+        revisionId: created.current_revision_id
+      },
+      supportsActivationModes ? "always" : undefined
+    );
     createFormDirty = false;
     createOpen = false;
     announcement = m.skills_created_and_added_to_draft_announcement({
@@ -181,6 +211,49 @@
     bindings = removeSkillBinding(bindings, row.reference.skill_id);
     announcement = m.skills_removed_from_draft_announcement({ name: rowName(row) });
     focusElement(nextFocusId ? rowId(nextFocusId) : addExistingTriggerId);
+  }
+
+  function activationMode(row: SkillBindingRow): SkillActivationMode {
+    return "activation_mode" in row.reference && row.reference.activation_mode
+      ? row.reference.activation_mode
+      : "always";
+  }
+
+  function activationModeLabel(mode: SkillActivationMode): string {
+    return mode === "on_demand"
+      ? m.skills_activation_mode_on_demand()
+      : m.skills_activation_mode_always();
+  }
+
+  function updateActivationMode(row: SkillBindingRow, value: string) {
+    if (!canEditBindings || (value !== "always" && value !== "on_demand")) return;
+    bindings = setSkillActivationMode(bindings, row.reference.skill_id, value);
+    announcement = m.skills_activation_mode_changed_announcement({
+      name: rowName(row),
+      mode: activationModeLabel(value)
+    });
+  }
+
+  function runtimeStatus(): string {
+    if (skillRuntime === null) return m.skills_activation_runtime_no_model();
+    switch (skillRuntime.fallback_reason) {
+      case "model_lacks_tool_calling":
+        return m.skills_activation_runtime_model_lacks_tools();
+      case "catalog_budget_exceeded":
+        return m.skills_activation_runtime_catalog_budget();
+      case "token_measurement_unavailable":
+        return m.skills_activation_runtime_measurement_unavailable();
+      case "selective_activation_disabled":
+        return m.skills_activation_runtime_disabled();
+    }
+    switch (skillRuntime.effective_mode) {
+      case "selective":
+        return m.skills_activation_runtime_selective();
+      case "always_only":
+        return m.skills_activation_runtime_always_only();
+      case "eager":
+        return m.skills_activation_runtime_eager();
+    }
   }
 
   async function useLatestRevision(row: SkillBindingRow, index: number) {
@@ -284,7 +357,9 @@
 <div class="flex flex-col gap-4">
   <div class="flex items-start justify-between gap-3">
     <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
-      {m.skills_binding_draft_description()}
+      {supportsActivationModes
+        ? m.skills_binding_assistant_draft_description()
+        : m.skills_binding_draft_description()}
     </p>
     {#if rows.length > 0}
       <Badge variant="secondary" class="shrink-0">
@@ -292,6 +367,31 @@
       </Badge>
     {/if}
   </div>
+
+  {#if supportsActivationModes}
+    <div class="border-border flex items-start gap-2 border-y py-3 text-sm">
+      <Info class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <div class="min-w-0">
+        <p id={runtimeStatusId}>{runtimeStatus()}</p>
+        <p id={runtimeHintId} class="text-muted-foreground mt-1 text-xs">
+          {m.skills_activation_runtime_saved_hint()}
+        </p>
+        {#if skillRuntime}
+          <p class="text-muted-foreground mt-1 text-xs tabular-nums">
+            {m.skills_activation_runtime_tokens({
+              used: String(skillRuntime.skill_context_tokens),
+              limit: String(skillRuntime.skill_context_token_limit)
+            })}
+            {#if skillRuntime.token_count_source === "fallback_estimate"}
+              <Badge variant="outline" class="ml-1 align-middle">
+                {m.skills_activation_runtime_estimated()}
+              </Badge>
+            {/if}
+          </p>
+        {/if}
+      </div>
+    </div>
+  {/if}
 
   {#if upgradeError}
     <p class="text-destructive text-sm" role="alert">{upgradeError}</p>
@@ -312,7 +412,8 @@
           <li
             id={rowId(row.reference.skill_id)}
             tabindex="-1"
-            class="focus-visible:ring-ring flex flex-col gap-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:flex-row sm:items-start sm:justify-between"
+            data-execution-blocked={row.executionBlocked || undefined}
+            class="focus-visible:ring-ring data-[execution-blocked]:bg-destructive/5 flex flex-col gap-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:flex-row sm:items-start sm:justify-between"
           >
             <div class="flex min-w-0 flex-1 items-start gap-3">
               <Badge variant="outline" class="mt-0.5 min-w-7 justify-center px-1.5 tabular-nums">
@@ -331,13 +432,19 @@
                       {m.skills_revision_label({ revision: String(row.pinnedRevision) })}
                     </Badge>
                   {/if}
-                  {#if row.isActive === false}
+                  {#if row.isActive === false && !row.executionBlocked}
                     <Badge variant="outline">{m.skills_unavailable_status()}</Badge>
                     <span class="text-muted-foreground text-xs">
                       {m.skills_unavailable_binding_explanation()}
                     </span>
                   {/if}
-                  {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined}
+                  {#if row.executionBlocked}
+                    <Badge variant="destructive">{m.skills_execution_blocked_status()}</Badge>
+                    <span class="text-destructive text-xs">
+                      {m.skills_execution_blocked_binding_explanation()}
+                    </span>
+                  {/if}
+                  {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && !row.executionBlocked}
                     <Badge variant="secondary">
                       {m.skills_newer_revision_available({
                         revision: String(row.attachableRevisionNumber)
@@ -345,11 +452,57 @@
                     </Badge>
                   {/if}
                 </div>
+                {#if supportsActivationModes}
+                  <div class="mt-3 w-full sm:max-w-56">
+                    <Select.Root
+                      type="single"
+                      value={activationMode(row)}
+                      disabled={!canEditBindings ||
+                        row.executionBlocked ||
+                        (!canChooseOnDemand && activationMode(row) === "always")}
+                      onValueChange={(value) => updateActivationMode(row, value)}
+                    >
+                      <Select.Trigger
+                        class="w-full"
+                        aria-label={m.skills_activation_mode_label({ name: rowName(row) })}
+                        aria-describedby={`${runtimeStatusId} ${runtimeHintId}`}
+                      >
+                        <span data-slot="select-value">
+                          {activationModeLabel(activationMode(row))}
+                        </span>
+                      </Select.Trigger>
+                      <Select.Content>
+                        <Select.Group>
+                          <Select.Item value="always" label={activationModeLabel("always")}>
+                            <span class="flex flex-col gap-0.5">
+                              <span>{activationModeLabel("always")}</span>
+                              <span class="text-muted-foreground text-xs font-normal">
+                                {m.skills_activation_mode_always_description()}
+                              </span>
+                            </span>
+                          </Select.Item>
+                          <Select.Item
+                            value="on_demand"
+                            label={activationModeLabel("on_demand")}
+                            disabled={!canChooseOnDemand}
+                          >
+                            <span class="flex flex-col gap-0.5">
+                              <span>{activationModeLabel("on_demand")}</span>
+                              <span class="text-muted-foreground text-xs font-normal">
+                                {m.skills_activation_mode_on_demand_description()}
+                              </span>
+                            </span>
+                          </Select.Item>
+                        </Select.Group>
+                      </Select.Content>
+                    </Select.Root>
+                  </div>
+                {/if}
               </div>
             </div>
 
             <div class="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
-              {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && row.isActive}
+              {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && row.isActive && !row.executionBlocked}
                 <Button
                   type="button"
                   variant="outline"

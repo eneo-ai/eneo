@@ -10,6 +10,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
 )
+from eneo.skills.domain.skill import SkillRuntimeResolution
 
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
@@ -26,7 +27,6 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.prompt_library.domain.prompt_library_repo import PromptLibraryRepo
     from eneo.skills.application.skill_service import SkillService
-    from eneo.skills.domain.skill import ResolvedSkillBinding
     from eneo.users.user import UserInDB
 
 
@@ -117,17 +117,17 @@ class EffectiveConfigService:
             )
             return entry.text if entry is not None else None
 
-        async def _load_governance_skills() -> "list[ResolvedSkillBinding]":
+        async def _load_governance_skills() -> SkillRuntimeResolution:
             if policy.id is None:
-                return []
-            return await self.skill_service.list_governance_bindings_for_runtime(
+                return SkillRuntimeResolution(eligible=(), blocked=())
+            return await self.skill_service.resolve_governance_bindings_for_runtime(
                 policy_id=policy.id
             )
 
         tenant_models = await _load_models()
         tenant_mcp_servers = await _load_mcp_servers()
         library_prompt_text = await _load_prompt_text()
-        governance_skill_bindings = await _load_governance_skills()
+        governance_skill_resolution = await _load_governance_skills()
 
         return resolve(
             assistant=assistant,
@@ -136,5 +136,5 @@ class EffectiveConfigService:
             tenant_completion_models=tenant_models,
             tenant_mcp_servers=tenant_mcp_servers,
             library_prompt_text=library_prompt_text,
-            governance_skill_bindings=tuple(governance_skill_bindings),
+            governance_skill_resolution=governance_skill_resolution,
         )

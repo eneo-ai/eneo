@@ -61,6 +61,7 @@ function updatePendingSkill(): OrganizationSkillPublic {
     published_revision_number: 1,
     first_published_at: "2026-07-19T09:00:00Z",
     publication_state: "update_pending",
+    execution_blocked: false,
     current_revision: currentRevision
   };
 }
@@ -76,6 +77,7 @@ function publishedSkill(): PublishedSkillPublic {
     description: publishedRevision.description,
     content_digest: publishedRevision.content_digest,
     first_published_at: "2026-07-19T09:00:00Z",
+    execution_blocked: false,
     revision: publishedRevision
   };
 }

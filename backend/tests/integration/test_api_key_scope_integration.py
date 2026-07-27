@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import UploadFile
 
+from eneo.server.dependencies.container import load_container_upload_admission
 from eneo.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
@@ -234,6 +235,7 @@ async def _create_user_owned_file(
     user,
 ) -> str:
     async with db_container(user=user) as container:
+        await load_container_upload_admission(container)
         file = await container.file_service().save_file(
             UploadFile(
                 file=BytesIO(b"owned content"),

@@ -1,5 +1,9 @@
+from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Union
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import UUID
 
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.main.models import ResourcePermission
@@ -7,11 +11,81 @@ from eneo.modules.module import Modules
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
-    from eneo.apps.apps.app import App
-    from eneo.assistants.assistant import Assistant
-    from eneo.group_chat.domain.entities.group_chat import GroupChat
     from eneo.spaces.space import Space
     from eneo.users.user import UserInDB
+
+
+class PublishableResource(Protocol):
+    @property
+    def id(self) -> UUID | None: ...
+
+    @property
+    def published(self) -> bool: ...
+
+
+@runtime_checkable
+class InsightResource(PublishableResource, Protocol):
+    @property
+    def insight_enabled(self) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SpaceRoleFact:
+    id: UUID
+    role: str
+
+
+@dataclass(frozen=True, slots=True)
+class SpaceAccessFacts:
+    id: UUID | None
+    user_id: UUID | None
+    tenant_space_id: UUID | None
+    members: Mapping[UUID, SpaceRoleFact]
+    group_members: Mapping[UUID, SpaceRoleFact]
+    default_assistant_id: UUID | None
+    assistant_ids: frozenset[UUID]
+    app_ids: frozenset[UUID]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "members",
+            MappingProxyType(dict(self.members)),
+        )
+        object.__setattr__(
+            self,
+            "group_members",
+            MappingProxyType(dict(self.group_members)),
+        )
+
+    @classmethod
+    def from_space(cls, space: "Space") -> "SpaceAccessFacts":
+        return cls(
+            id=space.id,
+            user_id=space.user_id,
+            tenant_space_id=space.tenant_space_id,
+            members={
+                member.id: SpaceRoleFact(id=member.id, role=member.role)
+                for member in space.members.values()
+            },
+            group_members={
+                member.id: SpaceRoleFact(id=member.id, role=member.role)
+                for member in space.group_members.values()
+            },
+            default_assistant_id=(
+                space.default_assistant.id
+                if space.default_assistant is not None
+                else None
+            ),
+            assistant_ids=frozenset(assistant.id for assistant in space.assistants),
+            app_ids=frozenset(app.id for app in space.apps if app.id is not None),
+        )
+
+    def is_personal(self) -> bool:
+        return self.user_id is not None
+
+    def is_organization(self) -> bool:
+        return self.user_id is None and self.tenant_space_id is None
 
 
 class SpaceAction(str, Enum):
@@ -418,7 +492,7 @@ class SpaceActor:
     def __init__(
         self,
         user: "UserInDB",
-        space: "Space",
+        space: SpaceAccessFacts,
         shared_space_permissions: AccessControlList = SHARED_SPACE_PERMISSIONS,
         personal_space_permissions: AccessControlList = PERSONAL_SPACE_PERMISSIONS,
         org_space_permissions: AccessControlList = ORG_SPACE_PERMISSIONS,
@@ -500,11 +574,11 @@ class SpaceActor:
             if key.scope_id != self.space.id:
                 return None
         elif scope_type in ("assistant", "app"):
-            resource_ids: set[object] = set()
-            if scope_type == "assistant":
-                resource_ids = {a.id for a in (self.space.assistants or [])}
-            elif scope_type == "app":
-                resource_ids = {a.id for a in (self.space.apps or [])}
+            resource_ids = (
+                self.space.assistant_ids
+                if scope_type == "assistant"
+                else self.space.app_ids
+            )
             if key.scope_id not in resource_ids:
                 return None
         else:
@@ -533,10 +607,12 @@ class SpaceActor:
             return None
 
         highest = None
-        for group_member in self.space.group_members.values():
-            if group_member.id in user_group_ids:
-                group_role = SpaceRole(group_member.role)
-                highest = self._get_highest_role(highest, group_role)
+        for group_id in user_group_ids:
+            group_member = self.space.group_members.get(group_id)
+            if group_member is None:
+                continue
+            group_role = SpaceRole(group_member.role)
+            highest = self._get_highest_role(highest, group_role)
 
         return highest
 
@@ -619,7 +695,7 @@ class SpaceActor:
         self,
         action: SpaceAction,
         resource_type: SpaceResourceType,
-        resource: Optional[Union["Assistant", "GroupChat", "App"]] = None,
+        resource: PublishableResource | None = None,
     ):
         role = self._get_role()
         permissions = self._get_permissions(role=role)
@@ -669,7 +745,9 @@ class SpaceActor:
                 return False
 
         if resource_type in INSIGHT_RESOURCES and action == SpaceAction.INSIGHT_VIEW:
-            if resource is not None and not resource.insight_enabled:  # type: ignore[attr-defined]
+            if resource is not None and not isinstance(resource, InsightResource):
+                return False
+            if resource is not None and not resource.insight_enabled:
                 return False
 
         allowed_actions = permissions.get(resource_type, set())
@@ -747,7 +825,7 @@ class SpaceActor:
             resource_type=SpaceResourceType.ASSISTANT,
         )
 
-    def can_read_assistant(self, assistant: "Assistant"):
+    def can_read_assistant(self, assistant: PublishableResource):
         return self.can_perform_action(
             action=SpaceAction.READ,
             resource_type=SpaceResourceType.ASSISTANT,
@@ -805,7 +883,7 @@ class SpaceActor:
             resource_type=SpaceResourceType.GROUP_CHAT,
         )
 
-    def can_read_group_chat(self, group_chat: "GroupChat"):
+    def can_read_group_chat(self, group_chat: PublishableResource):
         return self.can_perform_action(
             action=SpaceAction.READ,
             resource_type=SpaceResourceType.GROUP_CHAT,
@@ -832,7 +910,7 @@ class SpaceActor:
             resource_type=SpaceResourceType.APP,
         )
 
-    def can_read_app(self, app: "App"):
+    def can_read_app(self, app: PublishableResource):
         return self.can_perform_action(
             action=SpaceAction.READ,
             resource_type=SpaceResourceType.APP,
@@ -897,14 +975,14 @@ class SpaceActor:
             resource_type=SpaceResourceType.ASSISTANT,
         )
 
-    def can_access_insight_group_chat(self, group_chat: "GroupChat"):
+    def can_access_insight_group_chat(self, group_chat: InsightResource):
         return self.can_perform_action(
             action=SpaceAction.INSIGHT_VIEW,
             resource_type=SpaceResourceType.GROUP_CHAT,
             resource=group_chat,
         )
 
-    def can_access_insight_assistant(self, assistant: "Assistant"):
+    def can_access_insight_assistant(self, assistant: InsightResource):
         return self.can_perform_action(
             action=SpaceAction.INSIGHT_VIEW,
             resource_type=SpaceResourceType.ASSISTANT,
@@ -1053,15 +1131,15 @@ class SpaceActor:
         return permissions
 
     def get_assistant_permissions(
-        self, assistant: "Assistant"
+        self, assistant: InsightResource
     ) -> list[ResourcePermission]:
         permissions: list[ResourcePermission] = []
 
         # TODO: Getting permissions should be revisited after
         # Space is the aggregate root
         if (
-            self.space.default_assistant is not None
-            and assistant.id == self.space.default_assistant.id
+            self.space.default_assistant_id is not None
+            and assistant.id == self.space.default_assistant_id
         ):
             if self.can_read_default_assistant():
                 permissions.append(ResourcePermission.READ)
@@ -1080,7 +1158,7 @@ class SpaceActor:
         )
 
     def get_group_chat_permissions(
-        self, group_chat: "GroupChat"
+        self, group_chat: InsightResource
     ) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_group_chats(),

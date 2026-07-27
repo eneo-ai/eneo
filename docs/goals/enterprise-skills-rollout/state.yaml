@@ -4,7 +4,7 @@ goal:
   title: "Enterprise Skills rollout"
   slug: "enterprise-skills-rollout"
   kind: specific
-  tranche: "Close O1 and turn the remaining non-Marketplace Skills roadmap into an ordered implementation blueprint."
+  tranche: "Finish selective activation, close execution-block integrity, and deliver controlled organisation revision rollout before O2 and portability."
   status: active
 
 rules:
@@ -30,12 +30,12 @@ continuity:
   current_thread_id: "019f8f85-2ea6-7030-8c48-6d90143da5e0"
   previous_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
   rotation_count: 1
-  completed_write_tasks_in_thread: 4
+  completed_write_tasks_in_thread: 7
   handoff_note: null
   last_handoff_at: null
-  last_verified_revision: "c642da4953102718c4031c4004e3c6a83d956f4a"
+  last_verified_revision: "d528ec0af6d15a9343090e3e04303d74ce530d9b"
 
-active_task: T013
+active_task: T021
 
 tasks:
   - id: T001
@@ -528,43 +528,6 @@ tasks:
         - "The Skill and revision rows are deleted while body-free ID/revision/digest/position provenance remains readable."
         - "The fresh full-coverage review found no current in-scope findings on the merged head."
 
-  - id: T008
-    type: worker
-    assignee: Worker
-    status: queued
-    reasoning_hint: medium
-    objective: "Consolidate Skill lifecycle and revision conflicts into the existing typed API conflict contract."
-    constraints:
-      - "Do not broaden this into a generic error framework."
-      - "Preserve current HTTP semantics and dirty-editor recovery."
-    verify:
-      - "Generated conflict payloads"
-      - "Publish, revision, restore, and delete conflict behavior"
-      - "English and Swedish recovery copy"
-    stop_if:
-      - "The cleanup changes accepted lifecycle behavior."
-    receipt: null
-
-  - id: T009
-    type: worker
-    assignee: Worker
-    status: queued
-    reasoning_hint: medium
-    objective: "Add an explicit catalogue source filter when evidence shows builders need it at 200+ available Skills."
-    inputs:
-      - "O1 picker telemetry or usability evidence"
-      - "Tagged space and organisation catalogue source contract"
-    constraints:
-      - "Keep server-owned pagination and search."
-      - "Do not preload or advertise every organisation Skill to the model."
-      - "Do not implement without evidence that search plus source labels are insufficient."
-    verify:
-      - "Source-filter pagination and cursor behavior"
-      - "Keyboard, responsive, loading, empty, and error states"
-    stop_if:
-      - "There is no measured or observed need beyond the existing source labels and search."
-    receipt: null
-
   - id: T010
     type: pm
     assignee: PM
@@ -824,26 +787,34 @@ tasks:
   - id: T013
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement Task #553 slice 3: route every eager turn through one immutable SkillTurnPlan and persist typed, body-free activation evidence while behavior remains all-always."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
     inputs:
-      - "develop at e681171f691b70801b8059435906ff3f0d96f7d8 (merged PR #583)"
+      - "develop at cba9d0386c4b003a794c211c0e5a8ae6a45a410d (merged PR #584)"
       - "docs/enterprise-skills-roadmap.md slice 3 contract and evidence section"
       - "Issue #553 evidence section (Question.skill_provenance stays; one nullable skill_activation JSONB via a strict versioned model)"
       - "Existing completion context, streaming and non-streaming provider loops, placeholder/success/failure/stream-abort finalisation owners"
     allowed_files:
       - "backend/alembic/versions/"
+      - "backend/src/eneo/ai_models/"
       - "backend/src/eneo/assistants/"
       - "backend/src/eneo/completion_models/"
       - "backend/src/eneo/database/tables/"
+      - "backend/src/eneo/embedding_models/"
+      - "backend/src/eneo/governance_policy/"
+      - "backend/src/eneo/model_providers/"
       - "backend/src/eneo/questions/"
       - "backend/src/eneo/sessions/"
       - "backend/src/eneo/skills/"
+      - "backend/src/eneo/tenant_models/"
+      - "backend/src/eneo/tokens/"
+      - "backend/src/eneo/transcription_models/"
       - "backend/tests/"
       - "docs/enterprise-skills-roadmap.md"
       - "docs/goals/enterprise-skills-rollout/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
       - "frontend/packages/eneo-js/"
     constraints:
       - "Do not begin until a bounded plan with file:line evidence exists and the Codex plan gate has run."
@@ -851,7 +822,8 @@ tasks:
       - "Exact revision IDs and digests are retained; instruction bodies and prompts never enter analytics evidence."
       - "Reuse the canonical audit/history/debug owners; no event table."
       - "Do not add the activation tool, public on_demand writes, or UI controls."
-      - "Settle the roadmap's open retention decision with current product owners or stop and ask the user; do not invent a second retention system."
+      - "Question.skill_activation follows the owning Question row's existing assistant, Space, or tenant retention and deletion lifecycle; do not invent a second retention system."
+      - "Use one provider-qualified model-route owner for both provider dispatch and Skill token evidence; do not duplicate route construction."
     verify:
       - "Byte-equivalent all-always payloads through the frozen plan"
       - "Evidence finalisation across success, failure, timeout, cancellation, and client disconnect"
@@ -861,6 +833,527 @@ tasks:
     stop_if:
       - "The design requires the reserved activation function or provider-loop dispatch owned by slice 4."
       - "The retention decision cannot be settled without user product authority."
+    receipt:
+      result: done
+      summary: "Froze one immutable eager SkillTurnPlan before provider work, unified Assistant and Governance resolution around the canonical provider-qualified model route, persisted strict body-free per-Question activation evidence across success, failure, and stream abort, and deferred that hidden JSONB payload from normal conversation reads behind an explicit tenant-scoped evidence query. Squash-merged PR #590."
+      merged_pr: 590
+      source_head: "3b87880b820c0b591e31cb8f5ffc43fcddff1319"
+      merge_commit: "d2651deeeb94d93e367aac41bfab7d477f1cf871"
+      merged_at: "2026-07-24T13:46:05Z"
+      github_checks: "All 18 non-skipped checks passed on 3b87880b, including the 25m39s backend suite, Frontend E2E, schema drift, and coverage diff"
+      final_review: "Review 2 on 3b87880b confirmed F1 (hidden evidence on normal reads) resolved with no current findings: https://github.com/eneo-ai/eneo/pull/590#issuecomment-5070367442"
+      base_commit: "00aaa9dd2e296456bdadbb549aca14daf91e5754"
+      changed_files:
+        - "backend/alembic/versions/202607241100_add_question_skill_activation.py"
+        - "backend/src/eneo/assistants/"
+        - "backend/src/eneo/completion_models/"
+        - "backend/src/eneo/database/tables/questions_table.py"
+        - "backend/src/eneo/governance_policy/"
+        - "backend/src/eneo/model_providers/"
+        - "backend/src/eneo/questions/"
+        - "backend/src/eneo/sessions/"
+        - "backend/src/eneo/skills/"
+        - "backend/src/eneo/tokens/"
+        - "backend/tests/"
+        - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+        - "docs/enterprise-skills-roadmap.md"
+        - "docs/goals/enterprise-skills-rollout/"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      commands:
+        - cmd: "uv run pytest -q tests/unittests"
+          result: "pass: 2540 tests"
+        - cmd: "uv run pytest -q tests/unit"
+          result: "pass: 1290 tests"
+        - cmd: "uv run pytest -q tests/integration"
+          result: "pass: 1120 passed, 26 skipped, 52 deselected, 1 xfailed"
+        - cmd: "uv run pytest -q tests/unittests/questions tests/unittests/sessions/test_protocol.py tests/unittests/sessions/test_sessions_service.py tests/integration/services/test_conversation_stream_abort.py"
+          result: "pass: 26 tests after the deferred evidence fix"
+        - cmd: "uv run pyright; uv run alembic heads; python3 scripts/pre_push_check.py"
+          result: "pass: 0 type errors, one Alembic head 202607241100, pre-push check green"
+        - cmd: "Ruff check/format, migration round-trip, schema drift, docs formatting/build, Goal Maker checker, and git diff --check"
+          result: pass
+      review:
+        claude: ".codex/artifacts/claude-peer-loop-t013-frozen-skill-turn-evidence-hardening-iteration-2-20260724T110946Z.md; green, GREEN_LIGHT yes, score 9"
+        codex: ".codex/artifacts/codex-peer-loop-t013-frozen-skillturnplan-final-verification-iteration-4-20260724T112633Z.md; green, GREEN_LIGHT yes, score 9, no remaining P0-P3 findings"
+        github: "Review 1 F1 was verified and fixed; Review 2 found no current in-scope findings"
+
+  - id: T014
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Close the execution-block configuration and visibility gap without deleting bindings or changing established runtime behavior."
+    inputs:
+      - "Completed T013 receipt"
+      - "docs/enterprise-skills-roadmap.md execution-block contract"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md execution-block integrity contract"
+      - "docs/goals/enterprise-skills-rollout/notes/T014-mcp-rollout-blocking-plan.md"
+      - ".codex/artifacts/enterprise-skills-mcp-rollout-blocking-blueprint-20260724.md"
+      - "Current SkillService reference resolvers, execution-block owner, organisation projections, and SkillBindingsEditor"
+    allowed_files:
+      - "backend/src/eneo/skills/"
+      - "backend/src/eneo/settings/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Write behavior tests first at the common reference-resolution seam."
+      - "Reject newly added or revision-changed blocked references for Assistant, App, and Governance Policy."
+      - "Preserve an unchanged exact blocked pin during unrelated parent saves and reorder."
+      - "Keep established runtime semantics: Assistant and Personal Chat omit the Skill; Apps fail before provider work."
+      - "Derive block state in organisation and binding read projections; do not add a duplicate persisted boolean."
+      - "Keep publication and block as separate typed dimensions while making Blocked the dominant operational UI state."
+      - "Never expose the admin incident reason to non-admin users."
+      - "Use installed shadcn-svelte components only for new UI."
+    verify:
+      - "Assistant, App, and Governance new/change/retained/reorder/unblock behavior tests"
+      - "Tenant-safe organisation and binding projection tests"
+      - "Generic non-admin App error and incident-reason redaction tests"
+      - "Generated contract drift, Swedish/English component tests, keyboard and narrow-screen browser checks"
+      - "Backend Ruff, format, Pyright, focused suites, frontend checks, docs build, CI, and fresh /review"
+    stop_if:
+      - "The change requires deleting bindings, stopping an entire Assistant, or changing queued App provenance."
+      - "Block state cannot be derived without creating a second source of truth."
+    receipt:
+      result: done
+      summary: "Closed the execution-block configuration and visibility gap at the canonical reference-resolution seam, preserved retained exact pins, passed local and GitHub gates, and squash-merged PR #593."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/595"
+      merged_pr: 593
+      source_head: "6f228b47ae31e046fa79b8fd9e1efaab26447c65"
+      merge_commit: "5d54e242a0edd878ef0768c00ea35b63c827e50a"
+      merged_at: "2026-07-24T16:58:45Z"
+      github_checks: "All 19 non-skipped checks passed; one scope-dependent check was skipped."
+      final_review: "Review 3 confirmed F2-F3 resolved and found no current in-scope findings: https://github.com/eneo-ai/eneo/pull/593#issuecomment-5072051504"
+      changed_files:
+        - "backend/src/eneo/skills/"
+        - "backend/tests/"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+        - "frontend/apps/web/messages/"
+        - "frontend/apps/web/src/lib/features/skills/"
+        - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+        - "frontend/packages/eneo-js/"
+        - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+        - "docs/enterprise-skills-roadmap.md"
+        - "docs/goals/enterprise-skills-rollout/"
+      commands:
+        - cmd: "uv run pytest -n 2 -m 'not integration' tests/"
+          result: "pass: 2570 tests"
+        - cmd: "uv run pytest tests/integration/"
+          result: "pass: 1131 passed, 26 skipped, 52 deselected, 1 xfailed"
+        - cmd: "focused block-reference concurrency test repeated three times"
+          result: "pass: 9 behavior cases"
+        - cmd: "backend Ruff check/format, Pyright, frontend unit/check/lint/i18n, and hooks"
+          result: pass
+        - cmd: "required GitHub CI and final /review"
+          result: pass
+
+  - id: T015
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement Task #553 slice 4: the trusted internal on-demand activation effect through the existing completion loop."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/599"
+    inputs:
+      - "Completed T014 receipt"
+      - "docs/enterprise-skills-roadmap.md slice 4 contract"
+      - "Completed T013 frozen SkillTurnPlan and activation evidence"
+      - "Current streaming and non-streaming completion loops and external MCP dispatch"
+    allowed_files:
+      - "backend/src/eneo/assistants/assistant.py"
+      - "backend/src/eneo/assistants/assistant_service.py"
+      - "backend/src/eneo/completion_models/"
+      - "backend/src/eneo/questions/"
+      - "backend/src/eneo/sessions/"
+      - "backend/src/eneo/skills/"
+      - "backend/src/eneo/tokens/"
+      - "backend/tests/"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+      - "frontend/packages/eneo-js/"
+    constraints:
+      - "Use one reserved Eneo built-in identity and recognize it before external MCP dispatch."
+      - "Do not use loopback HTTP, FastMCP, a generic effect registry, a one-method port, or an external tool result as activation authority."
+      - "Map only plan-local activation keys back to the frozen exact revision; never advertise revision IDs or digests to the model."
+      - "Apply accepted Skills in saved binding order, rerun canonical token checks, and keep streaming/non-streaming parity."
+      - "Models without tool calling remain always_only; Apps remain eager."
+      - "Preempt sibling external calls in the same round with protocol-valid deferred results."
+    verify:
+      - "Should-trigger and should-not-trigger behavior with exact pinned activation"
+      - "Unknown/repeated/over-limit keys, hostile collisions, sibling calls, optional overflow, and external forgery"
+      - "Streaming/non-streaming, abort/error evidence, model fallback, block, and zero-Skill behavior"
+      - "Backend Ruff, format, Pyright, focused and relevant full suites, generated contracts, CI, and fresh /review"
+    stop_if:
+      - "The implementation requires PR #538's loopback transport, knowledge stack, or a generic plugin framework."
+      - "The provider adapter must import the Skills module or a mutable binding lookup occurs after plan construction."
+    receipt:
+      result: done
+      summary: "Added the trusted internal on-demand activation effect to the existing streaming and non-streaming completion loops, kept exact Skill content server-side, closed failure and forged-call evidence gaps from Review 1, and squash-merged PR #600."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/599"
+      merged_pr: 600
+      source_head: "bba9bbfd1cedca4030601f7a0418b18f2f05b796"
+      merge_commit: "2746098cc008f7e9b95eae775ae4501a11cdb5c3"
+      merged_at: "2026-07-24T22:56:51Z"
+      github_checks: "All required CI passed, including backend tests, frontend E2E, schema drift, route metadata, and coverage diff"
+      final_review: "Review 2 confirmed F1-F3 resolved and reported no current findings with complete changed-file coverage"
+      review_url: "https://github.com/eneo-ai/eneo/pull/600#issuecomment-5075095090"
+      verification:
+        - "backend: 3898 unit tests passed"
+        - "backend: focused T015 bundle passed 147 tests"
+        - "backend: stream-abort integration passed 6 tests"
+        - "backend: runtime robustness passed 19 cases"
+        - "backend: Ruff, format, Pyright, uv lock, and schema drift passed"
+        - "Claude and Codex final gates passed; GitHub CI completed successfully"
+      changed_files:
+        - "backend/src/eneo/ai_models/completion_models/completion_model.py"
+        - "backend/src/eneo/assistants/"
+        - "backend/src/eneo/completion_models/"
+        - "backend/src/eneo/help_assistants/"
+        - "backend/src/eneo/questions/"
+        - "backend/src/eneo/sessions/"
+        - "backend/src/eneo/skills/"
+        - "backend/src/eneo/tokens/"
+        - "backend/tests/"
+        - "docs/enterprise-skills-roadmap.md"
+        - "docs/goals/enterprise-skills-rollout/"
+      commands:
+        - cmd: "uv run pytest tests/unit tests/unittests -q"
+          result: "pass: 3898 tests"
+        - cmd: "focused T015 unit bundle"
+          result: "pass: 147 tests"
+        - cmd: "uv run pytest tests/integration/services/test_conversation_stream_abort.py -q"
+          result: "pass: 6 tests"
+        - cmd: "runtime robustness suite"
+          result: "pass: 19 cases"
+        - cmd: "Ruff format/check, source Pyright, uv lock --check, git diff --check, and pre-push schema drift"
+          result: pass
+        - cmd: "required GitHub CI and final /review"
+          result: pass
+      review:
+        claude: ".codex/artifacts/claude-peer-loop-t015-selective-skill-activation-pre-commit-gate-20260724T212107Z.md; green, score 8"
+        codex: ".codex/artifacts/codex-peer-loop-t015-trusted-on-demand-skill-activation-final-gate-20260724T202555Z.md; green, score 8"
+        github: "Review 1 findings F1-F3 were fixed; Review 2 found no current findings with complete changed-file coverage"
+
+  - id: T016
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement Task #553 slice 5A: Assistant binding-mode save contracts, admin runtime-policy UI, honest activation controls, and the shared fit/activatability owner."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/604"
+    inputs:
+      - "Completed T015 receipt"
+      - "docs/enterprise-skills-roadmap.md slice 5 contract"
+      - "Current typed Skill runtime policy and generated per-model projections"
+      - "Current Assistant parent-save owner and shared SkillBindingsEditor"
+      - ".codex/artifacts/claude-peer-loop-t016-assistant-selective-activation-implementation-ready-gate-20260726T105040Z.md"
+    allowed_files:
+      - "backend/src/eneo/assistants/"
+      - "backend/src/eneo/completion_models/"
+      - "backend/src/eneo/settings/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/admin/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Expose mode writes only after T015 runtime semantics are merged."
+      - "Distinguish an omitted mode from an explicit mode change; preserve retained modes."
+      - "Apps expose no mode and remain eager."
+      - "SkillTurnPlan.to_activation_runtime() remains the single selective-fit owner for save, read projection, ask, and tests; do not add a second evaluator."
+      - "Reuse stored admin policy; platform model-window and safety ceilings remain fixed invariants while tenant values remain admin-configurable."
+      - "Use existing admin and binding-editor surfaces with installed shadcn-svelte components; no new dashboard or form store."
+    verify:
+      - "Assistant mode saves, omitted/explicit distinction, model changes, policy precedence, and rollback"
+      - "Small and large context windows, canonical LiteLLM measurement, and unsupported model fallback"
+      - "Admin bounds/reset/audit and natural Swedish/English UI copy"
+      - "Keyboard, invalid-focus, loading/stale/estimated/error/narrow-screen states"
+      - "Generated contracts, backend/frontend suites, docs build, CI, and fresh /review"
+    stop_if:
+      - "Fit or activatability would be calculated in more than one owner."
+      - "The UI needs a second design system or Apps would gain on-demand behavior."
+    receipt:
+      result: done
+      summary: "Shipped Assistant Always/On demand controls and tenant-admin runtime-policy controls through the shared backend activatability owner, while preserving eager-only App and Personal Chat contracts."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/604"
+      merged_pr: 606
+      source_head: "17fc26fb377b2fe25a6cc5136be3d80835b3969b"
+      merge_commit: "a3652e59fbf057c1b7607cf6b5b8c9992c76d9be"
+      merged_at: "2026-07-26T20:33:16Z"
+      github_checks: "All required checks passed, including Frontend, Frontend E2E, schema drift, coverage diff, dependency review, and all Docker builds."
+      final_review: "Review 3 confirmed F1 resolved and found no current in-scope findings with complete changed-file coverage."
+      review_url: "https://github.com/eneo-ai/eneo/pull/606#issuecomment-5085238909"
+      changed_files:
+        - "frontend/apps/web/src/lib/features/skills/SkillBindingsEditor.svelte"
+        - "frontend/apps/web/src/lib/features/skills/SkillRuntimePolicySettings.svelte"
+        - "frontend/apps/web/src/lib/features/skills/skillBindings.ts"
+        - "frontend/apps/web/src/lib/features/skills/skillRuntimePolicy.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/assistants/[assistantId]/edit/"
+        - "frontend/packages/eneo-js/src/endpoints/settings.js"
+        - "frontend/packages/eneo-js/src/endpoints/skills.js"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      commands:
+        - "bunx vitest run <five affected web test files>"
+        - "node --test settings.test.js skills.test.js"
+        - "bun run --filter @eneo/web check"
+        - "bun run --filter @eneo/web lint"
+        - "NODE_OPTIONS='--max-old-space-size=8192' bun run --filter @eneo/web build"
+        - "bun run build (docs-site)"
+        - "pre-push hook"
+      verification:
+        - "frontend: 26 affected web tests passed"
+        - "SDK: 13 endpoint tests passed; compatibility follow-up passed 17 eneo-js tests"
+        - "Svelte check: 0 errors and 0 warnings"
+        - "frontend and SDK lint, web production build, docs build, schema drift, and pre-push hooks passed"
+        - "Impeccable detector found no changed-surface findings"
+        - "Claude pre-commit and post-fix verification passed, final score 8"
+
+  - id: T021
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Secure the existing Admin Insights message-logging endpoint with tenant-scoped, body-free authorization before any message or attachment hydration."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/608"
+    inputs:
+      - "Current /logging/{message_id}/ Admin Insights contract"
+      - "Canonical Permission.INSIGHTS and SpaceActor authorization"
+      - ".codex/artifacts/claude-peer-loop-secure-insights-message-logging-access-20260726T213646Z.md"
+    allowed_files:
+      - "backend/src/eneo/analysis/analysis_service.py"
+      - "backend/src/eneo/authentication/auth_dependencies.py"
+      - "backend/src/eneo/logging/logging_router.py"
+      - "backend/src/eneo/questions/questions_repo.py"
+      - "backend/tests/"
+      - "frontend/apps/docs-site/src/content/docs/api-key-management.mdx"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Preserve the public MessageLogging response and the authorized unlogged-message 400 behavior."
+      - "Require bearer-session authentication and canonical Insights permission; API keys and service principals remain denied."
+      - "Authorize a bounded tenant-scoped session-partner projection before Question, attachment, relationship, or logging-body hydration."
+      - "Use the existing SpaceActor insight authorization; personal Space, foreign tenant, disabled Insights, malformed sessions, and unauthorized resources fail with generic denial."
+      - "Do not create a diagnostics service, generic observability framework, UI change, migration, or MessageLogging payload change; regenerate the SDK schema for explicit 403 route metadata."
+    verify:
+      - "Authorized Assistant and group-chat Insights access preserves the existing response shape"
+      - "Foreign tenant, personal Space, disabled Insights, missing permission, malformed session, API key, and service principal fail closed"
+      - "Denied paths never hydrate Question bodies, files, relationships, or provider logging payloads"
+      - "Route metadata, focused unit/integration tests, Ruff, Pyright, schema drift, concise docs-site guidance, CI, Claude verification, and fresh /review"
+    stop_if:
+      - "The change requires a second Insights authorization owner or a public payload change."
+      - "Authorization cannot be proven before full message hydration."
+    receipt: null
+
+  - id: T020
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Add permission-gated, body-free Skill activation evidence to the existing chat debug panel without changing normal chat behavior."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/605"
+    inputs:
+      - "Completed T016 and T021 receipts"
+      - "Existing SHOW_CHAT_DEBUG_PANEL feature flag and generic chat debug panel"
+      - "Persisted body-free Question Skill activation evidence from T013-T015"
+      - "Current chat page and shadcn-svelte Sheet primitives"
+    constraints:
+      - "Normal chat requests never enable capture, extended logging, or provider-body hydration."
+      - "Keep /logging/{message_id}/ and MessageLogging owned by Admin Insights; T020 uses a separate, narrow conversation diagnostics endpoint."
+      - "Authorize the session partner and current Assistant access before reading one message's scalar Skill evidence."
+      - "Preserve generic model, token, MCP/tool, knowledge, and file diagnostics already available from the loaded conversation turn."
+      - "Never expose message bodies, Skill instructions, administrator incident reasons, credentials, hidden reasoning, tool arguments/results, or file contents."
+      - "Use installed shadcn-svelte components and the existing design system; no new UI dependency or parallel debug store."
+    verify:
+      - "Available, always-active, activated-on-demand, blocked, rejected, fallback, token-source, model, round, latency, ordering, and empty/error states"
+      - "Ordinary response non-disclosure plus flag, permission, API-key, tenant, session, partner, revoked-access, and group-chat authorization boundaries"
+      - "Generic model/token/MCP/tool/knowledge/file sections remain useful and body-free"
+      - "Migration upgrade/downgrade and generated OpenAPI/SDK contracts"
+      - "Keyboard, focus, stale-request, long-name, long-list, loading, and narrow-screen behavior"
+      - "Natural Swedish/English copy, docs build, backend/frontend suites, CI, Claude verification, and fresh /review"
+    stop_if:
+      - "The implementation would duplicate runtime activation decisions, persist a second evidence representation, or expose bodies or hidden reasoning."
+      - "The diagnostics route cannot remain narrow, scalar, and independent of Admin Insights logging."
+    receipt: null
+
+  - id: T019
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Complete Task #553 slice 5 for Personal Chat with Governance Policy mode saves and model-set fit validation through T016A's shared owner."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    inputs:
+      - "Completed T016 receipt"
+      - "docs/enterprise-skills-roadmap.md slice 5 contract"
+      - "Current Governance Policy parent-save owner and shared SkillBindingsEditor"
+      - "T016A shared fit/activatability owner"
+    allowed_files:
+      - "backend/src/eneo/assistants/"
+      - "backend/src/eneo/completion_models/"
+      - "backend/src/eneo/governance_policy/"
+      - "backend/src/eneo/settings/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/admin/personal-assistant/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Reuse T016's fit/activatability owner and canonical token counter; do not add a second calculator or tokenizer."
+      - "Evaluate the explicitly applicable Governance model set without scanning every tenant-available model by default."
+      - "Distinguish an omitted mode from an explicit mode change and preserve retained modes."
+      - "Apps expose no mode and remain eager."
+      - "Use the existing Personal Chat policy draft and shared editor; add no new form store."
+    verify:
+      - "Governance mode saves, omitted/explicit distinction, model-set changes, policy precedence, and rollback"
+      - "Provider-selected or unbounded model policies fail closed until their applicable set is explicit"
+      - "Natural Swedish/English UI copy, keyboard, invalid-focus, loading, error, and narrow-screen states"
+      - "Generated contracts, backend/frontend suites, docs build, CI, and fresh /review"
+    stop_if:
+      - "The implementation requires a second fit calculation, a tenant-wide model scan, or speculative caching/job infrastructure."
+      - "Apps would gain on-demand behavior."
+    receipt: null
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Consolidate Skill lifecycle and revision conflicts into the existing typed API conflict contract after Task #553 owners are stable."
+    inputs:
+      - "Completed T016 and T019 receipts"
+      - "Current publish, revision, restore, delete, and binding-mode conflict outcomes"
+    constraints:
+      - "Do not broaden this into a generic error framework."
+      - "Preserve current HTTP semantics and dirty-editor recovery."
+      - "Complete before controlled rollout adds new conflict outcomes."
+    verify:
+      - "Generated conflict payloads"
+      - "Publish, revision, restore, delete, and binding-mode conflict behavior"
+      - "English and Swedish recovery copy"
+    stop_if:
+      - "The cleanup changes accepted lifecycle behavior."
+    receipt: null
+
+  - id: T017
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Add tenant-admin controlled rollout of one published organisation Skill revision to existing Assistant and Personal Chat pins."
+    inputs:
+      - "Completed T008, T016, and T019 receipts"
+      - "docs/enterprise-skills-roadmap.md controlled rollout contract"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md R1 contract"
+      - "docs/goals/enterprise-skills-rollout/notes/T014-mcp-rollout-blocking-plan.md"
+      - ".codex/artifacts/enterprise-skills-mcp-rollout-blocking-blueprint-20260724.md"
+      - "Current organisation Skill detail/adoption projection, audit owner, and T016 shared fit function"
+    allowed_files:
+      - "backend/alembic/versions/"
+      - "backend/src/eneo/audit/"
+      - "backend/src/eneo/database/tables/"
+      - "backend/src/eneo/governance_policy/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "OrganizationSkillService owns tenant-admin authorization and lifecycle; SkillRepo owns target discovery, guarded pin writes, and concrete operation persistence."
+      - "Change only the expected old revision pin for existing same-Skill bindings; preserve order, activation mode, source identity, other bindings, and every parent field."
+      - "Never call parent-save commands, impersonate builders, attach missing bindings, or create a parallel full binding API."
+      - "Use T016's exact fit/activatability function; stop instead of duplicating compatibility calculations."
+      - "Keep one Skill-specific resumable operation; do not create a generic jobs or bulk-operation framework."
+      - "Do not store Skill bodies, prompts, tool results, credentials, or incident reasons in operation/audit data."
+      - "Use server pagination/search and installed shadcn-svelte; never render all targets."
+    verify:
+      - "Tenant-admin bearer access; scoped API keys and synthetic service principals denied"
+      - "Exact ready preview, provisional preparation counts, exclusions, idempotent retry, cancellation, and resumability"
+      - "Ten-thousand-target bounded memory, lock scope, stable cursor, and no N+1 target loading"
+      - "Concurrent edit skip; block, unpublish, publication change, missing target, context incompatibility, and partial failure"
+      - "Only exact pins change; operation/audit payloads remain body-free"
+      - "Migration round-trip, generated contracts, Swedish/English, a11y, responsive UI, CI, and fresh /review"
+    stop_if:
+      - "A second fit calculation, a generic jobs framework, or a parent-save impersonation path is required."
+      - "Exact preview cannot remain stable without copying parent or Skill content into operation rows."
+    receipt: null
+
+  - id: T018
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Extend controlled organisation Skill revision rollout to Apps as an explicit eager-only scope."
+    inputs:
+      - "Completed T017 receipt and production-like scale evidence"
+      - "Current App binding, context-fit, queue snapshot, and pre-provider execution-block owners"
+    allowed_files:
+      - "backend/src/eneo/apps/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Apps remain eager and gain no activation mode."
+      - "App scope is explicit, default off, and requires acknowledgement of new-run behavior."
+      - "Queued App snapshots and their exact provenance never change."
+      - "Reuse the T017 operation and T016 fit owner without widening pin-update authority."
+    verify:
+      - "App-specific preview compatibility and bounded scale"
+      - "New runs use the updated pin only after commit"
+      - "Queued snapshots keep their original revision"
+      - "Concurrent block, unpublication, context conflict, retry, and recovery fail closed"
+      - "Generated contracts, Swedish/English UI, CI, and fresh /review"
+    stop_if:
+      - "The extension requires rewriting queued runs or adding App on-demand activation."
+      - "App rollout cannot remain an explicit narrow scope on the existing operation."
+    receipt: null
+
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Add an explicit catalogue source filter only when evidence shows builders need it at 200+ available Skills."
+    inputs:
+      - "O1 picker telemetry or usability evidence"
+      - "Tagged space and organisation catalogue source contract"
+    constraints:
+      - "Keep server-owned pagination and search."
+      - "Do not preload or advertise every organisation Skill to the model."
+      - "Do not implement without evidence that search plus source labels are insufficient."
+    verify:
+      - "Source-filter pagination and cursor behavior"
+      - "Keyboard, responsive, loading, empty, and error states"
+    stop_if:
+      - "There is no measured or observed need beyond the existing source labels and search."
     receipt: null
 
   - id: T999
@@ -886,10 +1379,9 @@ checks:
   dirty_fingerprint: "main worktree contains unrelated user-owned changes; roadmap files are isolated"
   last_verification:
     result: pass
-    task: T006
+    task: T014
     commands:
-      - "GitHub: all 18 reported PR #577 checks reached a terminal non-failing state"
-      - "backend: 53 focused unit tests passed"
-      - "backend: 8 focused PostgreSQL execution-block integration tests passed"
-      - "backend: isolated migration test, Ruff, format, Pyright, and uv lock checks passed"
-      - "frontend: Prettier and docs-site production build passed"
+      - "GitHub: PR #593 merged after 19 successful checks, one scope skip, and Review 3 with no current findings"
+      - "backend: 2570 unit tests and 1131 integration tests passed"
+      - "backend: focused block-reference concurrency proof passed across three repeated runs"
+      - "backend/frontend: Ruff, format, Pyright, component tests, check, lint, i18n, and hooks passed"

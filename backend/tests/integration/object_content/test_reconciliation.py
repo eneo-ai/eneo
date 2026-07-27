@@ -29,16 +29,20 @@ from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import (
+    ContentAccessClass,
     ContentFailureCode,
+    ContentIntent,
     ContentState,
     ObjectContentBusyError,
     StorageKind,
     capture_content,
 )
 from eneo.object_content.content_repository import ObjectContentRepository
+from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
+    PublicationReservation,
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreIntegrityError,
@@ -217,6 +221,8 @@ async def _create_pending(
         descriptor.content_id = content.id
         descriptor.storage_kind = StorageKind.OBJECT_STORE.value
         descriptor.object_key = object_key
+        descriptor.verification_chunk_size_bytes = max(1, len(resolved_payload))
+        descriptor.verification_chunk_sha256 = digest
         session.add(descriptor)
         session.add(
             FileContentReferences(
@@ -995,6 +1001,227 @@ async def test_slow_abort_renews_only_the_lease_confirmed_for_failed_content(
             await running
         await real_object_store.store.abort_multipart(failed.object_key, upload_id)
         raw_client.close()
+
+
+@pytest.mark.asyncio
+async def test_active_publication_reservation_wins_orphan_delete_race(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    settings = real_object_store.settings
+    payload = b"verified-publication-race"
+    content_service = ObjectContentService(
+        settings,
+        object_content_database,
+        object_store_settings=settings,
+        object_store=real_object_store.store,
+    )
+    object_key: str | None = None
+
+    try:
+        async with capture_content(
+            _source(payload),
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            maximum_size_bytes=len(payload),
+            spool_memory_bytes=settings.spool_memory_bytes,
+            multipart_part_bytes=settings.multipart_part_bytes,
+        ) as captured:
+            async with content_service.upload_for_publication(
+                (captured,)
+            ) as publication:
+                object_key = publication.uploads[0].object_key
+                async with (
+                    object_content_database.session() as session,
+                    session.begin(),
+                ):
+                    candidate = await session.get(
+                        ObjectContentOrphanCandidates,
+                        object_key,
+                        with_for_update=True,
+                    )
+                    assert candidate is not None
+                    assert candidate.lease_owner == publication.lease_owner
+                    candidate.eligible_after = datetime.now(UTC) - timedelta(minutes=1)
+                    candidate.last_observed_at = datetime.now(UTC)
+                    candidate.completed_observations = 2
+
+                async with (
+                    object_content_database.session() as session,
+                    session.begin(),
+                ):
+                    claimed = await ObjectContentReconciliationRepository(
+                        session
+                    ).claim_orphan_deletes(
+                        lease_owner="competing-reconciler",
+                        lease_seconds=settings.reconciliation_lease_seconds,
+                        limit=1,
+                    )
+                    assert claimed == ()
+
+                async with (
+                    object_content_database.session() as session,
+                    session.begin(),
+                ):
+                    tenant_id = (await session.scalars(select(Tenants.id))).one()
+                    user_id = (await session.scalars(select(Users.id))).one()
+                    owner = Files(
+                        name=f"publication-race-{uuid4().hex}.bin",
+                        mimetype="application/octet-stream",
+                        file_type="text",
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        parent_file_id=None,
+                    )
+                    session.add(owner)
+                    await session.flush()
+                    (prepared,) = await content_service.adopt_verified_in_transaction(
+                        session,
+                        intents=(
+                            ContentIntent(
+                                tenant_id=tenant_id,
+                                created_by_user_id=user_id,
+                                access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                                idempotency_key=f"file:{owner.id}:original:0",
+                                producer_receipt=f"file:{owner.id}:original:0",
+                            ),
+                        ),
+                        contents=(captured,),
+                        publication=publication,
+                    )
+                    session.add(
+                        FileContentReferences(
+                            file_id=owner.id,
+                            content_id=prepared.id,
+                            variant="original",
+                            ordinal=0,
+                        )
+                    )
+
+        assert object_key is not None
+        async with object_content_database.session() as session, session.begin():
+            assert await session.get(ObjectContentOrphanCandidates, object_key) is None
+            descriptor = await session.scalar(
+                select(ObjectStoreObjects).where(
+                    ObjectStoreObjects.object_key == object_key
+                )
+            )
+            assert descriptor is not None
+            content = await session.get(ObjectContents, descriptor.content_id)
+            assert content is not None
+            assert content.state == ContentState.AVAILABLE.value
+            assert content.reference_count == 1
+    finally:
+        if object_key is not None:
+            await real_object_store.store.delete_and_confirm(object_key)
+
+
+@pytest.mark.asyncio
+async def test_publication_reservation_is_not_an_inventory_observation(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    settings = real_object_store.settings
+    reservation = PublicationReservation(
+        object_key=new_object_key(settings),
+        size_bytes=17,
+    )
+
+    async with object_content_database.session() as session, session.begin():
+        repository = ObjectContentReconciliationRepository(session)
+        cursor = await repository.object_inventory_cursor()
+        await repository.reserve_publication_objects(
+            (reservation,),
+            lease_owner="active-publisher",
+            lease_seconds=settings.reconciliation_lease_seconds,
+            orphan_grace_seconds=settings.orphan_grace_seconds,
+        )
+        completed = await repository.record_object_page(
+            cursor=cursor,
+            objects=(),
+            next_token=None,
+            orphan_grace_seconds=settings.orphan_grace_seconds,
+        )
+        candidate = await session.get(
+            ObjectContentOrphanCandidates,
+            reservation.object_key,
+        )
+
+        assert completed is True
+        assert candidate is not None
+        assert candidate.completed_observations == 0
+
+
+@pytest.mark.asyncio
+async def test_expired_publication_reservation_converges_through_orphan_inventory(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    settings = real_object_store.settings
+    object_key = new_object_key(settings)
+    payload = b"crashed-publication"
+    reservation = PublicationReservation(
+        object_key=object_key,
+        size_bytes=len(payload),
+    )
+
+    try:
+        async with object_content_database.session() as session, session.begin():
+            await ObjectContentReconciliationRepository(
+                session
+            ).reserve_publication_objects(
+                (reservation,),
+                lease_owner="crashed-publisher",
+                lease_seconds=settings.reconciliation_lease_seconds,
+                orphan_grace_seconds=settings.orphan_grace_seconds,
+            )
+
+        async with capture_content(
+            _source(payload),
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            maximum_size_bytes=len(payload),
+            spool_memory_bytes=settings.spool_memory_bytes,
+            multipart_part_bytes=settings.multipart_part_bytes,
+        ) as captured:
+            await real_object_store.store.upload(object_key, captured)
+
+        async with object_content_database.session() as session, session.begin():
+            now = await session.scalar(select(func.now()))
+            assert now is not None
+            candidate = await session.get(
+                ObjectContentOrphanCandidates,
+                object_key,
+                with_for_update=True,
+            )
+            assert candidate is not None
+            candidate.lease_until = now - timedelta(seconds=1)
+            candidate.eligible_after = now - timedelta(seconds=1)
+
+        reconciler = _reconciler(
+            settings,
+            real_object_store.store,
+            object_content_database,
+        )
+        first = await reconciler.run_once()
+        assert first.orphan_objects_deleted == 0
+        async with object_content_database.session() as session, session.begin():
+            candidate = await session.get(
+                ObjectContentOrphanCandidates,
+                object_key,
+            )
+            assert candidate is not None
+            assert candidate.completed_observations == 1
+
+        second = await reconciler.run_once()
+        assert second.orphan_objects_deleted == 1
+        with pytest.raises(ObjectStoreNotFoundError):
+            await real_object_store.store.head(object_key)
+    finally:
+        try:
+            await real_object_store.store.delete_and_confirm(object_key)
+        except ObjectStoreNotFoundError:
+            pass
 
 
 @pytest.mark.asyncio

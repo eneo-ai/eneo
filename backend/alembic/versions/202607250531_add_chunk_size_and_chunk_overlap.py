@@ -1,7 +1,7 @@
 """add chunk_size and chunk_overlap to knowledge source tables
 
 Revision ID: 202607250531
-Revises: 202607231700
+Revises: 202607261700
 Create Date: 2026-07-25 05:31:00.000000
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202607250531"
-down_revision: str | None = "202607231700"
+down_revision: str | None = "202607261700"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

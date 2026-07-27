@@ -194,6 +194,8 @@ async def test_inline_runtime_rejects_stranded_object_store_content(
                     content_id=content.id,
                     storage_kind=StorageKind.OBJECT_STORE.value,
                     object_key="v1/stranded-object-store-content",
+                    verification_chunk_size_bytes=1,
+                    verification_chunk_sha256=sha256(b"").digest(),
                 ),
                 FileContentReferences(
                     file_id=owner.id,
@@ -363,6 +365,8 @@ async def test_reachable_unpaired_store_blocks_readiness_and_all_reconciliation(
                         content_id=content.id,
                         storage_kind=StorageKind.OBJECT_STORE.value,
                         object_key=object_key,
+                        verification_chunk_size_bytes=len(payload),
+                        verification_chunk_sha256=digest,
                     ),
                     FileContentReferences(
                         file_id=owner.id,
@@ -468,6 +472,7 @@ async def test_concurrent_processes_cannot_pair_one_database_with_two_stores(
             declared_media_type="application/octet-stream",
             verified_media_type="application/octet-stream",
             part_sha256=(digest,),
+            part_size_bytes=len(payload),
         )
         async with object_content_database.session() as session, session.begin():
             tenant_id = (await session.scalars(select(Tenants.id))).one()

@@ -33,6 +33,9 @@ class Users(BasePublic):
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     quota_limit: Mapped[Optional[int]] = mapped_column(BigInteger)
     is_system_user: Mapped[bool] = mapped_column(server_default=false(), nullable=False)
+    is_platform_admin: Mapped[bool] = mapped_column(
+        server_default=false(), nullable=False
+    )
 
     tenant: Mapped[Tenants] = relationship()
     roles: Mapped[list[Roles]] = relationship(

@@ -20,6 +20,7 @@ from eneo.skills.domain.skill import (
 )
 from eneo.skills.presentation.skill_audit import audit_skill_created, skill_audit_extra
 from eneo.skills.presentation.skill_models import (
+    AssistantSkillConfigurationPublic,
     SkillActiveUpdateRequest,
     SkillBindingSummary,
     SkillCreateRequest,
@@ -390,11 +391,28 @@ async def list_assistant_skill_bindings(
     assistant_id: UUID,
     container: _ContainerWithUser,
 ) -> list[SkillBindingSummary]:
-    bindings = await container.skill_service().list_assistant_bindings(
+    bindings = await container.skill_service().list_assistant_binding_projections(
         space_id=space_id, assistant_id=assistant_id
     )
     assembler = container.skill_assembler()
     return [assembler.binding_to_summary(binding) for binding in bindings]
+
+
+@router.get(
+    "/{space_id}/assistants/{assistant_id}/skills/configuration/",
+    response_model=AssistantSkillConfigurationPublic,
+    responses=responses.get_responses([403, 404]),
+)
+async def get_assistant_skill_configuration(
+    space_id: UUID,
+    assistant_id: UUID,
+    container: _ContainerWithUser,
+) -> AssistantSkillConfigurationPublic:
+    configuration = await container.assistant_service().get_skill_configuration(
+        space_id=space_id,
+        assistant_id=assistant_id,
+    )
+    return container.skill_assembler().assistant_configuration_to_public(configuration)
 
 
 @router.get(
@@ -405,7 +423,7 @@ async def list_assistant_skill_bindings(
 async def list_app_skill_bindings(
     space_id: UUID, app_id: UUID, container: _ContainerWithUser
 ) -> list[SkillBindingSummary]:
-    bindings = await container.skill_service().list_app_bindings(
+    bindings = await container.skill_service().list_app_binding_projections(
         space_id=space_id, app_id=app_id
     )
     assembler = container.skill_assembler()

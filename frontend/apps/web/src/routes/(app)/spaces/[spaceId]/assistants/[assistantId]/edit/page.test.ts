@@ -8,11 +8,27 @@ const READ_SKILL_PERMISSION: ResourcePermission = "read";
 
 describe("Assistant edit loader", () => {
   test("loads Skill bindings for a reader of a non-default Assistant", async () => {
-    const bindings = [{ skill_id: "skill-1" }];
+    const configuration = {
+      bindings: [
+        {
+          skill_id: "skill-1",
+          skill_revision_id: "revision-1",
+          activation_mode: "on_demand"
+        }
+      ],
+      runtime: {
+        effective_model_id: "model-1",
+        effective_mode: "selective",
+        fallback_reason: null,
+        skill_context_tokens: 100,
+        skill_context_token_limit: 800,
+        token_count_source: "litellm"
+      }
+    };
     const skills = emptySkillBindingCatalogPage();
     const listSkills = vi.fn().mockResolvedValue(emptySkillCatalogPage());
     const listCatalogue = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
-    const listAssistantBindings = vi.fn().mockResolvedValue(bindings);
+    const getAssistantConfiguration = vi.fn().mockResolvedValue(configuration);
     const event = {
       depends: vi.fn(),
       params: { assistantId: "assistant-1" },
@@ -34,7 +50,7 @@ describe("Assistant edit loader", () => {
           skills: {
             list: listSkills,
             catalogue: { list: listCatalogue },
-            listAssistantBindings
+            getAssistantConfiguration
           }
         }
       })
@@ -42,11 +58,12 @@ describe("Assistant edit loader", () => {
 
     const result = await load(event as never);
 
-    expect(listAssistantBindings).toHaveBeenCalledWith({
+    expect(getAssistantConfiguration).toHaveBeenCalledWith({
       spaceId: "space-1",
       assistantId: "assistant-1"
     });
-    expect(result.skillBindings).toEqual(bindings);
+    expect(result.skillBindings).toEqual(configuration.bindings);
+    expect(result.skillRuntime).toEqual(configuration.runtime);
     expect(result.skills).toEqual(skills);
     expect(listSkills).toHaveBeenCalledWith({
       spaceId: "space-1",
@@ -58,7 +75,7 @@ describe("Assistant edit loader", () => {
 
   test("keeps direct Skills disabled for the personal default Assistant", async () => {
     const list = vi.fn();
-    const listAssistantBindings = vi.fn();
+    const getAssistantConfiguration = vi.fn();
     const event = {
       depends: vi.fn(),
       params: { assistantId: "default-assistant" },
@@ -77,7 +94,7 @@ describe("Assistant edit loader", () => {
           helpAssistants: {
             runs: { availability: vi.fn().mockResolvedValue(null) }
           },
-          skills: { list, listAssistantBindings }
+          skills: { list, getAssistantConfiguration }
         }
       })
     };
@@ -87,8 +104,9 @@ describe("Assistant edit loader", () => {
     expect(result.supportsDirectSkills).toBe(false);
     expect(result.skills).toEqual(emptySkillBindingCatalogPage());
     expect(result.skillBindings).toEqual([]);
+    expect(result.skillRuntime).toBeNull();
     expect(list).not.toHaveBeenCalled();
-    expect(listAssistantBindings).not.toHaveBeenCalled();
+    expect(getAssistantConfiguration).not.toHaveBeenCalled();
   });
 
   test("loads direct Skills for a shared default Assistant", async () => {
@@ -102,10 +120,19 @@ describe("Assistant edit loader", () => {
       items: localSkills.items.map((skill) => ({ ...skill, source: "space" as const })),
       count: 1
     };
-    const bindings = [{ skill_id: "skill-1" }];
+    const configuration = {
+      bindings: [
+        {
+          skill_id: "skill-1",
+          skill_revision_id: "revision-1",
+          activation_mode: "always"
+        }
+      ],
+      runtime: null
+    };
     const list = vi.fn().mockResolvedValue(localSkills);
     const listCatalogue = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
-    const listAssistantBindings = vi.fn().mockResolvedValue(bindings);
+    const getAssistantConfiguration = vi.fn().mockResolvedValue(configuration);
     const event = {
       depends: vi.fn(),
       params: { assistantId: "default-assistant" },
@@ -127,7 +154,7 @@ describe("Assistant edit loader", () => {
           skills: {
             list,
             catalogue: { list: listCatalogue },
-            listAssistantBindings
+            getAssistantConfiguration
           }
         }
       })
@@ -137,14 +164,15 @@ describe("Assistant edit loader", () => {
 
     expect(result.supportsDirectSkills).toBe(true);
     expect(result.skills).toEqual(skills);
-    expect(result.skillBindings).toEqual(bindings);
+    expect(result.skillBindings).toEqual(configuration.bindings);
+    expect(result.skillRuntime).toBeNull();
     expect(list).toHaveBeenCalledWith({
       spaceId: "shared-space",
       limit: SKILL_CATALOG_PAGE_SIZE,
       cursor: null,
       query: null
     });
-    expect(listAssistantBindings).toHaveBeenCalledWith({
+    expect(getAssistantConfiguration).toHaveBeenCalledWith({
       spaceId: "shared-space",
       assistantId: "default-assistant"
     });

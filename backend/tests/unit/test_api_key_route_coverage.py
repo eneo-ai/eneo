@@ -112,7 +112,7 @@ INTENTIONALLY_UNGUARDED = {
     "/integrations": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/jobs": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer authorization",
     "/analysis": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer role checks",
-    "/logging": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); router-level auth",
+    "/logging": "Tenant-scope guard plus session-only authentication",
     "/completion-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/embedding-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/transcription-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
@@ -576,6 +576,12 @@ class TestHighRiskExactRouteGuards:
             f"{label} should not require _api_key_permission_dep"
         )
 
+    def test_logging_details_requires_bearer_session(self):
+        route = _find_route_by_method_and_paths(
+            "GET", "/logging/{message_id}/", "/logging/{message_id}"
+        )
+        assert _route_has_dep_name(route, "require_session_auth")
+
     def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
         post_route = _find_route_by_method_and_paths("POST", "/files/", "/files")
@@ -1015,7 +1021,8 @@ class TestScopeCheckPathParamSafety:
             "DELETE",
             "/files/{id}/",
         ): "Files are owner-scoped: file_service.delete_file() calls "
-        "repo.delete_by_owner(id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
+        "repo.delete_by_owner_for_lifecycle("
+        "id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
         "The file delete scope guard "
         "blocks service keys because files are user-owned.",
         (
@@ -1023,6 +1030,11 @@ class TestScopeCheckPathParamSafety:
             "/files/{id}/signed-url/",
         ): "file_service.get_file_infos() performs the access check against user context "
         "before a signed URL is minted.",
+        (
+            "POST",
+            "/files/{id}/original/signed-url/",
+        ): "file_service.ensure_original_available() performs the owner and exact-original "
+        "checks before a signed URL is minted.",
         (
             "POST",
             "/info-blobs/{id}/",
@@ -1137,6 +1149,7 @@ class TestReadOverrideSnapshot:
             "run_service",
         ],
         "FILES_READ_OVERRIDES": [
+            "generate_original_signed_url",
             "generate_signed_url",
         ],
         "KNOWLEDGE_READ_OVERRIDES": [

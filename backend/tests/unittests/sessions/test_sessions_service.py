@@ -9,7 +9,11 @@ from eneo.assistants.api.assistant_models import AssistantSparse
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.session_service import SessionService
-from eneo.skills.domain.skill import SkillExecutionReference
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+    SkillTurnEffectiveMode,
+)
 from tests.fixtures import TEST_USER, TEST_UUID
 
 TEST_ASSISTANT = AssistantSparse(
@@ -155,6 +159,17 @@ async def test_question_placeholder_persists_selected_skill_revision(
         content_digest="a" * 64,
         position=0,
     )
+    activation = SkillActivationEvidenceV1(
+        effective_mode=SkillTurnEffectiveMode.EAGER,
+        available=(),
+        blocked=(),
+        initially_active=(),
+        selected_model_id=uuid4(),
+        selected_model_route="gpt-4o",
+        skill_context_tokens=0,
+        skill_context_token_limit=12_800,
+        token_count_source="litellm",
+    )
     question_id = uuid4()
     fresh_session = MagicMock()
     fresh_question_repo = AsyncMock()
@@ -190,9 +205,11 @@ async def test_question_placeholder_persists_selected_skill_revision(
         question="Question",
         session=session,
         skill_provenance=(reference,),
+        skill_activation=activation,
     )
 
     question_repo_factory.assert_called_once_with(fresh_session)
     question_add = fresh_question_repo.add.await_args.args[0]
     assert question_add.skill_provenance == [reference]
+    assert question_add.skill_activation == activation
     assert result == question_id

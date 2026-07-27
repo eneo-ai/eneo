@@ -26,10 +26,6 @@ env:
   POSTGRES_DB: placeholder
   REDIS_HOST: localhost
   REDIS_PORT: 6379
-  UPLOAD_FILE_TO_SESSION_MAX_SIZE: 10485760
-  UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: 10485760
-  UPLOAD_MAX_FILE_SIZE: 10485760
-  TRANSCRIPTION_MAX_FILE_SIZE: 10485760
   MAX_IN_QUESTION: 1
   API_PREFIX: /api/v1
   API_KEY_LENGTH: 64
@@ -410,8 +406,6 @@ jobs:
         env:
           SVELTE_KIT_OUT_DIR: .svelte-kit-e2e
           NODE_OPTIONS: --max-old-space-size=6144
-          ENEO_BACKEND_URL: http://localhost:8124
-          PUBLIC_ENEO_BACKEND_URL: http://localhost:8124
         run: bun run build
 
       - name: Run E2E tests
@@ -419,16 +413,29 @@ jobs:
         env:
           # The workflow owns the stack lifecycle, so Playwright must not manage it.
           E2E_MANAGE_STACK: "0"
-          E2E_BACKEND_URL: http://localhost:8124
+          # Keep SSR and direct API helpers on one deterministic loopback path.
+          E2E_BACKEND_URL: http://127.0.0.1:8124
           E2E_JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789 # matches the e2e-backend JWT_SECRET
         run: bun run test:e2e
+
+      - name: Capture E2E stack diagnostics
+        if: ${{ failure() }}
+        run: |
+          mkdir -p e2e-artifacts
+          docker compose -f docker-compose.e2e.ci.yml ps --all \
+            > e2e-artifacts/compose-ps.txt
+          docker compose -f docker-compose.e2e.ci.yml logs \
+            --no-color --timestamps \
+            > e2e-artifacts/compose.log
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: frontend/apps/web/playwright-report
+          path: |
+            frontend/apps/web/playwright-report
+            e2e-artifacts
           retention-days: 7
           if-no-files-found: ignore
 

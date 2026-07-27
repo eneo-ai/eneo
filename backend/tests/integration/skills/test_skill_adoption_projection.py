@@ -17,6 +17,7 @@ from eneo.skills.domain.skill import (
     SkillAdoptionCursor,
     SkillAdoptionDrift,
     SkillAdoptionResourceKind,
+    SkillBindingIntent,
     SkillBindingReference,
 )
 
@@ -174,7 +175,7 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
         await skill_service.replace_assistant_bindings(
             space_id=shared_space.id,
             assistant_id=assistant_behind.id,
-            references=[revision_one_reference],
+            intents=[SkillBindingIntent(reference=revision_one_reference)],
         )
         await skill_service.replace_app_bindings(
             space_id=shared_space.id,
@@ -218,10 +219,12 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
         await skill_service.replace_assistant_bindings(
             space_id=second_space.id,
             assistant_id=assistant_current.id,
-            references=[
-                SkillBindingReference(
-                    skill_id=skill.id,
-                    skill_revision_id=revision_two.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill.id,
+                        skill_revision_id=revision_two.id,
+                    )
                 )
             ],
         )
@@ -682,10 +685,12 @@ async def test_adoption_projection_uses_one_consistent_statement_snapshot(
         await setup_container.skill_service().replace_assistant_bindings(
             space_id=shared_space.id,
             assistant_id=assistant.id,
-            references=[
-                SkillBindingReference(
-                    skill_id=skill.id,
-                    skill_revision_id=revision.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill.id,
+                        skill_revision_id=revision.id,
+                    )
                 )
             ],
         )

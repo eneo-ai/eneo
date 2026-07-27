@@ -77,6 +77,8 @@ def _descriptor(content_id: UUID, key_suffix: str) -> ObjectStoreObjects:
     descriptor.content_id = content_id
     descriptor.storage_kind = StorageKind.OBJECT_STORE.value
     descriptor.object_key = f"v1/a2d539affef042aaa7f814376947be2c/{key_suffix}"
+    descriptor.verification_chunk_size_bytes = 1
+    descriptor.verification_chunk_sha256 = sha256(key_suffix.encode()).digest()
     return descriptor
 
 
@@ -88,7 +90,8 @@ def _captured_content(payload: bytes = b"x") -> CapturedContent:
         size_bytes=len(payload),
         declared_media_type="text/plain",
         verified_media_type="text/plain",
-        part_sha256=(digest,) if payload else (),
+        part_sha256=(digest,),
+        part_size_bytes=max(1, len(payload)),
     )
 
 
@@ -125,6 +128,81 @@ async def test_pending_content_accepts_its_first_reference_in_creation_transacti
         await session.flush()
         await session.refresh(initial_content)
         assert initial_content.reference_count == 1
+
+
+@pytest.mark.asyncio
+async def test_verified_object_content_accepts_first_reference_at_publication(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    tenant_id, user_id = await _owner_ids(object_content_database)
+    content = _captured_content(b"verified-before-publication")
+    intent = ContentIntent(
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        idempotency_key="verified-before-publication",
+        producer_receipt="file:verified-before-publication:original:0",
+    )
+
+    async with object_content_database.session() as session, session.begin():
+        owner = _file(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="verified-before-publication.txt",
+        )
+        session.add(owner)
+        await session.flush()
+        prepared = await ObjectContentRepository(session).prepare_verified_object_store(
+            intent=intent,
+            content=content,
+            object_key=f"v1/a2d539affef042aaa7f814376947be2c/{uuid4().hex}",
+            request_fingerprint=content_request_fingerprint(
+                intent,
+                content,
+                StorageKind.OBJECT_STORE,
+            ),
+        )
+        session.add(
+            FileContentReferences(
+                file_id=owner.id,
+                content_id=prepared.id,
+                variant="original",
+                ordinal=0,
+            )
+        )
+        await session.flush()
+        row = await session.get(ObjectContents, prepared.id)
+        assert row is not None
+        assert row.state == "available"
+        assert row.reference_count == 1
+
+
+@pytest.mark.asyncio
+async def test_verified_object_content_without_product_owner_cannot_commit(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    tenant_id, user_id = await _owner_ids(object_content_database)
+    content = _captured_content(b"ownerless-verified-object")
+    intent = ContentIntent(
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        idempotency_key="ownerless-verified-object",
+        producer_receipt="file:ownerless-verified-object:original:0",
+    )
+
+    with pytest.raises(DBAPIError, match="requires an initial owner"):
+        async with object_content_database.session() as session, session.begin():
+            await ObjectContentRepository(session).prepare_verified_object_store(
+                intent=intent,
+                content=content,
+                object_key=f"v1/a2d539affef042aaa7f814376947be2c/{uuid4().hex}",
+                request_fingerprint=content_request_fingerprint(
+                    intent,
+                    content,
+                    StorageKind.OBJECT_STORE,
+                ),
+            )
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 from uuid import UUID
 
@@ -64,6 +65,7 @@ from eneo.database.tables.spaces_table import (
     SpacesUsers,
 )
 from eneo.database.tables.user_groups_table import UserGroups
+from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
@@ -77,7 +79,9 @@ from eneo.main.exceptions import (
 from eneo.main.logging import get_logger
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from eneo.spaces.space import Space
+from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
+from eneo.user_groups.user_group import UserGroupState
 
 logger = get_logger(__name__)
 
@@ -823,6 +827,7 @@ class SpaceRepository:
         space_id: UUID,
         assistant_id: UUID,
         mcp_servers: list["MCPServer"],
+        assistant_tool_overrides: dict[UUID, bool] | None = None,
     ) -> list["MCPServer"]:
         """Load tools for assistant's MCP servers and apply space + assistant-level overrides.
 
@@ -881,20 +886,18 @@ class SpaceRepository:
             for override in space_overrides_db
         }
 
-        # Load assistant-level tool overrides
-        assistant_overrides_query = sa.select(AssistantMCPServerTools).where(
-            AssistantMCPServerTools.assistant_id == assistant_id
-        )
-        assistant_overrides_result = await self.session.execute(
-            assistant_overrides_query
-        )
-        assistant_overrides_db = assistant_overrides_result.scalars().all()
-
-        # Create map: tool_id -> is_enabled (assistant level)
-        assistant_tool_overrides = {
-            override.mcp_server_tool_id: override.is_enabled
-            for override in assistant_overrides_db
-        }
+        if assistant_tool_overrides is None:
+            assistant_overrides_query = sa.select(AssistantMCPServerTools).where(
+                AssistantMCPServerTools.assistant_id == assistant_id
+            )
+            assistant_overrides_result = await self.session.execute(
+                assistant_overrides_query
+            )
+            assistant_overrides_db = assistant_overrides_result.scalars().all()
+            assistant_tool_overrides = {
+                override.mcp_server_tool_id: override.is_enabled
+                for override in assistant_overrides_db
+            }
 
         # Group tools by server
         from collections import defaultdict
@@ -951,6 +954,28 @@ class SpaceRepository:
             server.tools = tools_by_server.get(server.id, [])
 
         return mcp_servers
+
+    async def project_assistant_mcp_servers(
+        self,
+        *,
+        space_id: UUID,
+        assistant_id: UUID,
+        mcp_servers: list["MCPServer"],
+        tool_settings: list[tuple[UUID, bool]] | None = None,
+    ) -> list["MCPServer"]:
+        """Project staged assistant tool settings through the canonical policy.
+
+        Copies the read-model entities because tool projection is intentionally
+        mutable and save-time validation must not alter the loaded Space.
+        """
+        return await self._load_assistant_mcp_server_tools_with_overrides(
+            space_id=space_id,
+            assistant_id=assistant_id,
+            mcp_servers=deepcopy(mcp_servers),
+            assistant_tool_overrides=(
+                dict(tool_settings) if tool_settings is not None else None
+            ),
+        )
 
     async def _get_assistants(self, space_id: UUID) -> Sequence[Assistants]:
         stmt = (
@@ -1443,6 +1468,85 @@ class SpaceRepository:
             raise NotFoundException()
 
         return space
+
+    async def get_applications_projection(
+        self, id: UUID
+    ) -> SpaceApplicationsProjection:
+        space_in_db = await self.session.scalar(
+            sa.select(Spaces).where(Spaces.id == id)
+        )
+        if space_in_db is None:
+            raise NotFoundException()
+
+        member_roles = dict(
+            (
+                await self.session.execute(
+                    sa.select(SpacesUsers.user_id, SpacesUsers.role)
+                    .join(Users, Users.id == SpacesUsers.user_id)
+                    .where(SpacesUsers.space_id == id)
+                    .where(Users.deleted_at.is_(None))
+                )
+            )
+            .tuples()
+            .all()
+        )
+        group_member_roles = dict(
+            (
+                await self.session.execute(
+                    sa.select(
+                        SpacesUserGroups.user_group_id,
+                        SpacesUserGroups.role,
+                    )
+                    .join(
+                        UserGroups,
+                        UserGroups.id == SpacesUserGroups.user_group_id,
+                    )
+                    .where(SpacesUserGroups.space_id == id)
+                    .where(
+                        sa.or_(
+                            UserGroups.state.is_(None),
+                            UserGroups.state != UserGroupState.DELETED.value,
+                        )
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+        assistants = (
+            await self.session.scalars(
+                sa.select(Assistants)
+                .where(Assistants.space_id == id)
+                .order_by(Assistants.created_at)
+            )
+        ).all()
+        group_chats = (
+            await self.session.scalars(
+                sa.select(GroupChatsTable).where(GroupChatsTable.space_id == id)
+            )
+        ).all()
+        apps = (
+            await self.session.scalars(
+                sa.select(Apps).where(Apps.space_id == id).order_by(Apps.created_at)
+            )
+        ).all()
+        services = (
+            await self.session.scalars(
+                sa.select(Services).where(Services.space_id == id)
+            )
+        ).all()
+        completion_models = await self.completion_model_repo.all(with_deprecated=True)
+
+        return self.factory.create_applications_projection(
+            space_in_db=space_in_db,
+            member_roles=member_roles,
+            group_member_roles=group_member_roles,
+            assistants_in_db=assistants,
+            group_chats_in_db=group_chats,
+            apps_in_db=apps,
+            services_in_db=services,
+            completion_models=completion_models,
+        )
 
     async def update(
         self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] | None = None

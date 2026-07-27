@@ -44,6 +44,7 @@ function makeSummary(skill: SkillSparse, revision: number, position: number): Sk
     is_active: skill.is_active,
     attachable_revision_id: skill.current_revision_id,
     attachable_revision_number: skill.current_revision_number,
+    execution_blocked: false,
     source: "space"
   };
 }
@@ -106,6 +107,140 @@ function makePublicSkill(id: string, displayName: string): SkillPublic {
 }
 
 describe("SkillBindingsEditor", () => {
+  test("shows Assistant activation modes and updates the selected draft mode", async () => {
+    const skill = makeSkill("activation");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "on_demand"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      supportsActivationModes: true,
+      skillRuntime: null,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    const activation = page.getByRole("button", {
+      name: m.skills_activation_mode_label({ name: skill.display_name })
+    });
+    await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
+
+    await activation.click();
+    await page.getByRole("option", { name: m.skills_activation_mode_always() }).click();
+    await expect.element(activation).toHaveTextContent(m.skills_activation_mode_always());
+  });
+
+  test("allows on-demand activation when the saved runtime supports it", async () => {
+    const skill = makeSkill("selective-runtime");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "always"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      supportsActivationModes: true,
+      skillRuntime: {
+        effective_model_id: "model-1",
+        effective_mode: "always_only",
+        fallback_reason: null,
+        skill_context_tokens: 80,
+        skill_context_token_limit: 800,
+        token_count_source: "litellm"
+      },
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    const activation = page.getByRole("button", {
+      name: m.skills_activation_mode_label({ name: skill.display_name })
+    });
+    await activation.click();
+    await page.getByRole("option", { name: m.skills_activation_mode_on_demand() }).click();
+
+    await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
+  });
+
+  test("keeps activation controls off non-Assistant Skill surfaces", async () => {
+    const skill = makeSkill("app");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [{ skill_id: skill.id, skill_revision_id: summary.skill_revision_id }],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_activation_mode_label({ name: skill.display_name })
+        })
+      )
+      .not.toBeInTheDocument();
+  });
+
+  test("prevents a new on-demand mode when the saved runtime cannot activate it", async () => {
+    const skill = makeSkill("disabled-runtime");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "always"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      supportsActivationModes: true,
+      skillRuntime: {
+        effective_model_id: "model-1",
+        effective_mode: "always_only",
+        fallback_reason: "selective_activation_disabled",
+        skill_context_tokens: 80,
+        skill_context_token_limit: 800,
+        token_count_source: "litellm"
+      },
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_activation_mode_label({ name: skill.display_name })
+        })
+      )
+      .toBeDisabled();
+    await expect
+      .element(page.getByText(m.skills_activation_runtime_disabled(), { exact: true }))
+      .toBeVisible();
+  });
+
   test("searches and loads more from the server-owned catalog", async () => {
     const first = makeSkill("first");
     const second = makeSkill("second");
@@ -165,6 +300,7 @@ describe("SkillBindingsEditor", () => {
       description: "Approved organisation instructions.",
       content_digest: "published-digest",
       first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: false,
       source: "organization"
     };
     const onGetSkillPreview = vi.fn(getPreview);
@@ -454,6 +590,98 @@ describe("SkillBindingsEditor", () => {
       )
       .toBeVisible();
     await expect.element(page.getByRole("listitem").first()).toHaveFocus();
+  });
+
+  test("keeps a blocked binding visible and removes blocked Skills from the picker", async () => {
+    const bound = makeSkill("blocked-bound", 2);
+    const boundSummary = makeSummary(bound, 1, 0);
+    boundSummary.source = "organization";
+    boundSummary.is_active = false;
+    boundSummary.execution_blocked = true;
+    const blockedChoice: SkillBindingCandidate = {
+      id: "blocked-choice",
+      slug: "blocked-choice",
+      revision_id: "blocked-choice-revision-1",
+      revision_number: 1,
+      display_name: "Blocked catalogue Skill",
+      description: "This Skill cannot be attached during an incident.",
+      content_digest: "blocked-choice-digest",
+      first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: true,
+      source: "organization"
+    };
+
+    render(SkillBindingsEditor, {
+      bindings: [{ skill_id: bound.id, skill_revision_id: boundSummary.skill_revision_id }],
+      initialCatalogPage: makePage([bound, blockedChoice]),
+      bindingSummaries: [boundSummary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await expect
+      .element(page.getByText(m.skills_execution_blocked_status(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_execution_blocked_binding_explanation(), { exact: true }))
+      .toBeVisible();
+    expect(m.skills_execution_blocked_binding_explanation()).toContain(
+      "Appar stoppas innan någon modellförfrågan skickas"
+    );
+    expect(m.skills_execution_blocked_binding_explanation()).not.toContain(
+      "men Skillen används inte vid körning"
+    );
+    await expect
+      .element(page.getByText(m.skills_unavailable_status(), { exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(m.skills_newer_revision_available({ revision: "2" }), { exact: true })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_use_latest_revision_aria({ name: bound.display_name, revision: "2" })
+        })
+      )
+      .not.toBeInTheDocument();
+
+    await page.getByRole("combobox", { name: m.skills_add_existing() }).click();
+    await expect
+      .element(page.getByText(blockedChoice.display_name, { exact: true }))
+      .not.toBeInTheDocument();
+  });
+
+  test("does not describe a blocked-only catalogue as already attached", async () => {
+    const blockedChoice: SkillBindingCandidate = {
+      id: "blocked-only-choice",
+      slug: "blocked-only-choice",
+      revision_id: "blocked-only-choice-revision-1",
+      revision_number: 1,
+      display_name: "Blocked-only catalogue Skill",
+      description: "This Skill cannot be attached during an incident.",
+      content_digest: "blocked-only-choice-digest",
+      first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: true,
+      source: "organization"
+    };
+
+    render(SkillBindingsEditor, {
+      bindings: [],
+      initialCatalogPage: makePage([blockedChoice]),
+      bindingSummaries: [],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await page.getByRole("combobox", { name: m.skills_add_existing() }).click();
+    await expect.element(page.getByText(m.skills_no_available())).toBeVisible();
+    await expect.element(page.getByText(m.skills_all_attached())).not.toBeInTheDocument();
   });
 
   test("keeps a populated create dialog open until discard is confirmed", async () => {

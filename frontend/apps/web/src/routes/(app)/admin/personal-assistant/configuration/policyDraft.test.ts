@@ -60,6 +60,7 @@ describe("PolicyDraft", () => {
       content_digest: "digest-1",
       position: 0,
       is_active: true,
+      execution_blocked: false,
       source: "organization" as const
     };
     const second = {
@@ -74,6 +75,7 @@ describe("PolicyDraft", () => {
       content_digest: "digest-2",
       position: 1,
       is_active: true,
+      execution_blocked: false,
       source: "organization" as const
     };
     const draft = new PolicyDraft();
@@ -121,6 +123,7 @@ describe("PolicyDraft", () => {
       description: "Approved leave guidance",
       content_digest: "digest-2",
       first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: false,
       source: "organization" as const
     };
     const skills = {

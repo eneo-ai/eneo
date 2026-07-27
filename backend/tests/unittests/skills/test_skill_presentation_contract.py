@@ -5,16 +5,20 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from fastapi import Response
+from fastapi import FastAPI, Response
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.main.exceptions import NotFoundException
+from eneo.main.models import NotProvided
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
-    SkillBindingReference,
+    SkillActivationMode,
+    SkillBindingProjection,
     SkillBindingSource,
     SkillCatalogEntry,
     SkillCatalogPage,
@@ -24,15 +28,18 @@ from eneo.skills.domain.skill import (
     SkillRevisionRestore,
     SkillRevisionSummary,
     SkillStatusChange,
+    SkillTurnEffectiveMode,
 )
 from eneo.skills.presentation import skill_models, skill_router
 from eneo.skills.presentation.skill_assembler import (
     SkillAssembler,
+    assistant_skill_binding_intents_from_input,
     skill_binding_audit_entries,
     skill_binding_references_from_input,
 )
 from eneo.skills.presentation.skill_models import SkillBindingReferenceInput
 from eneo.skills.presentation.skill_router import router
+from eneo.tokens.token_utils import TokenCountSource
 
 
 def _binding(*, position: int) -> ResolvedSkillBinding:
@@ -130,7 +137,13 @@ def _router_container(*, service, assembler):
 
 
 def test_skill_binding_audit_entries_preserve_order_without_bodies():
-    bindings = [_binding(position=0), _binding(position=1)]
+    bindings = [
+        _binding(position=0),
+        replace(
+            _binding(position=1),
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        ),
+    ]
 
     entries = skill_binding_audit_entries(bindings)
 
@@ -138,6 +151,10 @@ def test_skill_binding_audit_entries_preserve_order_without_bodies():
         str(binding.skill_id) for binding in bindings
     ]
     assert [entry["position"] for entry in entries] == [0, 1]
+    assert [entry["activation_mode"] for entry in entries] == [
+        "always",
+        "on_demand",
+    ]
     assert "instructions" not in str(entries)
     assert "description" not in str(entries)
 
@@ -161,11 +178,17 @@ def test_skill_binding_reference_input_maps_to_named_domain_reference():
 def test_binding_summary_carries_attachable_revision_without_catalog_lookup():
     binding = _binding(position=0)
 
-    summary = SkillAssembler.binding_to_summary(binding)
+    summary = SkillAssembler.binding_to_summary(
+        SkillBindingProjection(
+            binding=binding,
+            execution_blocked=True,
+        )
+    )
 
     assert summary.attachable_revision_id == binding.attachable_revision_id
     assert summary.attachable_revision_number == binding.attachable_revision_number
     assert summary.source is SkillBindingSource.SPACE
+    assert summary.execution_blocked is True
 
 
 def test_parent_binding_projection_routes_are_get_only():
@@ -582,25 +605,195 @@ async def test_lost_delete_race_does_not_emit_a_second_delete_audit():
     audit_service.log_async.assert_not_awaited()
 
 
-def test_public_binding_contracts_cannot_express_activation_mode():
-    """Slice 1 keeps the mode dormant: a client-supplied activation_mode is
-    dropped by the closed input model and no read model advertises one, so
-    the generated OpenAPI/SDK contracts stay unchanged."""
-    payload = {
+def test_assistant_binding_input_distinguishes_omitted_and_explicit_modes():
+    identity = {
         "skill_id": str(uuid4()),
         "skill_revision_id": str(uuid4()),
-        "activation_mode": "on_demand",
     }
-    parsed = SkillBindingReferenceInput.model_validate(payload)
-    references = skill_binding_references_from_input([parsed])
 
-    assert not hasattr(parsed, "activation_mode")
-    assert references[0] == SkillBindingReference(
-        skill_id=parsed.skill_id,
-        skill_revision_id=parsed.skill_revision_id,
+    omitted = skill_models.AssistantSkillBindingInput.model_validate(identity)
+    explicit_always = skill_models.AssistantSkillBindingInput.model_validate(
+        {**identity, "activation_mode": "always"}
     )
-    for public_model in (
-        skill_models.SkillBindingReferenceInput,
-        skill_models.SkillBindingSummary,
-    ):
-        assert "activation_mode" not in public_model.model_json_schema()["properties"]
+    explicit_on_demand = skill_models.AssistantSkillBindingInput.model_validate(
+        {**identity, "activation_mode": "on_demand"}
+    )
+
+    assert isinstance(omitted.activation_mode, NotProvided)
+    assert "activation_mode" not in omitted.model_fields_set
+    assert (
+        assistant_skill_binding_intents_from_input([omitted])[0].activation_mode is None
+    )
+    assert explicit_always.activation_mode is SkillActivationMode.ALWAYS
+    assert "activation_mode" in explicit_always.model_fields_set
+    assert explicit_on_demand.activation_mode is SkillActivationMode.ON_DEMAND
+    assert "activation_mode" in explicit_on_demand.model_fields_set
+
+
+def test_assistant_binding_input_rejects_explicit_null_mode():
+    with pytest.raises(ValidationError) as exc_info:
+        skill_models.AssistantSkillBindingInput.model_validate(
+            {
+                "skill_id": str(uuid4()),
+                "skill_revision_id": str(uuid4()),
+                "activation_mode": None,
+            }
+        )
+
+    assert all(
+        error["loc"] and error["loc"][0] == "activation_mode"
+        for error in exc_info.value.errors()
+    )
+
+
+def _assistant_binding_contract_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/binding")
+    def update_binding(
+        binding: skill_models.AssistantSkillBindingInput,
+    ) -> dict[str, bool]:
+        return {"accepted": True}
+
+    return app
+
+
+def test_assistant_binding_input_openapi_is_optional_and_non_nullable():
+    schema = _assistant_binding_contract_app().openapi()["components"]["schemas"][
+        "AssistantSkillBindingInput"
+    ]
+    activation_mode = schema["properties"]["activation_mode"]
+
+    assert "activation_mode" not in schema.get("required", [])
+    assert activation_mode["$ref"] == "#/components/schemas/SkillActivationMode"
+    assert "anyOf" not in activation_mode
+    assert "default" not in activation_mode
+
+
+def test_assistant_binding_input_http_rejects_null_at_field():
+    response = TestClient(_assistant_binding_contract_app()).post(
+        "/binding",
+        json={
+            "skill_id": str(uuid4()),
+            "skill_revision_id": str(uuid4()),
+            "activation_mode": None,
+        },
+    )
+
+    assert response.status_code == 422
+    assert all(
+        error["loc"][:2] == ["body", "activation_mode"]
+        for error in response.json()["detail"]
+    )
+
+
+def test_shared_binding_input_rejects_assistant_activation_mode():
+    with pytest.raises(ValidationError) as exc_info:
+        SkillBindingReferenceInput.model_validate(
+            {
+                "skill_id": str(uuid4()),
+                "skill_revision_id": str(uuid4()),
+                "activation_mode": "on_demand",
+            }
+        )
+
+    assert exc_info.value.errors()[0]["type"] == "extra_forbidden"
+
+
+def test_assistant_binding_summary_exposes_mode_without_broadening_shared_summary():
+    binding = replace(
+        _binding(position=0),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    projection = SkillBindingProjection(binding=binding, execution_blocked=False)
+
+    assistant_summary = SkillAssembler.assistant_binding_to_summary(projection)
+    shared_summary = SkillAssembler.binding_to_summary(projection)
+
+    assert isinstance(assistant_summary, skill_models.AssistantSkillBindingSummary)
+    assert assistant_summary.activation_mode is SkillActivationMode.ON_DEMAND
+    assert "activation_mode" in assistant_summary.model_json_schema()["properties"]
+    assert not hasattr(shared_summary, "activation_mode")
+    assert (
+        "activation_mode"
+        not in skill_models.SkillBindingSummary.model_json_schema()["properties"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_assistant_skill_configuration_returns_modes_and_exact_runtime():
+    binding = replace(
+        _binding(position=0),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    projection = SkillBindingProjection(binding=binding, execution_blocked=False)
+    model_id = uuid4()
+    assistant_service = SimpleNamespace(
+        get_skill_configuration=AsyncMock(
+            return_value=SimpleNamespace(
+                bindings=(projection,),
+                runtime=SimpleNamespace(
+                    effective_model_id=model_id,
+                    snapshot=SimpleNamespace(
+                        effective_mode=SkillTurnEffectiveMode.SELECTIVE,
+                        fallback_reason=None,
+                        measurement=SimpleNamespace(
+                            tokens=42,
+                            limit=800,
+                            source=TokenCountSource.LITELLM,
+                        ),
+                    ),
+                ),
+            )
+        )
+    )
+    container = SimpleNamespace(
+        assistant_service=lambda: assistant_service,
+        skill_assembler=lambda: SkillAssembler(),
+    )
+    space_id = uuid4()
+    assistant_id = uuid4()
+
+    response = await skill_router.get_assistant_skill_configuration(
+        space_id=space_id,
+        assistant_id=assistant_id,
+        container=container,
+    )
+
+    assistant_service.get_skill_configuration.assert_awaited_once_with(
+        space_id=space_id,
+        assistant_id=assistant_id,
+    )
+    assert response.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
+    assert response.runtime is not None
+    assert response.runtime.effective_model_id == model_id
+    assert response.runtime.effective_mode is SkillTurnEffectiveMode.SELECTIVE
+    assert response.runtime.fallback_reason is None
+    assert response.runtime.skill_context_tokens == 42
+    assert response.runtime.skill_context_token_limit == 800
+    assert response.runtime.token_count_source is TokenCountSource.LITELLM
+
+
+def test_assistant_skill_configuration_schema_has_no_runtime_bodies():
+    runtime_properties = skill_models.AssistantSkillRuntimeSummary.model_json_schema()[
+        "properties"
+    ]
+
+    assert "instructions" not in runtime_properties
+    assert "description" not in runtime_properties
+    assert "available" not in runtime_properties
+    assert "active" not in runtime_properties
+    assert "accepted" not in runtime_properties
+
+
+def test_assistant_skill_configuration_route_is_get_only():
+    methods = {
+        method
+        for route in router.routes
+        if isinstance(route, APIRoute)
+        and route.path
+        == "/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/"
+        for method in route.methods
+    }
+
+    assert methods == {"GET"}

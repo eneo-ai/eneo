@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -6,7 +7,6 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
 )
-from eneo.apps.apps.api import app_assembler as app_assembler_module
 from eneo.apps.apps.api.app_assembler import (
     _AUDIO_MAX_FILES,
     _IMAGE_MAX_FILES,
@@ -20,6 +20,8 @@ from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import AcceptedFileType, Limit
 from eneo.files.image import ImageMimeTypes
 from eneo.files.text import TextMimeTypes
+from eneo.object_content.content import StorageKind
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.transcription_models.domain import TranscriptionModel
 from tests.fixtures import TEST_USER, TEST_UUID
 
@@ -29,10 +31,15 @@ CUSTOM_TEXT_LIMIT = 5_000_000  # 5 MB
 CUSTOM_IMAGE_LIMIT = 8_000_000  # 8 MB
 CUSTOM_AUDIO_LIMIT = 150_000_000  # 150 MB
 
-_FAKE_SETTINGS = SimpleNamespace(
-    upload_file_to_session_max_size=CUSTOM_TEXT_LIMIT,
-    upload_image_to_session_max_size=CUSTOM_IMAGE_LIMIT,
-    transcription_max_file_size=CUSTOM_AUDIO_LIMIT,
+_UPLOAD_ADMISSION = UploadAdmissionSnapshot(
+    policy_revision=4,
+    session_storage_target=StorageKind.POSTGRES_INLINE,
+    session_operator_ceiling_bytes=200_000_000,
+    session_file_maximum_bytes=CUSTOM_TEXT_LIMIT,
+    session_image_maximum_bytes=CUSTOM_IMAGE_LIMIT,
+    session_audio_maximum_bytes=CUSTOM_AUDIO_LIMIT,
+    knowledge_file_maximum_bytes=25_000_000,
+    knowledge_audio_maximum_bytes=200_000_000,
 )
 
 
@@ -106,11 +113,11 @@ TEST_TRANSCRIPTION_MODEL = TranscriptionModel(
 
 
 @pytest.fixture
-def assembler(monkeypatch):
-    monkeypatch.setattr(app_assembler_module, "get_settings", lambda: _FAKE_SETTINGS)
+def assembler():
     return AppAssembler(
         user=SimpleNamespace(can_view_model_pricing=True),
         prompt_assembler=MagicMock(),
+        upload_admission=_UPLOAD_ADMISSION,
     )
 
 
@@ -226,19 +233,17 @@ def test_attachment_formats(app: App, assembler: AppAssembler):
 # ── Tests: changing settings changes limits ──────────────────────────────
 
 
-def test_limits_change_when_settings_change(monkeypatch, app):
-    """Prove that assembler reads from config at call time, not from hardcoded values."""
+def test_new_assembler_uses_new_policy_revision_without_restart(app):
     new_audio_limit = 500_000_000  # 500 MB
-    settings = SimpleNamespace(
-        upload_file_to_session_max_size=CUSTOM_TEXT_LIMIT,
-        upload_image_to_session_max_size=CUSTOM_IMAGE_LIMIT,
-        transcription_max_file_size=new_audio_limit,
-    )
-    monkeypatch.setattr(app_assembler_module, "get_settings", lambda: settings)
 
     assembler = AppAssembler(
         user=SimpleNamespace(can_view_model_pricing=True),
         prompt_assembler=MagicMock(),
+        upload_admission=replace(
+            _UPLOAD_ADMISSION,
+            policy_revision=_UPLOAD_ADMISSION.policy_revision + 1,
+            session_audio_maximum_bytes=new_audio_limit,
+        ),
     )
     app.input_fields = [InputField(type=InputFieldType.AUDIO_UPLOAD)]
 

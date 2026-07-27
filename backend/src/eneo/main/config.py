@@ -354,12 +354,6 @@ class Settings(BaseSettings):
     mobilityguard_client_secret: Optional[str] = None
     mobilityguard_tenant_id: Optional[str] = None
 
-    # Max sizes
-    upload_file_to_session_max_size: int
-    upload_image_to_session_max_size: int
-    upload_max_file_size: int
-    transcription_max_file_size: int
-
     # Visual content in document attachments (PDF pages with images/graphics,
     # DOCX/PPTX embedded images) is extracted as derived image files so vision
     # models can read it (capped per document to bound token cost)

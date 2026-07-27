@@ -527,8 +527,16 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
 - Go to the admin panel, navigate to the "Models" page, select the "Transcription" tab, and enable a model like Whisper
 
 ### Errors when uploading large files (e.g., PDFs)
-- The default upload limits might be too low
-- Increase the values in `env_backend.env` (values are in bytes, 10485760 = 10MB):
-  ```bash
-  UPLOAD_MAX_FILE_SIZE=10485760
-  ```
+- Ask a platform admin to review configured and effective limits in **Admin >
+  Storage**. Policy updates apply without restarting backend or worker.
+- For PostgreSQL-inline session uploads, the effective limit is the smaller of
+  the admin policy and the operator-owned
+  `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+- For object-store session uploads, the effective limit is the smaller of the
+  admin policy and the portable multipart envelope derived from deployment
+  transport settings.
+- FastAPI/Starlette multipart parsing happens before route admission and may
+  use temporary disk. Eneo's admission check rejects an oversized File or Icon
+  before its own capture/spool or any storage mutation. Use
+  ingress/request-body limits and configure and monitor temporary-disk capacity
+  to protect that earlier parsing boundary.

@@ -12,19 +12,22 @@ runtime selection, provenance, and context-budget behavior.
 
 ## Current Tranche
 
-Land the O1 foundation stack in dependency order: PR #552, then #559, then
-#560 with the admin-only organisation lifecycle and authorised catalogue
-preview correction. Each merge requires green CI, a clean fresh `/review`, a
-successful same-session Fable high gate against the accepted roadmap, and a
-final PM audit.
+Finish Task #553 in bounded dormant-to-visible slices, close execution-block
+integrity, consolidate typed lifecycle conflicts, and then deliver the explicit
+organisation revision-rollout operation for Assistants, Personal Chat, and
+Apps. O2 editable Space copies follow. S2 still waits for the Flow package
+vertical to land on `develop`, and external Marketplace distribution remains
+last.
 
-After this tranche, update the board from the accepted roadmap and continue
-with the required O1 release gates, O2, the internal Marketplace/package
-dependency chain, and S2. External Marketplace distribution remains deferred.
+Each implementation merge requires proportionate local verification, green
+required CI, a clean fresh `/review`, the applicable peer gate, and a final PM
+audit. Fable is planning-only for genuinely large or disputed direction
+changes; it is not a routine implementation or merge gate.
 
 ## Non-Negotiable Constraints
 
-- Follow `docs/enterprise-skills-roadmap.md` and its accepted Fable decisions.
+- Follow `docs/enterprise-skills-roadmap.md`, the ADR, and the current Goal
+  Maker board.
 - Keep one canonical owner for each lifecycle, permission, runtime, and UI
   concept; delete superseded paths instead of retaining compatibility branches.
 - Organisation Skill lifecycle management is admin-only. `Manage Skills`
@@ -35,7 +38,7 @@ dependency chain, and S2. External Marketplace distribution remains deferred.
   exact Skill revision used.
 - Prefer behavior tests at stable service, API, and user-flow interfaces.
 - Do not merge on stale review evidence, red/unknown required checks, or an
-  unresolved Fable gate.
+  unresolved applicable peer gate.
 - Do not mix unrelated user-owned worktree changes into roadmap commits.
 
 ## Stop Rule
@@ -67,5 +70,6 @@ active task, receipts, verification freshness, and completion truth.
 3. Record compact receipts with exact revisions and validation commands.
 4. Prepare the next dependency while external checks run, but do not publish it
    against a base that has not been merged.
-5. Merge only after CI, `/review`, same-session Fable high, and PM audit are all green.
+5. Merge only after CI, a fresh `/review`, the applicable peer gate, and PM
+   audit are all green.
 6. Activate the next task immediately unless a stop condition applies.

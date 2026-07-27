@@ -27,6 +27,8 @@ from eneo.object_content.content import (
     StorageKind,
 )
 
+_SHA256_BYTES = 32
+
 
 @dataclass(frozen=True, slots=True)
 class PreparedContent:
@@ -57,15 +59,18 @@ class ReadableContent:
 
 
 @dataclass(frozen=True, slots=True)
-class ReadableContentSource:
-    content: ReadableContent
-    inline_payload: bytes | None
-
-
-@dataclass(frozen=True, slots=True)
 class ObjectStoreDescriptor:
     content_id: UUID
     object_key: str
+    verification_chunk_size_bytes: int
+    verification_chunk_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReadableContentSource:
+    content: ReadableContent
+    inline_payload: bytes | None
+    object_store_descriptor: ObjectStoreDescriptor | None
 
 
 class ObjectContentRepository:
@@ -94,8 +99,47 @@ class ObjectContentRepository:
             descriptor.content_id = row.id
             descriptor.storage_kind = StorageKind.OBJECT_STORE.value
             descriptor.object_key = object_key
+            descriptor.verification_chunk_size_bytes = content.part_size_bytes
+            descriptor.verification_chunk_sha256 = b"".join(content.part_sha256)
             self._session.add(descriptor)
             await self._session.flush()
+        return PreparedContent(
+            id=row.id,
+            storage_kind=StorageKind(row.storage_kind),
+            state=ContentState(row.state),
+            created=created,
+        )
+
+    async def prepare_verified_object_store(
+        self,
+        *,
+        intent: ContentIntent,
+        content: CapturedContent,
+        object_key: str,
+        request_fingerprint: bytes,
+    ) -> PreparedContent:
+        row, created = await self._prepare_control(
+            intent=intent,
+            content=content,
+            storage_kind=StorageKind.OBJECT_STORE,
+            state=ContentState.AVAILABLE,
+            request_fingerprint=request_fingerprint,
+        )
+        if created:
+            descriptor = ObjectStoreObjects()
+            descriptor.content_id = row.id
+            descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+            descriptor.object_key = object_key
+            descriptor.verification_chunk_size_bytes = content.part_size_bytes
+            descriptor.verification_chunk_sha256 = b"".join(content.part_sha256)
+            self._session.add(descriptor)
+            await self._session.flush()
+        else:
+            descriptor = await self._object_store_descriptor(row.id, for_update=True)
+            if descriptor.object_key != object_key:
+                raise ObjectContentIdempotencyConflictError(
+                    "The idempotency key is bound to another verified object"
+                )
         return PreparedContent(
             id=row.id,
             storage_kind=StorageKind(row.storage_kind),
@@ -504,31 +548,11 @@ class ObjectContentRepository:
         self._clear_lease(row)
         await self._session.flush()
 
-    async def get_readable(
-        self,
-        *,
-        content_id: UUID,
-        tenant_id: UUID,
-        access_class: ContentAccessClass,
-    ) -> ReadableContent:
-        row = (
-            await self._session.scalars(
-                select(ObjectContents).where(
-                    ObjectContents.id == content_id,
-                    ObjectContents.tenant_id == tenant_id,
-                    ObjectContents.access_class == access_class.value,
-                )
-            )
-        ).one_or_none()
-        if row is None or row.state != ContentState.AVAILABLE.value:
-            raise ObjectContentStateError("Object content is not available")
-        return self._readable(row)
-
     async def get_readable_sources(
         self,
         grants: Sequence[ContentReadGrant],
     ) -> dict[UUID, ReadableContentSource]:
-        """Read access-validated controls and inline payloads in one query."""
+        """Read access-validated controls and byte-source facts in one query."""
         if not grants:
             return {}
 
@@ -542,10 +566,20 @@ class ObjectContentRepository:
         }
         rows = (
             await self._session.execute(
-                select(ObjectContents, InlineContentPayloads.payload)
+                select(
+                    ObjectContents,
+                    InlineContentPayloads.payload,
+                    ObjectStoreObjects.object_key,
+                    ObjectStoreObjects.verification_chunk_size_bytes,
+                    func.octet_length(ObjectStoreObjects.verification_chunk_sha256),
+                )
                 .outerjoin(
                     InlineContentPayloads,
                     InlineContentPayloads.content_id == ObjectContents.id,
+                )
+                .outerjoin(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
                 )
                 .where(
                     tuple_(
@@ -559,22 +593,87 @@ class ObjectContentRepository:
         ).all()
 
         sources: dict[UUID, ReadableContentSource] = {}
-        for row, inline_payload in rows:
+        for (
+            row,
+            inline_payload,
+            object_key,
+            verification_chunk_size_bytes,
+            verification_digest_bytes,
+        ) in rows:
             content = self._readable(row)
             if (
                 content.storage_kind is StorageKind.POSTGRES_INLINE
                 and inline_payload is None
             ):
                 raise ObjectContentStateError("Inline content payload is missing")
+            if content.storage_kind is StorageKind.OBJECT_STORE and (
+                object_key is None
+                or verification_chunk_size_bytes is None
+                or verification_digest_bytes is None
+                or verification_chunk_size_bytes < 1
+                or verification_digest_bytes < _SHA256_BYTES
+                or verification_digest_bytes % _SHA256_BYTES != 0
+            ):
+                raise ObjectContentStateError(
+                    "Object-store verification descriptor is missing or invalid"
+                )
             sources[content.content_id] = ReadableContentSource(
                 content=content,
                 inline_payload=inline_payload,
+                object_store_descriptor=(
+                    ObjectStoreDescriptor(
+                        content_id=content.content_id,
+                        object_key=object_key,
+                        verification_chunk_size_bytes=verification_chunk_size_bytes,
+                        verification_chunk_count=(
+                            verification_digest_bytes // _SHA256_BYTES
+                        ),
+                    )
+                    if (
+                        object_key is not None
+                        and verification_chunk_size_bytes is not None
+                        and verification_digest_bytes is not None
+                    )
+                    else None
+                ),
             )
 
         requested_ids = {grant.content_id for grant in grants}
         if sources.keys() != requested_ids:
             raise ObjectContentStateError("Object content is not available")
         return sources
+
+    async def get_object_store_verification_chunks(
+        self,
+        *,
+        content_id: UUID,
+        first_chunk_index: int,
+        chunk_count: int,
+    ) -> tuple[bytes, ...]:
+        """Read only the packed digest interval needed for one ranged response."""
+        if first_chunk_index < 0:
+            raise ValueError("first_chunk_index must not be negative")
+        if chunk_count < 1:
+            raise ValueError("chunk_count must be positive")
+
+        packed = await self._session.scalar(
+            select(
+                func.substring(
+                    ObjectStoreObjects.verification_chunk_sha256,
+                    (first_chunk_index * _SHA256_BYTES) + 1,
+                    chunk_count * _SHA256_BYTES,
+                )
+            ).where(ObjectStoreObjects.content_id == content_id)
+        )
+        expected_bytes = chunk_count * _SHA256_BYTES
+        if not isinstance(packed, bytes) or len(packed) != expected_bytes:
+            raise ObjectContentStateError(
+                "Object-store verification chunks are unavailable"
+            )
+        return tuple(
+            packed[offset : offset + _SHA256_BYTES]
+            for offset in range(0, expected_bytes, _SHA256_BYTES)
+        )
 
     async def get_available_by_id(self, content_id: UUID) -> ReadableContent:
         row = (
@@ -604,22 +703,6 @@ class ObjectContentRepository:
             row.failure_detail = "durable object bytes are unavailable or untrusted"
             row.next_attempt_at = None
             await self._session.flush()
-
-    async def get_inline_payload(self, content_id: UUID) -> bytes:
-        payload = await self._session.get(InlineContentPayloads, content_id)
-        if payload is None:
-            raise ObjectContentStateError("Inline content payload is missing")
-        return payload.payload
-
-    async def get_object_store_descriptor(
-        self,
-        content_id: UUID,
-    ) -> ObjectStoreDescriptor:
-        descriptor = await self._object_store_descriptor(content_id)
-        return ObjectStoreDescriptor(
-            content_id=descriptor.content_id,
-            object_key=descriptor.object_key,
-        )
 
     async def apply_hold(
         self,

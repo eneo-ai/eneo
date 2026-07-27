@@ -80,6 +80,8 @@ class InvalidContentRangeError(ValueError):
     code = "object_content_range_invalid"
 
 
+MAXIMUM_UPLOAD_POLICY_BYTES = 9_007_199_254_740_991
+
 # Durable content sizes use PostgreSQL BIGINT, whose decimal width is 19 digits.
 _MAX_BYTE_RANGE_DIGITS = 19
 
@@ -149,6 +151,47 @@ class ByteRange:
 
 
 @dataclass(frozen=True, slots=True)
+class VerificationChunkWindow:
+    aligned_range: ByteRange
+    first_chunk_index: int
+    chunk_count: int
+
+
+def verification_chunk_window(
+    byte_range: ByteRange,
+    *,
+    chunk_size_bytes: int,
+    chunk_count: int,
+) -> VerificationChunkWindow:
+    """Align one requested range to its persisted verification chunks."""
+    if chunk_size_bytes < 1:
+        raise ValueError("verification chunk size must be positive")
+    expected_chunk_count = max(
+        1,
+        (byte_range.total + chunk_size_bytes - 1) // chunk_size_bytes,
+    )
+    if chunk_count != expected_chunk_count:
+        raise ValueError("verification chunk count does not match object size")
+
+    first_chunk_index = byte_range.start // chunk_size_bytes
+    last_chunk_index = byte_range.end // chunk_size_bytes
+    aligned_start = first_chunk_index * chunk_size_bytes
+    aligned_end = min(
+        byte_range.total - 1,
+        ((last_chunk_index + 1) * chunk_size_bytes) - 1,
+    )
+    return VerificationChunkWindow(
+        aligned_range=ByteRange(
+            start=aligned_start,
+            end=aligned_end,
+            total=byte_range.total,
+        ),
+        first_chunk_index=first_chunk_index,
+        chunk_count=last_chunk_index - first_chunk_index + 1,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class CapturedContent:
     file: BinaryIO
     sha256: bytes
@@ -156,6 +199,19 @@ class CapturedContent:
     declared_media_type: str
     verified_media_type: str
     part_sha256: tuple[bytes, ...]
+    part_size_bytes: int
+
+    def __post_init__(self) -> None:
+        if self.part_size_bytes < 1:
+            raise ValueError("part_size_bytes must be positive")
+        expected_part_count = max(
+            1,
+            (self.size_bytes + self.part_size_bytes - 1) // self.part_size_bytes,
+        )
+        if len(self.part_sha256) != expected_part_count:
+            raise ValueError("part SHA-256 count does not match captured size")
+        if any(len(digest) != 32 for digest in self.part_sha256):
+            raise ValueError("part SHA-256 values must be 32-byte digests")
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +353,8 @@ async def capture_content(
 
         if current_part_size:
             part_digests.append(current_part_hasher.digest())
+        elif size_bytes == 0:
+            part_digests.append(canonical_hasher.digest())
 
         if spilled_to_disk:
             await asyncio.to_thread(spool.seek, 0)
@@ -309,6 +367,7 @@ async def capture_content(
             declared_media_type=declared_media_type,
             verified_media_type=verified_media_type,
             part_sha256=tuple(part_digests),
+            part_size_bytes=multipart_part_bytes,
         )
     finally:
         if spilled_to_disk:
