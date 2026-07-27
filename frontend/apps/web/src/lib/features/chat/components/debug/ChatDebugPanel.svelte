@@ -53,7 +53,19 @@
   });
   const selectedTurn = $derived(turnById.get(selectedMessageId) ?? null);
   const selectedMessage = $derived(messageById.get(selectedMessageId) ?? null);
-  const turnDetails = $derived(selectedMessage ? projectTurnDebugDetails(selectedMessage) : null);
+  const turnDetails = $derived(
+    selectedMessage
+      ? projectTurnDebugDetails(
+          selectedMessage,
+          diagnostics?.skill_activation
+            ? {
+                id: diagnostics.skill_activation.selected_model_id,
+                route: diagnostics.skill_activation.selected_model_route
+              }
+            : undefined
+        )
+      : null
+  );
   const liveStatus = $derived(
     loading
       ? m.chat_debug_loading()

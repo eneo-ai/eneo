@@ -164,9 +164,9 @@ describe("ChatDebugPanel", () => {
         mcp_tool_references: [
           {
             id: "reference-1",
-            uri: "mcp://calendar/events",
+            uri: "SENSITIVE_URI",
             content: "SENSITIVE_CONTENT",
-            meta: { title: "Calendar events", incident_reason: "SENSITIVE_INCIDENT" }
+            meta: { title: "SENSITIVE_TITLE", incident_reason: "SENSITIVE_INCIDENT" }
           }
         ]
       })
@@ -181,10 +181,9 @@ describe("ChatDebugPanel", () => {
     await page.getByRole("button", { name: m.chat_debug_retry() }).click();
 
     await expect.element(page.getByText("list_events")).toBeVisible();
-    await expect.element(page.getByText("Calendar events")).toBeVisible();
-    await expect.element(page.getByText("mcp://calendar/events")).toBeVisible();
+    await expect.element(page.getByText("MCP", { exact: true })).toBeVisible();
     expect(document.body.textContent).not.toMatch(
-      /SENSITIVE_(QUESTION|ANSWER|REASONING|ARGUMENT|RESULT|CONTENT|INCIDENT)/
+      /SENSITIVE_(QUESTION|ANSWER|REASONING|ARGUMENT|RESULT|CONTENT|INCIDENT|TITLE|URI)/
     );
 
     await userEvent.keyboard("{Escape}");
@@ -197,14 +196,10 @@ describe("ChatDebugPanel", () => {
       ({ callbacks }) =>
         new Promise<void>((resolve) => {
           callbacks.onFirstChunk({
-            ...message("message-2", "Latest question", {
-              completion_model: {
-                id: "model-1",
-                name: "gpt-4o",
-                token_limit: 128_000
-              } as NonNullable<ConversationMessage["completion_model"]>
-            }),
-            session_id: "session-1"
+            id: "message-2",
+            session_id: "session-1",
+            answer: "",
+            references: []
           });
           finishStream = resolve;
         })
@@ -216,7 +211,9 @@ describe("ChatDebugPanel", () => {
         if (messageId === "message-2" && message2Attempts++ === 0) {
           return Promise.reject(new Error("temporary"));
         }
-        return Promise.resolve(diagnostics(messageId));
+        return Promise.resolve(
+          diagnostics(messageId, messageId === "message-2" ? evidence(1) : null)
+        );
       }
     );
     const chat = createChat(getTurnDiagnostics, [message("message-1", "First question")], {
@@ -240,7 +237,10 @@ describe("ChatDebugPanel", () => {
     expect(chat.pendingDiagnosticsMessageIds).toEqual([]);
     expect(get).not.toHaveBeenCalled();
     await expect.element(page.getByText(m.chat_debug_live_turn_title())).not.toBeInTheDocument();
-    await expect.element(page.getByText("gpt-4o", { exact: true }).first()).toBeVisible();
+    await expect.element(page.getByText("provider/model", { exact: true }).first()).toBeVisible();
+    await expect
+      .element(page.getByText(m.chat_debug_unknown(), { exact: true }))
+      .not.toBeInTheDocument();
   });
 
   test("distinguishes legacy evidence from zero candidates and reveals large lists in chunks", async () => {

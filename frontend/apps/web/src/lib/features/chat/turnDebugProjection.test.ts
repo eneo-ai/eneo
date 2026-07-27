@@ -63,9 +63,9 @@ describe("turn debug projection", () => {
       mcp_tool_references: [
         {
           id: "reference-1",
-          uri: "mcp://calendar/events",
+          uri: "SENSITIVE_URI",
           content: "SENSITIVE_CONTENT",
-          meta: { title: "Calendar events", incident_reason: "SENSITIVE_INCIDENT" }
+          meta: { title: "SENSITIVE_TITLE", incident_reason: "SENSITIVE_INCIDENT" }
         }
       ],
       files: [{ id: "file-1", name: "input.pdf", mimetype: "application/pdf", size: 10 }]
@@ -87,9 +87,7 @@ describe("turn debug projection", () => {
         status: "complete"
       }
     ]);
-    expect(projected.knowledge).toEqual([
-      { order: 1, title: "Calendar events", uri: "mcp://calendar/events" }
-    ]);
+    expect(projected.knowledge).toEqual([{ order: 1, title: "MCP", uri: null }]);
     expect(projected.files[0].name).toBe("input.pdf");
     expect(serialized).not.toMatch(/SENSITIVE_/);
   });
@@ -119,5 +117,18 @@ describe("turn debug projection", () => {
       }
     ]);
     expect(JSON.stringify(projected)).not.toMatch(/SENSITIVE_/);
+  });
+
+  it("uses body-free activation evidence when the stream has no model object", () => {
+    const projected = projectTurnDebugDetails(message("message-1"), {
+      id: "model-1",
+      route: "provider/model"
+    });
+
+    expect(projected.model).toEqual({
+      id: "model-1",
+      name: "provider/model",
+      route: "provider/model"
+    });
   });
 });

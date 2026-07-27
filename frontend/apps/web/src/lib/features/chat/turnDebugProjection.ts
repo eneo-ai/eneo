@@ -31,6 +31,11 @@ type StreamingConversationMessage = ConversationMessage & {
   mcp_tool_calls?: NonNullable<ConversationMessage["tool_calls"]>;
 };
 
+export type TurnDebugModelFallback = {
+  id: string;
+  route: string;
+};
+
 export function listPersistedDebugTurns(
   messages: ConversationMessage[],
   pendingMessageIds: readonly string[]
@@ -49,7 +54,10 @@ export function listPersistedDebugTurns(
   return turns;
 }
 
-export function projectTurnDebugDetails(message: ConversationMessage): TurnDebugDetails {
+export function projectTurnDebugDetails(
+  message: ConversationMessage,
+  modelFallback?: TurnDebugModelFallback
+): TurnDebugDetails {
   const streamingToolCalls = (message as StreamingConversationMessage).mcp_tool_calls;
   const tools = (streamingToolCalls ?? message.tool_calls ?? []).map((tool, index) => ({
     order: index + 1,
@@ -75,12 +83,11 @@ export function projectTurnDebugDetails(message: ConversationMessage): TurnDebug
       uri: reference.url
     });
   }
-  for (const reference of message.mcp_tool_references ?? []) {
-    const title = reference.meta?.title;
+  for (const _reference of message.mcp_tool_references ?? []) {
     knowledge.push({
       order: knowledge.length + 1,
-      title: typeof title === "string" && title.trim() ? title : reference.uri,
-      uri: reference.uri
+      title: "MCP",
+      uri: null
     });
   }
 
@@ -94,7 +101,13 @@ export function projectTurnDebugDetails(message: ConversationMessage): TurnDebug
             message.completion_model.deployment_name ??
             message.completion_model.name
         }
-      : null,
+      : modelFallback
+        ? {
+            id: modelFallback.id,
+            name: modelFallback.route,
+            route: modelFallback.route
+          }
+        : null,
     inputTokens: message.num_tokens_question ?? 0,
     outputTokens: message.num_tokens_answer ?? 0,
     tools,
