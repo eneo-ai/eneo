@@ -315,7 +315,7 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByRole("button", { name: "storage_moves_resume" })).toBeEnabled();
   });
 
-  test("keeps the selected destination and limit when queueing fails", async () => {
+  test("keeps the selected destination and limit when readiness rejects queueing", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(
       policy({
@@ -335,7 +335,7 @@ describe("admin storage settings page", () => {
         ]
       })
     );
-    queueMoves.mockRejectedValue(new Error("queue unavailable"));
+    queueMoves.mockRejectedValue({ status: 503 });
 
     render(StoragePage);
 
@@ -347,6 +347,111 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByText("storage_moves_action_error_title")).toBeVisible();
     await expect.element(target).toHaveTextContent("storage_target_object_store");
     await expect.element(limit).toHaveValue(7);
+  });
+
+  test("reloads committed queue progress when the command outcome is unknown", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(
+      policy({
+        capabilities: [
+          {
+            target: "postgres_inline",
+            configured: true,
+            selectable: true,
+            readiness_code: "ready"
+          },
+          {
+            target: "object_store",
+            configured: true,
+            selectable: true,
+            readiness_code: "ready"
+          }
+        ]
+      })
+    );
+    let resolveReload!: (value: ReturnType<typeof moves>) => void;
+    getMoves
+      .mockResolvedValueOnce(moves())
+      .mockImplementationOnce(
+        () => new Promise<ReturnType<typeof moves>>((resolve) => (resolveReload = resolve))
+      );
+    queueMoves.mockRejectedValue(new Error("response lost"));
+
+    render(StoragePage);
+
+    const queueButton = page.getByRole("button", { name: "storage_moves_queue" });
+    const pauseButton = page.getByRole("button", { name: "storage_moves_pause" });
+    await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
+    const clickQueue = (async () => {
+      await queueButton.click();
+    })();
+
+    await expect.element(page.getByText("storage_moves_loading")).toBeVisible();
+    await expect.element(queueButton).toBeDisabled();
+    await expect.element(pauseButton).toBeDisabled();
+    resolveReload(
+      moves({
+        policy_revision: 5,
+        moves: [
+          {
+            target: "object_store",
+            state: "pending",
+            failure_code: null,
+            count: 4,
+            bytes: 8192,
+            oldest_updated_at: "2026-07-21T10:00:00Z"
+          }
+        ]
+      })
+    );
+    await clickQueue;
+
+    await expect.element(page.getByText("storage_moves_outcome_unknown_title")).toBeVisible();
+    await expect.element(page.getByText("4", { exact: true })).toBeVisible();
+  });
+
+  test("reloads a committed pause when the command outcome is unknown", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    getMoves
+      .mockResolvedValueOnce(moves())
+      .mockResolvedValueOnce(moves({ policy_revision: 5, paused: true }));
+    setMovesPaused.mockRejectedValue(new Error("response lost"));
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_moves_pause" }).click();
+
+    await expect.element(page.getByText("storage_moves_outcome_unknown_title")).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "storage_moves_resume" })).toBeEnabled();
+  });
+
+  test("uses the saved policy revision and pause state for the next move command", async () => {
+    testUser.isPlatformAdmin = true;
+    const initial = policy();
+    getPolicy.mockResolvedValue(initial);
+    replacePolicy.mockResolvedValue(
+      policy({
+        policy: {
+          ...initial.policy,
+          revision: 5,
+          session_file_limit_bytes: 30 * 1024 * 1024,
+          moves_paused: true
+        }
+      })
+    );
+    setMovesPaused.mockResolvedValue({ policy_revision: 6, paused: false });
+
+    render(StoragePage);
+
+    await page.getByLabelText("storage_limit_session_file").fill("31457280");
+    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_moves_resume" }).click();
+
+    expect(setMovesPaused).toHaveBeenCalledWith({
+      expected_revision: 5,
+      moves_paused: false
+    });
   });
 
   test("disables new move commands while compatible object storage is unavailable", async () => {

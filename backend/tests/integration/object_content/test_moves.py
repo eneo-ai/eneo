@@ -951,6 +951,114 @@ async def test_blocked_move_does_not_starve_eligible_work_or_lose_its_source(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_failed_staged_move_releases_store_dependency_after_orphan_cleanup(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content_id, actor_id = await _create_inline_content(
+        object_content_database,
+        payload=b"staged target becomes orphaned",
+        idempotency_key=f"move-{uuid4().hex}",
+    )
+    reconciler = ObjectContentReconciler(
+        real_object_store.settings,
+        object_content_database,
+        object_store_settings=real_object_store.settings,
+        object_store=real_object_store.store,
+    )
+    await _queue_move(
+        object_content_database,
+        target_kind=StorageKind.OBJECT_STORE,
+        actor_id=actor_id,
+        target_maximum_bytes=real_object_store.settings.maximum_multipart_bytes,
+    )
+
+    original_complete = ObjectContentMoveRepository.complete_to_object_store
+
+    async def crash_before_flip(
+        self: ObjectContentMoveRepository,
+        *,
+        content_id: UUID,
+        lease_owner: str,
+        reservation: PublicationReservation,
+        publication_lease_owner: str,
+    ) -> None:
+        raise SimulatedWorkerCrash
+
+    monkeypatch.setattr(
+        ObjectContentMoveRepository,
+        "complete_to_object_store",
+        crash_before_flip,
+    )
+    with pytest.raises(SimulatedWorkerCrash):
+        await reconciler.run_once()
+    monkeypatch.setattr(
+        ObjectContentMoveRepository,
+        "complete_to_object_store",
+        original_complete,
+    )
+
+    async with object_content_database.session() as session, session.begin():
+        move = await session.get(ObjectContentMoves, content_id)
+        assert move is not None
+        assert move.object_key is not None
+        assert move.state == "target_verified"
+        object_key = move.object_key
+        session.add(
+            ObjectContentHolds(
+                content_id=content_id,
+                kind="legal",
+                reason="preserve the authoritative inline source",
+                actor_user_id=actor_id,
+            )
+        )
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.content_id == content_id
+            )
+        )
+        candidate = await session.get(ObjectContentOrphanCandidates, object_key)
+        assert candidate is not None
+        now = await session.scalar(select(func.now()))
+        assert now is not None
+        candidate.eligible_after = now - timedelta(seconds=1)
+
+    await _expire_crashed_operation(
+        object_content_database,
+        content_id=content_id,
+        object_key=object_key,
+    )
+    inline_runtime = ObjectContentRuntime(database=object_content_database)
+    inline_runtime.start(
+        core_settings=ObjectContentCoreSettings(
+            _env_file=None,
+            inline_maximum_bytes=1024,
+            inline_io_chunk_bytes=1024,
+        )
+    )
+
+    await reconciler.run_once()
+    async with object_content_database.session() as session, session.begin():
+        move = await session.get(ObjectContentMoves, content_id)
+        assert move is not None
+        assert move.state == "failed"
+        assert move.failure_code == "content_ineligible"
+    with pytest.raises(ObjectContentConfigurationError):
+        await inline_runtime.validate_configuration()
+
+    await reconciler.run_once()
+    with pytest.raises(ObjectStoreNotFoundError):
+        await real_object_store.store.head(object_key)
+    await inline_runtime.validate_configuration()
+    readiness = await inline_runtime.readiness()
+    assert readiness.ready is True
+    assert readiness.code is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+    await inline_runtime.stop()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_inline_to_object_recovers_at_each_crash_boundary(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

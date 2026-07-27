@@ -48,6 +48,7 @@
   let moveLimit = $state(25);
   let moveActionPending = $state<MoveAction>(null);
   let moveActionError = $state(false);
+  let moveOutcomeUnknown = $state(false);
   let moveActionStale = $state(false);
   let moveQueueResult = $state<MoveQueueResult | null>(null);
   let loading = $state(true);
@@ -97,6 +98,13 @@
 
   function applyPolicy(next: DeploymentPolicy) {
     deploymentPolicy = next;
+    if (contentMoves !== null) {
+      contentMoves = {
+        ...contentMoves,
+        policy_revision: next.policy.revision,
+        paused: next.policy.moves_paused
+      };
+    }
     storageTarget = next.policy.new_write_storage_target;
     sessionFileLimitBytes = next.policy.session_file_limit_bytes;
     sessionImageLimitBytes = next.policy.session_image_limit_bytes;
@@ -118,6 +126,7 @@
       saveOutcomeUnknown = false;
       saveSuccess = false;
       moveActionError = false;
+      moveOutcomeUnknown = false;
       moveActionStale = false;
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
@@ -241,10 +250,18 @@
   }
 
   async function queueContentMoves() {
-    if (!canEdit || objectStoreUnavailable || !validMoveLimit || moveActionPending !== null) return;
+    if (
+      !canEdit ||
+      objectStoreUnavailable ||
+      !validMoveLimit ||
+      moveStatus !== "idle" ||
+      moveActionPending !== null
+    )
+      return;
 
     moveActionPending = "queue";
     moveActionError = false;
+    moveOutcomeUnknown = false;
     moveActionStale = false;
     moveQueueResult = null;
     try {
@@ -260,8 +277,11 @@
         contentMoves = null;
         inventoryStatus = "idle";
         moveStatus = "idle";
-      } else {
+      } else if (hasStatus(error, 503)) {
         moveActionError = true;
+      } else {
+        moveOutcomeUnknown = true;
+        await loadMoves();
       }
     } finally {
       moveActionPending = null;
@@ -269,10 +289,11 @@
   }
 
   async function setMovesPaused() {
-    if (!canEdit || !contentMoves || moveActionPending !== null) return;
+    if (!canEdit || !contentMoves || moveStatus !== "idle" || moveActionPending !== null) return;
 
     moveActionPending = "pause";
     moveActionError = false;
+    moveOutcomeUnknown = false;
     moveActionStale = false;
     moveQueueResult = null;
     try {
@@ -305,7 +326,8 @@
       } else if (hasStatus(error, 409)) {
         moveActionStale = true;
       } else {
-        moveActionError = true;
+        moveOutcomeUnknown = true;
+        await loadMoves();
       }
     } finally {
       moveActionPending = null;
@@ -810,6 +832,14 @@
                   <Alert.Description>{m.storage_moves_action_error_description()}</Alert.Description
                   >
                 </Alert.Root>
+              {:else if moveOutcomeUnknown}
+                <Alert.Root aria-live="polite">
+                  <Info />
+                  <Alert.Title>{m.storage_moves_outcome_unknown_title()}</Alert.Title>
+                  <Alert.Description>
+                    {m.storage_moves_outcome_unknown_description()}
+                  </Alert.Description>
+                </Alert.Root>
               {:else if moveQueueResult}
                 <Alert.Root aria-live="polite">
                   <CheckCircle2 />
@@ -872,7 +902,10 @@
               <div class="flex flex-wrap gap-3">
                 <Button
                   type="button"
-                  disabled={objectStoreUnavailable || !validMoveLimit || moveActionPending !== null}
+                  disabled={objectStoreUnavailable ||
+                    !validMoveLimit ||
+                    moveStatus !== "idle" ||
+                    moveActionPending !== null}
                   aria-busy={moveActionPending === "queue"}
                   onclick={queueContentMoves}
                 >
@@ -884,7 +917,9 @@
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={contentMoves === null || moveActionPending !== null}
+                  disabled={contentMoves === null ||
+                    moveStatus !== "idle" ||
+                    moveActionPending !== null}
                   aria-busy={moveActionPending === "pause"}
                   onclick={setMovesPaused}
                 >

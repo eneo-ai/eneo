@@ -331,9 +331,6 @@ class ObjectContentRuntime:
                                 ),
                             ),
                             exists().where(
-                                ObjectContentMoves.object_key.is_not(None),
-                            ),
-                            exists().where(
                                 ObjectContentOrphanCandidates.object_key.is_not(None),
                             ),
                             exists().where(
@@ -344,12 +341,12 @@ class ObjectContentRuntime:
                         )
                     )
                 )
-                active_content = bool(result.scalar_one())
+                requires_object_store = bool(result.scalar_one())
         except (OSError, SQLAlchemyError) as error:
             raise ObjectContentUnavailableError(
                 "Unable to verify object-content authority state"
             ) from error
-        return active_content
+        return requires_object_store
 
     async def reconcile_once(self) -> ReconciliationResult:
         if self._state is ObjectContentRuntimeState.NOT_STARTED:

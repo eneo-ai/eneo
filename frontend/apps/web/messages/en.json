@@ -219,6 +219,8 @@
   "storage_moves_stale_description": "Reload the latest storage settings before pausing or resuming again.",
   "storage_moves_action_error_title": "The move command could not be completed",
   "storage_moves_action_error_description": "No moves were queued. Check that object storage is available and try again.",
+  "storage_moves_outcome_unknown_title": "The command result could not be confirmed",
+  "storage_moves_outcome_unknown_description": "Eneo could not confirm whether the command took effect. Check the move status before trying again.",
   "storage_moves_queue_result": "Queued {queued} items. {tooLarge} items are larger than the current destination limit.",
   "storage_moves_target": "Destination",
   "storage_moves_limit": "Items to queue",

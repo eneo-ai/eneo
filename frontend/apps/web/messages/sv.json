@@ -219,6 +219,8 @@
   "storage_moves_stale_description": "Läs in de senaste lagringsinställningarna innan du pausar eller återupptar igen.",
   "storage_moves_action_error_title": "Flyttkommandot kunde inte slutföras",
   "storage_moves_action_error_description": "Inga flyttar köades. Kontrollera att objektlagringen är tillgänglig och försök igen.",
+  "storage_moves_outcome_unknown_title": "Resultatet kunde inte bekräftas",
+  "storage_moves_outcome_unknown_description": "Eneo kunde inte bekräfta om kommandot genomfördes. Kontrollera flyttstatusen innan du försöker igen.",
   "storage_moves_queue_result": "{queued} poster köades. {tooLarge} poster är större än den aktuella gränsen för den nya lagringsplatsen.",
   "storage_moves_target": "Ny lagringsplats",
   "storage_moves_limit": "Poster att köa",
