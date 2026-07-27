@@ -62,13 +62,13 @@ async def test_get_session_partner_uses_tenant_scoped_scalar_join():
     assert tenant_id in compiled.params.values()
 
 
-async def test_get_is_tenant_scoped_before_hydration():
+async def test_get_for_tenant_is_scoped_before_hydration():
     question_id = uuid4()
     tenant_id = uuid4()
     repo = QuestionRepository(AsyncMock())
     repo.delegate.get_model_from_query = AsyncMock(return_value=None)
 
-    question = await repo.get(id=question_id, tenant_id=tenant_id)
+    question = await repo.get_for_tenant(id=question_id, tenant_id=tenant_id)
 
     assert question is None
     statement = repo.delegate.get_model_from_query.await_args.args[0]

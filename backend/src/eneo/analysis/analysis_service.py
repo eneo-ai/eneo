@@ -592,7 +592,7 @@ class AnalysisService:
         except (BadRequestException, NotFoundException, UnauthorizedException) as exc:
             raise NotFoundException("Message not found") from exc
 
-        question = await self.question_repo.get(
+        question = await self.question_repo.get_for_tenant(
             id=message_id,
             tenant_id=self.user.tenant_id,
         )

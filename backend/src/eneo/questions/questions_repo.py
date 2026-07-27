@@ -191,7 +191,13 @@ class QuestionRepository:
 
         await self.session.execute(stmt)
 
-    async def get(self, *, id: UUID, tenant_id: UUID) -> Question | None:
+    async def get(self, id: UUID) -> Question | None:
+        question = await self.delegate.get(id)
+        if question is None:
+            return None
+        return (await self._hydrate_questions([question]))[0]
+
+    async def get_for_tenant(self, *, id: UUID, tenant_id: UUID) -> Question | None:
         question = await self.delegate.get_model_from_query(
             sa.select(Questions).where(
                 Questions.id == id,
@@ -445,10 +451,7 @@ class QuestionRepository:
             logging_details = result.scalar_one()  # pyright: ignore[reportUnknownVariableType]  # dynamic table scalar
             question_record.logging_details = logging_details
 
-        return await self.get(
-            id=question_record.id,
-            tenant_id=question.tenant_id,
-        )
+        return await self.get(question_record.id)
 
     async def get_by_service(self, service_id: UUID):
         stmt = (
