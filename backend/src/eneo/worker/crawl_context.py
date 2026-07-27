@@ -130,6 +130,10 @@ class CrawlContext:
     # max_transaction_wall_time_seconds: hard ceiling on Phase 2 persist (consensus: 30s)
     max_transaction_wall_time_seconds: int = 30
 
+    # Chunking - per-website overrides (None => global default)
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None
+
 
 @dataclass
 class PreparedPage:

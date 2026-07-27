@@ -879,6 +879,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     tenant_id=website.tenant_id,
                     tenant_slug=tenant.slug if tenant else None,
                     user_id=container.user().id,
+                    chunk_size=website.chunk_size,
+                    chunk_overlap=website.chunk_overlap,
                     # Embedding model - use EmbeddingModelSpec DTO (already extracted)
                     embedding_model_id=embedding_model_spec.id
                     if embedding_model_spec

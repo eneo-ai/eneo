@@ -187,7 +187,7 @@ async def persist_batch(
             add_failure(FailureReason.EMBEDDING_ERROR, page["url"])
         return 0, len(page_buffer), [], failures_by_reason
 
-    splitter = build_text_splitter()
+    splitter = build_text_splitter(ctx.chunk_size, ctx.chunk_overlap)
 
     # PHASE 1: Compute embeddings (uses embedding_session for provider credentials)
     # The embedding session is used to load API credentials from DB, but the actual
