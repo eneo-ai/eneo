@@ -20,6 +20,21 @@ class ChunkSettings(BaseSettings):
 
 settings = ChunkSettings()
 
+# Safety valve: keep chunks well under the model's token limit, where embedding
+# quality degrades and oversized chunks get silently truncated at embed time.
+MAX_CHUNK_FRACTION = 0.6
+
+
+def clamp_chunk_size(chunk_size: int, max_input: int | None) -> int:
+    """Cap chunk_size at MAX_CHUNK_FRACTION of the model's max_input.
+
+    ``max_input`` of None/0 (unknown limit) leaves the value untouched.
+    """
+    if not max_input:
+        return chunk_size
+    ceiling = int(max_input * MAX_CHUNK_FRACTION)
+    return min(chunk_size, ceiling) if ceiling > 0 else chunk_size
+
 
 def build_text_splitter(
     chunk_size: int | None = None,

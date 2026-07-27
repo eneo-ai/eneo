@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional, Union, cast, overload
 from typing_extensions import override
 
 from eneo.base.base_entity import Entity
+from eneo.embedding_models.domain.chunking import clamp_chunk_size
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 
 if TYPE_CHECKING:
@@ -151,6 +152,10 @@ class Collection(Entity):
         if is_provided(name):
             self.name = name
         if is_provided(chunk_size):
-            self.chunk_size = chunk_size
+            self.chunk_size = (
+                clamp_chunk_size(chunk_size, self.embedding_model.max_input)
+                if chunk_size is not None
+                else None
+            )
         if is_provided(chunk_overlap):
             self.chunk_overlap = chunk_overlap
