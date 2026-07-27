@@ -210,6 +210,8 @@ class IntegrationKnowledgePublic(BaseModel):
     selected_item_type: Optional[str] = None
     wrapper_id: Optional[UUID] = None
     wrapper_name: Optional[str] = None
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
     permissions: list[ResourcePermission] = Field(
         default_factory=_empty_resource_permissions
     )

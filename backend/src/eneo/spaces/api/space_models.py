@@ -342,6 +342,8 @@ class CreateSpaceIntegrationKnowledge(BaseModel):
     resource_type: Optional[str] = (
         "site"  # "site" for SharePoint, "onedrive" for OneDrive
     )
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
 
 
 class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
@@ -359,6 +361,8 @@ class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
 class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):
     embedding_model: ModelId
     wrapper_name: Optional[str] = None
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
     items: list[CreateSpaceIntegrationKnowledgeBatchItem] = Field(
         min_length=1, max_length=50
     )

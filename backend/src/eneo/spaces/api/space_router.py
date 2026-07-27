@@ -802,6 +802,8 @@ async def create_space_integration_knowledge(
         folder_path=data.folder_path,
         selected_item_type=data.selected_item_type,
         resource_type=data.resource_type or "site",
+        chunk_size=data.chunk_size,
+        chunk_overlap=data.chunk_overlap,
     )
 
     # Get space for context (graceful degradation if space fetch fails)
@@ -862,6 +864,8 @@ async def create_space_integration_knowledge_batch(
         embedding_model_id=data.embedding_model.id,
         space_id=id,
         wrapper_name=data.wrapper_name,
+        chunk_size=data.chunk_size,
+        chunk_overlap=data.chunk_overlap,
         items=[
             {
                 "name": item.name,

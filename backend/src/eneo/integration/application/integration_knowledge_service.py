@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from typing_extensions import TypedDict
 
+from eneo.embedding_models.domain.chunking import clamp_chunk_size
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
@@ -184,6 +185,8 @@ class IntegrationKnowledgeService:
         resource_type: str = "site",
         wrapper_id: UUID | None = None,
         wrapper_name: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> tuple[IntegrationKnowledge, "JobInDb"]:
         space = await self.space_repo.one(id=space_id)
 
@@ -222,6 +225,9 @@ class IntegrationKnowledgeService:
             site_id_value = None
             drive_id_value = None
 
+        if chunk_size is not None:
+            chunk_size = clamp_chunk_size(chunk_size, embedding_model.max_input)
+
         obj = IntegrationKnowledge(
             name=name,
             original_name=name,  # Store original name at creation time
@@ -238,6 +244,8 @@ class IntegrationKnowledgeService:
             selected_item_type=selected_item_type,
             wrapper_id=wrapper_id,
             wrapper_name=wrapper_name,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
         knowledge = await self.integration_knowledge_repo.add(obj=obj)
 
@@ -346,6 +354,8 @@ class IntegrationKnowledgeService:
         space_id: UUID,
         items: list[BatchIntegrationKnowledgeCreateItem],
         wrapper_name: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> list[BatchIntegrationKnowledgeCreateResult]:
         """Create multiple integration knowledge rows in one request.
 
@@ -372,6 +382,8 @@ class IntegrationKnowledgeService:
                     folder_path=item.get("folder_path"),
                     selected_item_type=item.get("selected_item_type"),
                     resource_type=item.get("resource_type") or "site",
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
                     wrapper_id=batch_wrapper_id,
                     wrapper_name=batch_wrapper_name,
                 )
