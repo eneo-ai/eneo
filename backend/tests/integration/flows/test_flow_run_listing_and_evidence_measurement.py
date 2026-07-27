@@ -1,4 +1,4 @@
-"""Reproducible Flow M6.1 endpoint and evidence baseline.
+"""Measure Flow run listing and redacted evidence with a reproducible workload.
 
 The workload uses 600 measured runs (300 per Flow) so a 50-row page at offset
 250 must perform meaningfully deeper work than the first page.
@@ -8,8 +8,8 @@ optimization claims. Retention and webhook values are recorded context only;
 their canonical tests own those contracts.
 
 By default the JSON report is written under pytest's tmp_path. Set
-FLOW_M6_BASELINE_REPORT_PATH to a caller-controlled file path to retain a report
-after the test process exits. No report belongs in the repository.
+FLOW_RUN_LISTING_EVIDENCE_REPORT_PATH to a caller-controlled file path to retain
+a report after the test process exits. No report belongs in the repository.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository, PreseedSt
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import build_published_definition_json
 
-SCHEMA_VERSION = "flow-m6.1.v1"
+REPORT_SCHEMA_VERSION = "flow-run-listing-evidence-measurement.v1"
 WORKLOAD_SEED = 20260726
 MEASURED_TENANT_RUNS = 600
 RUNS_PER_FLOW = 300
@@ -84,10 +84,10 @@ RESULT_FILE_COUNT = 1
 PAGE_LIMIT = 50
 DEEP_OFFSET = 250
 # Run page, result-file hydration, token aggregation, and final-output versions.
-ENDPOINT_STATEMENT_COUNT = 4
+RUN_LISTING_STATEMENT_COUNT = 4
 EVIDENCE_QUERY_COUNT = 12
-REPORT_PATH_ENV = "FLOW_M6_BASELINE_REPORT_PATH"
-SECRET_SENTINEL = "m6-secret-20260726"
+REPORT_PATH_ENV = "FLOW_RUN_LISTING_EVIDENCE_REPORT_PATH"
+SECRET_SENTINEL = "flow-evidence-secret-20260726"
 _BASE_TIME = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
 
 
@@ -260,9 +260,9 @@ async def _create_evidence_files(
     file_repo = FileRepository(session=session)
     file_ids: list[UUID] = []
     for name, text in (
-        ("m6-input-1.txt", "Representative evidence input 1"),
-        ("m6-input-2.txt", "Representative evidence input 2"),
-        ("m6-result.txt", "Representative evidence result"),
+        ("flow-evidence-input-1.txt", "Representative evidence input 1"),
+        ("flow-evidence-input-2.txt", "Representative evidence input 2"),
+        ("flow-evidence-result.txt", "Representative evidence result"),
     ):
         created = await file_repo.add(
             FileCreate(
@@ -306,7 +306,7 @@ async def _write_representative_evidence(
                 step_id=step_id,
                 step_order=step_order,
                 attempt_no=attempt_no,
-                celery_task_id=f"m6-{step_order}-{attempt_no}",
+                celery_task_id=f"flow-evidence-{step_order}-{attempt_no}",
                 predecessor_attempt_id=predecessor_attempt_id,
             )
             if attempt_no > 1:
@@ -386,13 +386,13 @@ async def _seed_workload(
     admin_user,
 ) -> _SeededWorkload:
     random_source = Random(WORKLOAD_SEED)
-    model = await completion_model_factory(session, "flow-m6-baseline-model")
+    model = await completion_model_factory(session, "flow-evidence-measurement-model")
     measured_space = await space_factory(
-        session, "Flow M6 baseline measurement", [model.id]
+        session, "Flow run evidence measurement", [model.id]
     )
     assistant = await assistant_factory(
         session,
-        "Flow M6 baseline assistant",
+        "Flow run evidence measurement assistant",
         model.id,
         space_id=measured_space.id,
     )
@@ -405,7 +405,7 @@ async def _seed_workload(
         space_id=measured_space.id,
         user_id=admin_user.id,
         assistant_id=assistant.id,
-        name="Flow M6 baseline evidence",
+        name="Flow evidence measurement",
         step_count=EVIDENCE_STEP_COUNT,
     )
     second_flow = await _create_flow(
@@ -415,7 +415,7 @@ async def _seed_workload(
         space_id=measured_space.id,
         user_id=admin_user.id,
         assistant_id=assistant.id,
-        name="Flow M6 baseline secondary",
+        name="Flow listing comparison",
         step_count=1,
     )
     step_ids = tuple(cast(UUID, step.id) for step in evidence_flow.steps)
@@ -530,7 +530,7 @@ def _max_actual_rows(explain: dict[str, object]) -> float:
     )
 
 
-async def _measure_endpoint_page(
+async def _measure_run_listing_page(
     *,
     session: AsyncSession,
     run_service: FlowRunService,
@@ -545,7 +545,7 @@ async def _measure_endpoint_page(
             limit=PAGE_LIMIT,
             offset=offset,
         )
-    assert len(captured) == ENDPOINT_STATEMENT_COUNT
+    assert len(captured) == RUN_LISTING_STATEMENT_COUNT
 
     connection = await session.connection()
     statement_reports: list[dict[str, object]] = []
@@ -583,7 +583,7 @@ async def _run_count(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_m6_baseline_measurement_contract(
+async def test_flow_run_listing_and_evidence_measurement_contract(
     db_container,
     completion_model_factory,
     space_factory,
@@ -625,7 +625,7 @@ async def test_flow_m6_baseline_measurement_contract(
             ("shallow", 0, True),
             ("deep", DEEP_OFFSET, False),
         ):
-            page, statement_reports = await _measure_endpoint_page(
+            page, statement_reports = await _measure_run_listing_page(
                 session=session,
                 run_service=run_service,
                 flow_id=workload.measured_flow_ids[0],
@@ -703,7 +703,7 @@ async def test_flow_m6_baseline_measurement_contract(
         assert expected_masked_paths <= set(evidence_bundle.masked_paths)
 
         report: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": REPORT_SCHEMA_VERSION,
             "workload": {
                 "seed": WORKLOAD_SEED,
                 "tenant_count": 1,
@@ -716,7 +716,7 @@ async def test_flow_m6_baseline_measurement_contract(
                 "result_files": RESULT_FILE_COUNT,
                 "provider_calls": PROVIDER_CALL_COUNT,
             },
-            "endpoint_run_list": {
+            "flow_run_listing": {
                 "analyze_before_explain": True,
                 "pages": page_reports,
             },
@@ -751,11 +751,14 @@ async def test_flow_m6_baseline_measurement_contract(
         }
 
         report_path = Path(
-            os.environ.get(REPORT_PATH_ENV, str(tmp_path / f"{SCHEMA_VERSION}.json"))
+            os.environ.get(
+                REPORT_PATH_ENV,
+                str(tmp_path / f"{REPORT_SCHEMA_VERSION}.json"),
+            )
         )
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
             json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        print(f"{SCHEMA_VERSION} report={report_path}")
+        print(f"{REPORT_SCHEMA_VERSION} report={report_path}")
