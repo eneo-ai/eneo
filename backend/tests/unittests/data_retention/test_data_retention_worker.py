@@ -162,6 +162,9 @@ class _DataRetentionService:
         return FlowDebugRedactionCounts(
             debug_step_results=7,
             debug_step_attempts=11,
+            debug_provider_calls=13,
+            debug_resolved_input_aggregates=17,
+            debug_resolved_input_edges=19,
         )
 
     async def delete_old_delivered_flow_audit_outbox_rows(self) -> int:
@@ -229,11 +232,17 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 31
     assert result["deleted"]["flow_runs_skipped_unresolved_webhook"] == 41
     assert result["deleted"]["flow_runs_skipped_active_rerun"] == 37
-    assert result["deleted"]["total"] == 233
+    assert result["deleted"]["flow_provider_calls"] == 13
+    assert result["deleted"]["flow_resolved_input_aggregates"] == 17
+    assert result["deleted"]["flow_resolved_input_edges"] == 19
+    assert result["deleted"]["total"] == 263
     assert "flow_runtime_source_candidate_bytes: 1200" in caplog.text
     assert "flow_runtime_source_bytes_deleted: 300" in caplog.text
     assert "flow_runs_considered: 3" in caplog.text
     assert "flow_runs_lock_deferred: 0" in caplog.text
+    assert "flow_provider_calls: 13" in caplog.text
+    assert "flow_resolved_input_aggregates: 17" in caplog.text
+    assert "flow_resolved_input_edges: 19" in caplog.text
     assert "flow_runs_skipped_unresolved_webhook: 41" in caplog.text
     assert str(_SENSITIVE_FLOW_ID) not in caplog.text
     assert str(_SENSITIVE_TENANT_ID) not in caplog.text

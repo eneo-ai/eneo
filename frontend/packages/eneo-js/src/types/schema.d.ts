@@ -16709,7 +16709,6 @@ export interface components {
      *               "attempt_no": 1,
      *               "call_reason": "initial",
      *               "event_id": "00000000-0000-0000-0000-000000000801",
-     *               "evidence_source": "live_observer",
      *               "finished_at": "2026-07-26T12:00:01Z",
      *               "input_source": "provider",
      *               "mapped_execution_mode": "per_item",
@@ -16722,7 +16721,7 @@ export interface components {
      *               "provider": "openai",
      *               "provider_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
      *               "provider_response_id": "resp_01HZXAMPLE",
-     *               "request_schema_version": 1,
+     *               "request_schema_version": 2,
      *               "requested_at": "2026-07-26T12:00:00Z",
      *               "requested_capabilities": [
      *                 "structured_output"
@@ -16878,7 +16877,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "303533022162d538e9c10e2bdec84dec42ed92aa9e73b80b703784f476baa03d",
+     *       "content_hash": "5ff9c2925588426dc669df439fd12a7aeaa1d3a5f977c6cc29b43fcca747bb73",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -16914,7 +16913,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "303533022162d538e9c10e2bdec84dec42ed92aa9e73b80b703784f476baa03d",
+     *         "content_hash": "5ff9c2925588426dc669df439fd12a7aeaa1d3a5f977c6cc29b43fcca747bb73",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -17420,7 +17419,6 @@ export interface components {
      *             "attempt_no": 1,
      *             "call_reason": "initial",
      *             "event_id": "00000000-0000-0000-0000-000000000801",
-     *             "evidence_source": "live_observer",
      *             "finished_at": "2026-07-26T12:00:01Z",
      *             "input_source": "provider",
      *             "mapped_execution_mode": "per_item",
@@ -17433,7 +17431,7 @@ export interface components {
      *             "provider": "openai",
      *             "provider_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
      *             "provider_response_id": "resp_01HZXAMPLE",
-     *             "request_schema_version": 1,
+     *             "request_schema_version": 2,
      *             "requested_at": "2026-07-26T12:00:00Z",
      *             "requested_capabilities": [
      *               "structured_output"
@@ -24219,21 +24217,26 @@ export interface components {
       /** Ordinal */
       ordinal: number;
       status: components["schemas"]["ProviderCallStatus"];
-      evidence_source: components["schemas"]["ProviderCallEvidenceSource"];
-      /** Request Schema Version */
-      request_schema_version: number | null;
-      /** Provider Request Hash */
-      provider_request_hash: string | null;
+      /**
+       * Request Schema Version
+       * @constant
+       */
+      request_schema_version: 2;
+      /**
+       * Provider Request Hash
+       * @description SHA-256 of Eneo's canonical non-streaming request intent at the provider adapter boundary: requested model, provider, ordered messages, and allowlisted controls. Provider-side parameter dropping or transport enrichment is not reflected.
+       */
+      provider_request_hash: string;
       /** Requested Model */
-      requested_model: string | null;
+      requested_model: string;
       /** Provider */
       provider: string | null;
-      response_format: components["schemas"]["ProviderCallResponseFormat"] | null;
+      response_format: components["schemas"]["ProviderCallResponseFormat"];
       /**
        * Requested Capabilities
-       * @description Sorted request intent for capabilities Eneo attempted in this provider request. null means not observed; [] means observed with none. This is not proof of provider support, acceptance, or completion.
+       * @description Sorted request intent for capabilities Eneo attempted in this provider request. [] means none were requested. This is not proof of provider support, acceptance, or completion.
        */
-      requested_capabilities: components["schemas"]["ProviderCallRequestedCapability"][] | null;
+      requested_capabilities: components["schemas"]["ProviderCallRequestedCapability"][];
       call_reason: components["schemas"]["ProviderCallReason"];
       /** Mapped Execution Mode */
       mapped_execution_mode: ("per_item" | "per_source") | null;
@@ -24261,8 +24264,11 @@ export interface components {
         | components["schemas"]["ProviderCallRejectionReason"]
         | components["schemas"]["ProviderCallUnknownReason"]
         | null;
-      /** Requested At */
-      requested_at: string | null;
+      /**
+       * Requested At
+       * Format: date-time
+       */
+      requested_at: string;
       /** Finished At */
       finished_at: string | null;
     };
@@ -24310,7 +24316,6 @@ export interface components {
      *           "attempt_no": 1,
      *           "call_reason": "initial",
      *           "event_id": "00000000-0000-0000-0000-000000000801",
-     *           "evidence_source": "live_observer",
      *           "finished_at": "2026-07-26T12:00:01Z",
      *           "input_source": "provider",
      *           "mapped_execution_mode": "per_item",
@@ -24323,7 +24328,7 @@ export interface components {
      *           "provider": "openai",
      *           "provider_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
      *           "provider_response_id": "resp_01HZXAMPLE",
-     *           "request_schema_version": 1,
+     *           "request_schema_version": 2,
      *           "requested_at": "2026-07-26T12:00:00Z",
      *           "requested_capabilities": [
      *             "structured_output"
@@ -24353,15 +24358,10 @@ export interface components {
       next_after_event_id: string | null;
     };
     /**
-     * ProviderCallEvidenceSource
-     * @enum {string}
-     */
-    ProviderCallEvidenceSource: "live_observer" | "legacy_provenance";
-    /**
      * ProviderCallReason
      * @enum {string}
      */
-    ProviderCallReason: "initial" | "response_format_fallback" | "tool_round" | "legacy_backfill";
+    ProviderCallReason: "initial" | "response_format_fallback" | "tool_round";
     /**
      * ProviderCallRejectionReason
      * @enum {string}

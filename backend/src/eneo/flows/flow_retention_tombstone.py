@@ -32,6 +32,9 @@ class RunDebugAttemptRetentionCounts(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cleared_field_count: int
+    provider_call_count: int
+    resolved_input_aggregate_count: int
+    resolved_input_edge_count: int
 
 
 class GeneratedArtifactRetentionCounts(BaseModel):

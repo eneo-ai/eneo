@@ -255,7 +255,7 @@ Policies remain enforced even when tenant `security_enabled` display is disabled
 
 The explicit no-purge value is a retention barrier, not a general records-management or legal-hold framework. The preview separately reports three lifecycle blockers—undelivered audit delivery, unresolved webhook delivery, and active rerun work—and the minimum/no-purge/conflict policy blockers.
 
-Current retention deletes the full run and step history. There is no API for raw per-step deletion intervals yet. When the organization or matching-classification envelope is active, a stricter Flow/Space `data_retention_days` value can shorten the full run-history window. A Flow/Space value cannot activate deletion by itself. Use tenant evidence policy for export controls.
+Current retention deletes the full run and step history. The earlier `run_debug_evidence_days` window removes step debug payloads, provider-call rows, and the attempt's resolved-input evidence while retaining a tombstone with deletion counts. There is no API for raw per-step deletion intervals yet. When the organization or matching-classification envelope is active, a stricter Flow/Space `data_retention_days` value can shorten the full run-history window. A Flow/Space value cannot activate deletion by itself. Use tenant evidence policy for export controls.
 
 The never-attached-upload input is only a control-plane value in this slice. Upload sweeping remains a separate implementation step and is not performed by these endpoints.
 
@@ -1153,10 +1153,14 @@ Each row has an explicit lifecycle status:
   spend may still have occurred, so never infer zero spend or an automatically
   safe retry.
 
-`provider_request_hash` correlates the exact request content and allowed controls
-without exposing credentials or copying the full request into this table. Request
-and response model ids, provider, response format, call reason, response id, and
-timestamps explain the dispatch. Mapped calls additionally expose
+`request_schema_version = 2` identifies the current request-hash contract.
+`provider_request_hash` is the SHA-256 of Eneo's canonical non-streaming request
+intent at the provider-adapter boundary: requested model, provider, ordered
+messages, and allowlisted controls. Provider-side parameter dropping or transport
+enrichment is not reflected. The hash correlates that credential-free intent
+without copying the full request into this table. Request and response model ids,
+provider, response format, call reason, response id, and timestamps explain the
+dispatch. Mapped calls additionally expose
 `mapped_execution_mode`, the item or source index, and `mapped_source_id` when the
 runtime had one.
 
@@ -1164,10 +1168,9 @@ runtime had one.
 that provider request: `image_input`, `reasoning`, `structured_output`, and
 `tool_calling`. It is derived at the provider boundary after Eneo's adapter has
 removed an unsupported or empty `reasoning_effort`. The list explains request
-intent; it does not claim that the provider supports, honored, or completed the
-capability. `null` means the row predates this observation or was otherwise not
-observed. An empty list means Eneo observed the request and none of these four
-capabilities were requested. Preserve that distinction in UI labels and metrics.
+intent; it does not claim that the provider supported, honored, or completed the
+capability. An empty list means none of these four capabilities were requested.
+The field is always an array, so clients do not need a legacy or unknown branch.
 
 Input and output usage are independent: each completed row has a count and a
 matching `*_source`.

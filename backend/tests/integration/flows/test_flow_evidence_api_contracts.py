@@ -22,7 +22,6 @@ from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
-    FlowProviderCalls,
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
@@ -803,7 +802,12 @@ def _attempt_retention_marker_payload(
             policy_source="tenant.flow_settings.retention_policy.run_debug_evidence_days",
             cutoff=now,
             actor_source=FLOW_RETENTION_ACTOR_SOURCE,
-            counts=RunDebugAttemptRetentionCounts(cleared_field_count=1),
+            counts=RunDebugAttemptRetentionCounts(
+                cleared_field_count=1,
+                provider_call_count=0,
+                resolved_input_aggregate_count=0,
+                resolved_input_edge_count=0,
+            ),
             timestamp=now,
             retention_state="retention_purged",
         )
@@ -983,11 +987,6 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
                 call_reason="initial",
             ),
         )
-        await session.execute(
-            sa.update(FlowProviderCalls)
-            .where(FlowProviderCalls.id == rejected.id)
-            .values(requested_capabilities=None)
-        )
         await provider_call_repo.reject_call(
             call_id=rejected.id,
             reason="response_format_rejected",
@@ -1037,7 +1036,9 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     assert first_page["items"][0]["status"] == "rejected"
     assert first_page["items"][0]["outcome_reason"] == ("response_format_rejected")
     assert first_page["items"][0]["provider_request_hash"] == "a" * 64
-    assert first_page["items"][0]["requested_capabilities"] is None
+    assert first_page["items"][0]["request_schema_version"] == 2
+    assert first_page["items"][0]["requested_capabilities"] == ["structured_output"]
+    assert "evidence_source" not in first_page["items"][0]
 
     second_response = await client.get(
         endpoint,
@@ -1087,7 +1088,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
         str(completed.id),
     ]
     assert [item["requested_capabilities"] for item in embedded["items"]] == [
-        None,
+        ["structured_output"],
         ["structured_output"],
     ]
 
@@ -1105,7 +1106,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     assert [
         item["requested_capabilities"]
         for item in evidence_export["bundle"]["provider_calls"]["items"]
-    ] == [None, ["structured_output"]]
+    ] == [["structured_output"], ["structured_output"]]
 
 
 @pytest.mark.asyncio

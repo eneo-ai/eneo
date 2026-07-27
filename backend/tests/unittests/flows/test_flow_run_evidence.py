@@ -326,7 +326,12 @@ def _attempt_retention_marker_payload(
             policy_source="tenant.flow_settings.retention_policy.run_debug_evidence_days",
             cutoff=now,
             actor_source=FLOW_RETENTION_ACTOR_SOURCE,
-            counts=RunDebugAttemptRetentionCounts(cleared_field_count=1),
+            counts=RunDebugAttemptRetentionCounts(
+                cleared_field_count=1,
+                provider_call_count=0,
+                resolved_input_aggregate_count=0,
+                resolved_input_edge_count=0,
+            ),
             timestamp=now,
             retention_state="retention_purged",
         )
@@ -1650,7 +1655,12 @@ def test_evidence_export_redacted_preserves_retention_marker_fields() -> None:
     assert marker["tombstone"]["tenant_id"] == str(run.tenant_id)
     assert marker["tombstone"]["run_id"] == str(run.id)
     assert marker["tombstone"]["trace_id"] == str(run.trace_id)
-    assert marker["tombstone"]["counts"] == {"cleared_field_count": 1}
+    assert marker["tombstone"]["counts"] == {
+        "cleared_field_count": 1,
+        "provider_call_count": 0,
+        "resolved_input_aggregate_count": 0,
+        "resolved_input_edge_count": 0,
+    }
     assert not any(
         path.startswith("bundle.step_attempts.0.provenance_json.tombstone")
         for path in export["redaction"]["masked_paths"]

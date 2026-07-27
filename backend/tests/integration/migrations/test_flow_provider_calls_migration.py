@@ -41,26 +41,18 @@ def _alembic_cfg(database_url: str) -> Config:
 
 @pytest.fixture(autouse=True)
 def cleanup_database() -> Iterator[None]:
-    """Shadow global cleanup while this test controls the schema revision."""
     yield
 
 
 @pytest.fixture(autouse=True)
 def seed_default_models() -> Iterator[None]:
-    """Shadow global model seeding while this test controls the schema revision."""
     yield
 
 
 @pytest.fixture
 def migration_db(test_settings) -> Iterator[MigrationDb]:
     cfg = _alembic_cfg(test_settings.sync_database_url)
-    conn = psycopg2.connect(
-        host=test_settings.postgres_host,
-        port=test_settings.postgres_port,
-        dbname=test_settings.postgres_db,
-        user=test_settings.postgres_user,
-        password=test_settings.postgres_password,
-    )
+    conn = psycopg2.connect(test_settings.sync_database_url)
     conn.autocommit = True
 
     command.upgrade(cfg, "head")
@@ -119,10 +111,7 @@ def _insert_completed_attempt(
             (user_id, f"user-{user_id}", f"{user_id}@example.test", tenant_id),
         )
         cur.execute(
-            """
-            INSERT INTO spaces (id, name, tenant_id, user_id)
-            VALUES (%s, %s, %s, NULL)
-            """,
+            "INSERT INTO spaces (id, name, tenant_id, user_id) VALUES (%s, %s, %s, NULL)",
             (space_id, "Provider-call migration space", tenant_id),
         )
         cur.execute(
@@ -169,10 +158,7 @@ def _insert_completed_attempt(
                 ),
             ),
         )
-        cur.execute(
-            "UPDATE flows SET published_version = 1 WHERE id = %s",
-            (flow_id,),
-        )
+        cur.execute("UPDATE flows SET published_version = 1 WHERE id = %s", (flow_id,))
         cur.execute(
             """
             INSERT INTO flow_runs (
@@ -191,14 +177,7 @@ def _insert_completed_attempt(
             )
             VALUES (%s, %s, %s, %s, %s, 1, 1, 'completed', %s, now(), now())
             """,
-            (
-                attempt_id,
-                run_id,
-                flow_id,
-                tenant_id,
-                step_id,
-                Json(provenance_json),
-            ),
+            (attempt_id, run_id, flow_id, tenant_id, step_id, Json(provenance_json)),
         )
     return attempt_id
 
@@ -210,377 +189,161 @@ def _table_exists(conn: PsycopgConnection, table_name: str) -> bool:
     return row is not None and row[0] is not None
 
 
-def _provider_call_rows(
+def _insert_started_provider_call(
     conn: PsycopgConnection,
     *,
     attempt_id: UUID,
-) -> list[tuple[object, ...]]:
+    schema_version: int = 2,
+    call_reason: str = "initial",
+    requested_model: str = "openai/gpt-5-mini",
+    provider: str | None = None,
+) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT
-                ordinal, status, evidence_source, request_schema_version,
-                provider_request_hash, requested_model, provider,
-                response_format, call_reason, mapped_execution_mode,
-                mapped_item_index, mapped_source_index, mapped_source_id,
-                response_model,
-                provider_response_id, num_tokens_input, num_tokens_output,
-                input_source, output_source, requested_at, finished_at
-            FROM flow_provider_calls
-            WHERE flow_step_attempt_id = %s
-            ORDER BY ordinal
-            """,
-            (attempt_id,),
-        )
-        return list(cur.fetchall())
-
-
-def test_upgrade_aborts_before_casting_inconsistent_legacy_token_usage(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json={
-            "token_usage": {
-                "completed_provider_calls": [
-                    {
-                        "call_index": 1,
-                        "num_tokens_input": None,
-                        "num_tokens_output": 8,
-                        "input_source": "provider",
-                        "output_source": "provider",
-                    }
-                ]
-            }
-        },
-    )
-
-    with pytest.raises(RuntimeError) as exc:
-        command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    message = str(exc.value)
-    assert "invalid legacy provider receipts" in message
-    assert "invalid_token_usage=1" in message
-    assert str(attempt_id) in message
-
-
-def test_relational_table_rejects_token_counts_that_disagree_with_their_source(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json={},
-    )
-    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    with pytest.raises(psycopg2.errors.CheckViolation) as exc:
-        with migration_db.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO flow_provider_calls (
-                    flow_step_attempt_id, ordinal, status, evidence_source,
-                    request_schema_version, provider_request_hash,
-                    response_format, call_reason, num_tokens_input,
-                    num_tokens_output, input_source, output_source,
-                    requested_at, finished_at
-                )
-                VALUES (
-                    %s, 1, 'completed', 'live_observer', 1, %s,
-                    'none', 'initial', NULL, NULL, 'provider', 'not_reported',
-                    now(), now()
-                )
-                """,
-                (attempt_id, "a" * 64),
-            )
-
-    assert "ck_flow_provider_calls_input_usage_shape" in str(exc.value)
-
-
-def test_relational_table_rejects_completed_rows_without_usage_sources(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json={},
-    )
-    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    with pytest.raises(psycopg2.errors.CheckViolation) as exc:
-        with migration_db.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO flow_provider_calls (
-                    flow_step_attempt_id, ordinal, status, evidence_source,
-                    call_reason
-                )
-                VALUES (
-                    %s, 1, 'completed', 'legacy_provenance',
-                    'legacy_backfill'
-                )
-                """,
-                (attempt_id,),
-            )
-
-    assert "ck_flow_provider_calls_lifecycle_shape" in str(exc.value)
-
-
-def test_relational_table_requires_response_format_for_live_evidence(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json={},
-    )
-    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    with pytest.raises(psycopg2.errors.CheckViolation) as exc:
-        with migration_db.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO flow_provider_calls (
-                    flow_step_attempt_id, ordinal, status, evidence_source,
-                    request_schema_version, provider_request_hash, call_reason,
-                    num_tokens_input, num_tokens_output, input_source,
-                    output_source, requested_at, finished_at
-                )
-                VALUES (
-                    %s, 1, 'completed', 'live_observer', 1, %s, 'initial',
-                    5, 3, 'provider', 'provider', now(), now()
-                )
-                """,
-                (attempt_id, "a" * 64),
-            )
-
-    assert "ck_flow_provider_calls_evidence_shape" in str(exc.value)
-
-
-def test_upgrade_aborts_when_legacy_call_ordinals_are_not_sequential(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json={
-            "token_usage": {
-                "completed_provider_calls": [
-                    {
-                        "call_index": 2,
-                        "num_tokens_input": 5,
-                        "num_tokens_output": 8,
-                        "input_source": "provider",
-                        "output_source": "provider",
-                    }
-                ]
-            }
-        },
-    )
-
-    with pytest.raises(RuntimeError) as exc:
-        command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    message = str(exc.value)
-    assert "invalid_ordinals=1" in message
-    assert str(attempt_id) in message
-
-
-def test_upgrade_reports_unrepresentable_legacy_mapping_before_backfill_casts(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json={
-            "token_usage": {
-                "completed_provider_calls": [
-                    {
-                        "call_index": 1,
-                        "num_tokens_input": 5,
-                        "num_tokens_output": 8,
-                        "input_source": "provider",
-                        "output_source": "provider",
-                        "mapped_call": {
-                            "execution_mode": "per_item",
-                            "item_index": "one",
-                            "source_index": None,
-                        },
-                    }
-                ]
-            }
-        },
-    )
-
-    with pytest.raises(RuntimeError) as exc:
-        command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    message = str(exc.value)
-    assert "invalid_fields=1" in message
-    assert str(attempt_id) in message
-
-
-def test_upgrade_backfills_legacy_receipts_without_inventing_unknown_usage(
-    migration_db: MigrationDb,
-) -> None:
-    legacy_receipts = [
-        {
-            "call_index": 1,
-            "num_tokens_input": None,
-            "num_tokens_output": 0,
-            "input_source": "not_reported",
-            "output_source": "provider",
-            "requested_model": "gpt-5-mini",
-            "response_model": "gpt-5-mini-2025-08-07",
-            "provider": "openai",
-            "provider_response_id": "resp_legacy_1",
-            "mapped_call": {
-                "execution_mode": "per_item",
-                "item_index": 1,
-                "source_index": None,
-                "source_id": "source-file-1",
-            },
-        },
-        {
-            "call_index": 2,
-            "num_tokens_input": 7,
-            "num_tokens_output": 3,
-            "input_source": "estimated",
-            "output_source": "provider",
-            "mapped_call": {
-                "execution_mode": "per_source_reader",
-                "item_index": None,
-                "source_index": 2,
-                "source_id": "source-file-2",
-            },
-        },
-    ]
-    provenance_json = {"token_usage": {"completed_provider_calls": legacy_receipts}}
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json=provenance_json,
-    )
-
-    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    assert _provider_call_rows(
-        migration_db.conn,
-        attempt_id=attempt_id,
-    ) == [
-        (
-            1,
-            "completed",
-            "legacy_provenance",
-            None,
-            None,
-            "gpt-5-mini",
-            "openai",
-            None,
-            "legacy_backfill",
-            "per_item",
-            1,
-            None,
-            "source-file-1",
-            "gpt-5-mini-2025-08-07",
-            "resp_legacy_1",
-            None,
-            0,
-            "not_reported",
-            "provider",
-            None,
-            None,
-        ),
-        (
-            2,
-            "completed",
-            "legacy_provenance",
-            None,
-            None,
-            None,
-            None,
-            None,
-            "legacy_backfill",
-            "per_source",
-            None,
-            2,
-            "source-file-2",
-            None,
-            None,
-            7,
-            3,
-            "estimated",
-            "provider",
-            None,
-            None,
-        ),
-    ]
-
-    command.downgrade(migration_db.cfg, PRIOR_REVISION)
-    assert not _table_exists(migration_db.conn, "flow_provider_calls")
-    with migration_db.conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT provenance_json #> '{token_usage,completed_provider_calls}'
-            FROM flow_step_attempts
-            WHERE id = %s
-            """,
-            (attempt_id,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    assert row[0] == legacy_receipts
-
-
-def test_upgrade_requires_flow_workers_to_be_drained(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json={},
-    )
-    with migration_db.conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE flow_step_attempts
-            SET status = 'started', finished_at = NULL
-            WHERE id = %s
-            """,
-            (attempt_id,),
-        )
-
-    with pytest.raises(RuntimeError) as exc:
-        command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    assert "requires drained Flow workers" in str(exc.value)
-    assert "found 1 started flow_step_attempts" in str(exc.value)
-    assert not _table_exists(migration_db.conn, "flow_provider_calls")
-    assert PRIOR_REVISION in current_revisions(migration_db.conn)
-
-
-def test_downgrade_refuses_to_discard_live_provider_call_evidence(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(
-        migration_db.conn,
-        provenance_json={},
-    )
-    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-    with migration_db.conn.cursor() as cur:
-        cur.execute(
-            """
             INSERT INTO flow_provider_calls (
-                flow_step_attempt_id, ordinal, status, evidence_source,
-                request_schema_version, provider_request_hash,
-                response_format, call_reason, num_tokens_input,
-                num_tokens_output, input_source, output_source,
-                requested_at, finished_at
+                flow_step_attempt_id, ordinal, status, request_schema_version,
+                provider_request_hash, requested_model, provider, response_format,
+                call_reason, requested_at
             )
-            VALUES (
-                %s, 1, 'completed', 'live_observer', 1, %s,
-                'none', 'initial', 5, 3, 'provider', 'provider', now(), now()
-            )
+            VALUES (%s, 1, 'started', %s, %s, %s, %s, 'none', %s, now())
             """,
-            (attempt_id, "b" * 64),
+            (
+                attempt_id,
+                schema_version,
+                "a" * 64,
+                requested_model,
+                provider,
+                call_reason,
+            ),
         )
 
-    with pytest.raises(RuntimeError) as exc:
-        command.downgrade(migration_db.cfg, PRIOR_REVISION)
 
-    assert "would discard live provider lifecycle evidence (1 rows)" in str(exc.value)
+def test_clean_install_ignores_attempt_json_and_requires_version_two_identity(
+    migration_db: MigrationDb,
+) -> None:
+    attempt_id = _insert_completed_attempt(
+        migration_db.conn,
+        provenance_json={
+            "token_usage": {"completed_provider_calls": [{"call_index": 1}]}
+        },
+    )
+
+    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
+
+    with migration_db.conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM flow_provider_calls")
+        assert cur.fetchone() == (0,)
+        cur.execute(
+            """
+            SELECT column_name, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = 'flow_provider_calls'
+              AND column_name IN (
+                  'evidence_source', 'request_schema_version',
+                  'provider_request_hash', 'requested_model',
+                  'response_format', 'requested_at'
+              )
+            ORDER BY column_name
+            """
+        )
+        assert cur.fetchall() == [
+            ("provider_request_hash", "NO"),
+            ("request_schema_version", "NO"),
+            ("requested_at", "NO"),
+            ("requested_model", "NO"),
+            ("response_format", "NO"),
+        ]
+
+    _insert_started_provider_call(migration_db.conn, attempt_id=attempt_id)
+
+
+@pytest.mark.parametrize(
+    ("schema_version", "call_reason", "constraint_name"),
+    [
+        (1, "initial", "ck_flow_provider_calls_request_identity"),
+        (2, "legacy_backfill", "ck_flow_provider_calls_reason"),
+    ],
+)
+def test_clean_install_rejects_superseded_provider_call_contracts(
+    migration_db: MigrationDb,
+    schema_version: int,
+    call_reason: str,
+    constraint_name: str,
+) -> None:
+    attempt_id = _insert_completed_attempt(migration_db.conn, provenance_json={})
+    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
+
+    with pytest.raises(psycopg2.errors.CheckViolation) as exc_info:
+        _insert_started_provider_call(
+            migration_db.conn,
+            attempt_id=attempt_id,
+            schema_version=schema_version,
+            call_reason=call_reason,
+        )
+
+    assert constraint_name in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("requested_model", "provider", "constraint_name"),
+    [
+        ("", None, "ck_flow_provider_calls_requested_model_nonempty"),
+        (
+            "openai/gpt-5-mini",
+            "",
+            "ck_flow_provider_calls_provider_nonempty",
+        ),
+    ],
+)
+def test_clean_install_rejects_empty_model_identifiers(
+    migration_db: MigrationDb,
+    requested_model: str,
+    provider: str | None,
+    constraint_name: str,
+) -> None:
+    attempt_id = _insert_completed_attempt(migration_db.conn, provenance_json={})
+    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
+
+    with pytest.raises(psycopg2.errors.CheckViolation) as exc_info:
+        _insert_started_provider_call(
+            migration_db.conn,
+            attempt_id=attempt_id,
+            requested_model=requested_model,
+            provider=provider,
+        )
+
+    assert constraint_name in str(exc_info.value)
+
+
+def test_migration_does_not_require_flow_workers_to_be_drained(
+    migration_db: MigrationDb,
+) -> None:
+    attempt_id = _insert_completed_attempt(migration_db.conn, provenance_json={})
+    with migration_db.conn.cursor() as cur:
+        cur.execute(
+            "UPDATE flow_step_attempts SET status = 'started', finished_at = NULL WHERE id = %s",
+            (attempt_id,),
+        )
+
+    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
+
     assert _table_exists(migration_db.conn, "flow_provider_calls")
-    assert MIGRATION_REVISION in current_revisions(migration_db.conn)
+
+
+def test_downgrade_refuses_rows_and_drops_an_empty_table(
+    migration_db: MigrationDb,
+) -> None:
+    attempt_id = _insert_completed_attempt(migration_db.conn, provenance_json={})
+    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
+    _insert_started_provider_call(migration_db.conn, attempt_id=attempt_id)
+
+    with pytest.raises(RuntimeError, match="would discard provider lifecycle evidence"):
+        command.downgrade(migration_db.cfg, PRIOR_REVISION)
+    assert current_revisions(migration_db.conn) == {MIGRATION_REVISION}
+
+    with migration_db.conn.cursor() as cur:
+        cur.execute("DELETE FROM flow_provider_calls")
+    command.downgrade(migration_db.cfg, PRIOR_REVISION)
+
+    assert not _table_exists(migration_db.conn, "flow_provider_calls")

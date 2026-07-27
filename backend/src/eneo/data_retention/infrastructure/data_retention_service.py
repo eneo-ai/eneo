@@ -26,12 +26,14 @@ from eneo.database.tables.flow_classification_retention_policy_table import (
 from eneo.database.tables.flow_tables import (
     BuilderSessions,
     FlowOutboxDeliveryStatus,
+    FlowProviderCalls,
     FlowRunAuditOutbox,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
     FlowRuntimeUploadedFiles,
     Flows,
+    FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -97,6 +99,9 @@ def _builder_session_has_no_fresh_send_lock(now: datetime) -> sa.ColumnElement[b
 class FlowRuntimeCleanupCounts(TypedDict):
     debug_step_results: int
     debug_step_attempts: int
+    debug_provider_calls: int
+    debug_resolved_input_aggregates: int
+    debug_resolved_input_edges: int
     flow_runs_considered: int
     flow_runs_lock_deferred: int
     flow_runs_purged: int
@@ -122,6 +127,9 @@ def _empty_flow_runtime_cleanup_counts() -> FlowRuntimeCleanupCounts:
     return {
         "debug_step_results": 0,
         "debug_step_attempts": 0,
+        "debug_provider_calls": 0,
+        "debug_resolved_input_aggregates": 0,
+        "debug_resolved_input_edges": 0,
         "flow_runs_considered": 0,
         "flow_runs_lock_deferred": 0,
         "flow_runs_purged": 0,
@@ -165,6 +173,9 @@ class FlowRunHistoryPurgeBlockedCounts:
 class FlowDebugRedactionCounts:
     debug_step_results: int = 0
     debug_step_attempts: int = 0
+    debug_provider_calls: int = 0
+    debug_resolved_input_aggregates: int = 0
+    debug_resolved_input_edges: int = 0
 
 
 FLOW_RETENTION_PREVIEW_MAX_AGE = timedelta(minutes=15)
@@ -1555,6 +1566,11 @@ class DataRetentionService:
         debug_counts = await self.redact_old_flow_debug_evidence(now=now)
         counts["debug_step_results"] += debug_counts.debug_step_results
         counts["debug_step_attempts"] += debug_counts.debug_step_attempts
+        counts["debug_provider_calls"] += debug_counts.debug_provider_calls
+        counts["debug_resolved_input_aggregates"] += (
+            debug_counts.debug_resolved_input_aggregates
+        )
+        counts["debug_resolved_input_edges"] += debug_counts.debug_resolved_input_edges
         return counts
 
     async def delete_old_delivered_flow_audit_outbox_rows(self) -> int:
@@ -2118,6 +2134,18 @@ class DataRetentionService:
                         total_counts.debug_step_attempts
                         + debug_counts["debug_step_attempts"]
                     ),
+                    debug_provider_calls=(
+                        total_counts.debug_provider_calls
+                        + debug_counts["debug_provider_calls"]
+                    ),
+                    debug_resolved_input_aggregates=(
+                        total_counts.debug_resolved_input_aggregates
+                        + debug_counts["debug_resolved_input_aggregates"]
+                    ),
+                    debug_resolved_input_edges=(
+                        total_counts.debug_resolved_input_edges
+                        + debug_counts["debug_resolved_input_edges"]
+                    ),
                 )
 
         return total_counts
@@ -2223,32 +2251,75 @@ class DataRetentionService:
             )
             debug_step_results += affected_row_count(result)
 
-        attempt_stmt = sa.select(
-            FlowStepAttempts.id,
-            FlowStepAttempts.flow_run_id,
-            FlowStepAttempts.provenance_json,
-            FlowStepAttempts.input_payload_json,
-            FlowStepAttempts.output_payload_json,
-        ).where(
-            sa.and_(
+        attempt_stmt = (
+            sa.select(
+                FlowStepAttempts.id,
+                FlowStepAttempts.flow_run_id,
+                FlowStepAttempts.provenance_json,
+                FlowStepAttempts.input_payload_json,
+                FlowStepAttempts.output_payload_json,
+            )
+            .where(
                 FlowStepAttempts.flow_run_id.in_(set(actions_by_run_id)),
                 sa.or_(
                     FlowStepAttempts.provenance_json.is_not(None),
                     FlowStepAttempts.input_payload_json.is_not(None),
                     FlowStepAttempts.output_payload_json.is_not(None),
+                    sa.exists().where(
+                        FlowProviderCalls.flow_step_attempt_id == FlowStepAttempts.id
+                    ),
+                    sa.exists().where(
+                        FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                        == FlowStepAttempts.id
+                    ),
                 ),
             )
+            .with_for_update(of=FlowStepAttempts)
         )
         attempt_rows = await self.session.execute(attempt_stmt)
-        debug_step_attempts = 0
-        for row in attempt_rows.fetchall():
-            action = actions_by_run_id[row.flow_run_id]
-            provenance_to_clear = (
-                None
-                if _is_current_attempt_retention_marker(row.provenance_json)
-                else row.provenance_json
+        locked_attempts = attempt_rows.fetchall()
+        attempt_ids = [row.id for row in locked_attempts]
+
+        provider_call_counts: dict[UUID, int] = {}
+        resolved_input_counts: dict[UUID, tuple[int, int]] = {}
+        if attempt_ids:
+            provider_delete_result = await self.session.execute(
+                sa.delete(FlowProviderCalls)
+                .where(FlowProviderCalls.flow_step_attempt_id.in_(attempt_ids))
+                .returning(FlowProviderCalls.flow_step_attempt_id)
             )
-            cleared_field_count = sum(
+            for attempt_id in provider_delete_result.scalars():
+                provider_call_counts[attempt_id] = (
+                    provider_call_counts.get(attempt_id, 0) + 1
+                )
+
+            resolved_input_delete_result = await self.session.execute(
+                sa.delete(FlowStepAttemptResolvedInputs)
+                .where(
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id.in_(attempt_ids)
+                )
+                .returning(
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id,
+                    FlowStepAttemptResolvedInputs.resolved_input_edge_count,
+                )
+            )
+            for attempt_id, edge_count in resolved_input_delete_result:
+                aggregate_count, previous_edge_count = resolved_input_counts.get(
+                    attempt_id, (0, 0)
+                )
+                resolved_input_counts[attempt_id] = (
+                    aggregate_count + 1,
+                    previous_edge_count + edge_count,
+                )
+
+        debug_step_attempts = 0
+        for row in locked_attempts:
+            action = actions_by_run_id[row.flow_run_id]
+            previous_counts = _current_attempt_retention_counts(row.provenance_json)
+            provenance_to_clear = (
+                None if previous_counts is not None else row.provenance_json
+            )
+            newly_cleared_field_count = sum(
                 value is not None
                 for value in (
                     provenance_to_clear,
@@ -2256,13 +2327,54 @@ class DataRetentionService:
                     row.output_payload_json,
                 )
             )
-            if cleared_field_count == 0:
+            provider_call_count = provider_call_counts.get(row.id, 0)
+            (
+                resolved_input_aggregate_count,
+                resolved_input_edge_count,
+            ) = resolved_input_counts.get(row.id, (0, 0))
+            if (
+                newly_cleared_field_count == 0
+                and provider_call_count == 0
+                and resolved_input_aggregate_count == 0
+            ):
                 continue
+            previous_cleared_field_count = (
+                previous_counts.cleared_field_count
+                if previous_counts is not None
+                else 0
+            )
+            previous_provider_call_count = (
+                previous_counts.provider_call_count
+                if previous_counts is not None
+                else 0
+            )
+            previous_resolved_input_aggregate_count = (
+                previous_counts.resolved_input_aggregate_count
+                if previous_counts is not None
+                else 0
+            )
+            previous_resolved_input_edge_count = (
+                previous_counts.resolved_input_edge_count
+                if previous_counts is not None
+                else 0
+            )
             marker = _build_attempt_retention_marker(
                 action=action,
                 object_id=str(row.id),
                 counts=RunDebugAttemptRetentionCounts(
-                    cleared_field_count=cleared_field_count
+                    cleared_field_count=(
+                        previous_cleared_field_count + newly_cleared_field_count
+                    ),
+                    provider_call_count=(
+                        previous_provider_call_count + provider_call_count
+                    ),
+                    resolved_input_aggregate_count=(
+                        previous_resolved_input_aggregate_count
+                        + resolved_input_aggregate_count
+                    ),
+                    resolved_input_edge_count=(
+                        previous_resolved_input_edge_count + resolved_input_edge_count
+                    ),
                 ),
             )
             attempt_result = await self.session.execute(
@@ -2276,9 +2388,20 @@ class DataRetentionService:
             )
             debug_step_attempts += affected_row_count(attempt_result)
 
+        deleted_provider_calls = sum(provider_call_counts.values())
+        deleted_resolved_input_aggregates = sum(
+            aggregate_count for aggregate_count, _ in resolved_input_counts.values()
+        )
+        deleted_resolved_input_edges = sum(
+            edge_count for _, edge_count in resolved_input_counts.values()
+        )
+
         counts = _empty_flow_runtime_cleanup_counts()
         counts["debug_step_results"] = debug_step_results
         counts["debug_step_attempts"] = debug_step_attempts
+        counts["debug_provider_calls"] = deleted_provider_calls
+        counts["debug_resolved_input_aggregates"] = deleted_resolved_input_aggregates
+        counts["debug_resolved_input_edges"] = deleted_resolved_input_edges
         return counts
 
     async def get_affected_questions_count_for_space(
@@ -2524,11 +2647,16 @@ def _build_attempt_retention_marker(
     ).to_payload()
 
 
-def _is_current_attempt_retention_marker(payload: Any) -> bool:
+def _current_attempt_retention_counts(
+    payload: Any,
+) -> RunDebugAttemptRetentionCounts | None:
     if not isinstance(payload, dict):
-        return False
+        return None
     try:
-        FlowAttemptRetentionMarker.model_validate(cast(dict[str, Any], payload))
+        marker = FlowAttemptRetentionMarker.model_validate(
+            cast(dict[str, Any], payload)
+        )
     except ValueError:
-        return False
-    return True
+        return None
+    counts = marker.tombstone.counts
+    return counts if isinstance(counts, RunDebugAttemptRetentionCounts) else None

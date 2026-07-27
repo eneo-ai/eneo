@@ -12,7 +12,6 @@ from eneo.flows.domain.provider_call import (
     ProviderCallCompletion,
     ProviderCallEvidence,
     ProviderCallEvidencePage,
-    ProviderCallEvidenceSource,
     ProviderCallRejectionReason,
     ProviderCallRequest,
     ProviderCallStatus,
@@ -248,7 +247,6 @@ class FlowProviderCallRepository:
                 flow_step_attempt_id=attempt_id,
                 ordinal=(current_ordinal or 0) + 1,
                 status=ProviderCallStatus.STARTED.value,
-                evidence_source=ProviderCallEvidenceSource.LIVE_OBSERVER.value,
                 request_schema_version=request.request_schema_version,
                 provider_request_hash=request.provider_request_hash,
                 requested_model=request.requested_model,
@@ -409,17 +407,12 @@ def _to_evidence(
             "attempt_no": attempt_no,
             "ordinal": call.ordinal,
             "status": call.status,
-            "evidence_source": call.evidence_source,
             "request_schema_version": call.request_schema_version,
             "provider_request_hash": call.provider_request_hash,
             "requested_model": call.requested_model,
             "provider": call.provider,
             "response_format": call.response_format,
-            "requested_capabilities": (
-                tuple(sorted(set(call.requested_capabilities)))
-                if call.requested_capabilities is not None
-                else None
-            ),
+            "requested_capabilities": tuple(call.requested_capabilities),
             "call_reason": call.call_reason,
             "mapped_execution_mode": call.mapped_execution_mode,
             "mapped_item_index": call.mapped_item_index,

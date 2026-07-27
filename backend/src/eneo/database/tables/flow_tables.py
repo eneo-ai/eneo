@@ -32,7 +32,6 @@ from eneo.flow_packages.domain.flow_package_import_record import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionStatus
 from eneo.flows.domain.provider_call import (
-    PROVIDER_CALL_EVIDENCE_SOURCE_VALUES,
     PROVIDER_CALL_REASON_VALUES,
     PROVIDER_CALL_REJECTION_REASON_VALUES,
     PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES,
@@ -1263,18 +1262,13 @@ class FlowProviderCalls(BasePublic):
     )
     ordinal: Mapped[int] = mapped_column(nullable=False)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
-    evidence_source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
-    request_schema_version: Mapped[Optional[int]] = mapped_column(
-        sa.SmallInteger, nullable=True
-    )
-    provider_request_hash: Mapped[Optional[str]] = mapped_column(
-        sa.String(64), nullable=True
-    )
-    requested_model: Mapped[Optional[str]] = mapped_column(sa.String(255))
+    request_schema_version: Mapped[int] = mapped_column(sa.SmallInteger, nullable=False)
+    provider_request_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    requested_model: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     provider: Mapped[Optional[str]] = mapped_column(sa.String(128))
-    response_format: Mapped[Optional[str]] = mapped_column(sa.String(32))
-    requested_capabilities: Mapped[Optional[list[str]]] = mapped_column(
-        ARRAY(sa.String(32)), nullable=True
+    response_format: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    requested_capabilities: Mapped[list[str]] = mapped_column(
+        ARRAY(sa.String(32)), nullable=False
     )
     call_reason: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     mapped_execution_mode: Mapped[Optional[str]] = mapped_column(sa.String(32))
@@ -1288,7 +1282,9 @@ class FlowProviderCalls(BasePublic):
     input_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
     output_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
     outcome_reason: Mapped[Optional[str]] = mapped_column(sa.String(64))
-    requested_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+    requested_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
     finished_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
 
     __table_args__ = (
@@ -1306,28 +1302,20 @@ class FlowProviderCalls(BasePublic):
             name="ck_flow_provider_calls_status",
         ),
         CheckConstraint(
-            "evidence_source IN "
-            f"({_check_values(PROVIDER_CALL_EVIDENCE_SOURCE_VALUES)})",
-            name="ck_flow_provider_calls_evidence_source",
-        ),
-        CheckConstraint(
-            "response_format IS NULL OR response_format IN "
-            f"({_check_values(PROVIDER_CALL_RESPONSE_FORMAT_VALUES)})",
+            f"response_format IN ({_check_values(PROVIDER_CALL_RESPONSE_FORMAT_VALUES)})",
             name="ck_flow_provider_calls_response_format",
         ),
         CheckConstraint(
-            "requested_capabilities IS NULL OR ("
             "(cardinality(requested_capabilities) = 0 OR "
             "array_ndims(requested_capabilities) = 1) AND "
             "requested_capabilities <@ ARRAY["
             f"{_check_values(PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES)}"
-            "]::varchar(32)[] AND cardinality(requested_capabilities) <= 4)",
+            "]::varchar(32)[] AND cardinality(requested_capabilities) <= 4",
             name="ck_flow_provider_calls_capabilities_allowed",
         ),
         CheckConstraint(
-            "requested_capabilities IS NULL OR (response_format IS NOT NULL AND "
             "(('structured_output' = ANY(requested_capabilities)) = "
-            "(response_format IN ('json_object', 'json_schema'))))",
+            "(response_format IN ('json_object', 'json_schema')))",
             name="ck_flow_provider_calls_capabilities_response_format",
         ),
         CheckConstraint(
@@ -1335,9 +1323,16 @@ class FlowProviderCalls(BasePublic):
             name="ck_flow_provider_calls_reason",
         ),
         CheckConstraint(
-            "(request_schema_version IS NULL AND provider_request_hash IS NULL) OR "
-            "(request_schema_version = 1 AND provider_request_hash ~ '^[0-9a-f]{64}$')",
+            "request_schema_version = 2 AND provider_request_hash ~ '^[0-9a-f]{64}$'",
             name="ck_flow_provider_calls_request_identity",
+        ),
+        CheckConstraint(
+            "length(requested_model) > 0",
+            name="ck_flow_provider_calls_requested_model_nonempty",
+        ),
+        CheckConstraint(
+            "provider IS NULL OR length(provider) > 0",
+            name="ck_flow_provider_calls_provider_nonempty",
         ),
         CheckConstraint(
             "num_tokens_input IS NULL OR num_tokens_input >= 0",
@@ -1378,8 +1373,7 @@ class FlowProviderCalls(BasePublic):
             "AND input_source IS NULL AND output_source IS NULL) OR "
             "(status = 'completed' AND outcome_reason IS NULL "
             "AND input_source IS NOT NULL AND output_source IS NOT NULL "
-            "AND ((evidence_source = 'legacy_provenance') OR "
-            "(finished_at IS NOT NULL))) OR "
+            "AND finished_at IS NOT NULL) OR "
             "(status = 'rejected' AND finished_at IS NOT NULL "
             f"AND outcome_reason IN ({_check_values(PROVIDER_CALL_REJECTION_REASON_VALUES)}) "
             "AND response_model IS NULL AND provider_response_id IS NULL "
@@ -1391,18 +1385,6 @@ class FlowProviderCalls(BasePublic):
             "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
             "AND input_source IS NULL AND output_source IS NULL)",
             name="ck_flow_provider_calls_lifecycle_shape",
-        ),
-        CheckConstraint(
-            "(evidence_source = 'live_observer' AND response_format IS NOT NULL "
-            "AND request_schema_version = 1 "
-            "AND provider_request_hash IS NOT NULL AND requested_at IS NOT NULL "
-            "AND call_reason <> 'legacy_backfill') OR "
-            "(evidence_source = 'legacy_provenance' AND status = 'completed' "
-            "AND response_format IS NULL "
-            "AND request_schema_version IS NULL AND provider_request_hash IS NULL "
-            "AND requested_at IS NULL AND finished_at IS NULL "
-            "AND call_reason = 'legacy_backfill')",
-            name="ck_flow_provider_calls_evidence_shape",
         ),
         CheckConstraint(
             "(mapped_execution_mode IS NULL AND mapped_item_index IS NULL "

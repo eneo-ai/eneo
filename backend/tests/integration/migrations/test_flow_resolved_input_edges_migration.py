@@ -31,6 +31,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRIOR_REVISION = "202607270830_call_capabilities"
 MIGRATION_REVISION = "202607271130_resolved_edges"
+REPOSITORY_HEAD = "202607271530_provider_call_v2"
 EVIDENCE_TABLE = "flow_step_attempt_resolved_inputs"
 
 
@@ -334,7 +335,7 @@ def test_empty_downgrade_and_reupgrade_keep_one_head(
     command.upgrade(migration_db.cfg, MIGRATION_REVISION)
     assert current_revisions(migration_db.conn) == {MIGRATION_REVISION}
     assert set(ScriptDirectory.from_config(migration_db.cfg).get_heads()) == {
-        MIGRATION_REVISION
+        REPOSITORY_HEAD
     }
 
     command.downgrade(migration_db.cfg, PRIOR_REVISION)

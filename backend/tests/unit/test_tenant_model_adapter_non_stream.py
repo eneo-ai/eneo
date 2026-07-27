@@ -384,7 +384,7 @@ async def test_provider_call_observer_wraps_actual_non_streaming_io():
 
     assert completion_call.await_count == 1
     request = observer.started.await_args.args[0]
-    assert request.request_schema_version == 1
+    assert request.request_schema_version == 2
     assert request.requested_model == "openai/test-model"
     assert request.provider == "openai"
     assert request.provider_request_hash is not None

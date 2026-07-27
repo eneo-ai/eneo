@@ -812,7 +812,7 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
         provider_observer = kwargs["provider_call_observer"]
         call_id = await provider_observer.started(
             ProviderCallRequestFacts(
-                request_schema_version=1,
+                request_schema_version=2,
                 provider_request_hash="f" * 64,
                 requested_model="openai/gpt-test",
                 provider="openai",

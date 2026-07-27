@@ -154,7 +154,12 @@ def _attempt_retention_marker_payload(
             policy_source="tenant.flow_settings.retention_policy.run_debug_evidence_days",
             cutoff=now,
             actor_source=FLOW_RETENTION_ACTOR_SOURCE,
-            counts=RunDebugAttemptRetentionCounts(cleared_field_count=1),
+            counts=RunDebugAttemptRetentionCounts(
+                cleared_field_count=1,
+                provider_call_count=0,
+                resolved_input_aggregate_count=0,
+                resolved_input_edge_count=0,
+            ),
             timestamp=now,
             retention_state="retention_purged",
         )

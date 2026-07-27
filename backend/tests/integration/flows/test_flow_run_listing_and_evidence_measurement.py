@@ -325,6 +325,7 @@ async def _write_representative_evidence(
                     provider_request_hash=_digest(
                         f"provider-{step_order}-{attempt_no}"
                     ),
+                    requested_model="openai/gpt-4o-mini",
                     provider="openai",
                     requested_capabilities=(),
                 ),

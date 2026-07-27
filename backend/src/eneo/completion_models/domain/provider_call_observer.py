@@ -36,7 +36,7 @@ _REQUEST_CONTROL_ALLOWLIST = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class ProviderCallRequestFacts:
-    request_schema_version: Literal[1]
+    request_schema_version: Literal[2]
     provider_request_hash: str
     requested_model: str
     provider: str | None
@@ -81,6 +81,10 @@ def build_provider_call_request_facts(
     request_kwargs: Mapping[str, object],
     reason: ProviderCallReason,
 ) -> ProviderCallRequestFacts:
+    if not requested_model or provider == "":
+        raise ProviderCallObserverError(
+            "Provider request evidence requires non-empty model identifiers."
+        )
     controls = {
         key: request_kwargs[key]
         for key in sorted(request_kwargs)
@@ -95,8 +99,9 @@ def build_provider_call_request_facts(
     try:
         serialized = json.dumps(
             {
-                "request_schema_version": 1,
+                "request_schema_version": 2,
                 "requested_model": requested_model,
+                "provider": provider,
                 "messages": list(messages),
                 "controls": controls,
                 "stream": False,
@@ -110,7 +115,7 @@ def build_provider_call_request_facts(
             "Provider request evidence could not be serialized safely."
         ) from exc
     return ProviderCallRequestFacts(
-        request_schema_version=1,
+        request_schema_version=2,
         provider_request_hash=hashlib.sha256(serialized).hexdigest(),
         requested_model=requested_model,
         provider=provider,

@@ -32,6 +32,9 @@ class DeletedCounts(TypedDict):
     builder_sessions: int
     flow_debug_rows: int
     flow_attempt_provenance: int
+    flow_provider_calls: int
+    flow_resolved_input_aggregates: int
+    flow_resolved_input_edges: int
     flow_runs_considered: int
     flow_runs_lock_deferred: int
     flow_runs_purged: int
@@ -135,6 +138,9 @@ def _record_flow_debug_redaction_counts(
 ) -> None:
     deleted["flow_debug_rows"] += counts.debug_step_results
     deleted["flow_attempt_provenance"] += counts.debug_step_attempts
+    deleted["flow_provider_calls"] += counts.debug_provider_calls
+    deleted["flow_resolved_input_aggregates"] += counts.debug_resolved_input_aggregates
+    deleted["flow_resolved_input_edges"] += counts.debug_resolved_input_edges
 
 
 @worker.cron_job(hour=3, minute=0)
@@ -162,6 +168,9 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "builder_sessions": 0,
             "flow_debug_rows": 0,
             "flow_attempt_provenance": 0,
+            "flow_provider_calls": 0,
+            "flow_resolved_input_aggregates": 0,
+            "flow_resolved_input_edges": 0,
             "flow_runs_considered": 0,
             "flow_runs_lock_deferred": 0,
             "flow_runs_purged": 0,
@@ -362,6 +371,8 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         + results["deleted"]["builder_sessions"]
         + results["deleted"]["flow_debug_rows"]
         + results["deleted"]["flow_attempt_provenance"]
+        + results["deleted"]["flow_provider_calls"]
+        + results["deleted"]["flow_resolved_input_aggregates"]
         + results["deleted"]["flow_runs_purged"]
         + results["deleted"]["flow_generated_files_deleted"]
         + results["deleted"]["flow_runtime_source_bindings_deleted"]
@@ -384,6 +395,11 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"builder_sessions: {results['deleted']['builder_sessions']}, "
             f"flow_debug_rows: {results['deleted']['flow_debug_rows']}, "
             f"flow_attempt_provenance: {results['deleted']['flow_attempt_provenance']}, "
+            f"flow_provider_calls: {results['deleted']['flow_provider_calls']}, "
+            f"flow_resolved_input_aggregates: "
+            f"{results['deleted']['flow_resolved_input_aggregates']}, "
+            f"flow_resolved_input_edges: "
+            f"{results['deleted']['flow_resolved_input_edges']}, "
             f"flow_runs_considered: {results['deleted']['flow_runs_considered']}, "
             f"flow_runs_lock_deferred: "
             f"{results['deleted']['flow_runs_lock_deferred']}, "

@@ -24,6 +24,7 @@ from eneo.database.tables.flow_classification_retention_policy_table import (
 )
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
+    FlowProviderCalls,
     FlowRunAuditOutbox,
     FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
@@ -33,6 +34,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuntimeUploadedFiles,
     FlowRunWebhookDeliveries,
     Flows,
+    FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
     FlowSteps,
@@ -2650,6 +2652,129 @@ async def test_cleanup_old_flow_runtime_data_redacts_tenant_debug_before_later_f
     assert attempt_marker.tombstone.counts.cleared_field_count == 3
     assert refreshed_attempt.input_payload_json is None
     assert refreshed_attempt.output_payload_json is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolved_input_edge_count", [0, 1])
+async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evidence(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+    resolved_input_edge_count: int,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=10,
+        flow_retention_days=30,
+        flow_settings={
+            "retention_policy": {
+                "run_debug_evidence_days": 7,
+            }
+        },
+    )
+    provider_call = FlowProviderCalls(
+        flow_step_attempt_id=fixture.step_attempt.id,
+        ordinal=1,
+        status="completed",
+        request_schema_version=2,
+        provider_request_hash="a" * 64,
+        requested_model="openai/gpt-5-mini",
+        provider="openai",
+        response_format="none",
+        requested_capabilities=[],
+        call_reason="initial",
+        mapped_execution_mode=None,
+        mapped_item_index=None,
+        mapped_source_index=None,
+        mapped_source_id=None,
+        response_model="gpt-5-mini-2026-07-01",
+        provider_response_id="response-retention-1",
+        num_tokens_input=12,
+        num_tokens_output=4,
+        input_source="provider",
+        output_source="provider",
+        outcome_reason=None,
+        requested_at=fixture.step_attempt.started_at,
+        finished_at=fixture.step_attempt.finished_at,
+    )
+    resolved_inputs = FlowStepAttemptResolvedInputs(
+        flow_step_attempt_id=fixture.step_attempt.id,
+        resolved_input_edges_jsonb={
+            "schema_version": 1,
+            "edges": (
+                [
+                    {
+                        "binding_ref": "question",
+                        "source": {
+                            "kind": "flow_input",
+                            "selector": {
+                                "kind": "json_path",
+                                "path": ["question"],
+                            },
+                        },
+                        "selection": {
+                            "encoding": "utf8",
+                            "sha256": "b" * 64,
+                            "byte_size": 18,
+                        },
+                    }
+                ]
+                if resolved_input_edge_count
+                else []
+            ),
+        },
+    )
+    async_session.add_all([provider_call, resolved_inputs])
+    await async_session.flush()
+
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts["debug_provider_calls"] == 1
+    assert counts["debug_resolved_input_aggregates"] == 1
+    assert counts["debug_resolved_input_edges"] == resolved_input_edge_count
+    assert await async_session.get(FlowProviderCalls, provider_call.id) is None
+    assert (
+        await async_session.get(
+            FlowStepAttemptResolvedInputs,
+            fixture.step_attempt.id,
+        )
+        is None
+    )
+    refreshed_attempt = await async_session.get(
+        FlowStepAttempts, fixture.step_attempt.id
+    )
+    assert refreshed_attempt is not None
+    attempt_marker = FlowAttemptRetentionMarker.model_validate(
+        refreshed_attempt.provenance_json
+    )
+    attempt_counts = attempt_marker.tombstone.counts
+    assert isinstance(attempt_counts, RunDebugAttemptRetentionCounts)
+    assert attempt_counts.cleared_field_count == 3
+    assert attempt_counts.provider_call_count == 1
+    assert attempt_counts.resolved_input_aggregate_count == 1
+    assert attempt_counts.resolved_input_edge_count == resolved_input_edge_count
+
+    first_marker = refreshed_attempt.provenance_json
+    repeated_counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+    repeated_attempt = await async_session.get(
+        FlowStepAttempts, fixture.step_attempt.id
+    )
+
+    assert repeated_counts["debug_step_attempts"] == 0
+    assert repeated_counts["debug_provider_calls"] == 0
+    assert repeated_counts["debug_resolved_input_aggregates"] == 0
+    assert repeated_counts["debug_resolved_input_edges"] == 0
+    assert repeated_attempt is not None
+    assert repeated_attempt.provenance_json == first_marker
 
 
 @pytest.mark.asyncio

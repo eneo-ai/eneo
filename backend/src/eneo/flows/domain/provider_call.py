@@ -20,6 +20,12 @@ from eneo.flows.flow_run_provenance import (
 )
 
 PROVIDER_REQUEST_HASH_PATTERN = r"^[0-9a-f]{64}$"
+PROVIDER_REQUEST_HASH_DESCRIPTION = (
+    "SHA-256 of Eneo's canonical non-streaming request intent at the provider "
+    "adapter boundary: requested model, provider, ordered messages, and "
+    "allowlisted controls. Provider-side parameter dropping or transport "
+    "enrichment is not reflected."
+)
 
 PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE: dict[str, JsonValue] = {
     "items": [
@@ -31,8 +37,7 @@ PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE: dict[str, JsonValue] = {
             "attempt_no": 1,
             "ordinal": 1,
             "status": "completed",
-            "evidence_source": "live_observer",
-            "request_schema_version": 1,
+            "request_schema_version": 2,
             "provider_request_hash": "a" * 64,
             "requested_model": "gpt-5-mini",
             "provider": "openai",
@@ -99,12 +104,6 @@ class ProviderCallReason(str, Enum):
     INITIAL = "initial"
     RESPONSE_FORMAT_FALLBACK = "response_format_fallback"
     TOOL_ROUND = "tool_round"
-    LEGACY_BACKFILL = "legacy_backfill"
-
-
-class ProviderCallEvidenceSource(str, Enum):
-    LIVE_OBSERVER = "live_observer"
-    LEGACY_PROVENANCE = "legacy_provenance"
 
 
 class ProviderCallRejectionReason(str, Enum):
@@ -126,14 +125,33 @@ class ProviderCallRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    request_schema_version: Literal[1] = 1
-    provider_request_hash: str = Field(pattern=PROVIDER_REQUEST_HASH_PATTERN)
-    requested_model: str | None = Field(default=None, max_length=255)
-    provider: str | None = Field(default=None, max_length=128)
+    request_schema_version: Literal[2] = 2
+    provider_request_hash: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description=PROVIDER_REQUEST_HASH_DESCRIPTION,
+    )
+    requested_model: str = Field(min_length=1, max_length=255)
+    provider: str | None = Field(default=None, min_length=1, max_length=128)
     response_format: ProviderCallResponseFormat = ProviderCallResponseFormat.NONE
     requested_capabilities: ProviderCallRequestedCapabilities
     call_reason: ProviderCallReason = ProviderCallReason.INITIAL
     mapped_call: MappedProviderCallProvenance | None = None
+
+    @model_validator(mode="after")
+    def validate_capabilities_match_response_format(self) -> "ProviderCallRequest":
+        structured_output_requested = (
+            ProviderCallRequestedCapability.STRUCTURED_OUTPUT
+            in self.requested_capabilities
+        )
+        structured_response_format = self.response_format in {
+            ProviderCallResponseFormat.JSON_OBJECT,
+            ProviderCallResponseFormat.JSON_SCHEMA,
+        }
+        if structured_output_requested != structured_response_format:
+            raise ValueError(
+                "Structured-output capability and response format must agree."
+            )
+        return self
 
 
 class ProviderCallCompletion(BaseModel):
@@ -167,13 +185,15 @@ class ProviderCall(BaseModel):
     flow_step_attempt_id: UUID
     ordinal: int = Field(ge=1)
     status: ProviderCallStatus
-    evidence_source: ProviderCallEvidenceSource
-    request_schema_version: int | None
-    provider_request_hash: str | None
-    requested_model: str | None
-    provider: str | None
-    response_format: ProviderCallResponseFormat | None
-    requested_capabilities: ProviderCallRequestedCapabilities | None
+    request_schema_version: Literal[2]
+    provider_request_hash: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description=PROVIDER_REQUEST_HASH_DESCRIPTION,
+    )
+    requested_model: str = Field(min_length=1)
+    provider: str | None = Field(min_length=1)
+    response_format: ProviderCallResponseFormat
+    requested_capabilities: ProviderCallRequestedCapabilities
     call_reason: ProviderCallReason
     mapped_execution_mode: Literal["per_item", "per_source"] | None
     mapped_item_index: int | None = Field(default=None, ge=1)
@@ -186,7 +206,7 @@ class ProviderCall(BaseModel):
     input_source: TokenCountSource | None
     output_source: TokenCountSource | None
     outcome_reason: ProviderCallRejectionReason | ProviderCallUnknownReason | None
-    requested_at: datetime | None
+    requested_at: datetime
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -224,17 +244,19 @@ class ProviderCallEvidence(BaseModel):
     attempt_no: int = Field(ge=1)
     ordinal: int = Field(ge=1)
     status: ProviderCallStatus
-    evidence_source: ProviderCallEvidenceSource
-    request_schema_version: int | None
-    provider_request_hash: str | None
-    requested_model: str | None
-    provider: str | None
-    response_format: ProviderCallResponseFormat | None
-    requested_capabilities: ProviderCallRequestedCapabilities | None = Field(
+    request_schema_version: Literal[2]
+    provider_request_hash: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description=PROVIDER_REQUEST_HASH_DESCRIPTION,
+    )
+    requested_model: str = Field(min_length=1)
+    provider: str | None = Field(min_length=1)
+    response_format: ProviderCallResponseFormat
+    requested_capabilities: ProviderCallRequestedCapabilities = Field(
         description=(
             "Sorted request intent for capabilities Eneo attempted in this provider "
-            "request. null means not observed; [] means observed with none. This is "
-            "not proof of provider support, acceptance, or completion."
+            "request. [] means none were requested. This is not proof of provider "
+            "support, acceptance, or completion."
         )
     )
     call_reason: ProviderCallReason
@@ -251,7 +273,7 @@ class ProviderCallEvidence(BaseModel):
     outcome_reason: ProviderCallRejectionReason | ProviderCallUnknownReason | None = (
         None
     )
-    requested_at: datetime | None
+    requested_at: datetime
     finished_at: datetime | None
 
 
@@ -287,9 +309,6 @@ PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES = tuple(
     item.value for item in ProviderCallRequestedCapability
 )
 PROVIDER_CALL_REASON_VALUES = tuple(item.value for item in ProviderCallReason)
-PROVIDER_CALL_EVIDENCE_SOURCE_VALUES = tuple(
-    item.value for item in ProviderCallEvidenceSource
-)
 PROVIDER_CALL_REJECTION_REASON_VALUES = tuple(
     item.value for item in ProviderCallRejectionReason
 )

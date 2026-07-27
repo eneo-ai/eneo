@@ -2276,25 +2276,24 @@ def test_openapi_provider_call_evidence_is_typed_and_cursor_paginated(
     item_ref = page_schema["properties"]["items"]["items"]
     item_schema = _resolve_component_ref(openapi_spec, item_ref)
     assert item_schema.get("additionalProperties") is False
+    assert "evidence_source" not in item_schema["properties"]
     assert "mapped_source_id" in item_schema.get("required", [])
     assert "requested_capabilities" in item_schema.get("required", [])
+    assert item_schema["properties"]["request_schema_version"]["const"] == 2
+    assert item_schema["properties"]["requested_model"]["minLength"] == 1
+    assert any(
+        branch.get("minLength") == 1
+        for branch in item_schema["properties"]["provider"]["anyOf"]
+    )
     capability_property = item_schema["properties"]["requested_capabilities"]
-    capability_options = (
-        capability_property.get("anyOf") or capability_property.get("oneOf") or []
-    )
-    capability_array = next(
-        option for option in capability_options if option.get("type") == "array"
-    )
     assert _extract_enum_values(
         openapi_spec,
-        capability_array["items"],
+        capability_property["items"],
     ) == {"image_input", "reasoning", "structured_output", "tool_calling"}
-    assert any(option.get("type") == "null" for option in capability_options)
     capability_description = capability_property.get("description", "")
     assert "request intent" in capability_description
     assert "not proof of provider support" in capability_description
-    assert "null means not observed" in capability_description
-    assert "[] means observed with none" in capability_description
+    assert "[] means none were requested" in capability_description
     assert _extract_enum_values(
         openapi_spec,
         item_schema["properties"]["status"],

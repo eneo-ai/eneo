@@ -621,8 +621,7 @@ const validProviderCallEvidence: FlowProviderCallEvidence = {
   attempt_no: 1,
   ordinal: 1,
   status: "completed",
-  evidence_source: "live_observer",
-  request_schema_version: 1,
+  request_schema_version: 2,
   provider_request_hash: "a".repeat(64),
   requested_model: "openai/gpt-4o-mini",
   provider: "openai",
@@ -643,8 +642,9 @@ const validProviderCallEvidence: FlowProviderCallEvidence = {
   requested_at: isoTimestamp,
   finished_at: isoTimestamp
 };
-const validProviderCallEvidenceWithUnobservedCapabilities: FlowProviderCallEvidence = {
+const invalidProviderCallEvidenceWithNullCapabilities: FlowProviderCallEvidence = {
   ...validProviderCallEvidence,
+  // @ts-expect-error provider-call capability evidence is always an observed array.
   requested_capabilities: null
 };
 const validProviderCallEvidenceWithNoRequestedCapabilities: FlowProviderCallEvidence = {
@@ -655,7 +655,7 @@ const {
   requested_capabilities: observedProviderCallCapabilities,
   ...providerCallEvidenceWithoutRequestedCapabilities
 } = validProviderCallEvidence;
-// @ts-expect-error provider-call evidence requires explicit null or an observed capability array.
+// @ts-expect-error provider-call evidence requires an observed capability array.
 const invalidProviderCallEvidenceWithoutRequestedCapabilities: FlowProviderCallEvidence =
   providerCallEvidenceWithoutRequestedCapabilities;
 const validProviderCallEvidencePage: FlowProviderCallEvidencePage = {
@@ -973,7 +973,7 @@ void validReviewCheckpointState;
 void validReviewCheckpointResumeResponse;
 void validFlowEvidence;
 void validListFlowRunProviderCallsResponse;
-void validProviderCallEvidenceWithUnobservedCapabilities;
+void invalidProviderCallEvidenceWithNullCapabilities;
 void validProviderCallEvidenceWithNoRequestedCapabilities;
 void observedProviderCallCapabilities;
 void invalidProviderCallEvidenceWithoutRequestedCapabilities;

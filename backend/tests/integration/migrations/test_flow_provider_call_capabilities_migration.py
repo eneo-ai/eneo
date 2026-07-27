@@ -29,6 +29,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRIOR_REVISION = "202607261600_provider_calls"
 MIGRATION_REVISION = "202607270830_call_capabilities"
+CLEAN_INSTALL_BASE_REVISION = "202607250930_rerun_input_chain"
 
 
 class MigrationDb(NamedTuple):
@@ -68,7 +69,10 @@ def migration_db(test_settings) -> Iterator[MigrationDb]:
     conn.autocommit = True
 
     command.upgrade(cfg, "head")
-    command.downgrade(cfg, PRIOR_REVISION)
+    # Rebuild the parent from its migration rather than inheriting the historical
+    # pre-v2 schema intentionally restored by the convergence downgrade.
+    command.downgrade(cfg, CLEAN_INSTALL_BASE_REVISION)
+    command.upgrade(cfg, PRIOR_REVISION)
     _clear_seeded_rows(conn)
 
     try:
@@ -91,14 +95,13 @@ def _insert_live_provider_call(
         cur.execute(
             """
             INSERT INTO flow_provider_calls (
-                flow_step_attempt_id, ordinal, status, evidence_source,
-                request_schema_version, provider_request_hash, response_format,
+                flow_step_attempt_id, ordinal, status, request_schema_version,
+                provider_request_hash, requested_model, response_format,
                 requested_capabilities, call_reason, num_tokens_input,
-                num_tokens_output, input_source, output_source, requested_at,
-                finished_at
+                num_tokens_output, input_source, output_source, requested_at, finished_at
             )
             VALUES (
-                %s, %s, 'completed', 'live_observer', 1, %s, %s, %s,
+                %s, %s, 'completed', 2, %s, 'openai/gpt-5-mini', %s, %s,
                 'initial', 3, 2, 'provider', 'provider', now(), now()
             )
             """,
@@ -230,35 +233,6 @@ def test_database_rejects_multidimensional_capability_arrays(
         )
 
     assert "ck_flow_provider_calls_capabilities_allowed" in str(exc_info.value)
-
-
-def test_nonnull_capabilities_require_observed_response_format(
-    migration_db: MigrationDb,
-) -> None:
-    attempt_id = _insert_completed_attempt(migration_db.conn, provenance_json={})
-    command.upgrade(migration_db.cfg, MIGRATION_REVISION)
-
-    with pytest.raises(psycopg2.errors.CheckViolation) as exc_info:
-        with migration_db.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO flow_provider_calls (
-                    flow_step_attempt_id, ordinal, status, evidence_source,
-                    request_schema_version, provider_request_hash,
-                    response_format, requested_capabilities, call_reason,
-                    num_tokens_input, num_tokens_output, input_source,
-                    output_source, requested_at, finished_at
-                )
-                VALUES (
-                    %s, 1, 'completed', 'legacy_provenance', NULL, NULL,
-                    NULL, ARRAY['reasoning']::varchar(32)[], 'legacy_backfill',
-                    3, 2, 'provider', 'provider', NULL, NULL
-                )
-                """,
-                (attempt_id,),
-            )
-
-    assert "ck_flow_provider_calls_capabilities_response_format" in str(exc_info.value)
 
 
 def test_downgrade_refuses_to_discard_observed_capabilities(

@@ -3766,9 +3766,11 @@ def test_flow_api_guide_documents_unknown_provider_token_usage() -> None:
         "`tool_calling`",
     ):
         assert capability in evidence_view
-    assert "`null` means the row predates" in evidence_view
-    assert "empty list means Eneo observed" in evidence_view
-    assert "does not claim that the provider supports" in evidence_view
+    assert "`request_schema_version = 2`" in evidence_view
+    assert "ordered messages" in " ".join(evidence_view.split())
+    assert "empty list means none" in evidence_view
+    assert "always an array" in evidence_view
+    assert "does not claim that the provider supported" in evidence_view
     assert "credential-free" in evidence_view
     assert "`flow_provider_call_evidence_persistence_failed`" in evidence_view
     assert "`not_reported`" in evidence_view

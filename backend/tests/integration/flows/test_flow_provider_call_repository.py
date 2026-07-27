@@ -163,6 +163,27 @@ async def _create_started_attempt(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_provider_call_table_check_constraints_are_valid_postgresql(
+    db_container,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        constraints = [
+            constraint
+            for constraint in FlowProviderCalls.__table__.constraints
+            if isinstance(constraint, sa.CheckConstraint)
+        ]
+
+        assert constraints
+        for constraint in constraints:
+            statement = (
+                sa.select(constraint.sqltext).select_from(FlowProviderCalls).limit(0)
+            )
+            await session.execute(statement)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_provider_call_ordinals_resume_from_persisted_attempt_rows(
     db_container,
     completion_model_factory,
@@ -229,7 +250,7 @@ async def test_provider_call_ordinals_resume_from_persisted_attempt_rows(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_provider_call_evidence_canonicalizes_raw_capabilities(
+async def test_provider_call_evidence_rejects_noncanonical_persisted_capabilities(
     db_container,
     completion_model_factory,
     space_factory,
@@ -272,16 +293,15 @@ async def test_provider_call_evidence_canonicalizes_raw_capabilities(
         await session.flush()
         session.expire_all()
 
-        page = await FlowProviderCallRepository(session).list_evidence_page(
-            run_id=context.run_id,
-            tenant_id=context.tenant_id,
-            limit=1,
-        )
-
-        assert page.items[0].requested_capabilities == (
-            "reasoning",
-            "structured_output",
-        )
+        with pytest.raises(
+            ValueError,
+            match="Requested provider capabilities must be sorted and unique",
+        ):
+            await FlowProviderCallRepository(session).list_evidence_page(
+                run_id=context.run_id,
+                tenant_id=context.tenant_id,
+                limit=1,
+            )
 
 
 @pytest.mark.asyncio
@@ -363,6 +383,7 @@ async def test_provider_call_known_rejection_and_unknown_outcome_are_distinct(
             attempt_id=context.attempt_id,
             request=ProviderCallRequest(
                 provider_request_hash="d" * 64,
+                requested_model="openai/gpt-4o-mini",
                 requested_capabilities=(),
             ),
         )
@@ -370,6 +391,7 @@ async def test_provider_call_known_rejection_and_unknown_outcome_are_distinct(
             attempt_id=context.attempt_id,
             request=ProviderCallRequest(
                 provider_request_hash="e" * 64,
+                requested_model="openai/gpt-4o-mini",
                 requested_capabilities=(),
             ),
         )
@@ -418,7 +440,7 @@ async def test_provider_call_recorder_commits_outside_executor_session(
     )
     call_id = await recorder.started(
         ProviderCallRequestFacts(
-            request_schema_version=1,
+            request_schema_version=2,
             provider_request_hash="1" * 64,
             requested_model="openai/gpt-4o-mini",
             provider="openai",
@@ -474,6 +496,7 @@ async def test_provider_call_evidence_page_is_stable_bounded_and_cursor_checked(
                 attempt_id=context.attempt_id,
                 request=ProviderCallRequest(
                     provider_request_hash=f"{index:x}" * 64,
+                    requested_model="openai/gpt-4o-mini",
                     requested_capabilities=(),
                     mapped_call=(
                         MappedProviderCallProvenance(
@@ -550,6 +573,7 @@ async def test_stale_run_recovery_marks_only_started_provider_calls_unknown(
             attempt_id=context.attempt_id,
             request=ProviderCallRequest(
                 provider_request_hash="a" * 64,
+                requested_model="openai/gpt-4o-mini",
                 requested_capabilities=(),
             ),
         )
@@ -557,6 +581,7 @@ async def test_stale_run_recovery_marks_only_started_provider_calls_unknown(
             attempt_id=context.attempt_id,
             request=ProviderCallRequest(
                 provider_request_hash="b" * 64,
+                requested_model="openai/gpt-4o-mini",
                 requested_capabilities=(),
             ),
         )
