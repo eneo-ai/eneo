@@ -295,6 +295,27 @@ Review the adoption view and update or remove unsafe versions before unblocking.
   execution** to stop those existing pins at runtime.
 </Callout>
 
+## When a change is blocked
+
+Eneo refuses a Skill change rather than silently overwriting someone else's work
+or breaking a resource that is in use. The message names the exact blocker and
+the action that clears it.
+
+| Blocker                             | What happened                                                                                                                                                                 | How to clear it                                                                |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Slug already taken                  | Another Skill in the same Space, or in the organisation catalogue, already uses that slug                                                                                     | Choose a different slug                                                        |
+| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action           |
+| Published Skill cannot be deleted   | A Skill that has ever been published is kept for audit history and can never be deleted                                                                                       | Unpublish it to stop new attachments; existing ones keep working until removed |
+| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy                                                                                       | Remove every attachment, then delete                                           |
+| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then delete                                        |
+| Execution block changed             | The block you reviewed was released or replaced before your action reached the server                                                                                         | The page reloads the live block state; review it and try again                 |
+
+The Skill editor keeps unsaved edits when a save is refused, so nothing has to
+be retyped. A separate refusal applies at save time when the selected models or
+the organisation runtime policy cannot support **On demand**; that is a
+configuration limit rather than a conflict, described in
+[Versions and adoption](#versions-and-adoption).
+
 ## Current boundaries
 
 - Skills contain instructions and metadata. They do not execute scripts or

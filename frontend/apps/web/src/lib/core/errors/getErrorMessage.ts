@@ -1,4 +1,4 @@
-import { EneoError } from "@eneo/eneo-js";
+import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 /**
@@ -19,7 +19,16 @@ import { m } from "$lib/paraglide/messages";
  * Error codes are defined in: backend/src/eneo/main/exceptions.py → ErrorCodes enum
  * The @unique decorator on ErrorCodes guarantees no duplicate codes exist.
  */
-const ERROR_CODE_MESSAGES: Record<number, () => string> = {
+/**
+ * The reviewed execution block was released or replaced before the request
+ * reached the server. Exported because the recovery — re-read the block and
+ * show the live state — is a decision, not just a message.
+ */
+export const SKILL_EXECUTION_BLOCK_CONFLICT: EneoErrorCode = 9052;
+
+// Keyed on the generated code union, so a code the backend does not define
+// fails to compile instead of mapping a message nothing can ever reach.
+const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- Authorization & authentication ---
   9001: () => m.eneo_error_9001(), // UNAUTHORIZED
   9005: () => m.eneo_error_9005(), // AUTHENTICATION_ERROR
@@ -52,7 +61,14 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
 
   // --- Concurrent changes ---
-  9043: () => m.eneo_error_9043() // SKILL_REVISION_CONFLICT
+  9043: () => m.eneo_error_9043(), // SKILL_REVISION_CONFLICT
+  9052: () => m.eneo_error_9052(), // SKILL_EXECUTION_BLOCK_CONFLICT
+
+  // --- Skill lifecycle ---
+  9048: () => m.eneo_error_9048(), // SKILL_SLUG_TAKEN
+  9049: () => m.eneo_error_9049(), // SKILL_PUBLISHED_NOT_DELETABLE
+  9050: () => m.eneo_error_9050(), // SKILL_IN_USE_BY_APP_RUN
+  9051: () => m.eneo_error_9051() // SKILL_STILL_ATTACHED
 };
 
 /**

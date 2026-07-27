@@ -25,6 +25,13 @@ from eneo.object_content.deployment_policy import (
     DeploymentPolicyConflict,
     ObjectStoreTargetNotSelectable,
 )
+from eneo.skills.domain.skill import (
+    PublishedSkillDeletionError,
+    SkillExecutionBlockConflictError,
+    SkillHasActiveAppRunsError,
+    SkillHasBindingsError,
+    SkillSlugConflictError,
+)
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -142,9 +149,44 @@ def add_exception_handlers(app: FastAPI):
             ErrorCodes.OBJECT_STORE_NOT_SELECTABLE,
         ),
     }
+    # Skill lifecycle conflicts the Space and organisation services used to
+    # translate with identical code. Registering the domain error once keeps the
+    # status, the reason code and the English fallback in a single place; the
+    # localized recovery instruction is chosen from the code by the client.
+    skill_exception_map = {
+        SkillSlugConflictError: (
+            409,
+            "A Skill with this slug already exists here. Choose a different slug.",
+            ErrorCodes.SKILL_SLUG_TAKEN,
+        ),
+        PublishedSkillDeletionError: (
+            409,
+            "Previously published Skills are retained for audit history "
+            "and cannot be deleted.",
+            ErrorCodes.SKILL_PUBLISHED_NOT_DELETABLE,
+        ),
+        SkillHasActiveAppRunsError: (
+            409,
+            "This Skill is required by a queued or running App run. "
+            "Wait for it to finish before deleting the Skill.",
+            ErrorCodes.SKILL_IN_USE_BY_APP_RUN,
+        ),
+        SkillHasBindingsError: (
+            409,
+            "This Skill is still attached. Remove every binding before deleting it.",
+            ErrorCodes.SKILL_STILL_ATTACHED,
+        ),
+        SkillExecutionBlockConflictError: (
+            409,
+            "This execution block changed after you reviewed it. "
+            "Reload the Skill before unblocking.",
+            ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
+        ),
+    }
     exception_handlers = (
         *EXCEPTION_MAP.items(),
         *object_content_exception_map.items(),
+        *skill_exception_map.items(),
     )
     for exception, (status_code, error_message, error_code) in exception_handlers:
 

@@ -8,7 +8,6 @@ import pytest
 
 from eneo.main.exceptions import (
     BadRequestException,
-    NameCollisionException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -171,7 +170,7 @@ async def test_skill_slug_collision_is_reported_without_leaking_persistence_deta
     repo.create.side_effect = SkillSlugConflictError
     service = _service(space=space, repo=repo)
 
-    with pytest.raises(NameCollisionException, match="slug 'payroll'"):
+    with pytest.raises(SkillSlugConflictError):
         await service.create_skill(
             space_id=space.id,
             slug="payroll",
