@@ -10008,11 +10008,19 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** CollectionUpdate */
     CollectionUpdate: {
       /** Name */
       name: string;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** CompletionModel */
     CompletionModel: {
