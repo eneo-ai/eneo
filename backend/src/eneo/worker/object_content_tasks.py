@@ -7,6 +7,7 @@ class ObjectContentReconciliationSummary(TypedDict):
     lifecycle_advanced: int
     inline_deleted: int
     content_processed: int
+    moves_processed: int
     references_audited: int
     reference_drifts: int
     missing_objects: int
@@ -23,6 +24,7 @@ async def reconcile_object_content_task(
         "lifecycle_advanced": result.lifecycle_advanced,
         "inline_deleted": result.inline_deleted,
         "content_processed": result.content_processed,
+        "moves_processed": result.moves_processed,
         "references_audited": result.references_audited,
         "reference_drifts": result.reference_drifts,
         "missing_objects": result.missing_objects,

@@ -1,6 +1,14 @@
 from uuid import UUID
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, SmallInteger, String
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    SmallInteger,
+    String,
+    false,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BaseWithTableName, TimestampMixin
@@ -16,6 +24,9 @@ class ObjectContentDeploymentPolicy(TimestampMixin, BaseWithTableName):
     knowledge_file_limit_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     transcription_audio_limit_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False
+    )
+    moves_paused: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false()
     )
     updated_by_actor: Mapped[str] = mapped_column(String, nullable=False)
     updated_by_user_id: Mapped[UUID | None] = mapped_column(

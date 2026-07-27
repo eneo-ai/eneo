@@ -4,14 +4,19 @@
     EneoError,
     type DeploymentPolicy,
     type DeploymentPolicyUpdate,
-    type ObjectContentInventory
+    type MoveQueueResult,
+    type ObjectContentInventory,
+    type ObjectContentMoves
   } from "@eneo/eneo-js";
   import { AlertCircle, CheckCircle2, Database, HardDrive, Info, Loader2 } from "lucide-svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getEneo } from "$lib/core/Eneo";
@@ -23,7 +28,10 @@
   type ReadinessCode = DeploymentPolicy["capabilities"][number]["readiness_code"];
   type UploadUseCase = DeploymentPolicy["limits"][number]["use_case"];
   type ContentState = ObjectContentInventory["inventory"][number]["state"];
+  type MoveState = ObjectContentMoves["moves"][number]["state"];
+  type MoveFailureCode = NonNullable<ObjectContentMoves["moves"][number]["failure_code"]>;
   type InventoryStatus = "idle" | "loading" | "error";
+  type MoveAction = "queue" | "pause" | null;
 
   const DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE = 9046;
   const OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE = 9047;
@@ -34,6 +42,15 @@
   let deploymentPolicy = $state<DeploymentPolicy | null>(null);
   let contentInventory = $state<ObjectContentInventory | null>(null);
   let inventoryStatus = $state<InventoryStatus>("idle");
+  let contentMoves = $state<ObjectContentMoves | null>(null);
+  let moveStatus = $state<InventoryStatus>("idle");
+  let moveTarget = $state<StorageTarget>("object_store");
+  let moveLimit = $state(25);
+  let moveActionPending = $state<MoveAction>(null);
+  let moveActionError = $state(false);
+  let moveOutcomeUnknown = $state(false);
+  let moveActionStale = $state(false);
+  let moveQueueResult = $state<MoveQueueResult | null>(null);
   let loading = $state(true);
   let reloading = $state(false);
   let loadError = $state(false);
@@ -51,10 +68,14 @@
   let transcriptionAudioLimitBytes = $state(1);
 
   const canEdit = $derived(user.is_platform_admin === true && !authorityRevoked);
+  const policyMutationPending = $derived(saving || moveActionPending === "pause");
   const objectStoreCapability = $derived(
     deploymentPolicy?.capabilities.find((capability) => capability.target === "object_store")
   );
   const objectStoreUnavailable = $derived(objectStoreCapability?.selectable !== true);
+  const validMoveLimit = $derived(
+    Number.isSafeInteger(moveLimit) && moveLimit >= 1 && moveLimit <= 100
+  );
   const selectedObjectStoreDegraded = $derived(
     deploymentPolicy?.policy.new_write_storage_target === "object_store" &&
       objectStoreCapability?.readiness_code !== "ready"
@@ -76,16 +97,32 @@
         transcriptionAudioLimitBytes !== deploymentPolicy.policy.transcription_audio_limit_bytes)
   );
 
-  function applyPolicy(next: DeploymentPolicy) {
+  function applyPolicy(next: DeploymentPolicy, preserveDraft = false): boolean {
+    const currentRevision = deploymentPolicy?.policy.revision;
+    if (currentRevision !== undefined && next.policy.revision < currentRevision) return true;
+
+    if (contentMoves !== null && next.policy.revision >= contentMoves.policy_revision) {
+      contentMoves = {
+        ...contentMoves,
+        policy_revision: next.policy.revision,
+        paused: next.policy.moves_paused
+      };
+    }
+    if (preserveDraft && currentRevision !== undefined && next.policy.revision > currentRevision)
+      return false;
+
     deploymentPolicy = next;
-    storageTarget = next.policy.new_write_storage_target;
-    sessionFileLimitBytes = next.policy.session_file_limit_bytes;
-    sessionImageLimitBytes = next.policy.session_image_limit_bytes;
-    knowledgeFileLimitBytes = next.policy.knowledge_file_limit_bytes;
-    transcriptionAudioLimitBytes = next.policy.transcription_audio_limit_bytes;
+    if (!preserveDraft) {
+      storageTarget = next.policy.new_write_storage_target;
+      sessionFileLimitBytes = next.policy.session_file_limit_bytes;
+      sessionImageLimitBytes = next.policy.session_image_limit_bytes;
+      knowledgeFileLimitBytes = next.policy.knowledge_file_limit_bytes;
+      transcriptionAudioLimitBytes = next.policy.transcription_audio_limit_bytes;
+    }
+    return true;
   }
 
-  async function loadPolicy() {
+  async function loadPolicy(preserveDraft = false) {
     const initialLoad = deploymentPolicy === null;
     if (initialLoad) loading = true;
     else reloading = true;
@@ -93,16 +130,21 @@
 
     try {
       const nextPolicy = await eneo.objectContentPolicy.get();
-      applyPolicy(nextPolicy);
-      stale = false;
+      const policyApplied = applyPolicy(nextPolicy, preserveDraft);
+      stale = !policyApplied;
       targetUnavailable = false;
       saveOutcomeUnknown = false;
       saveSuccess = false;
+      moveActionError = false;
+      moveOutcomeUnknown = false;
+      moveActionStale = false;
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
         authorityRevoked = true;
         contentInventory = null;
         inventoryStatus = "idle";
+        contentMoves = null;
+        moveStatus = "idle";
       }
       loadError = true;
       return;
@@ -112,6 +154,7 @@
     }
 
     await loadInventory();
+    await loadMoves();
   }
 
   async function loadInventory() {
@@ -137,6 +180,44 @@
     }
   }
 
+  async function loadMoves() {
+    if (user.is_platform_admin !== true || authorityRevoked) {
+      contentMoves = null;
+      moveStatus = "idle";
+      return;
+    }
+
+    const previousMoves = contentMoves;
+    contentMoves = null;
+    moveStatus = "loading";
+    try {
+      const nextMoves = await eneo.objectContentPolicy.getMoves();
+      contentMoves =
+        previousMoves !== null &&
+        nextMoves.policy_revision < previousMoves.policy_revision &&
+        (deploymentPolicy === null ||
+          previousMoves.policy_revision >= deploymentPolicy.policy.revision)
+          ? previousMoves
+          : deploymentPolicy !== null &&
+              nextMoves.policy_revision < deploymentPolicy.policy.revision
+            ? {
+                ...nextMoves,
+                policy_revision: deploymentPolicy.policy.revision,
+                paused: deploymentPolicy.policy.moves_paused
+              }
+            : nextMoves;
+      moveStatus = "idle";
+    } catch (error: unknown) {
+      contentMoves = null;
+      if (hasStatus(error, 403)) {
+        authorityRevoked = true;
+        moveStatus = "idle";
+      } else {
+        moveStatus = "error";
+      }
+    }
+  }
+
   function hasStatus(error: unknown, status: number): boolean {
     return (
       typeof error === "object" && error !== null && "status" in error && error.status === status
@@ -149,7 +230,7 @@
       !deploymentPolicy ||
       !dirty ||
       !validDraft ||
-      saving ||
+      policyMutationPending ||
       stale ||
       saveOutcomeUnknown
     )
@@ -190,6 +271,97 @@
       } else saveOutcomeUnknown = true;
     } finally {
       saving = false;
+    }
+  }
+
+  async function queueContentMoves() {
+    if (
+      !canEdit ||
+      objectStoreUnavailable ||
+      !validMoveLimit ||
+      moveStatus !== "idle" ||
+      moveActionPending !== null
+    )
+      return;
+
+    moveActionPending = "queue";
+    moveActionError = false;
+    moveOutcomeUnknown = false;
+    moveActionStale = false;
+    moveQueueResult = null;
+    try {
+      moveQueueResult = await eneo.objectContentPolicy.queueMoves({
+        target: moveTarget,
+        limit: moveLimit
+      });
+      await loadMoves();
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) {
+        authorityRevoked = true;
+        contentInventory = null;
+        contentMoves = null;
+        inventoryStatus = "idle";
+        moveStatus = "idle";
+      } else if (hasStatus(error, 503)) {
+        moveActionError = true;
+      } else {
+        moveOutcomeUnknown = true;
+        await loadMoves();
+      }
+    } finally {
+      moveActionPending = null;
+    }
+  }
+
+  async function setMovesPaused() {
+    if (!canEdit || !contentMoves || moveStatus !== "idle" || policyMutationPending) return;
+
+    const preservePolicyDraft = dirty;
+    moveActionPending = "pause";
+    moveActionError = false;
+    moveOutcomeUnknown = false;
+    moveActionStale = false;
+    moveQueueResult = null;
+    try {
+      const policyBaselineWasCurrent =
+        deploymentPolicy?.policy.revision === contentMoves.policy_revision;
+      const result = await eneo.objectContentPolicy.setMovesPaused({
+        expected_revision: contentMoves.policy_revision,
+        moves_paused: !contentMoves.paused
+      });
+      contentMoves = {
+        ...contentMoves,
+        policy_revision: result.policy_revision,
+        paused: result.paused
+      };
+      if (deploymentPolicy !== null && policyBaselineWasCurrent) {
+        deploymentPolicy = {
+          ...deploymentPolicy,
+          policy: {
+            ...deploymentPolicy.policy,
+            revision: result.policy_revision,
+            moves_paused: result.paused
+          }
+        };
+      } else if (deploymentPolicy !== null) {
+        await loadPolicy(preservePolicyDraft);
+      }
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) {
+        authorityRevoked = true;
+        contentInventory = null;
+        contentMoves = null;
+        inventoryStatus = "idle";
+        moveStatus = "idle";
+      } else if (hasStatus(error, 409)) {
+        moveActionStale = true;
+      } else {
+        moveOutcomeUnknown = true;
+        await loadPolicy(preservePolicyDraft);
+        moveOutcomeUnknown = true;
+      }
+    } finally {
+      moveActionPending = null;
     }
   }
 
@@ -234,7 +406,29 @@
     return labels[state]();
   }
 
-  function inventoryDate(value: string | null): string {
+  function moveStateLabel(state: MoveState): string {
+    const labels: Record<MoveState, () => string> = {
+      pending: m.storage_move_state_pending,
+      target_verified: m.storage_move_state_target_verified,
+      failed: m.storage_move_state_failed
+    };
+    return labels[state]();
+  }
+
+  function moveFailureLabel(code: MoveFailureCode | null): string {
+    if (code === null) return m.storage_moves_failure_none();
+    const labels: Record<MoveFailureCode, () => string> = {
+      store_unavailable: m.storage_move_failure_store_unavailable,
+      target_too_large: m.storage_move_failure_target_too_large,
+      source_missing: m.storage_move_failure_source_missing,
+      source_corrupt: m.storage_move_failure_source_corrupt,
+      target_corrupt: m.storage_move_failure_target_corrupt,
+      content_ineligible: m.storage_move_failure_content_ineligible
+    };
+    return labels[code]();
+  }
+
+  function storageDate(value: string | null): string {
     if (value === null) return m.storage_inventory_not_available();
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return m.storage_inventory_not_available();
@@ -275,7 +469,7 @@
             <Alert.Title>{m.storage_settings_load_error_title()}</Alert.Title>
             <Alert.Description>
               <p>{m.storage_settings_load_error_description()}</p>
-              <Button class="mt-3" variant="outline" onclick={loadPolicy}>
+              <Button class="mt-3" variant="outline" onclick={() => loadPolicy()}>
                 {m.retry()}
               </Button>
             </Alert.Description>
@@ -323,7 +517,12 @@
               <Alert.Title>{m.storage_settings_stale_title()}</Alert.Title>
               <Alert.Description>
                 <p>{m.storage_settings_stale_description()}</p>
-                <Button class="mt-3" variant="outline" disabled={reloading} onclick={loadPolicy}>
+                <Button
+                  class="mt-3"
+                  variant="outline"
+                  disabled={reloading}
+                  onclick={() => loadPolicy()}
+                >
                   {#if reloading}
                     <Loader2 class="animate-spin" />
                     {m.storage_settings_reloading()}
@@ -357,7 +556,12 @@
               <Alert.Title>{m.storage_settings_save_outcome_unknown_title()}</Alert.Title>
               <Alert.Description>
                 <p>{m.storage_settings_save_outcome_unknown_description()}</p>
-                <Button class="mt-3" variant="outline" disabled={reloading} onclick={loadPolicy}>
+                <Button
+                  class="mt-3"
+                  variant="outline"
+                  disabled={reloading}
+                  onclick={() => loadPolicy()}
+                >
                   {#if reloading}
                     <Loader2 class="animate-spin" />
                     {m.storage_settings_reloading()}
@@ -401,7 +605,7 @@
                     name="storage-target"
                     value="postgres_inline"
                     checked={storageTarget === "postgres_inline"}
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     onchange={() => (storageTarget = "postgres_inline")}
                   />
                   <Database class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -422,7 +626,7 @@
                     name="storage-target"
                     value="object_store"
                     checked={storageTarget === "object_store"}
-                    disabled={!canEdit || saving || objectStoreUnavailable}
+                    disabled={!canEdit || policyMutationPending || objectStoreUnavailable}
                     onchange={() => (storageTarget = "object_store")}
                   />
                   <HardDrive class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -468,7 +672,7 @@
                     min="1"
                     step="1"
                     required
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     bind:value={sessionFileLimitBytes}
                   />
                   <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
@@ -484,7 +688,7 @@
                     min="1"
                     step="1"
                     required
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     bind:value={sessionImageLimitBytes}
                   />
                   <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
@@ -500,7 +704,7 @@
                     min="1"
                     step="1"
                     required
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     bind:value={knowledgeFileLimitBytes}
                   />
                   <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
@@ -516,7 +720,7 @@
                     min="1"
                     step="1"
                     required
-                    disabled={!canEdit || saving}
+                    disabled={!canEdit || policyMutationPending}
                     bind:value={transcriptionAudioLimitBytes}
                   />
                   <p class="text-muted text-xs">{m.storage_limit_audio_help()}</p>
@@ -569,7 +773,11 @@
                 </p>
                 <Button
                   type="submit"
-                  disabled={!dirty || !validDraft || saving || stale || saveOutcomeUnknown}
+                  disabled={!dirty ||
+                    !validDraft ||
+                    policyMutationPending ||
+                    stale ||
+                    saveOutcomeUnknown}
                 >
                   {#if saving}
                     <Loader2 class="animate-spin" />
@@ -623,6 +831,203 @@
           </section>
 
           {#if user.is_platform_admin === true && !authorityRevoked}
+            <Separator />
+            <section class="space-y-5">
+              <div class="max-w-3xl space-y-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h2 class="text-lg font-semibold">{m.storage_moves_title()}</h2>
+                  {#if contentMoves}
+                    <Badge variant="secondary">
+                      {contentMoves.paused
+                        ? m.storage_moves_status_paused()
+                        : m.storage_moves_status_running()}
+                    </Badge>
+                  {/if}
+                </div>
+                <p class="text-secondary text-sm leading-6">
+                  {m.storage_moves_description()}
+                </p>
+              </div>
+
+              {#if objectStoreUnavailable}
+                <Alert.Root>
+                  <Info />
+                  <Alert.Title>{m.storage_moves_store_unavailable()}</Alert.Title>
+                  <Alert.Description>
+                    {m.storage_moves_store_unavailable_description()}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
+
+              {#if moveActionStale}
+                <Alert.Root variant="destructive" aria-live="assertive">
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_moves_stale_title()}</Alert.Title>
+                  <Alert.Description>
+                    <p>{m.storage_moves_stale_description()}</p>
+                    <Button class="mt-3" variant="outline" onclick={() => loadPolicy()}>
+                      {m.storage_settings_reload_latest()}
+                    </Button>
+                  </Alert.Description>
+                </Alert.Root>
+              {:else if moveActionError}
+                <Alert.Root variant="destructive" aria-live="assertive">
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_moves_action_error_title()}</Alert.Title>
+                  <Alert.Description>{m.storage_moves_action_error_description()}</Alert.Description
+                  >
+                </Alert.Root>
+              {:else if moveOutcomeUnknown}
+                <Alert.Root aria-live="polite">
+                  <Info />
+                  <Alert.Title>{m.storage_moves_outcome_unknown_title()}</Alert.Title>
+                  <Alert.Description>
+                    {m.storage_moves_outcome_unknown_description()}
+                  </Alert.Description>
+                </Alert.Root>
+              {:else if moveQueueResult}
+                <Alert.Root aria-live="polite">
+                  <CheckCircle2 />
+                  <Alert.Title>
+                    {m.storage_moves_queue_result({
+                      queued: moveQueueResult.queued_count,
+                      tooLarge: moveQueueResult.target_too_large_count
+                    })}
+                  </Alert.Title>
+                </Alert.Root>
+              {/if}
+
+              <Field.Group class="grid gap-4 sm:grid-cols-2">
+                <Field.Field data-disabled={moveActionPending !== null || undefined}>
+                  <Field.Label for="move-target">{m.storage_moves_target()}</Field.Label>
+                  <Select.Root
+                    type="single"
+                    bind:value={moveTarget}
+                    disabled={moveActionPending !== null}
+                  >
+                    <Select.Trigger id="move-target" class="w-full">
+                      <span data-slot="select-value">{storageTargetLabel(moveTarget)}</span>
+                    </Select.Trigger>
+                    <Select.Content>
+                      <Select.Group>
+                        <Select.Item value="object_store" label={m.storage_target_object_store()}>
+                          {m.storage_target_object_store()}
+                        </Select.Item>
+                        <Select.Item
+                          value="postgres_inline"
+                          label={m.storage_target_postgres_inline()}
+                        >
+                          {m.storage_target_postgres_inline()}
+                        </Select.Item>
+                      </Select.Group>
+                    </Select.Content>
+                  </Select.Root>
+                </Field.Field>
+                <Field.Field
+                  data-disabled={moveActionPending !== null || undefined}
+                  data-invalid={!validMoveLimit || undefined}
+                >
+                  <Field.Label for="move-limit">{m.storage_moves_limit()}</Field.Label>
+                  <Input
+                    id="move-limit"
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    disabled={moveActionPending !== null}
+                    aria-invalid={!validMoveLimit}
+                    aria-describedby="move-limit-description"
+                    bind:value={moveLimit}
+                  />
+                  <Field.Description id="move-limit-description">
+                    {m.storage_moves_limit_help()}
+                  </Field.Description>
+                </Field.Field>
+              </Field.Group>
+              <div class="flex flex-wrap gap-3">
+                <Button
+                  type="button"
+                  disabled={objectStoreUnavailable ||
+                    !validMoveLimit ||
+                    moveStatus !== "idle" ||
+                    moveActionPending !== null}
+                  aria-busy={moveActionPending === "queue"}
+                  onclick={queueContentMoves}
+                >
+                  {#if moveActionPending === "queue"}
+                    <Loader2 data-icon="inline-start" class="animate-spin" />
+                  {/if}
+                  {m.storage_moves_queue()}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={contentMoves === null || moveStatus !== "idle" || policyMutationPending}
+                  aria-busy={moveActionPending === "pause"}
+                  onclick={setMovesPaused}
+                >
+                  {#if moveActionPending === "pause"}
+                    <Loader2 data-icon="inline-start" class="animate-spin" />
+                  {/if}
+                  {contentMoves?.paused ? m.storage_moves_resume() : m.storage_moves_pause()}
+                </Button>
+              </div>
+
+              {#if moveStatus === "loading"}
+                <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
+                  <Loader2 class="size-4 animate-spin" />
+                  {m.storage_moves_loading()}
+                </p>
+              {:else if moveStatus === "error"}
+                <Alert.Root variant="destructive" aria-live="assertive">
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_moves_load_error_title()}</Alert.Title>
+                  <Alert.Description>
+                    <p>{m.storage_moves_load_error_description()}</p>
+                    <Button class="mt-3" variant="outline" onclick={loadMoves}>
+                      {m.storage_moves_retry()}
+                    </Button>
+                  </Alert.Description>
+                </Alert.Root>
+              {:else if contentMoves?.moves.length === 0}
+                <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
+                  {m.storage_moves_empty()}
+                </p>
+              {:else if contentMoves}
+                <div class="border-default overflow-x-auto rounded-lg border">
+                  <Table.Root class="min-w-[760px]">
+                    <Table.Caption class="sr-only">{m.storage_moves_caption()}</Table.Caption>
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.Head>{m.storage_moves_target()}</Table.Head>
+                        <Table.Head>{m.storage_moves_state()}</Table.Head>
+                        <Table.Head>{m.storage_moves_failure()}</Table.Head>
+                        <Table.Head>{m.storage_moves_count()}</Table.Head>
+                        <Table.Head>{m.storage_moves_bytes()}</Table.Head>
+                        <Table.Head>{m.storage_moves_oldest_update()}</Table.Head>
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {#each contentMoves.moves as item (`${item.target}-${item.state}-${item.failure_code}`)}
+                        <Table.Row>
+                          <Table.Cell class="font-medium">
+                            {storageTargetLabel(item.target)}
+                          </Table.Cell>
+                          <Table.Cell>{moveStateLabel(item.state)}</Table.Cell>
+                          <Table.Cell>{moveFailureLabel(item.failure_code)}</Table.Cell>
+                          <Table.Cell>{item.count}</Table.Cell>
+                          <Table.Cell>{formatBytes(item.bytes)}</Table.Cell>
+                          <Table.Cell>{storageDate(item.oldest_updated_at)}</Table.Cell>
+                        </Table.Row>
+                      {/each}
+                    </Table.Body>
+                  </Table.Root>
+                </div>
+              {/if}
+            </section>
+          {/if}
+
+          {#if user.is_platform_admin === true && !authorityRevoked}
             <section class="space-y-4 pb-8">
               <div class="max-w-3xl space-y-1">
                 <h2 class="text-lg font-semibold">{m.storage_inventory_title()}</h2>
@@ -674,7 +1079,7 @@
                           <Table.Cell>{contentStateLabel(item.state)}</Table.Cell>
                           <Table.Cell>{item.count}</Table.Cell>
                           <Table.Cell>{formatBytes(item.bytes)}</Table.Cell>
-                          <Table.Cell>{inventoryDate(item.oldest_created_at)}</Table.Cell>
+                          <Table.Cell>{storageDate(item.oldest_created_at)}</Table.Cell>
                         </Table.Row>
                       {/each}
                     </Table.Body>

@@ -108,6 +108,16 @@ class ObjectContents(BasePublic):
             "state",
             postgresql_where=text("storage_kind = 'object_store'"),
         ),
+        Index(
+            "ix_object_contents_move_candidates",
+            "storage_kind",
+            "created_at",
+            "id",
+            postgresql_where=text(
+                "state = 'available' AND reference_count > 0 "
+                "AND delete_requested_at IS NULL"
+            ),
+        ),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(
@@ -254,6 +264,88 @@ class ObjectStoreObjects(BaseCrossReference):
     )
 
 
+class ObjectContentMoves(BaseCrossReference):
+    __table_args__ = (
+        CheckConstraint(
+            "target_kind IN ('postgres_inline', 'object_store')",
+            name="ck_object_content_moves_target_kind",
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'target_verified', 'failed')",
+            name="ck_object_content_moves_state",
+        ),
+        CheckConstraint(
+            "(verification_chunk_size_bytes IS NULL) = "
+            "(verification_chunk_sha256 IS NULL)",
+            name="ck_object_content_moves_verification_pair",
+        ),
+        CheckConstraint(
+            "verification_chunk_size_bytes IS NULL "
+            "OR verification_chunk_size_bytes > 0",
+            name="ck_object_content_moves_verification_size",
+        ),
+        CheckConstraint(
+            "verification_chunk_sha256 IS NULL OR "
+            "(octet_length(verification_chunk_sha256) BETWEEN 32 AND 320000 "
+            "AND octet_length(verification_chunk_sha256) % 32 = 0)",
+            name="ck_object_content_moves_verification_sha256",
+        ),
+        CheckConstraint(
+            "target_kind = 'object_store' OR "
+            "(object_key IS NULL AND verification_chunk_size_bytes IS NULL)",
+            name="ck_object_content_moves_object_target",
+        ),
+        CheckConstraint(
+            "state <> 'target_verified' OR target_kind = 'postgres_inline' OR "
+            "(object_key IS NOT NULL AND verification_chunk_size_bytes IS NOT NULL)",
+            name="ck_object_content_moves_verified_target",
+        ),
+        CheckConstraint(
+            "state <> 'failed' OR failure_code IS NOT NULL",
+            name="ck_object_content_moves_failed_code",
+        ),
+        CheckConstraint(
+            "failure_code IS NULL OR failure_code IN ("
+            "'store_unavailable', 'target_too_large', 'source_missing', "
+            "'source_corrupt', 'target_corrupt', 'content_ineligible')",
+            name="ck_object_content_moves_failure_code",
+        ),
+        CheckConstraint(
+            "failure_detail IS NULL OR char_length(failure_detail) <= 512",
+            name="ck_object_content_moves_failure_detail",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0", name="ck_object_content_moves_attempt_count"
+        ),
+        UniqueConstraint(
+            "object_key",
+            name="uq_object_content_moves_object_key",
+        ),
+    )
+
+    content_id: Mapped[UUID] = mapped_column(
+        ForeignKey(ObjectContents.id, ondelete="CASCADE"), primary_key=True
+    )
+    target_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    object_key: Mapped[Optional[str]] = mapped_column(Text)
+    verification_chunk_size_bytes: Mapped[Optional[int]] = mapped_column(BigInteger)
+    verification_chunk_sha256: Mapped[Optional[bytes]] = mapped_column(
+        BYTEA, deferred=True
+    )
+    failure_code: Mapped[Optional[str]] = mapped_column(String(64))
+    failure_detail: Mapped[Optional[str]] = mapped_column(String(512))
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    requested_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL")
+    )
+
+
 class ObjectContentHolds(BasePublic):
     __table_args__ = (
         CheckConstraint(
@@ -372,7 +464,7 @@ class ObjectContentAuditEvents(BasePublic):
         CheckConstraint(
             "event_type IN ('prepared', 'available', 'retained', 'failed', "
             "'delete_pending', 'tombstoned', 'reference_changed', "
-            "'hold_changed')",
+            "'hold_changed', 'storage_moved')",
             name="ck_object_content_audit_events_type",
         ),
         CheckConstraint(
@@ -387,6 +479,9 @@ class ObjectContentAuditEvents(BasePublic):
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
     detail: Mapped[Optional[str]] = mapped_column(String(512))
     correlation_id: Mapped[Optional[UUID]]
+    actor_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL")
+    )
 
 
 class ObjectContentOrphanCandidates(BaseCrossReference):
@@ -538,6 +633,18 @@ Index(
     "ix_object_contents_reconcile", ObjectContents.state, ObjectContents.next_attempt_at
 )
 Index("ix_object_contents_lease", ObjectContents.lease_until)
+Index(
+    "ix_object_content_moves_due",
+    ObjectContentMoves.state,
+    ObjectContentMoves.next_attempt_at,
+    ObjectContentMoves.updated_at,
+    ObjectContentMoves.content_id,
+)
+Index(
+    "ix_object_content_moves_target_state",
+    ObjectContentMoves.target_kind,
+    ObjectContentMoves.state,
+)
 Index(
     "ix_object_contents_reference_audit",
     ObjectContents.reference_audited_at,

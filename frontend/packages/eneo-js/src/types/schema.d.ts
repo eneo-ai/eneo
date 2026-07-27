@@ -5903,6 +5903,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/object-content-moves": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Object Content Moves
+     * @description Get bounded aggregate progress and typed failure reasons for explicit object-content moves. Platform administrators only.
+     */
+    get: operations["get_object_content_moves_api_v1_admin_object_content_moves_get"];
+    put?: never;
+    /**
+     * Queue Object Content Moves
+     * @description Queue one bounded page of eligible content for an explicit storage move. This never starts an automatic fleet migration.
+     */
+    post: operations["queue_object_content_moves_api_v1_admin_object_content_moves_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-content-moves/pause": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set Object Content Moves Paused
+     * @description Pause or resume new object-content move claims using the expected deployment-policy revision.
+     */
+    put: operations["set_object_content_moves_paused_api_v1_admin_object_content_moves_pause_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{space_id}/skills/": {
     parameters: {
       query?: never;
@@ -10451,6 +10495,22 @@ export interface components {
      */
     ContentDisposition: "attachment" | "inline";
     /**
+     * ContentMoveFailureCode
+     * @enum {string}
+     */
+    ContentMoveFailureCode:
+      | "store_unavailable"
+      | "target_too_large"
+      | "source_missing"
+      | "source_corrupt"
+      | "target_corrupt"
+      | "content_ineligible";
+    /**
+     * ContentMoveState
+     * @enum {string}
+     */
+    ContentMoveState: "pending" | "target_verified" | "failed";
+    /**
      * ContentState
      * @enum {string}
      */
@@ -11243,6 +11303,13 @@ export interface components {
        */
       deleted_keys: string[];
     };
+    /** DeploymentPolicyPauseUpdate */
+    DeploymentPolicyPauseUpdate: {
+      /** Expected Revision */
+      expected_revision: number;
+      /** Moves Paused */
+      moves_paused: boolean;
+    };
     /** DeploymentPolicyPublic */
     DeploymentPolicyPublic: {
       policy: components["schemas"]["DeploymentPolicyPublicValues"];
@@ -11264,6 +11331,8 @@ export interface components {
       knowledge_file_limit_bytes: number;
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
+      /** Moves Paused */
+      moves_paused: boolean;
       updated_by_actor: components["schemas"]["PolicyActor"];
       /**
        * Created At
@@ -13847,6 +13916,38 @@ export interface components {
      * @enum {string}
      */
     Modules: "eneo-applications";
+    /** MovePausePublic */
+    MovePausePublic: {
+      /** Policy Revision */
+      policy_revision: number;
+      /** Paused */
+      paused: boolean;
+    };
+    /** MoveQueuePublic */
+    MoveQueuePublic: {
+      /** Queued Count */
+      queued_count: number;
+      /** Target Too Large Count */
+      target_too_large_count: number;
+    };
+    /** MoveQueueRequest */
+    MoveQueueRequest: {
+      target: components["schemas"]["StorageKind"];
+      /** Limit */
+      limit: number;
+    };
+    /** MoveStatePublic */
+    MoveStatePublic: {
+      target: components["schemas"]["StorageKind"];
+      state: components["schemas"]["ContentMoveState"];
+      failure_code: components["schemas"]["ContentMoveFailureCode"] | null;
+      /** Count */
+      count: number;
+      /** Bytes */
+      bytes: number;
+      /** Oldest Updated At */
+      oldest_updated_at: string | null;
+    };
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
       /**
@@ -13885,6 +13986,15 @@ export interface components {
     ObjectContentInventoryPublic: {
       /** Inventory */
       inventory: components["schemas"]["InventoryPublic"][];
+    };
+    /** ObjectContentMovesPublic */
+    ObjectContentMovesPublic: {
+      /** Policy Revision */
+      policy_revision: number;
+      /** Paused */
+      paused: boolean;
+      /** Moves */
+      moves: components["schemas"]["MoveStatePublic"][];
     };
     /**
      * ObjectContentReadinessCode
@@ -39887,6 +39997,137 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_object_content_moves_api_v1_admin_object_content_moves_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectContentMovesPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  queue_object_content_moves_api_v1_admin_object_content_moves_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MoveQueueRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MoveQueuePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  set_object_content_moves_paused_api_v1_admin_object_content_moves_pause_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeploymentPolicyPauseUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MovePausePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

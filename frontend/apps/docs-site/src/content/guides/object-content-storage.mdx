@@ -346,6 +346,31 @@ entire object; a range verifies only the chunks that cover that response.
 
 ## Operate it safely
 
+### Move existing content
+
+PostgreSQL inline remains the complete default; compatible object storage is
+optional. When the endpoint reports **Ready**, a platform administrator can
+open **Admin > Storage** and move existing content in either direction:
+
+1. Choose the destination and a page of 1–100 items.
+2. Select **Queue moves**. Run another command when you want to queue the next
+   bounded page.
+3. Follow item and byte counts by destination, state, and failure reason.
+4. Select **Pause moves** to stop new work claims. One item already being
+   verified may finish before the pause takes effect.
+
+Eneo verifies every item at the destination before it starts using that copy.
+It never moves the full installation automatically, falls back during an
+outage, or treats both placements as writable. Interrupted work resumes from
+its stored intent.
+
+Before removing object-store configuration, move eligible content inline and
+leave the worker and endpoint running through the configured orphan grace and
+two complete inventory observations. This lets the existing cleanup lifecycle
+delete former remote keys. Eneo keeps configuration required while remote
+content, staged moves, orphan candidates, or multipart cleanup still depend on
+the endpoint.
+
 ### Backup rule
 
 - **Only inline rows:** PostgreSQL backup contains control and bytes.
@@ -432,8 +457,8 @@ content item live either inline or in the configured endpoint.
 
 ### Will enabling the endpoint move existing files?
 
-No. Placement changes require an explicit copy, full verification, authority
-switch, and cleanup workflow.
+No. A platform administrator must queue bounded, verified moves from **Admin >
+Storage**. Changing the target for new writes never starts a fleet migration.
 
 ### Why can I not delete an uploaded File?
 
