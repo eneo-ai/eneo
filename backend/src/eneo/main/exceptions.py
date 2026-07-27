@@ -70,10 +70,11 @@ class ErrorCodes(int, Enum):
     FILE_ORIGINAL_NOT_FOUND = 9045
     DEPLOYMENT_POLICY_CONFLICT = 9046
     OBJECT_STORE_NOT_SELECTABLE = 9047
-    # Skill lifecycle conflicts. Each one has its own recovery action, so they
-    # cannot share a code: the client picks the instruction from the code. They
-    # are registered in eneo.server.exception_handlers, which may depend on the
-    # Skills domain without reversing the dependency.
+    # Skill lifecycle conflicts. Each one needs different client handling, so
+    # they cannot share a code: the client picks its instruction from the code,
+    # and not every blocker can be cleared. They are registered in
+    # eneo.server.exception_handlers, which may depend on the Skills domain
+    # without reversing the dependency.
     SKILL_SLUG_TAKEN = 9048
     SKILL_PUBLISHED_NOT_DELETABLE = 9049
     SKILL_IN_USE_BY_APP_RUN = 9050

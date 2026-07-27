@@ -20,9 +20,9 @@ import { m } from "$lib/paraglide/messages";
  * The @unique decorator on ErrorCodes guarantees no duplicate codes exist.
  */
 /**
- * The reviewed execution block was released or replaced before the request
- * reached the server. Exported because the recovery — re-read the block and
- * show the live state — is a decision, not just a message.
+ * The reviewed execution block was released or replaced before this unblock was
+ * applied. Exported because the recovery — re-read the block and show the live
+ * state — is a decision, not just a message.
  */
 export const SKILL_EXECUTION_BLOCK_CONFLICT: EneoErrorCode = 9052;
 
