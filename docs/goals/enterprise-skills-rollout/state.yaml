@@ -30,12 +30,12 @@ continuity:
   current_thread_id: "019f8f85-2ea6-7030-8c48-6d90143da5e0"
   previous_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
   rotation_count: 1
-  completed_write_tasks_in_thread: 6
+  completed_write_tasks_in_thread: 7
   handoff_note: null
   last_handoff_at: null
-  last_verified_revision: "5d54e242a0edd878ef0768c00ea35b63c827e50a"
+  last_verified_revision: "d528ec0af6d15a9343090e3e04303d74ce530d9b"
 
-active_task: T016
+active_task: T021
 
 tasks:
   - id: T001
@@ -1043,10 +1043,10 @@ tasks:
   - id: T016
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement Task #553 slice 5A: Assistant binding-mode save contracts, admin runtime-policy UI, honest activation controls, and the shared fit/activatability owner."
-    tracking_issue: "https://github.com/eneo-ai/eneo/issues/602"
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/604"
     inputs:
       - "Completed T015 receipt"
       - "docs/enterprise-skills-roadmap.md slice 5 contract"
@@ -1083,6 +1083,108 @@ tasks:
     stop_if:
       - "Fit or activatability would be calculated in more than one owner."
       - "The UI needs a second design system or Apps would gain on-demand behavior."
+    receipt:
+      result: done
+      summary: "Shipped Assistant Always/On demand controls and tenant-admin runtime-policy controls through the shared backend activatability owner, while preserving eager-only App and Personal Chat contracts."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/604"
+      merged_pr: 606
+      source_head: "17fc26fb377b2fe25a6cc5136be3d80835b3969b"
+      merge_commit: "a3652e59fbf057c1b7607cf6b5b8c9992c76d9be"
+      merged_at: "2026-07-26T20:33:16Z"
+      github_checks: "All required checks passed, including Frontend, Frontend E2E, schema drift, coverage diff, dependency review, and all Docker builds."
+      final_review: "Review 3 confirmed F1 resolved and found no current in-scope findings with complete changed-file coverage."
+      review_url: "https://github.com/eneo-ai/eneo/pull/606#issuecomment-5085238909"
+      changed_files:
+        - "frontend/apps/web/src/lib/features/skills/SkillBindingsEditor.svelte"
+        - "frontend/apps/web/src/lib/features/skills/SkillRuntimePolicySettings.svelte"
+        - "frontend/apps/web/src/lib/features/skills/skillBindings.ts"
+        - "frontend/apps/web/src/lib/features/skills/skillRuntimePolicy.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/assistants/[assistantId]/edit/"
+        - "frontend/packages/eneo-js/src/endpoints/settings.js"
+        - "frontend/packages/eneo-js/src/endpoints/skills.js"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      commands:
+        - "bunx vitest run <five affected web test files>"
+        - "node --test settings.test.js skills.test.js"
+        - "bun run --filter @eneo/web check"
+        - "bun run --filter @eneo/web lint"
+        - "NODE_OPTIONS='--max-old-space-size=8192' bun run --filter @eneo/web build"
+        - "bun run build (docs-site)"
+        - "pre-push hook"
+      verification:
+        - "frontend: 26 affected web tests passed"
+        - "SDK: 13 endpoint tests passed; compatibility follow-up passed 17 eneo-js tests"
+        - "Svelte check: 0 errors and 0 warnings"
+        - "frontend and SDK lint, web production build, docs build, schema drift, and pre-push hooks passed"
+        - "Impeccable detector found no changed-surface findings"
+        - "Claude pre-commit and post-fix verification passed, final score 8"
+
+  - id: T021
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Secure the existing Admin Insights message-logging endpoint with tenant-scoped, body-free authorization before any message or attachment hydration."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/608"
+    inputs:
+      - "Current /logging/{message_id}/ Admin Insights contract"
+      - "Canonical Permission.INSIGHTS and SpaceActor authorization"
+      - ".codex/artifacts/claude-peer-loop-secure-insights-message-logging-access-20260726T213646Z.md"
+    allowed_files:
+      - "backend/src/eneo/analysis/analysis_service.py"
+      - "backend/src/eneo/authentication/auth_dependencies.py"
+      - "backend/src/eneo/logging/logging_router.py"
+      - "backend/src/eneo/questions/questions_repo.py"
+      - "backend/tests/"
+      - "frontend/apps/docs-site/src/content/docs/api-key-management.mdx"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Preserve the public MessageLogging response and the authorized unlogged-message 400 behavior."
+      - "Require bearer-session authentication and canonical Insights permission; API keys and service principals remain denied."
+      - "Authorize a bounded tenant-scoped session-partner projection before Question, attachment, relationship, or logging-body hydration."
+      - "Use the existing SpaceActor insight authorization; personal Space, foreign tenant, disabled Insights, malformed sessions, and unauthorized resources fail with generic denial."
+      - "Do not create a diagnostics service, generic observability framework, UI change, migration, or MessageLogging payload change; regenerate the SDK schema for explicit 403 route metadata."
+    verify:
+      - "Authorized Assistant and group-chat Insights access preserves the existing response shape"
+      - "Foreign tenant, personal Space, disabled Insights, missing permission, malformed session, API key, and service principal fail closed"
+      - "Denied paths never hydrate Question bodies, files, relationships, or provider logging payloads"
+      - "Route metadata, focused unit/integration tests, Ruff, Pyright, schema drift, concise docs-site guidance, CI, Claude verification, and fresh /review"
+    stop_if:
+      - "The change requires a second Insights authorization owner or a public payload change."
+      - "Authorization cannot be proven before full message hydration."
+    receipt: null
+
+  - id: T020
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Add permission-gated, body-free Skill activation evidence to the existing chat debug panel without changing normal chat behavior."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/605"
+    inputs:
+      - "Completed T016 and T021 receipts"
+      - "Existing SHOW_CHAT_DEBUG_PANEL feature flag and generic chat debug panel"
+      - "Persisted body-free Question Skill activation evidence from T013-T015"
+      - "Current chat page and shadcn-svelte Sheet primitives"
+    constraints:
+      - "Normal chat requests never enable capture, extended logging, or provider-body hydration."
+      - "Keep /logging/{message_id}/ and MessageLogging owned by Admin Insights; T020 uses a separate, narrow conversation diagnostics endpoint."
+      - "Authorize the session partner and current Assistant access before reading one message's scalar Skill evidence."
+      - "Preserve generic model, token, MCP/tool, knowledge, and file diagnostics already available from the loaded conversation turn."
+      - "Never expose message bodies, Skill instructions, administrator incident reasons, credentials, hidden reasoning, tool arguments/results, or file contents."
+      - "Use installed shadcn-svelte components and the existing design system; no new UI dependency or parallel debug store."
+    verify:
+      - "Available, always-active, activated-on-demand, blocked, rejected, fallback, token-source, model, round, latency, ordering, and empty/error states"
+      - "Ordinary response non-disclosure plus flag, permission, API-key, tenant, session, partner, revoked-access, and group-chat authorization boundaries"
+      - "Generic model/token/MCP/tool/knowledge/file sections remain useful and body-free"
+      - "Migration upgrade/downgrade and generated OpenAPI/SDK contracts"
+      - "Keyboard, focus, stale-request, long-name, long-list, loading, and narrow-screen behavior"
+      - "Natural Swedish/English copy, docs build, backend/frontend suites, CI, Claude verification, and fresh /review"
+    stop_if:
+      - "The implementation would duplicate runtime activation decisions, persist a second evidence representation, or expose bodies or hidden reasoning."
+      - "The diagnostics route cannot remain narrow, scalar, and independent of Admin Insights logging."
     receipt: null
 
   - id: T019
