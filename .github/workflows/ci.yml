@@ -653,6 +653,19 @@ jobs:
           (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         uses: actions/checkout@v4
 
+      # The frontend production build needs more memory than the hosted runner
+      # can provide without swap once it runs inside Docker. Keep this scoped to
+      # the frontend image; the other images build within the runner's RAM.
+      - name: Add swap for frontend image build
+        if: >-
+          matrix.image == 'frontend' &&
+          (github.event_name != 'pull_request' || needs.changes.outputs.docker_frontend == 'true')
+        run: |
+          sudo fallocate --length 4G /mnt/eneo-frontend.swap
+          sudo chmod 600 /mnt/eneo-frontend.swap
+          sudo mkswap /mnt/eneo-frontend.swap
+          sudo swapon /mnt/eneo-frontend.swap
+
       - name: Build Docker image
         if: >-
           github.event_name != 'pull_request' ||
