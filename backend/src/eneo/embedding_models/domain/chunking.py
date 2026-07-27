@@ -40,10 +40,13 @@ def build_text_splitter(
     chunk_size: int | None = None,
     chunk_overlap: int | None = None,
 ) -> RecursiveCharacterTextSplitter:
+    size = chunk_size if chunk_size is not None else settings.chunk_size
+    overlap = chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
+    # RecursiveCharacterTextSplitter requires overlap < size; cap it so a small
+    # chunk_size (e.g. below the default overlap) can never break ingestion.
+    overlap = min(overlap, size // 2)
     return RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size if chunk_size is not None else settings.chunk_size,
-        chunk_overlap=(
-            chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
-        ),
+        chunk_size=size,
+        chunk_overlap=overlap,
         length_function=count_tokens,
     )
