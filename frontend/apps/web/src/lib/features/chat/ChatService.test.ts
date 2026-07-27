@@ -58,6 +58,34 @@ function completedAsk() {
   });
 }
 
+function persistedConversation(
+  toolCalls: Array<{ server_name: string; tool_name: string; result_status: string }> = []
+) {
+  return {
+    id: "session-1",
+    name: "Hello",
+    messages: [
+      {
+        id: "message-1",
+        question: "Hello",
+        answer: "Answer",
+        completion_model: {
+          id: "model-1",
+          name: "gpt-4o",
+          token_limit: 128000
+        },
+        references: [],
+        files: [],
+        generated_files: [],
+        web_search_references: [],
+        mcp_tool_references: [],
+        tool_calls: toolCalls,
+        tools: { assistants: [] }
+      }
+    ]
+  };
+}
+
 describe("ChatService assistant baseline preflight", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -154,35 +182,15 @@ describe("ChatService turn diagnostics", () => {
           finishStream = resolve;
         })
     );
-    const get = vi.fn().mockResolvedValue({
-      id: "session-1",
-      name: "Hello",
-      messages: [
+    const get = vi.fn().mockResolvedValue(
+      persistedConversation([
         {
-          id: "message-1",
-          question: "Hello",
-          answer: "Answer",
-          completion_model: {
-            id: "model-1",
-            name: "gpt-4o",
-            token_limit: 128000
-          },
-          references: [],
-          files: [],
-          generated_files: [],
-          web_search_references: [],
-          mcp_tool_references: [],
-          tool_calls: [
-            {
-              server_name: "warehouse",
-              tool_name: "query",
-              result_status: "complete"
-            }
-          ],
-          tools: { assistants: [] }
+          server_name: "warehouse",
+          tool_name: "query",
+          result_status: "complete"
         }
-      ]
-    });
+      ])
+    );
     const chat = chatService(vi.fn(), { ask, get });
     if (panelOpenDuringStream) chat.setDebugPanelOpen(true);
 
@@ -206,5 +214,31 @@ describe("ChatService turn diagnostics", () => {
         result_status: "complete"
       }
     ]);
+  });
+
+  it("rehydrates pending diagnostics when the next request fails before streaming", async () => {
+    const storedConversation = persistedConversation();
+    let resolveStaleHydration!: (conversation: typeof storedConversation) => void;
+    const staleHydration = new Promise<typeof storedConversation>((resolve) => {
+      resolveStaleHydration = resolve;
+    });
+    const get = vi
+      .fn()
+      .mockReturnValueOnce(staleHydration)
+      .mockResolvedValueOnce(storedConversation);
+    const ask = completedAsk();
+    const chat = chatService(vi.fn(), { ask, get });
+    chat.setDebugPanelOpen(true);
+
+    await chat.askQuestion("Hello");
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-1"]);
+
+    ask.mockRejectedValueOnce(new Error("request failed before streaming"));
+    await expect(chat.askQuestion("Try again")).rejects.toThrow("request failed before streaming");
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(chat.pendingDiagnosticsMessageIds).toEqual([]);
+
+    resolveStaleHydration(storedConversation);
   });
 });

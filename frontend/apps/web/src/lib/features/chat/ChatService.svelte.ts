@@ -882,14 +882,14 @@ export class ChatService {
 
           // Flush any remaining buffered content after stream completes
           this.#finalizeStream();
+          if (this.debugPanelOpen) {
+            void this.#hydratePendingDiagnosticsMessages();
+          }
         }
       }
 
       if (this.#streamGen === streamGen) {
         this.reloadHistory();
-        if (this.debugPanelOpen) {
-          void this.#hydratePendingDiagnosticsMessages();
-        }
       }
 
       // The $effect in constructor now handles automatic token calculation
