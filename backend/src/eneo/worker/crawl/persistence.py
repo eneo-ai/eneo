@@ -16,12 +16,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 import sqlalchemy as sa
 from dependency_injector import providers
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing_extensions import TypedDict
 
-from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
 from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.embedding_models.domain.chunking import build_text_splitter
 from eneo.info_blobs.info_blob import InfoBlobChunk
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
@@ -36,10 +35,6 @@ if TYPE_CHECKING:
     from eneo.main.container.container import Container
 
 logger = get_logger(__name__)
-
-# Chunking settings (matching datastore.py pattern)
-_CHUNK_SIZE = 200
-_CHUNK_OVERLAP = 40
 
 # EMBEDDING SEMAPHORE: Module-level bounded concurrency
 #
@@ -192,12 +187,7 @@ async def persist_batch(
             add_failure(FailureReason.EMBEDDING_ERROR, page["url"])
         return 0, len(page_buffer), [], failures_by_reason
 
-    # Create text splitter (matching datastore.py pattern)
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=_CHUNK_SIZE,
-        chunk_overlap=_CHUNK_OVERLAP,
-        length_function=count_tokens,
-    )
+    splitter = build_text_splitter()
 
     # PHASE 1: Compute embeddings (uses embedding_session for provider credentials)
     # The embedding session is used to load API credentials from DB, but the actual

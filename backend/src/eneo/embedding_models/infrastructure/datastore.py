@@ -1,10 +1,7 @@
 import time
 from typing import TYPE_CHECKING, Optional
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pydantic_settings import BaseSettings
-
-from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.embedding_models.domain.chunking import build_text_splitter
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import (
     InfoBlobChunk,
@@ -28,14 +25,6 @@ if TYPE_CHECKING:
     from eneo.websites.domain.website import Website
 
 logger = get_logger(__name__)
-
-
-class ChunkSettings(BaseSettings):
-    chunk_size: int = 200
-    chunk_overlap: int = 40
-
-
-settings = ChunkSettings()
 
 
 def autocut(y_values: list[float], cutoff: int = 2) -> int:
@@ -84,12 +73,13 @@ class Datastore:
         self.chunk_repo = info_blob_chunk_repo
         self.create_embeddings_service = create_embeddings_service
 
-    def _chunk_text(self, info_blob: InfoBlobInDB) -> list[InfoBlobChunk]:
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-            length_function=count_tokens,
-        )
+    def _chunk_text(
+        self,
+        info_blob: InfoBlobInDB,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
+    ) -> list[InfoBlobChunk]:
+        splitter = build_text_splitter(chunk_size, chunk_overlap)
 
         info_blob_chunks = [
             InfoBlobChunk(
@@ -126,9 +116,15 @@ class Datastore:
             logger.debug(f"Last batch. Adding {len(chunks)} chunks to datastore.")
             await self.chunk_repo.add(chunks)
 
-    async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
+    async def add(
+        self,
+        info_blob: InfoBlobInDB,
+        embedding_model: "EmbeddingModel",
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
+    ):
         logger.debug("Chunking text.")
-        info_blob_chunks = self._chunk_text(info_blob)
+        info_blob_chunks = self._chunk_text(info_blob, chunk_size, chunk_overlap)
 
         if not info_blob_chunks:
             logger.warning(
