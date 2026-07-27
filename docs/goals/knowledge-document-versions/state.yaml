@@ -1,0 +1,137 @@
+# Goal Maker v2 state.yaml
+# Compact board truth; the bounded implementation contract is in notes/T001-preflight-receipt.md.
+
+version: 2
+
+goal:
+  title: "Keep working knowledge available during updates"
+  slug: "knowledge-document-versions"
+  kind: specific
+  tranche: "Publish one complete active knowledge version per document, preserve the last working version on failure, and deliver one reviewable PR without starting the later ingestion pipeline."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019fa011-95cf-7912-85d3-4bbde889653f"
+  previous_thread_id: null
+  rotation_count: 0
+  completed_write_tasks_in_thread: 0
+  handoff_note: null
+  last_handoff_at: null
+  last_verified_revision: "7abc3fcef4789949a8434a0faf6b19dbfedbd7ea"
+
+active_task: T010
+
+tasks:
+  - id: T001
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Freeze the smallest safe document-version contract from current source, consumers, migration graph, issue #571, and epic #549."
+    inputs:
+      - "Live origin/develop and current InfoBlob, chunk, crawler, integration, quota, citation, and deletion owners"
+      - "Issue #571 and epic #549"
+    constraints:
+      - "Reuse existing owners before adding schema or modules."
+      - "Keep PostgreSQL complete by default and object storage optional."
+      - "Do not start retries, leases, retention cleanup, public version history, provider branches, multi-tenant routing, or Flow adoption."
+    expected_output:
+      - "One canonical publication owner and consumer classification"
+      - "Migration, failure, concurrency, complexity, tests, and rollback contract"
+    receipt:
+      result: done
+      note: notes/T001-preflight-receipt.md
+      summary: "Approved two complete persisted states, active-only product projections, exact-ID historical citations, whole-family deletion, unchanged no-op, and failure-preserving atomic publication. Same Claude session planning iteration 4 was green with MIN_SCORE 8."
+
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: default
+    objective: "Implement, validate, document, review, publish, and merge the bounded knowledge-version slice."
+    allowed_files:
+      - backend/alembic/versions/202607271000_add_info_blob_versions.py
+      - backend/alembic/versions/202607271100_merge_info_blob_and_debug_permission.py
+      - backend/src/eneo/database/tables/info_blobs_table.py
+      - backend/src/eneo/info_blobs/**
+      - backend/src/eneo/embedding_models/infrastructure/datastore.py
+      - backend/src/eneo/worker/crawl/**
+      - backend/src/eneo/worker/crawl_tasks.py
+      - backend/src/eneo/integration/infrastructure/content_service/**
+      - backend/src/eneo/groups_legacy/**
+      - backend/src/eneo/assistants/assistant_repo.py
+      - backend/src/eneo/spaces/space_repo.py
+      - backend/src/eneo/websites/infrastructure/update_website_size_service.py
+      - backend/src/eneo/main/container/container.py
+      - backend/tests/integration/info_blobs/**
+      - backend/tests/integration/migrations/test_info_blob_versions.py
+      - backend/tests/integration/embedding_models/test_embedding_model_lifecycle.py
+      - backend/tests/integration/object_content/test_reference_fence.py
+      - backend/tests/integration/test_ingestion_failure_safety.py
+      - backend/tests/unittests/info_blobs/**
+      - backend/tests/unittests/integration/test_sharepoint_content_service.py
+      - backend/tests/unittests/worker/test_persist_batch_logic.py
+      - frontend/apps/docs-site/src/content/docs/architecture.mdx
+      - frontend/apps/docs-site/src/content/guides/document-processing.mdx
+      - frontend/apps/docs-site/src/content/guides/object-content-storage.mdx
+      - docs/goals/knowledge-document-versions/**
+    verify:
+      - "Real PostgreSQL publication, failure preservation, retrieval, citation, deletion, and crawler behavior"
+      - "PostgreSQL 13 migration upgrade/downgrade/re-upgrade/history fence and one Alembic head"
+      - "Whole-backend Pyright 0/0, changed Python Ruff/format, backend non-integration suite"
+      - "OpenAPI/generated schema parity, docs build, diff/secret/pre-push checks"
+      - "Same-session Claude exact-diff gate green with MIN_SCORE >= 8"
+      - "Fresh GitHub /review; merge only exact green CI head with no critical current finding"
+    stop_if:
+      - "The change requires a public version-history contract or another persistence owner."
+      - "The change begins the later ingestion pipeline, retention cleanup, Flow work, or provider-specific storage behavior."
+      - "A genuine data-loss, migration, concurrency, security, or material performance blocker remains."
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit the immutable PR head, current review, CI, merge, issue links, docs, and non-goals before closing this tranche."
+    inputs:
+      - "T001 contract and T010 implementation evidence"
+    constraints:
+      - "Do not add product scope."
+      - "Non-critical review nits do not reopen the implementation loop."
+    expected_output:
+      - "complete | not_complete"
+      - "Smallest next task if incomplete"
+    receipt: null
+
+checks:
+  dirty_fingerprint: "Dirty implementation diff from origin/develop 7abc3fcef; no unrelated source paths or staged files."
+  last_verification:
+    result: pass
+    task: T010
+    commands:
+      - "25 real PostgreSQL publication/failure/reference tests passed"
+      - "1 PostgreSQL 13 migration round-trip/history-fence test passed; Alembic head 202607271100 only"
+      - "4077 backend non-integration tests passed; 1309 deselected"
+      - "whole-backend Pyright 0 errors/0 warnings/0 informations"
+      - "changed Python Ruff/format, OpenAPI generated-schema drift, docs-site build, diff and Goal checker passed"
+      - "Claude session knowledge-document-versions iteration 5: GREEN_LIGHT yes, MIN_SCORE 8, no blockers"

@@ -10,7 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.icons_table import Icons
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionState
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     IconContentReferences,
@@ -217,7 +217,9 @@ async def test_info_blob_pending_content_accepts_its_first_reference_at_creation
             title="owned extracted text",
             url=None,
             size=0,
-            content_hash=None,
+            content_hash=sha256(b"").digest(),
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
             user_id=user_id,
             tenant_id=tenant_id,
             group_id=None,

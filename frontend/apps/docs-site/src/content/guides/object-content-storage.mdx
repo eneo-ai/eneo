@@ -56,13 +56,14 @@ Object storage and RAG solve different problems:
 
 ### What is adopted now?
 
-| Product content                                   | Current behavior                                                                                        |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Eligible new File and Icon bytes                  | Use the deployment-wide target selected in **Admin > Storage**                                          |
-| Existing File and Icon bytes                      | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
-| InfoBlob knowledge generations and Flow artifacts | Remain separate follow-up work                                                                          |
-| Changing the selected target                      | Affects eligible new writes without a restart; existing content stays where it is                       |
-| Moving existing content                           | Requires a separate explicit, verified migration                                                        |
+| Product content                  | Current behavior                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Eligible new File and Icon bytes | Use the deployment-wide target selected in **Admin > Storage**                                          |
+| Existing File and Icon bytes     | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
+| Searchable knowledge versions    | Live in PostgreSQL/pgvector; only a complete replacement becomes active                                 |
+| Flow artifacts                   | Remain separate follow-up work                                                                          |
+| Changing the selected target     | Affects eligible new writes without a restart; existing content stays where it is                       |
+| Moving existing content          | Requires a separate explicit, verified migration                                                        |
 
 Enabling an endpoint makes the optional byte plane available; it does not move
 existing content or change producer placement by itself. A platform admin must

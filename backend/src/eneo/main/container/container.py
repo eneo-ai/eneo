@@ -1162,6 +1162,7 @@ class Container(containers.DeclarativeContainer):
         group_service=group_service,
         space_service=space_service,
         actor_manager=actor_manager,
+        datastore=datastore,
     )
     prompt_service = providers.Factory(
         PromptService, user=user, repo=prompt_repo, factory=prompt_factory
@@ -1486,7 +1487,6 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
-        datastore=datastore,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
     )
@@ -1501,7 +1501,6 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
-        datastore=datastore,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
@@ -1603,7 +1602,6 @@ class Container(containers.DeclarativeContainer):
         TextProcessor,
         user=user,
         extractor=text_extractor,
-        datastore=datastore,
         info_blob_service=info_blob_service,
     )
     transcriber = providers.Factory(

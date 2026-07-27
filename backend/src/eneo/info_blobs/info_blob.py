@@ -48,6 +48,14 @@ class InfoBlobAdd(InfoBlobBase, InfoBlobMetadataUpsertPublic):
 
 class InfoBlobAddToDB(InfoBlobAdd):
     embedding_model_id: UUID
+    source_id: UUID
+    version_state: str
+
+    @model_validator(mode="after")
+    def require_content_hash(self) -> "InfoBlobAddToDB":
+        if self.content_hash is None:
+            raise ValueError("Published InfoBlob content requires a SHA-256 digest")
+        return self
 
 
 class InfoBlobUpdatePublic(BaseModel):
@@ -72,6 +80,8 @@ class InfoBlobInDBNoText(InDB):
     integration_knowledge_id: Optional[UUID] = None
     sharepoint_item_id: Optional[str] = None
     content_hash: Optional[bytes] = None
+    source_id: UUID
+    version_state: str
 
     group: Optional[GroupInDBBase] = None
     website: Optional[WebsiteInDBBase] = None

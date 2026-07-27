@@ -1,3 +1,4 @@
+from hashlib import sha256
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
@@ -19,19 +20,18 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.main.logging import get_logger
 from eneo.spaces.utils.space_utils import effective_space_ids
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
+    from eneo.embedding_models.domain.embedding_model import EmbeddingModel
+    from eneo.embedding_models.infrastructure.datastore import Datastore
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
     from eneo.websites.infrastructure.update_website_size_service import (
         UpdateWebsiteSizeService,
     )
-
-logger = get_logger(__name__)
 
 
 class InfoBlobService:
@@ -46,6 +46,7 @@ class InfoBlobService:
         update_website_size_service: "UpdateWebsiteSizeService",
         space_service: "SpaceService",
         actor_manager: "ActorManager",
+        datastore: "Datastore",
     ) -> None:
         super().__init__()
         self.repo = repo
@@ -56,6 +57,7 @@ class InfoBlobService:
         self.quota_service = quota_service
         self.space_service = space_service
         self.actor_manager = actor_manager
+        self.datastore = datastore
 
     async def _get_actor(
         self, info_blob: Optional[InfoBlobInDB], group_id: Optional[UUID]
@@ -117,92 +119,53 @@ class InfoBlobService:
             case _:
                 pass  # Other SpaceAction values are not applicable to info blobs
 
-    async def _delete_if_same_title(self, info_blob: InfoBlobAdd):
-        if info_blob.title:
-            if info_blob.group_id:
-                info_blob_deleted = await self.repo.delete_by_title_and_group(
-                    info_blob.title, info_blob.group_id
-                )
-
-                if info_blob_deleted is not None:
-                    logger.debug(
-                        f"Info blob ({info_blob_deleted.title}) in group "
-                        f"({info_blob.group_id}) was replaced"
-                    )
-
-            elif info_blob.website_id:
-                info_blob_deleted = await self.repo.delete_by_title_and_website(
-                    info_blob.title, info_blob.website_id
-                )
-
-                if info_blob_deleted is not None:
-                    logger.debug(
-                        f"Info blob ({info_blob_deleted.title}) in website "
-                        f"({info_blob.website_id}) was replaced"
-                    )
-
-            elif info_blob.integration_knowledge_id:
-                info_blobs_deleted = (
-                    await self.repo.delete_by_title_and_integration_knowledge(
-                        info_blob.title, info_blob.integration_knowledge_id
-                    )
-                )
-
-                if info_blobs_deleted:
-                    logger.debug(
-                        f"Replaced {len(info_blobs_deleted)} info blob(s) with title '{info_blob.title}' "
-                        f"from integration {info_blob.integration_knowledge_id}"
-                    )
-
-    async def add_info_blob_without_validation(
-        self, info_blob: InfoBlobAdd
-    ) -> InfoBlobInDB:
-        await self._delete_if_same_title(info_blob)
-        size_of_text = await self.quota_service.add_text(info_blob.text)
-        info_blob.size = size_of_text
-        info_blob_in_db = await self.repo.add(info_blob)
-
-        return info_blob_in_db
-
-    async def upsert_info_blob_by_title_and_integration(
-        self, info_blob: InfoBlobAdd
-    ) -> InfoBlobInDB:
-        """Idempotent upsert for integration_knowledge blobs.
-
-        Handles duplicate webhooks by updating existing blobs instead of creating duplicates.
-        Automatically calculates size via quota_service.
-        """
-        # Calculate size
-        size_of_text = await self.quota_service.add_text(info_blob.text)
-        info_blob.size = size_of_text
-
-        # Use repo's upsert method
-        return await self.repo.upsert_by_title_and_integration_knowledge(info_blob)
-
-    async def upsert_info_blob_by_sharepoint_item_and_integration(
+    async def publish_info_blob_without_validation(
         self,
         info_blob: InfoBlobAdd,
+        *,
+        embedding_model: "EmbeddingModel",
     ) -> InfoBlobInDB:
-        """Idempotent upsert for SharePoint content keyed by item ID."""
-        size_of_text = await self.quota_service.add_text(info_blob.text)
-        info_blob.size = size_of_text
-        return await self.repo.upsert_by_sharepoint_item_and_integration_knowledge(
-            info_blob
-        )
+        if info_blob.content_hash is None:
+            info_blob.content_hash = sha256(info_blob.text.encode("utf-8")).digest()
 
-    async def add_info_blob(self, info_blob: InfoBlobAdd) -> InfoBlobInDB:
-        info_blob_in_db = await self.add_info_blob_without_validation(info_blob)
+        async with self.repo.session.begin_nested():
+            await self.repo.lock_publication_identity(info_blob)
+            active = await self.repo.get_active_for_publication(info_blob)
+            if active is not None and active.content_hash == info_blob.content_hash:
+                return active
 
-        await self._validate(info_blob_in_db)
+            source_id = active.source_id if active is not None else None
+            if active is not None and not await self.repo.supersede(active.id):
+                raise RuntimeError(
+                    "The active knowledge version changed during publish"
+                )
 
-        return info_blob_in_db
+            size_of_text = await self.quota_service.add_text(info_blob.text)
+            info_blob.size = size_of_text
+            published = await self.repo.add(info_blob, source_id=source_id)
+            await self.datastore.add(
+                info_blob=published,
+                embedding_model=embedding_model,
+            )
+            updated = await self.update_info_blob_size(published.id)
+            return updated
 
     async def add_info_blobs(
-        self, group_id: UUID, info_blobs: list[InfoBlobAdd]
+        self,
+        group_id: UUID,
+        info_blobs: list[InfoBlobAdd],
+        *,
+        embedding_model: "EmbeddingModel",
     ) -> list[InfoBlobInDB]:
         await self._can_perform_action(group_id=group_id, action=SpaceAction.CREATE)
 
-        return [await self.add_info_blob(blob) for blob in info_blobs]
+        return [
+            await self.publish_info_blob_without_validation(
+                blob,
+                embedding_model=embedding_model,
+            )
+            for blob in info_blobs
+        ]
 
     async def update_info_blob(self, info_blob: InfoBlobUpdate):
         current_info_blob = await self.repo.get(info_blob.id)

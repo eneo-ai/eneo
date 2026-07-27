@@ -2,7 +2,12 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 
-from eneo.database.tables.info_blobs_table import InfoBlobs as InfoBlobsTable
+from eneo.database.tables.info_blobs_table import (
+    InfoBlobs as InfoBlobsTable,
+)
+from eneo.database.tables.info_blobs_table import (
+    active_info_blob_version,
+)
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 
 if TYPE_CHECKING:
@@ -19,7 +24,10 @@ class UpdateWebsiteSizeService:
     async def update_website_size(self, website_id: "UUID") -> None:
         update_size_stmt = (
             sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-            .where(InfoBlobsTable.website_id == website_id)
+            .where(
+                InfoBlobsTable.website_id == website_id,
+                active_info_blob_version(),
+            )
             .scalar_subquery()
         )
 

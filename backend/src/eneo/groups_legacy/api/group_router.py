@@ -25,7 +25,6 @@ from eneo.groups_legacy.api.group_models import (
 from eneo.info_blobs import info_blob_protocol
 from eneo.info_blobs.info_blob import (
     InfoBlobAdd,
-    InfoBlobInDB,
     InfoBlobPublic,
     InfoBlobPublicNoText,
 )
@@ -247,7 +246,6 @@ async def add_info_blobs(
     if len(info_blobs.info_blobs) > 128:
         raise BadRequestException("Too many info-blobs!")
 
-    datastore = container.datastore()
     group_service = container.group_service()
     group = await group_service.get_group(id)
 
@@ -264,18 +262,10 @@ async def add_info_blobs(
 
     service = container.info_blob_service()
     info_blobs_added = await service.add_info_blobs(
-        group_id=id, info_blobs=info_blobs_to_add
+        group_id=id,
+        info_blobs=info_blobs_to_add,
+        embedding_model=group.embedding_model,
     )
-
-    # Add to datastore
-    info_blobs_updated: list[InfoBlobInDB] = []
-    for info_blob in info_blobs_added:
-        await datastore.add(
-            info_blob=info_blob,
-            embedding_model=group.embedding_model,
-        )
-        info_blob_updated = await service.update_info_blob_size(info_blob.id)
-        info_blobs_updated.append(info_blob_updated)
 
     # Audit logging for info blob additions
     from eneo.audit.domain.action_types import ActionType
@@ -298,7 +288,7 @@ async def add_info_blobs(
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=id,  # Group ID
-        description=f"Added {len(info_blobs_updated)} info blobs to collection/group",
+        description=f"Added {len(info_blobs_added)} info blobs to collection/group",
         metadata={
             "actor": {
                 "id": str(current_user.id),
@@ -310,13 +300,13 @@ async def add_info_blobs(
                 "group_name": group.name,
                 "space_id": str(group.space_id) if group.space_id else None,
                 "space_name": space.name if space else None,
-                "blobs_count": len(info_blobs_updated),
+                "blobs_count": len(info_blobs_added),
             },
         },
     )
 
     info_blobs_public = [
-        info_blob_protocol.to_info_blob_public(blob) for blob in info_blobs_updated
+        info_blob_protocol.to_info_blob_public(blob) for blob in info_blobs_added
     ]
 
     return protocol.to_paginated_response(info_blobs_public)

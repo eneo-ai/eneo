@@ -1,4 +1,5 @@
 import struct
+from hashlib import sha256
 from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -11,7 +12,11 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import (
+    InfoBlobs,
+    InfoBlobVersionState,
+    active_info_blob_version,
+)
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import Spaces, SpacesTranscriptionModels
 from eneo.embedding_models.infrastructure.datastore import Datastore
@@ -79,6 +84,9 @@ async def _seed_attempt(container, *, with_existing: bool = True):
             title=TITLE,
             text=OLD_TEXT,
             size=777,
+            content_hash=sha256(OLD_TEXT.encode("utf-8")).digest(),
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
             user_id=user.id,
             tenant_id=user.tenant_id,
             group_id=group.id,
@@ -119,11 +127,19 @@ async def _committed_state(job_id: UUID):
             )
         ).one()
         blobs = (
-            await session.scalars(sa.select(InfoBlobs).where(InfoBlobs.title == TITLE))
+            await session.scalars(
+                sa.select(InfoBlobs).where(
+                    InfoBlobs.title == TITLE,
+                    active_info_blob_version(),
+                )
+            )
         ).all()
         chunks = (
             await session.scalars(
-                sa.select(InfoBlobChunks).order_by(InfoBlobChunks.chunk_no)
+                sa.select(InfoBlobChunks)
+                .join(InfoBlobs)
+                .where(active_info_blob_version())
+                .order_by(InfoBlobChunks.chunk_no)
             )
         ).all()
         return (

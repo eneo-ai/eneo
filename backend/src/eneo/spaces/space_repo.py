@@ -25,7 +25,7 @@ from eneo.database.tables.group_chats_table import (
     GroupChatsTable,
 )
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.info_blobs_table import InfoBlobs as InfoBlobsTable
 from eneo.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
@@ -253,7 +253,7 @@ class SpaceRepository:
 
         ib_count_sq = (
             sa.select(sa.func.count(sa.distinct(ib.id)))
-            .where(ib.group_id == c.id)
+            .where(ib.group_id == c.id, active_info_blob_version())
             .correlate(c)
             .scalar_subquery()
         )
@@ -645,7 +645,10 @@ class SpaceRepository:
         def _set_size_subquery(collection: "Collection"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                .where(InfoBlobsTable.group_id == collection.id)
+                .where(
+                    InfoBlobsTable.group_id == collection.id,
+                    active_info_blob_version(),
+                )
                 .scalar_subquery()
             )
 
@@ -723,7 +726,10 @@ class SpaceRepository:
         def _set_size_subquery(website: "Website"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                .where(InfoBlobsTable.website_id == website.id)
+                .where(
+                    InfoBlobsTable.website_id == website.id,
+                    active_info_blob_version(),
+                )
                 .scalar_subquery()
             )
 
