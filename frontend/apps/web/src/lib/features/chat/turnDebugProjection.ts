@@ -3,7 +3,6 @@ import type { ConversationMessage } from "@eneo/eneo-js";
 export type DebugTurnOption = {
   messageId: string;
   turnNumber: number;
-  questionExcerpt: string;
 };
 
 export type TurnDebugDetails = {
@@ -28,6 +27,10 @@ export type TurnDebugDetails = {
   }>;
 };
 
+type StreamingConversationMessage = ConversationMessage & {
+  mcp_tool_calls?: NonNullable<ConversationMessage["tool_calls"]>;
+};
+
 export function listPersistedDebugTurns(
   messages: ConversationMessage[],
   pendingMessageIds: readonly string[]
@@ -39,8 +42,7 @@ export function listPersistedDebugTurns(
     if (!message.id || pendingMessageIds.includes(message.id)) continue;
     turns.push({
       messageId: message.id,
-      turnNumber: index + 1,
-      questionExcerpt: excerpt(message.question)
+      turnNumber: index + 1
     });
   }
 
@@ -48,7 +50,8 @@ export function listPersistedDebugTurns(
 }
 
 export function projectTurnDebugDetails(message: ConversationMessage): TurnDebugDetails {
-  const tools = (message.tool_calls ?? []).map((tool, index) => ({
+  const streamingToolCalls = (message as StreamingConversationMessage).mcp_tool_calls;
+  const tools = (streamingToolCalls ?? message.tool_calls ?? []).map((tool, index) => ({
     order: index + 1,
     serverName: tool.server_name,
     toolName: tool.mcp_tool_name ?? tool.tool_name,
@@ -109,10 +112,4 @@ export function projectTurnDebugDetails(message: ConversationMessage): TurnDebug
       }))
     ]
   };
-}
-
-function excerpt(question: string): string {
-  const singleLine = question.replace(/\s+/g, " ").trim();
-  if (singleLine.length <= 72) return singleLine;
-  return `${singleLine.slice(0, 69).trimEnd()}...`;
 }

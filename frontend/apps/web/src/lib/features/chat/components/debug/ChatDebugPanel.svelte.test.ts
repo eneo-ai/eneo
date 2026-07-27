@@ -151,7 +151,7 @@ describe("ChatDebugPanel", () => {
       .mockRejectedValueOnce(new Error("temporary"))
       .mockResolvedValue(diagnostics("message-1"));
     const chat = createChat(getTurnDiagnostics, [
-      message("message-1", "Inspect metadata", {
+      message("message-1", "SENSITIVE_QUESTION", {
         tool_calls: [
           {
             server_name: "calendar",
@@ -184,47 +184,41 @@ describe("ChatDebugPanel", () => {
     await expect.element(page.getByText("Calendar events")).toBeVisible();
     await expect.element(page.getByText("mcp://calendar/events")).toBeVisible();
     expect(document.body.textContent).not.toMatch(
-      /SENSITIVE_(ANSWER|REASONING|ARGUMENT|RESULT|CONTENT|INCIDENT)/
+      /SENSITIVE_(QUESTION|ANSWER|REASONING|ARGUMENT|RESULT|CONTENT|INCIDENT)/
     );
 
     await userEvent.keyboard("{Escape}");
     await expect.element(trigger).toHaveFocus();
   });
 
-  test("retries canonical metadata after a completed turn fails to refresh", async () => {
+  test("retries diagnostics after a completed turn cannot be confirmed", async () => {
     let finishStream!: () => void;
     const ask = vi.fn().mockImplementation(
       ({ callbacks }) =>
         new Promise<void>((resolve) => {
           callbacks.onFirstChunk({
-            ...message("message-2", "Latest question"),
+            ...message("message-2", "Latest question", {
+              completion_model: {
+                id: "model-1",
+                name: "gpt-4o",
+                token_limit: 128_000
+              } as NonNullable<ConversationMessage["completion_model"]>
+            }),
             session_id: "session-1"
           });
           finishStream = resolve;
         })
     );
-    const get = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("temporary"))
-      .mockResolvedValue({
-        id: "session-1",
-        name: "Conversation",
-        messages: [
-          message("message-1", "First question"),
-          message("message-2", "Latest question", {
-            completion_model: {
-              id: "model-1",
-              name: "gpt-4o",
-              token_limit: 128_000
-            } as NonNullable<ConversationMessage["completion_model"]>
-          })
-        ]
-      });
-    const getTurnDiagnostics = vi
-      .fn()
-      .mockImplementation(({ messageId }: { messageId: string }) =>
-        Promise.resolve(diagnostics(messageId))
-      );
+    const get = vi.fn();
+    let message2Attempts = 0;
+    const getTurnDiagnostics = vi.fn(
+      ({ messageId }: { messageId: string }): Promise<ChatTurnDiagnostics> => {
+        if (messageId === "message-2" && message2Attempts++ === 0) {
+          return Promise.reject(new Error("temporary"));
+        }
+        return Promise.resolve(diagnostics(messageId));
+      }
+    );
     const chat = createChat(getTurnDiagnostics, [message("message-1", "First question")], {
       ask,
       get
@@ -242,8 +236,9 @@ describe("ChatDebugPanel", () => {
       .toBeVisible();
     await page.getByRole("button", { name: m.chat_debug_retry() }).click();
 
-    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(message2Attempts).toBeGreaterThanOrEqual(2));
     expect(chat.pendingDiagnosticsMessageIds).toEqual([]);
+    expect(get).not.toHaveBeenCalled();
     await expect.element(page.getByText(m.chat_debug_live_turn_title())).not.toBeInTheDocument();
     await expect.element(page.getByText("gpt-4o", { exact: true }).first()).toBeVisible();
   });

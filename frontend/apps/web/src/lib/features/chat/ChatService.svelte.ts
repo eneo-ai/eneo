@@ -49,6 +49,7 @@ export class ChatService {
   debugPanelOpen = $state(false);
   #pendingDiagnosticsMessageIds = $state<string[]>([]);
   #failedDiagnosticsRefreshSessionId = $state<string | null>(null);
+  #activeDiagnosticsStreamGeneration: number | null = null;
   pendingDiagnosticsMessageIds = $derived([...this.#pendingDiagnosticsMessageIds]);
   pendingDiagnosticsRefreshFailed = $derived(
     this.#failedDiagnosticsRefreshSessionId === this.currentConversation.id &&
@@ -227,13 +228,13 @@ export class ChatService {
     waitFor(data.initialConversation, {
       onLoaded: (initialConversation) => {
         this.currentConversation = initialConversation;
-        this.#pendingDiagnosticsMessageIds = [];
+        this.#resetDiagnosticsMetadata();
         this.#seedLockedFromHistory();
         this.#clearPreflight();
       },
       onNull: () => {
         this.currentConversation = emptyConversation();
-        this.#pendingDiagnosticsMessageIds = [];
+        this.#resetDiagnosticsMetadata();
         this.#resetLocked();
         this.#clearPreflight();
       }
@@ -242,7 +243,7 @@ export class ChatService {
 
   newConversation() {
     this.currentConversation = emptyConversation();
-    this.#pendingDiagnosticsMessageIds = [];
+    this.#resetDiagnosticsMetadata();
     this.#resetLocked();
     this.#clearPreflight();
   }
@@ -250,7 +251,7 @@ export class ChatService {
   setDebugPanelOpen(open: boolean) {
     this.debugPanelOpen = open;
     if (open && !this.askQuestion.isLoading) {
-      void this.#hydratePendingDiagnosticsMessages();
+      void this.#confirmPendingDiagnosticsMessages();
     }
   }
 
@@ -259,7 +260,7 @@ export class ChatService {
   }
 
   async retryPendingDiagnosticsMetadata() {
-    await this.#hydratePendingDiagnosticsMessages();
+    await this.#confirmPendingDiagnosticsMessages();
   }
 
   async getToolCallResult(toolCallId: string): Promise<string | null> {
@@ -520,7 +521,7 @@ export class ChatService {
     try {
       const loaded = await this.#eneo.conversations.get(conversation);
       this.currentConversation = loaded;
-      this.#pendingDiagnosticsMessageIds = [];
+      this.#resetDiagnosticsMetadata();
       this.#seedLockedFromHistory();
       this.#clearPreflight();
       return loaded;
@@ -568,6 +569,7 @@ export class ChatService {
       // End any previous stream loop/buffer
       this.#finalizeStream();
       const streamGen = ++this.#streamGen;
+      this.#activeDiagnosticsStreamGeneration = streamGen;
       let inrefBuffer = "";
       let ref: ReturnType<typeof emptyMessage> | undefined;
       const isStale = () => this.#streamGen !== streamGen;
@@ -882,8 +884,9 @@ export class ChatService {
 
           // Flush any remaining buffered content after stream completes
           this.#finalizeStream();
+          this.#activeDiagnosticsStreamGeneration = null;
           if (this.debugPanelOpen) {
-            void this.#hydratePendingDiagnosticsMessages();
+            void this.#confirmPendingDiagnosticsMessages();
           }
         }
       }
@@ -908,36 +911,36 @@ export class ChatService {
     );
   }
 
-  async #hydratePendingDiagnosticsMessages() {
+  #resetDiagnosticsMetadata() {
+    this.#pendingDiagnosticsMessageIds = [];
+    this.#failedDiagnosticsRefreshSessionId = null;
+  }
+
+  async #confirmPendingDiagnosticsMessages() {
+    // A manual retry must never replace or otherwise reconcile the live message
+    // while SSE callbacks still own it. The existing pending queue is drained by
+    // the terminal stream path above.
+    if (this.#activeDiagnosticsStreamGeneration !== null) return;
+
     const sessionId = this.currentConversation.id;
     const pendingMessageIds = [...this.#pendingDiagnosticsMessageIds];
     if (!sessionId || pendingMessageIds.length === 0) return;
 
-    const streamGen = this.#streamGen;
     this.#failedDiagnosticsRefreshSessionId = null;
-    try {
-      const loaded = await this.#eneo.conversations.get({ id: sessionId });
-      if (this.currentConversation.id !== sessionId || this.#streamGen !== streamGen) return;
-      if (
-        pendingMessageIds.some(
-          (messageId) => !loaded.messages.some((message) => message.id === messageId)
-        )
-      ) {
-        this.#failedDiagnosticsRefreshSessionId = sessionId;
-        return;
+    for (const messageId of pendingMessageIds) {
+      try {
+        await this.getTurnDiagnostics(sessionId, messageId);
+        if (this.currentConversation.id !== sessionId) return;
+        this.#clearDiagnosticsPending(messageId);
+      } catch (error) {
+        if (
+          this.currentConversation.id === sessionId &&
+          this.#pendingDiagnosticsMessageIds.includes(messageId)
+        ) {
+          this.#failedDiagnosticsRefreshSessionId = sessionId;
+        }
+        console.error("Could not confirm persisted turn metadata for diagnostics", error);
       }
-
-      this.currentConversation = loaded;
-      this.#pendingDiagnosticsMessageIds = this.#pendingDiagnosticsMessageIds.filter(
-        (messageId) => !loaded.messages.some((message) => message.id === messageId)
-      );
-      this.#failedDiagnosticsRefreshSessionId = null;
-      this.#seedLockedFromHistory();
-    } catch (error) {
-      if (this.currentConversation.id === sessionId && this.#streamGen === streamGen) {
-        this.#failedDiagnosticsRefreshSessionId = sessionId;
-      }
-      console.error("Could not load persisted turn metadata for diagnostics", error);
     }
   }
 

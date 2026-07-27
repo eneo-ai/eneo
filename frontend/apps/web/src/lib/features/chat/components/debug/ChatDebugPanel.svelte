@@ -169,8 +169,7 @@
 
   function turnLabel(turn: (typeof turns)[number]): string {
     return m.chat_debug_turn_option({
-      number: String(turn.turnNumber),
-      question: turn.questionExcerpt || m.chat_debug_empty_question()
+      number: String(turn.turnNumber)
     });
   }
 </script>

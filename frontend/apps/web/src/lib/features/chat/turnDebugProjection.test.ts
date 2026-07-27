@@ -24,12 +24,12 @@ describe("turn debug projection", () => {
     const messages = [message("message-1", "First"), message("message-2", "Second")];
 
     expect(listPersistedDebugTurns(messages, [])).toEqual([
-      { messageId: "message-1", turnNumber: 1, questionExcerpt: "First" },
-      { messageId: "message-2", turnNumber: 2, questionExcerpt: "Second" }
+      { messageId: "message-1", turnNumber: 1 },
+      { messageId: "message-2", turnNumber: 2 }
     ]);
   });
 
-  it("excludes only messages awaiting canonical persisted metadata", () => {
+  it("excludes only messages whose diagnostics are not persisted yet", () => {
     const messages = [
       message("message-1", "First"),
       message("message-2", "Second"),
@@ -37,8 +37,8 @@ describe("turn debug projection", () => {
     ];
 
     expect(listPersistedDebugTurns(messages, ["message-2"])).toEqual([
-      { messageId: "message-1", turnNumber: 1, questionExcerpt: "First" },
-      { messageId: "message-3", turnNumber: 3, questionExcerpt: "Third" }
+      { messageId: "message-1", turnNumber: 1 },
+      { messageId: "message-3", turnNumber: 3 }
     ]);
   });
 
@@ -92,5 +92,32 @@ describe("turn debug projection", () => {
     ]);
     expect(projected.files[0].name).toBe("input.pdf");
     expect(serialized).not.toMatch(/SENSITIVE_/);
+  });
+
+  it("projects tool metadata from the live streaming field", () => {
+    const source = {
+      ...message("message-1"),
+      mcp_tool_calls: [
+        {
+          server_name: "warehouse",
+          tool_name: "query",
+          arguments: { secret: "SENSITIVE_ARGUMENT" },
+          result: "SENSITIVE_RESULT",
+          result_status: "complete"
+        }
+      ]
+    } as unknown as ConversationMessage;
+
+    const projected = projectTurnDebugDetails(source);
+
+    expect(projected.tools).toEqual([
+      {
+        order: 1,
+        serverName: "warehouse",
+        toolName: "query",
+        status: "complete"
+      }
+    ]);
+    expect(JSON.stringify(projected)).not.toMatch(/SENSITIVE_/);
   });
 });
