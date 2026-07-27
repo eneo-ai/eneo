@@ -69,7 +69,7 @@ export default defineConfig({
       PUBLIC_ENEO_BACKEND_URL: BACKEND_URL,
       JWT_SECRET: process.env.E2E_JWT_SECRET ?? "1234",
       // The production Svelte build exceeds Node's default heap (same flag CI uses).
-      NODE_OPTIONS: "--max-old-space-size=6144"
+      NODE_OPTIONS: "--max-old-space-size=8192"
     }
   }
 });
