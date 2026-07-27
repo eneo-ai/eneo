@@ -267,11 +267,6 @@
 
         {#if turns.length === 0 && !liveTurnPending}
           {@render EmptyState(m.chat_debug_no_turn_title(), m.chat_debug_no_turn_description())}
-        {:else if turns.length === 0}
-          {@render EmptyState(
-            m.chat_debug_waiting_for_turn_title(),
-            m.chat_debug_waiting_for_turn_description()
-          )}
         {:else if loading}
           <div class="flex flex-col gap-4 p-5" aria-busy="true" aria-label={m.chat_debug_loading()}>
             <Skeleton class="h-24 w-full" />

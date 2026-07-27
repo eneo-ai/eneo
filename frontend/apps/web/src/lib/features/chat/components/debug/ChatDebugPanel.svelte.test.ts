@@ -127,7 +127,10 @@ describe("ChatDebugPanel", () => {
     await expect.element(trigger).toHaveAttribute("aria-haspopup", "dialog");
     await trigger.click();
     await vi.waitFor(() =>
-      expect(getTurnDiagnostics).toHaveBeenCalledWith("session-1", "message-2")
+      expect(getTurnDiagnostics).toHaveBeenCalledWith({
+        sessionId: "session-1",
+        messageId: "message-2"
+      })
     );
 
     chat.changeChatPartner({ ...chat.partner, id: "assistant-2" } as ChatPartner);

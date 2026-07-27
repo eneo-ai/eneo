@@ -3997,8 +3997,6 @@
   "chat_debug_load_error": "Informationen om meddelandet kunde inte läsas in",
   "chat_debug_no_turn_title": "Det finns inga sparade meddelanden",
   "chat_debug_no_turn_description": "Skicka ett meddelande och öppna sedan Felsökning för att granska det.",
-  "chat_debug_waiting_for_turn_title": "Meddelandet bearbetas fortfarande",
-  "chat_debug_waiting_for_turn_description": "Det blir tillgängligt när svaret har sparats.",
   "chat_debug_live_turn_title": "Det aktiva meddelandet är inte tillgängligt än",
   "chat_debug_live_turn_description": "Du kan välja meddelandet när svaret har sparats.",
   "chat_debug_unavailable_title": "Felsökningsinformationen är inte tillgänglig",

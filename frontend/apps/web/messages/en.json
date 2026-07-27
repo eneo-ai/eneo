@@ -3997,8 +3997,6 @@
   "chat_debug_load_error": "Turn diagnostics could not be loaded",
   "chat_debug_no_turn_title": "No persisted turns",
   "chat_debug_no_turn_description": "Send a message, then open Debug to inspect the persisted turn.",
-  "chat_debug_waiting_for_turn_title": "This turn is still in progress",
-  "chat_debug_waiting_for_turn_description": "It will become available after the response has been persisted.",
   "chat_debug_live_turn_title": "Live turn not available yet",
   "chat_debug_live_turn_description": "The current response can be selected after it has been persisted.",
   "chat_debug_unavailable_title": "Diagnostics are unavailable",
