@@ -177,6 +177,77 @@ describe("SkillBindingsEditor", () => {
     await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
   });
 
+  test("allows on-demand activation for a validated policy model set", async () => {
+    const skill = makeSkill("policy-runtime");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "always"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      supportsActivationModes: true,
+      canSelectOnDemand: true,
+      selectiveActivationEnabled: true,
+      skillRuntime: null,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    const activation = page.getByRole("button", {
+      name: m.skills_activation_mode_label({ name: skill.display_name })
+    });
+    await activation.click();
+    await page.getByRole("option", { name: m.skills_activation_mode_on_demand() }).click();
+    await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
+  });
+
+  test("names the disabled tenant runtime rather than the model requirements", async () => {
+    const skill = makeSkill("selective-disabled");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "always"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      supportsActivationModes: true,
+      canSelectOnDemand: false,
+      selectiveActivationEnabled: false,
+      skillRuntime: null,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await expect
+      .element(page.getByText(m.skills_activation_runtime_disabled(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_activation_runtime_policy_requirements(), { exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_activation_mode_label({ name: skill.display_name })
+        })
+      )
+      .toBeDisabled();
+  });
+
   test("keeps activation controls off non-Assistant Skill surfaces", async () => {
     const skill = makeSkill("app");
     const summary = makeSummary(skill, 1, 0);

@@ -117,6 +117,30 @@ async def test_resolve_for_all_restrictions_disabled_skips_catalog_fetches():
     prompt_library_repo.get.assert_not_called()
 
 
+async def test_resolve_personal_default_does_not_require_an_assistant():
+    tenant_id = uuid4()
+    policy = GovernancePolicy(
+        id=uuid4(), tenant_id=tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+    )
+    service = EffectiveConfigService(
+        user=SimpleNamespace(tenant_id=tenant_id),
+        policy_repo=AsyncMock(get_by_tenant=AsyncMock(return_value=policy)),
+        prompt_library_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        mcp_server_settings_service=AsyncMock(),
+        skill_service=AsyncMock(
+            resolve_governance_bindings_for_runtime=AsyncMock(
+                return_value=_resolution()
+            )
+        ),
+    )
+
+    cfg = await service.resolve_personal_default()
+
+    assert cfg.models_enforced is False
+    assert cfg.governance_skill_resolution == _resolution()
+
+
 async def test_resolve_for_non_personal_space_short_circuits_before_repos():
     policy_repo = AsyncMock()
     service = EffectiveConfigService(

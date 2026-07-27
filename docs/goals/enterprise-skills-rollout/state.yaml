@@ -30,12 +30,12 @@ continuity:
   current_thread_id: "019f8f85-2ea6-7030-8c48-6d90143da5e0"
   previous_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
   rotation_count: 1
-  completed_write_tasks_in_thread: 7
+  completed_write_tasks_in_thread: 8
   handoff_note: null
   last_handoff_at: null
-  last_verified_revision: "fb90e120dd83e33b69f759924783c7cfa2f2fb93"
+  last_verified_revision: "7abc3fcef4789949a8434a0faf6b19dbfedbd7ea"
 
-active_task: T020
+active_task: T019
 
 tasks:
   - id: T001
@@ -1189,7 +1189,7 @@ tasks:
   - id: T020
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Add permission-gated, body-free Skill activation evidence to an opt-in chat debug panel without changing normal chat behavior."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/605"
@@ -1235,12 +1235,43 @@ tasks:
     stop_if:
       - "The implementation would duplicate runtime activation decisions, persist a second evidence representation, or expose bodies or hidden reasoning."
       - "The diagnostics route cannot remain narrow, scalar, and independent of Admin Insights logging."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Added an opt-in, permission-gated chat debug panel for persisted Skill activation evidence through a body-free conversation endpoint."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/605"
+      merged_pr: 612
+      source_head: "5c15f21874476ef1b5f054d2b2646548ee65f25d"
+      merge_commit: "7abc3fcef4789949a8434a0faf6b19dbfedbd7ea"
+      merged_at: "2026-07-27T12:08:33Z"
+      github_checks: "All required checks passed, including Backend tests, Frontend, Frontend E2E, CI, coverage diff, schema drift, dependency review, and Docker builds."
+      final_review: "Review 9 confirmed F8 and F9 resolved and left one non-blocking Low/P3 duplicate-read optimization (F10), which was deliberately deferred to avoid broadening panel state ownership."
+      review_url: "https://github.com/eneo-ai/eneo/pull/612#issuecomment-5090778838"
+      changed_files:
+        - "backend/alembic/versions/202607261730_grant_assistant_debug_permission.py"
+        - "backend/src/eneo/conversations/"
+        - "backend/src/eneo/questions/questions_repo.py"
+        - "backend/src/eneo/roles/"
+        - "backend/tests/"
+        - "frontend/apps/web/src/lib/features/chat/"
+        - "frontend/packages/eneo-js/"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+        - "docs/goals/enterprise-skills-rollout/state.yaml"
+      commands:
+        - "Focused backend unit and contract suites: 136 tests passed."
+        - "PostgreSQL service-key integration suites: 32 passed and 3 skipped by marker selection."
+        - "Migration round-trip suite: 3 tests passed."
+        - "Focused frontend chat and projection suites: 15 tests passed across the final local passes."
+        - "Generated SDK endpoint suite: 2 tests passed."
+        - "Ruff, Ruff format, Pyright, Svelte check, ESLint, Prettier, web build, docs build, schema drift, and pre-push hooks passed."
+      verification:
+        - "Body-free authorization, denied credentials, conversation ownership, current Assistant access, legacy evidence, and request-race behavior are covered."
+        - "The final Linux browser suite, Frontend E2E, backend suite, CI aggregate, and coverage diff passed on GitHub."
+        - "F8 and F9 were fixed and confirmed resolved by Review 9; F10 remains a bounded Low/P3 performance follow-up."
 
   - id: T019
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Complete Task #553 slice 5 for Personal Chat with Governance Policy mode saves and model-set fit validation through T016A's shared owner."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"

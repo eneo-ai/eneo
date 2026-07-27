@@ -516,6 +516,25 @@ class SkillService:
             for position, reference in enumerate(references)
         ]
 
+    @classmethod
+    def _mode_changed_retained_references(
+        cls,
+        *,
+        retained_by_reference: dict[SkillBindingReference, ResolvedSkillBinding],
+        existing: list[ResolvedSkillBinding],
+        requested_modes: dict[UUID, SkillActivationMode],
+    ) -> list[SkillBindingReference]:
+        existing_by_reference = {
+            cls._binding_reference(binding): binding for binding in existing
+        }
+        return [
+            reference
+            for reference in retained_by_reference
+            if reference.skill_id in requested_modes
+            and requested_modes[reference.skill_id]
+            is not existing_by_reference[reference].activation_mode
+        ]
+
     async def _resolve_resource_references(
         self,
         *,
@@ -559,17 +578,12 @@ class SkillService:
         )
         # Resolution holds the Skill rows FOR SHARE, so this read observes a
         # concurrent execution block that acquired FOR UPDATE first.
-        existing_by_reference = {
-            self._binding_reference(binding): binding for binding in existing
-        }
         requested_modes = requested_modes or {}
-        mode_changed_retained_references = [
-            reference
-            for reference in retained_by_reference
-            if reference.skill_id in requested_modes
-            and requested_modes[reference.skill_id]
-            is not existing_by_reference[reference].activation_mode
-        ]
+        mode_changed_retained_references = self._mode_changed_retained_references(
+            retained_by_reference=retained_by_reference,
+            existing=existing,
+            requested_modes=requested_modes,
+        )
         await self._reject_blocked_references(
             tenant_id=tenant_id,
             references=[*new_references, *mode_changed_retained_references],
@@ -594,6 +608,7 @@ class SkillService:
         organization_space_id: UUID,
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
+        requested_modes: dict[UUID, SkillActivationMode] | None = None,
     ) -> list[ResolvedSkillBinding]:
         await self._validate_reference_count(
             tenant_id=self.user.tenant_id, references=references
@@ -614,14 +629,21 @@ class SkillService:
         )
         # Resolution holds the Skill rows FOR SHARE, so this read observes a
         # concurrent execution block that acquired FOR UPDATE first.
+        requested_modes = requested_modes or {}
+        mode_changed_retained_references = self._mode_changed_retained_references(
+            retained_by_reference=retained_by_reference,
+            existing=existing,
+            requested_modes=requested_modes,
+        )
         await self._reject_blocked_references(
             tenant_id=self.user.tenant_id,
-            references=new_references,
+            references=[*new_references, *mode_changed_retained_references],
         )
         return self._order_resolved_bindings(
             references=references,
             resolved_groups=(list(retained_by_reference.values()), published),
             existing=existing,
+            requested_modes=requested_modes,
             missing_error=BadRequestException(
                 "Personal Chat can only use published organisation Skill versions"
             ),
@@ -805,7 +827,7 @@ class SkillService:
         *,
         policy_id: UUID,
         organization_space_id: UUID,
-        references: list[SkillBindingReference],
+        intents: list[SkillBindingIntent],
     ) -> list[ResolvedSkillBinding]:
         if self.user.active_api_key is not None:
             raise UnauthorizedException("Skill policy changes require a session token")
@@ -816,10 +838,17 @@ class SkillService:
                 "Governance Skills must belong to this tenant's organisation Space"
             )
         existing = await self.repo.list_policy_bindings(policy_id=policy_id)
+        references = [intent.reference for intent in intents]
+        requested_modes = {
+            intent.reference.skill_id: intent.activation_mode
+            for intent in intents
+            if intent.activation_mode is not None
+        }
         resolved = await self._resolve_governance_references(
             organization_space_id=organization_space_id,
             references=references,
             existing=existing,
+            requested_modes=requested_modes,
         )
         await self.repo.replace_policy_bindings(
             policy_id=policy_id,

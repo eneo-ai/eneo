@@ -158,10 +158,10 @@ The Assistant API accepts **always** or **on demand** for each binding:
 - **On demand** advertises a compact descriptor and loads the exact pinned
   instructions only when a tool-capable model requests them.
 
-The Assistant builder exposes this choice for each attached Skill. Apps and
-Personal Chat remain eager: their attached Skills enter every request in the
-configured order. Runtime evidence, rather than the adoption view, shows which
-Assistant Skills were eligible, requested, blocked, or included.
+The Assistant builder and Personal Chat administration expose this choice for
+each attached Skill. Apps remain eager: their attached Skills enter every run in
+the configured order. Runtime evidence, rather than the adoption view, shows
+which Skills were eligible, requested, blocked, or included.
 
 Tenant admins manage the stored runtime limits in Admin settings. The API owns
 the editable ranges; the selected model window and fixed platform safety bounds
@@ -219,7 +219,15 @@ grant access to organisation authoring.
 Tenant admins select and order published organisation Skill versions in the
 existing Personal Chat administration page. The organisation catalogue owns
 content and publication. Personal Chat settings own which approved versions
-apply to Personal Chat.
+apply to Personal Chat and whether each is **Always** or **On demand**.
+
+**On demand** is available only when the policy selects a finite list of models
+that all support tool calling. Selecting an entire provider or leaving model
+access unrestricted keeps **Always** available but disables **On demand**,
+because Eneo cannot safely validate current and future models as one bounded
+set. Saving rechecks the selected models, prompt, MCP configuration, and every
+existing Personal Chat baseline. If any candidate cannot fit, the save is
+rejected and the previous policy remains active.
 
 ### Default roles
 

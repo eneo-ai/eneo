@@ -3,6 +3,7 @@ import { load } from "./+page";
 
 function createEvent(skillPermissions = ["read"]) {
   const skills = [{ id: "skill-1" }];
+  const skillRuntimePolicy = { selective_activation_enabled: false };
   const organizationSpace = {
     id: "organization-space",
     skill_permissions: skillPermissions
@@ -18,7 +19,10 @@ function createEvent(skillPermissions = ["read"]) {
     promptLibrary: { list: vi.fn().mockResolvedValue({}) },
     modelProviders: { list: vi.fn().mockResolvedValue([]) },
     spaces: { getOrganizationSpace: vi.fn().mockResolvedValue(organizationSpace) },
-    skills: { catalogue: { list: listSkills } }
+    skills: { catalogue: { list: listSkills } },
+    settings: {
+      getSkillRuntimePolicy: vi.fn().mockResolvedValue(skillRuntimePolicy)
+    }
   };
 
   return {
@@ -28,7 +32,8 @@ function createEvent(skillPermissions = ["read"]) {
     },
     listSkills,
     skills,
-    organizationSpace
+    organizationSpace,
+    skillRuntimePolicy
   };
 }
 
@@ -49,6 +54,14 @@ describe("personal assistant configuration loader", () => {
     );
     expect(result.organizationSpace).toEqual(organizationSpace);
     expect(event.depends).toHaveBeenCalledWith("organization:skills");
+  });
+
+  test("loads the tenant Skill runtime policy that gates On demand", async () => {
+    const { event, skillRuntimePolicy } = createEvent();
+
+    const result = await load(event as never);
+
+    expect(result.skillRuntimePolicy).toEqual(skillRuntimePolicy);
   });
 
   test("loads the admin catalogue without a separate Space Skill permission", async () => {

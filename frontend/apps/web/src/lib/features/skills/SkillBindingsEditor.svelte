@@ -50,6 +50,10 @@
     canEditBindings: boolean;
     canCreateSkills: boolean;
     supportsActivationModes?: boolean;
+    canSelectOnDemand?: boolean;
+    /** Tenant runtime prerequisite, supplied by policy editors that validate a
+        draft before any turn exists. `undefined` when unknown. */
+    selectiveActivationEnabled?: boolean;
     skillRuntime?: AssistantSkillRuntimeSummary | null;
     onListCatalog: ListSkillBindingCatalog;
     onGetSkillPreview: GetSkillBindingPreview;
@@ -63,6 +67,8 @@
     canEditBindings,
     canCreateSkills,
     supportsActivationModes = false,
+    canSelectOnDemand,
+    selectiveActivationEnabled,
     skillRuntime = null,
     onListCatalog,
     onGetSkillPreview,
@@ -122,7 +128,7 @@
     getSkillBindingRows(bindings, bindingSummaries, catalog, loadedRevisionMetadata)
   );
   const canChooseOnDemand = $derived(
-    skillRuntime !== null && skillRuntime.fallback_reason === null
+    canSelectOnDemand ?? (skillRuntime !== null && skillRuntime.fallback_reason === null)
   );
   const emptyChoiceMessage = $derived.by(() => {
     if (skillCatalog.loading) return m.skills_search_loading();
@@ -235,7 +241,14 @@
   }
 
   function runtimeStatus(): string {
-    if (skillRuntime === null) return m.skills_activation_runtime_no_model();
+    if (skillRuntime === null) {
+      // The tenant switch outranks the model requirements: it cannot be fixed
+      // from a policy editor, so naming only the model rules would misdirect.
+      if (selectiveActivationEnabled === false) return m.skills_activation_runtime_disabled();
+      if (canSelectOnDemand === true) return m.skills_activation_runtime_policy_selective();
+      if (canSelectOnDemand === false) return m.skills_activation_runtime_policy_requirements();
+      return m.skills_activation_runtime_no_model();
+    }
     switch (skillRuntime.fallback_reason) {
       case "model_lacks_tool_calling":
         return m.skills_activation_runtime_model_lacks_tools();
@@ -254,6 +267,12 @@
       case "eager":
         return m.skills_activation_runtime_eager();
     }
+  }
+
+  function runtimeHint(): string {
+    return canSelectOnDemand === undefined
+      ? m.skills_activation_runtime_saved_hint()
+      : m.skills_activation_runtime_policy_validation_hint();
   }
 
   async function useLatestRevision(row: SkillBindingRow, index: number) {
@@ -374,7 +393,7 @@
       <div class="min-w-0">
         <p id={runtimeStatusId}>{runtimeStatus()}</p>
         <p id={runtimeHintId} class="text-muted-foreground mt-1 text-xs">
-          {m.skills_activation_runtime_saved_hint()}
+          {runtimeHint()}
         </p>
         {#if skillRuntime}
           <p class="text-muted-foreground mt-1 text-xs tabular-nums">

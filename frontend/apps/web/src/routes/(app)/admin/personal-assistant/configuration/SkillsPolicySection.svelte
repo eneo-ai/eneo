@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SkillBindingReferenceInput, SkillBindingSummary } from "@eneo/eneo-js";
+  import type { AssistantSkillBindingInput, AssistantSkillBindingSummary } from "@eneo/eneo-js";
   import { BookOpenCheck, Info } from "lucide-svelte";
   import { resolve } from "$app/paths";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -13,10 +13,14 @@
   import PolicySection from "./PolicySection.svelte";
 
   type Props = {
-    skillBindings: SkillBindingReferenceInput[];
+    skillBindings: AssistantSkillBindingInput[];
     initialCatalogPage: SkillBindingCatalogPage;
-    bindingSummaries: SkillBindingSummary[];
+    bindingSummaries: AssistantSkillBindingSummary[];
     summary: string;
+    skillsValid: boolean;
+    canSelectOnDemand: boolean;
+    selectiveActivationEnabled: boolean;
+    badgeVariant: (enabled: boolean, valid: boolean) => "default" | "outline" | "destructive";
     onListCatalog: ListSkillBindingCatalog;
     onGetSkillPreview: GetSkillBindingPreview;
   };
@@ -26,6 +30,10 @@
     initialCatalogPage,
     bindingSummaries,
     summary,
+    skillsValid,
+    canSelectOnDemand,
+    selectiveActivationEnabled,
+    badgeVariant,
     onListCatalog,
     onGetSkillPreview
   }: Props = $props();
@@ -36,7 +44,7 @@
   title={m.governance_skills_heading()}
   description={m.governance_skills_section_description()}
   {summary}
-  summaryVariant={skillBindings.length > 0 ? "default" : "outline"}
+  summaryVariant={badgeVariant(skillBindings.length > 0, skillsValid)}
 >
   {#snippet icon()}
     <BookOpenCheck class="size-5" />
@@ -69,6 +77,9 @@
       {bindingSummaries}
       canEditBindings={true}
       canCreateSkills={false}
+      supportsActivationModes
+      {canSelectOnDemand}
+      {selectiveActivationEnabled}
       {onListCatalog}
       {onGetSkillPreview}
     />

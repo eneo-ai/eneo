@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
@@ -42,6 +43,7 @@ from eneo.database.tables.websites_table import CrawlRuns, Websites
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata
 from eneo.main.exceptions import BadRequestException
+from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt import Prompt
 
 if TYPE_CHECKING:
@@ -52,8 +54,16 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge as DomainIntegrationKnowledge,
     )
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.users.user import UserInDB
     from eneo.websites.domain.website import Website
+
+
+@dataclass(frozen=True)
+class PersonalDefaultValidationInput:
+    assistant: Assistant
+    configured_mcp_servers: tuple["MCPServer", ...]
+    has_knowledge: bool
 
 
 # IMPORTANT: every list-returning method in this repo must apply this
@@ -547,15 +557,32 @@ class AssistantRepository:
 
     async def get_personal_defaults_for_tenant(
         self, *, tenant_id: UUID
-    ) -> list[Assistant]:
+    ) -> list[PersonalDefaultValidationInput]:
         """Load the persisted baselines affected by personal-chat governance.
 
         This deliberately does not apply the helper-assistant exclusion used by
         user-facing lists: governance must validate every personal default row,
         even if an unrelated role assignment has left one in an invalid state.
         """
+        has_knowledge = sa.or_(
+            sa.exists(
+                sa.select(sa.literal(1)).where(
+                    AssistantsGroups.assistant_id == Assistants.id
+                )
+            ),
+            sa.exists(
+                sa.select(sa.literal(1)).where(
+                    AssistantsWebsites.assistant_id == Assistants.id
+                )
+            ),
+            sa.exists(
+                sa.select(sa.literal(1)).where(
+                    AssistantIntegrationKnowledge.assistant_id == Assistants.id
+                )
+            ),
+        ).label("has_knowledge")
         query = (
-            sa.select(Assistants)
+            sa.select(Assistants, has_knowledge)
             .join(Spaces, Assistants.space_id == Spaces.id)
             .where(
                 Spaces.tenant_id == tenant_id,
@@ -569,10 +596,12 @@ class AssistantRepository:
                 selectinload(Assistants.template).selectinload(
                     AssistantTemplates.completion_model
                 ),
+                selectinload(Assistants.mcp_servers),
             )
             .order_by(Assistants.created_at)
         )
-        records = list((await self.session.scalars(query)).all())
+        rows = list((await self.session.execute(query)).all())
+        records = [row[0] for row in rows]
         if not records:
             return []
 
@@ -596,13 +625,19 @@ class AssistantRepository:
         attachments = await self._load_attachments(records)
 
         return [
-            self.factory.create_assistant_from_db(
-                record,
-                attachments=attachments[record.id],
-                completion_model_list=completion_models,
-                prompt=prompts_by_assistant.get(record.id),
+            PersonalDefaultValidationInput(
+                assistant=self.factory.create_assistant_from_db(
+                    record,
+                    attachments=attachments[record.id],
+                    completion_model_list=completion_models,
+                    prompt=prompts_by_assistant.get(record.id),
+                ),
+                configured_mcp_servers=tuple(
+                    MCPServerMapper.to_entities(record.mcp_servers)
+                ),
+                has_knowledge=row[1],
             )
-            for record in records
+            for row, record in zip(rows, records, strict=True)
         ]
 
     async def update(
