@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.auth_dependencies import (
@@ -12,9 +12,16 @@ from eneo.authentication.auth_dependencies import (
 )
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
-from eneo.object_content.content import ContentState, StorageKind
+from eneo.object_content.content import (
+    ContentMoveFailureCode,
+    ContentMoveState,
+    ContentState,
+    ObjectContentUnavailableError,
+    StorageKind,
+)
 from eneo.object_content.deployment_policy import (
     DeploymentPolicy,
+    DeploymentPolicyPauseUpdate,
     DeploymentPolicyRepository,
     DeploymentPolicyUpdate,
     ObjectStoreTargetNotSelectable,
@@ -22,6 +29,7 @@ from eneo.object_content.deployment_policy import (
     UploadLimitProjection,
     project_upload_limits,
 )
+from eneo.object_content.move_repository import ObjectContentMoveRepository
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
 )
@@ -87,6 +95,7 @@ class DeploymentPolicyPublicValues(BaseModel):
     session_image_limit_bytes: int
     knowledge_file_limit_bytes: int
     transcription_audio_limit_bytes: int
+    moves_paused: bool
     updated_by_actor: PolicyActor
     created_at: datetime
     updated_at: datetime
@@ -100,6 +109,36 @@ class DeploymentPolicyPublic(BaseModel):
 
 class ObjectContentInventoryPublic(BaseModel):
     inventory: tuple[InventoryPublic, ...]
+
+
+class MoveStatePublic(BaseModel):
+    target: StorageKind
+    state: ContentMoveState
+    failure_code: ContentMoveFailureCode | None
+    count: int
+    bytes: int
+    oldest_updated_at: datetime | None
+
+
+class ObjectContentMovesPublic(BaseModel):
+    policy_revision: int
+    paused: bool
+    moves: tuple[MoveStatePublic, ...]
+
+
+class MoveQueueRequest(BaseModel):
+    target: StorageKind
+    limit: int = Field(ge=1, le=100)
+
+
+class MoveQueuePublic(BaseModel):
+    queued_count: int
+    target_too_large_count: int
+
+
+class MovePausePublic(BaseModel):
+    policy_revision: int
+    paused: bool
 
 
 async def _read_projection(
@@ -128,6 +167,7 @@ async def _read_projection(
             session_image_limit_bytes=policy.session_image_limit_bytes,
             knowledge_file_limit_bytes=policy.knowledge_file_limit_bytes,
             transcription_audio_limit_bytes=policy.transcription_audio_limit_bytes,
+            moves_paused=policy.moves_paused,
             updated_by_actor=policy.updated_by_actor,
             created_at=policy.created_at,
             updated_at=policy.updated_at,
@@ -163,6 +203,31 @@ async def _read_inventory(session: AsyncSession) -> ObjectContentInventoryPublic
             )
             for fact in inventory_facts
         )
+    )
+
+
+async def _read_moves(session: AsyncSession) -> ObjectContentMovesPublic:
+    if session.in_transaction():
+        raise RuntimeError("Move projection requires a non-transactional session")
+
+    async with session.begin():
+        policy = await DeploymentPolicyRepository(session).get()
+        facts = await ObjectContentMoveRepository(session).state_facts()
+
+    return ObjectContentMovesPublic(
+        policy_revision=policy.revision,
+        paused=policy.moves_paused,
+        moves=tuple(
+            MoveStatePublic(
+                target=fact.target_kind,
+                state=fact.state,
+                failure_code=fact.failure_code,
+                count=fact.count,
+                bytes=fact.size_bytes,
+                oldest_updated_at=fact.oldest_updated_at,
+            )
+            for fact in facts
+        ),
     )
 
 
@@ -205,6 +270,131 @@ async def get_object_content_inventory(
     container: _PolicyAdminContainer,
 ) -> ObjectContentInventoryPublic:
     return await _read_inventory(cast(AsyncSession, container.session()))
+
+
+@router.get(
+    "/object-content-moves",
+    response_model=ObjectContentMovesPublic,
+    description=(
+        "Get bounded aggregate progress and typed failure reasons for explicit "
+        "object-content moves. Platform administrators only."
+    ),
+    dependencies=[
+        Depends(_require_policy_session_auth),
+        Depends(_require_policy_user_identity),
+        Depends(_require_policy_platform_admin),
+    ],
+    responses=responses.get_responses([403]),
+)
+async def get_object_content_moves(
+    container: _PolicyAdminContainer,
+) -> ObjectContentMovesPublic:
+    return await _read_moves(cast(AsyncSession, container.session()))
+
+
+@router.post(
+    "/object-content-moves",
+    response_model=MoveQueuePublic,
+    description=(
+        "Queue one bounded page of eligible content for an explicit storage move. "
+        "This never starts an automatic fleet migration."
+    ),
+    dependencies=[
+        Depends(_require_policy_session_auth),
+        Depends(_require_policy_user_identity),
+        Depends(_require_policy_platform_admin),
+    ],
+    responses=responses.get_responses([403, 503]),
+)
+async def queue_object_content_moves(
+    request: MoveQueueRequest,
+    container: _PolicyAdminContainer,
+) -> MoveQueuePublic:
+    object_store_capability = next(
+        fact
+        for fact in await object_content_runtime.storage_capabilities()
+        if fact.target is StorageKind.OBJECT_STORE
+    )
+    if not object_store_capability.selectable:
+        raise ObjectContentUnavailableError(
+            "Compatible object storage is not ready for a new move command"
+        )
+    maximum_bytes = (
+        object_content_runtime.inline_maximum_bytes
+        if request.target is StorageKind.POSTGRES_INLINE
+        else object_content_runtime.object_store_maximum_bytes
+    )
+    if maximum_bytes is None:
+        raise ObjectContentUnavailableError(
+            "Compatible object storage is required to move durable content"
+        )
+
+    user = container.user()
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        result = await ObjectContentMoveRepository(session).queue(
+            target_kind=request.target,
+            limit=request.limit,
+            requested_by_user_id=user.id,
+            target_maximum_bytes=maximum_bytes,
+        )
+    logger.info(
+        "object_content.moves_queued",
+        extra={
+            "actor_user_id": str(user.id),
+            "actor": {"type": "platform_admin", "via": "session"},
+            "target": request.target.value,
+            "requested_limit": request.limit,
+            "queued_count": result.queued_count,
+            "target_too_large_count": result.target_too_large_count,
+        },
+    )
+    return MoveQueuePublic(
+        queued_count=result.queued_count,
+        target_too_large_count=result.target_too_large_count,
+    )
+
+
+@router.put(
+    "/object-content-moves/pause",
+    response_model=MovePausePublic,
+    description=(
+        "Pause or resume new object-content move claims using the expected "
+        "deployment-policy revision."
+    ),
+    dependencies=[
+        Depends(_require_policy_session_auth),
+        Depends(_require_policy_user_identity),
+        Depends(_require_policy_platform_admin),
+    ],
+    responses=responses.get_responses([403, 409]),
+)
+async def set_object_content_moves_paused(
+    replacement: DeploymentPolicyPauseUpdate,
+    container: _PolicyAdminContainer,
+) -> MovePausePublic:
+    user = container.user()
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        old = await DeploymentPolicyRepository(session).get()
+        updated = await DeploymentPolicyRepository(session).set_moves_paused(
+            replacement,
+            actor_user_id=user.id,
+        )
+    logger.info(
+        "object_content.move_pause_changed",
+        extra={
+            "actor_user_id": str(user.id),
+            "actor": {"type": "platform_admin", "via": "session"},
+            "old_paused": old.moves_paused,
+            "new_paused": updated.moves_paused,
+            "policy_revision": updated.revision,
+        },
+    )
+    return MovePausePublic(
+        policy_revision=updated.revision,
+        paused=updated.moves_paused,
+    )
 
 
 @router.put(
@@ -265,4 +455,5 @@ def _log_values(policy: DeploymentPolicy) -> dict[str, str | int]:
         "session_image_limit_bytes": policy.session_image_limit_bytes,
         "knowledge_file_limit_bytes": policy.knowledge_file_limit_bytes,
         "transcription_audio_limit_bytes": policy.transcription_audio_limit_bytes,
+        "moves_paused": str(policy.moves_paused).lower(),
     }

@@ -147,6 +147,7 @@ async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
         "session_image_limit_bytes",
         "knowledge_file_limit_bytes",
         "transcription_audio_limit_bytes",
+        "moves_paused",
         "updated_by_actor",
         "created_at",
         "updated_at",
@@ -237,8 +238,22 @@ async def test_privileged_policy_routes_reject_user_api_keys(
             "transcription_audio_limit_bytes": 104,
         },
     )
+    moves = await client.get(
+        "/api/v1/admin/object-content-moves",
+        headers=headers,
+    )
+    queue = await client.post(
+        "/api/v1/admin/object-content-moves",
+        headers=headers,
+        json={"target": "object_store", "limit": 1},
+    )
+    pause = await client.put(
+        "/api/v1/admin/object-content-moves/pause",
+        headers=headers,
+        json={"expected_revision": 1, "moves_paused": True},
+    )
 
-    for response in (inventory, replacement):
+    for response in (inventory, replacement, moves, queue, pause):
         assert response.status_code == 403, response.text
         assert "session token" in response.text.lower()
 

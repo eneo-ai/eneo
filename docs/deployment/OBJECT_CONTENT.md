@@ -382,6 +382,47 @@ registers and schedules it with ARQ; the lifecycle implementation does not
 import ARQ. Replacing ARQ with another worker implementation therefore changes
 the scheduling/registration adapter, not S3 or lifecycle logic.
 
+### Move existing content
+
+PostgreSQL inline remains a complete deployment without an object-store
+service or configuration. When compatible object storage is configured and
+ready, a platform administrator can use **Admin > Storage** to queue an explicit
+move in either direction. Selecting the default target for new writes never
+moves existing content.
+
+Each queue command inspects 1–100 eligible items in creation order and persists
+one resumable intent per content item. The worker processes at most one move per
+reconciliation run. **Pause moves** blocks new claims; an item that already
+holds a claim may finish its verified authority flip. The progress table groups
+item and byte counts by destination, state, and typed failure reason. Run
+another bounded command to queue the next page; Eneo does not run a scheduled
+or automatic fleet migration.
+
+For PostgreSQL-to-object moves, Eneo captures and hashes the inline source,
+uploads under the existing publication reservation, verifies the complete
+target, and then changes authority in one short database transaction that also
+deletes the inline payload. For object-to-PostgreSQL moves, Eneo fully reads and
+verifies the remote source before the transaction that inserts the inline
+payload and changes authority. At every committed point, exactly one placement
+is authoritative. A failure before the flip retries or stops without changing
+the source; recovery after the flip proceeds forward.
+
+An object-to-PostgreSQL flip registers the former remote key with the existing
+orphan lifecycle. Keep the endpoint configured and the worker running until the
+configured orphan grace has elapsed and two complete inventory observations
+have allowed bounded deletion. Object-store configuration remains required
+while any remote authority, staged move key, orphan candidate, or multipart
+cleanup record exists. To retire an endpoint, first move all eligible content
+inline, confirm **Admin > Storage** reports no active object-store content or
+nonterminal moves, then allow those cleanup observations to finish before
+removing configuration.
+
+The schema downgrade is available only before this feature has persisted a
+move intent or `storage_moved` audit event. Once either exists, downgrade stops
+without deleting the row, event, or feature schema. Restore the matching
+application version and proceed forward; do not erase audit evidence to force a
+downgrade.
+
 Every inventory page must provide a complete, advancing pagination cursor.
 Malformed or non-advancing pages fail that reconciliation run without
 completing the inventory cycle or marking unseen rows missing. A complete

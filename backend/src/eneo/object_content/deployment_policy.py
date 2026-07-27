@@ -34,6 +34,13 @@ class DeploymentPolicyUpdate(BaseModel):
     )
 
 
+class DeploymentPolicyPauseUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    moves_paused: bool
+
+
 @dataclass(frozen=True, slots=True)
 class DeploymentPolicy:
     revision: int
@@ -42,6 +49,7 @@ class DeploymentPolicy:
     session_image_limit_bytes: int
     knowledge_file_limit_bytes: int
     transcription_audio_limit_bytes: int
+    moves_paused: bool
     updated_by_actor: PolicyActor
     updated_by_user_id: UUID | None
     created_at: datetime
@@ -167,6 +175,7 @@ def _policy(row: ObjectContentDeploymentPolicy) -> DeploymentPolicy:
         session_image_limit_bytes=row.session_image_limit_bytes,
         knowledge_file_limit_bytes=row.knowledge_file_limit_bytes,
         transcription_audio_limit_bytes=row.transcription_audio_limit_bytes,
+        moves_paused=row.moves_paused,
         updated_by_actor=PolicyActor(row.updated_by_actor),
         updated_by_user_id=row.updated_by_user_id,
         created_at=row.created_at,
@@ -204,6 +213,30 @@ class DeploymentPolicyRepository:
                 ObjectContentDeploymentPolicy.revision == replacement.expected_revision,
             )
             .values(**values)
+            .returning(ObjectContentDeploymentPolicy)
+        )
+        if row is None:
+            raise DeploymentPolicyConflict("Deployment policy revision is stale")
+        return _policy(row)
+
+    async def set_moves_paused(
+        self,
+        replacement: DeploymentPolicyPauseUpdate,
+        *,
+        actor_user_id: UUID,
+    ) -> DeploymentPolicy:
+        row = await self._session.scalar(
+            update(ObjectContentDeploymentPolicy)
+            .where(
+                ObjectContentDeploymentPolicy.id == 1,
+                ObjectContentDeploymentPolicy.revision == replacement.expected_revision,
+            )
+            .values(
+                moves_paused=replacement.moves_paused,
+                revision=ObjectContentDeploymentPolicy.revision + 1,
+                updated_by_actor=PolicyActor.PLATFORM_ADMIN.value,
+                updated_by_user_id=actor_user_id,
+            )
             .returning(ObjectContentDeploymentPolicy)
         )
         if row is None:

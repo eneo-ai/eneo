@@ -564,6 +564,42 @@ class ObjectContentReconciliationRepository:
             .values(lease_owner=None, lease_until=None)
         )
 
+    async def register_known_orphan(
+        self,
+        *,
+        object_key: str,
+        size_bytes: int,
+        orphan_grace_seconds: int,
+    ) -> None:
+        if size_bytes < 0:
+            raise ValueError("Known orphan size must not be negative")
+        now = await self._database_now()
+        eligible_after = now + timedelta(seconds=orphan_grace_seconds)
+        statement = insert(ObjectContentOrphanCandidates).values(
+            object_key=object_key,
+            size_bytes=size_bytes,
+            observed_cycle_id=uuid4(),
+            eligible_after=eligible_after,
+            last_observed_at=now,
+            completed_observations=0,
+            lease_owner="known-former-object",
+            lease_until=eligible_after,
+        )
+        await self._session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[ObjectContentOrphanCandidates.object_key],
+                set_={
+                    "size_bytes": statement.excluded.size_bytes,
+                    "observed_cycle_id": statement.excluded.observed_cycle_id,
+                    "eligible_after": statement.excluded.eligible_after,
+                    "last_observed_at": statement.excluded.last_observed_at,
+                    "completed_observations": 0,
+                    "lease_owner": statement.excluded.lease_owner,
+                    "lease_until": statement.excluded.lease_until,
+                },
+            )
+        )
+
     async def record_object_page(
         self,
         *,

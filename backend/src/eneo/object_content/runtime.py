@@ -5,11 +5,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.database.database import DatabaseSessionManager, sessionmanager
-from eneo.database.tables.object_content_table import ObjectContents
+from eneo.database.tables.object_content_table import (
+    ObjectContentMoves,
+    ObjectContentMultipartCandidates,
+    ObjectContentOrphanCandidates,
+    ObjectContents,
+)
 from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
     ObjectContentSettings,
@@ -17,6 +22,7 @@ from eneo.object_content.configuration import (
     load_object_content_settings,
 )
 from eneo.object_content.content import (
+    ContentMoveState,
     ContentState,
     ObjectContentConfigurationError,
     ObjectContentUnavailableError,
@@ -250,7 +256,7 @@ class ObjectContentRuntime:
             )
 
         try:
-            active_object_store_content = await self._has_active_object_store_content()
+            requires_object_store = await self._requires_object_store_configuration()
         except ObjectContentUnavailableError:
             # Readiness is a failure boundary: driver and pool failures must
             # produce one sanitized status instead of escaping through the
@@ -261,7 +267,7 @@ class ObjectContentRuntime:
             )
 
         if not self.object_store_configured:
-            if active_object_store_content:
+            if requires_object_store:
                 return ObjectContentReadiness(
                     ready=False,
                     code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
@@ -294,24 +300,47 @@ class ObjectContentRuntime:
             raise ObjectContentUnavailableError(
                 "Durable object content is not initialized"
             )
-        active_object_store_content = await self._has_active_object_store_content()
+        requires_object_store = await self._requires_object_store_configuration()
         if not self.object_store_configured:
-            if active_object_store_content:
+            if requires_object_store:
                 raise ObjectContentConfigurationError(
                     "Object-store configuration is required by active content"
                 )
             return
         await self.service.check_object_store_ready()
 
-    async def _has_active_object_store_content(self) -> bool:
+    async def _requires_object_store_configuration(self) -> bool:
         try:
             async with self._database.connect() as connection:
                 result = await connection.execute(
                     select(
-                        exists().where(
-                            ObjectContents.storage_kind
-                            == StorageKind.OBJECT_STORE.value,
-                            ObjectContents.state.in_(_ACTIVE_CONTENT_STATES),
+                        or_(
+                            exists().where(
+                                ObjectContents.storage_kind
+                                == StorageKind.OBJECT_STORE.value,
+                                ObjectContents.state.in_(_ACTIVE_CONTENT_STATES),
+                            ),
+                            exists().where(
+                                ObjectContentMoves.target_kind
+                                == StorageKind.OBJECT_STORE.value,
+                                ObjectContentMoves.state.in_(
+                                    (
+                                        ContentMoveState.PENDING.value,
+                                        ContentMoveState.TARGET_VERIFIED.value,
+                                    )
+                                ),
+                            ),
+                            exists().where(
+                                ObjectContentMoves.object_key.is_not(None),
+                            ),
+                            exists().where(
+                                ObjectContentOrphanCandidates.object_key.is_not(None),
+                            ),
+                            exists().where(
+                                ObjectContentMultipartCandidates.object_key.is_not(
+                                    None
+                                ),
+                            ),
                         )
                     )
                 )
@@ -329,7 +358,7 @@ class ObjectContentRuntime:
             )
         if (
             not self.object_store_configured
-            and await self._has_active_object_store_content()
+            and await self._requires_object_store_configuration()
         ):
             raise ObjectContentConfigurationError(
                 "Object-store configuration is required by active content"

@@ -1,0 +1,327 @@
+version: 2
+
+goal:
+  title: "Verified object-content moves"
+  slug: "verified-object-content-moves"
+  kind: specific
+  tranche: "Implement, validate, peer-review, publish, and merge explicit verified moves in both storage directions."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019fa011-95d2-79d1-96b4-f44b22cb64c3"
+  previous_thread_id: "019f64db-c1fa-7250-97d3-e4c12a889f71"
+  rotation_count: 0
+  completed_write_tasks_in_thread: 0
+  handoff_note: notes/handoff.md
+  last_handoff_at: null
+  last_verified_revision: "a3652e59fbf057c1b7607cf6b5b8c9992c76d9be"
+
+active_task: T004
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Freeze the current object-content ownership, persisted/public contracts, worker and readiness seams, migration head, test infrastructure, and smallest coherent move slice."
+    inputs:
+      - backend/src/eneo/object_content
+      - backend/tests
+      - backend/alembic/versions
+      - docs/deployment/OBJECT_CONTENT.md
+      - .github/PROJECT_WORKFLOW.md
+      - .github/pull_request_template.md
+      - issue #569 under epic #549
+    constraints:
+      - "Read-only."
+      - "Verify exact paths and symbols in current source."
+      - "Identify shared paths that require coordination before editing."
+      - "Bound command output and record exact validation commands."
+    expected_output:
+      - "Canonical ownership and duplicate-path map"
+      - "Persisted state and lifecycle candidates"
+      - "Crash/retry and one-authority invariant matrix"
+      - "Migration and real-integration test commands"
+      - "Smallest allowed Worker scope and stop conditions"
+    receipt:
+      result: done
+      summary: "Confirmed object_contents.storage_kind as authority; concrete backend composite FKs and the deferred exactly-one-backend trigger retain their exact meaning. Reuse capture/verification, content leases, publication reservations, reconciliation/orphan inventory, readiness, deployment-policy authority, and the single ARQ cron. Prefer one reusable per-content move intent plus bounded aggregate queries; a batch parent has no independent product lifecycle."
+      evidence:
+        - backend/src/eneo/database/tables/object_content_table.py
+        - backend/alembic/versions/202607231200_split_object_content_backends.py
+        - backend/src/eneo/object_content/content_service.py
+        - backend/src/eneo/object_content/reconciliation.py
+        - backend/src/eneo/object_content/reconciliation_repository.py
+        - backend/src/eneo/object_content/runtime.py
+        - backend/src/eneo/worker/object_content_tasks.py
+        - backend/src/eneo/worker/routes.py
+        - docs/deployment/OBJECT_CONTENT.md
+      commands:
+        - cmd: "cd backend && uv run alembic heads"
+          status: "pass: one head 202607261700"
+        - cmd: "focused target-capture and worker unit tests"
+          status: "pass: 6 tests"
+        - cmd: "real PostgreSQL and SeaweedFS upload/read/delete lifecycle"
+          status: "pass: 1 test"
+      risks:
+        - "Prove the legal immediate-FK order delete source child, update parent authority, insert target child in real PostgreSQL."
+        - "Object-store-to-inline staging may make the flip transaction too large; stop instead of weakening the owner fence if it cannot be short."
+        - "A staged remote target is protected only by the existing publication reservation; a post-flip former remote key deliberately becomes an ordinary orphan for bounded deletion."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Challenge the frozen evidence and select the smallest owner-level implementation slice that can satisfy the move contract without duplicate authority or speculative machinery."
+    inputs:
+      - "T001 receipt"
+      - "Claude plan pass"
+    constraints:
+      - "Read-only."
+      - "Reject missing recovery, boundedness, or migration ownership."
+    expected_output:
+      - "Decision and invariant model"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Deferred scope"
+    receipt:
+      result: done
+      decision: "Proceed with one reusable move row per content, no batch entity, unchanged immediate composite FKs, and one delete-source -> update-parent -> insert-target authority-flip transaction."
+      invariants:
+        - "object_contents.storage_kind remains the sole read authority."
+        - "Rollback exists before the flip and recovery is forward-only afterward."
+        - "Inline-to-object deletes inline bytes in the verified flip; object-to-inline registers the old remote key with the existing bounded orphan-deletion owner."
+        - "No backup BYTEA, second content row, former-copy field, recovery hold, or guaranteed post-flip rollback."
+      smallest_schema:
+        - "One transient object_content_moves row keyed by content_id with target_kind, pending/target_verified/failed state, nullable verified target-object fields, typed failure/retry facts, requesting actor, and timestamps. A successful flip records the durable audit event and deletes the intent in the same transaction so the progress query does not become permanent history."
+        - "Reuse ObjectContents lease fields, publication reservations, deployment-policy CAS, inventory, orphan deletion, and audit events."
+        - "Extend the existing audit events with one storage_moved type and typed requesting actor evidence; do not add history tables."
+      pause: "Persist only a deployment-wide moves_paused bit in the existing policy singleton; serialize claim and flip against that row."
+      eligibility: "Queue only available referenced content with no delete intent, source different from target, no active conflicting move, and target-size eligibility. Holds remain unchanged retention fences; a final-reference/state race blocks the flip with a typed result."
+      concurrency: "At most one move per reconciliation run; the admin request count has its own explicit bound."
+      review_corrections:
+        - "Cross-run inline-to-object attempts re-reserve the staged key under the current owner, fully re-verify it, and consume the reservation in the flip."
+        - "Run at most one move after all existing reconciliation phases so move work cannot starve or roll back earlier safety work. Existing SDK request budgets and renewable leases bound store operations without imposing a file-size business timeout."
+        - "Read pause without holding the policy singleton lock through the flip; pause blocks new claims and allows at most one verified move to finish."
+        - "Add a state-specific available-content move lease renewal and require an active nonterminal move in the storage guard."
+        - "The storage guard permits only target_verified; object-to-inline reaches it inside the short flip after validating the captured target bytes."
+      deferred:
+        - "Admin Storage UI, generated client, localization, and operator documentation follow after the backend contract stabilizes."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Implement the selected behavior-first object-content move slice."
+    allowed_files:
+      - backend/alembic/versions/202607262200_verified_object_content_moves.py
+      - backend/src/eneo/database/tables/object_content_table.py
+      - backend/src/eneo/database/tables/object_content_policy_table.py
+      - backend/src/eneo/object_content/content.py
+      - backend/src/eneo/object_content/content_service.py
+      - backend/src/eneo/object_content/content_repository.py
+      - backend/src/eneo/object_content/configuration.py
+      - backend/src/eneo/object_content/deployment_policy.py
+      - backend/src/eneo/object_content/deployment_policy_router.py
+      - backend/src/eneo/object_content/move_executor.py
+      - backend/src/eneo/object_content/move_repository.py
+      - backend/src/eneo/object_content/reconciliation.py
+      - backend/src/eneo/object_content/reconciliation_repository.py
+      - backend/src/eneo/object_content/runtime.py
+      - backend/src/eneo/worker/object_content_tasks.py
+      - backend/tests/unittests/object_content/test_moves.py
+      - backend/tests/unittests/object_content/test_deployment_policy.py
+      - backend/tests/unittests/object_content/test_configuration.py
+      - backend/tests/unittests/object_content/test_runtime.py
+      - backend/tests/unittests/object_content/test_worker_task.py
+      - backend/tests/integration/object_content/test_moves.py
+      - backend/tests/integration/object_content/test_reconciliation.py
+      - backend/tests/integration/object_content/test_deployment_policy_integration.py
+      - backend/tests/integration/migrations/test_verified_object_content_moves.py
+    verify:
+      - "cd backend && uv run pytest -q tests/unittests/object_content/test_moves.py tests/unittests/object_content/test_deployment_policy.py tests/unittests/object_content/test_runtime.py tests/unittests/object_content/test_worker_task.py"
+      - "cd backend && uv run pytest -q -m integration tests/integration/object_content/test_moves.py tests/integration/object_content/test_reconciliation.py tests/integration/object_content/test_deployment_policy_integration.py"
+      - "cd backend && uv run pytest -q -m migration_isolation tests/integration/migrations/test_verified_object_content_moves.py"
+      - "cd backend && uv run alembic heads"
+      - "cd backend && uv run pyright"
+      - "cd backend && uv run ruff check src/eneo/object_content src/eneo/database/tables/object_content_table.py src/eneo/database/tables/object_content_policy_table.py tests/unittests/object_content/test_moves.py tests/integration/object_content/test_moves.py tests/integration/migrations/test_verified_object_content_moves.py"
+      - "git diff --check && git status --short"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "A product or public-contract choice is ambiguous."
+      - "A verification failure repeats twice."
+      - "Another Alembic revision lands before this task freezes its migration base."
+      - "Either composite FK or the deferred owner fence must be relaxed or made deferrable."
+      - "The corrected delete-source -> update-parent -> insert-target order cannot commit in real PostgreSQL."
+      - "Implementation requires a batch, backup payload, former-copy state, recovery hold, permanent dual read, or second authoritative content row."
+      - "Object-to-inline at the configured maximum cannot remain bounded with one move in flight."
+      - "Pause cannot serialize claim and flip through the existing policy row."
+      - "Roadmap, work-item, task, PR, or issue identifiers leak into product names, schema, tests, errors, comments, or documentation."
+      - "A cross-run verified target cannot be re-reserved, fully re-verified, and consumed safely."
+      - "Move work can starve or roll back an earlier existing reconciliation phase."
+    receipt:
+      result: done
+      summary: "Added one resumable move row per content, target-verified-only authority flips, bounded one-at-a-time execution, typed retry/failure facts, pause/progress administration, and known-former-key cleanup through the existing orphan lifecycle. PostgreSQL remains the complete default; compatible object storage is optional."
+      changed_files:
+        - backend/alembic/versions/202607262200_verified_object_content_moves.py
+        - backend/src/eneo/database/tables/object_content_policy_table.py
+        - backend/src/eneo/database/tables/object_content_table.py
+        - backend/src/eneo/object_content/content.py
+        - backend/src/eneo/object_content/deployment_policy.py
+        - backend/src/eneo/object_content/deployment_policy_router.py
+        - backend/src/eneo/object_content/move_executor.py
+        - backend/src/eneo/object_content/move_repository.py
+        - backend/src/eneo/object_content/reconciliation.py
+        - backend/src/eneo/object_content/reconciliation_repository.py
+        - backend/src/eneo/object_content/runtime.py
+        - backend/src/eneo/worker/object_content_tasks.py
+        - backend/tests/integration/migrations/test_verified_object_content_moves.py
+        - backend/tests/integration/object_content/test_deployment_policy_integration.py
+        - backend/tests/integration/object_content/test_moves.py
+        - backend/tests/unittests/object_content/test_deployment_policy.py
+        - backend/tests/unittests/object_content/test_worker_task.py
+      commands:
+        - "cd backend && uv run pytest -q tests/unittests/object_content/test_moves.py tests/unittests/object_content/test_deployment_policy.py tests/unittests/object_content/test_runtime.py tests/unittests/object_content/test_worker_task.py"
+        - "cd backend && uv run pytest -q -m integration tests/integration/object_content/test_moves.py tests/integration/object_content/test_reconciliation.py tests/integration/object_content/test_deployment_policy_integration.py"
+        - "cd backend && uv run pytest -q -m migration_isolation tests/integration/migrations/test_verified_object_content_moves.py"
+        - "cd backend && uv run pyright && uv run alembic heads"
+      validation:
+        - "56 focused object-content unit tests passed."
+        - "13 real PostgreSQL and compatible-store move tests passed, including one deterministic round trip just above the multipart threshold."
+        - "16 real reconciliation integration tests passed."
+        - "6 admin policy integration tests passed."
+        - "132 broad real object-content integration tests passed after the multipart case was added."
+        - "1 isolated migration roundtrip/retry/evidence-fence test passed."
+        - "Strict whole-backend Pyright passed with zero findings; focused Ruff, format, compile, and one-head checks passed."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Expose the stabilized move contract in Admin Storage, generated client types, English/Swedish copy, and concise operator/deployment documentation."
+    allowed_files:
+      - frontend/packages/eneo-js/src/endpoints/object-content-policy.js
+      - frontend/packages/eneo-js/src/endpoints/object-content-policy.test.js
+      - frontend/packages/eneo-js/src/types/resources.d.ts
+      - frontend/packages/eneo-js/src/types/schema.d.ts
+      - frontend/apps/web/src/routes/(app)/admin/storage/+page.svelte
+      - frontend/apps/web/src/routes/(app)/admin/storage/storage-page.svelte.test.ts
+      - frontend/apps/web/messages/en.json
+      - frontend/apps/web/messages/sv.json
+      - frontend/apps/docs-site/src/content/guides/object-content-storage.mdx
+      - frontend/apps/docs-site/src/content/guides/deployment.mdx
+      - docs/deployment/OBJECT_CONTENT.md
+    verify:
+      - "cd frontend/packages/eneo-js && bun test src/endpoints/object-content-policy.test.js"
+      - "cd frontend/apps/web && bun run test --run src/routes/(app)/admin/storage/storage-page.svelte.test.ts"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend && bun run lint"
+      - "cd frontend/apps/docs-site && bun run build"
+      - "python scripts/pre_push_check.py --help or the repository's focused OpenAPI drift command"
+    stop_if:
+      - "T003 is not done or the backend contract is still changing."
+      - "The UI requires a new product lifecycle rather than projecting the backend owner."
+      - "A verification failure repeats twice."
+    receipt:
+      result: done
+      summary: "Exposed bounded move queueing, pause/resume, aggregate status, and typed failures through the generated client and existing Admin Storage page; used installed shadcn-svelte form primitives; kept PostgreSQL complete and compatible object storage optional; updated concise operator documentation."
+      changed_files:
+        - docs/deployment/OBJECT_CONTENT.md
+        - frontend/apps/docs-site/src/content/guides/object-content-storage.mdx
+        - frontend/apps/web/messages/en.json
+        - frontend/apps/web/messages/sv.json
+        - frontend/apps/web/src/routes/(app)/admin/storage/+page.svelte
+        - frontend/apps/web/src/routes/(app)/admin/storage/storage-page.svelte.test.ts
+        - frontend/packages/eneo-js/src/endpoints/object-content-policy.js
+        - frontend/packages/eneo-js/src/endpoints/object-content-policy.test.js
+        - frontend/packages/eneo-js/src/types/resources.d.ts
+        - frontend/packages/eneo-js/src/types/schema.d.ts
+      commands:
+        - "cd frontend/packages/eneo-js && bun test src/endpoints/object-content-policy.test.js"
+        - "cd frontend/apps/web && bun run test --run src/routes/(app)/admin/storage/storage-page.svelte.test.ts"
+        - "cd frontend/apps/web && bun run check"
+        - "cd frontend && bun run lint"
+        - "cd frontend/apps/docs-site && bun run build"
+        - "node /Users/ccimen/.agents/skills/impeccable/scripts/detect.mjs --json frontend/apps/web/src/routes/(app)/admin/storage/+page.svelte frontend/apps/web/src/routes/(app)/admin/storage/storage-page.svelte.test.ts"
+      validation:
+        - "18 focused Chromium component tests passed, including action-specific pending state and preserved form values after failure."
+        - "Web Svelte/i18n check passed with zero errors and zero warnings; web and client formatting/lint passed."
+        - "2 object-content policy client endpoint tests passed and generated OpenAPI schema matched the backend contract byte-for-byte."
+        - "Docs-site production build and search indexing passed with only the existing image optimization warning."
+        - "Impeccable scoped detector reported zero findings; EN/SV copy and narrow-table overflow were manually audited."
+
+  - id: T004
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Run exact-diff Claude commit gate, broad validation, roadmap/PR publication, fresh /review and CI, repair verified findings within scope, and merge the exact reviewed head."
+    inputs:
+      - "T003 receipt"
+      - "Current exact diff including untracked files"
+    constraints:
+      - "Do not commit without GREEN_LIGHT yes and MIN_SCORE >= 8."
+      - "Do not merge with stale review or red required checks."
+      - "Rebase onto live develop and repair migration lineage if develop adds a revision."
+      - "Post a fresh top-level /review on every changed PR head."
+      - "Before merge handoff, record the immutable SHA, Claude receipts, full diff inventory, tests, review URL, and CI runs."
+      - "Run a naming scan before every commit and include it in the Claude exact-diff packet."
+    expected_output:
+      - "Commit and validation receipt"
+      - "Draft PR linked to #569 and #549"
+      - "Fresh review and CI evidence"
+      - "Merge receipt"
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit the immutable merged head against every acceptance criterion and report complete or the next bounded recovery task."
+    inputs:
+      - "All done task receipts"
+      - "Final Claude verdict"
+      - "PR review and CI evidence"
+      - "Merged revision"
+    constraints:
+      - "Read-only."
+      - "Reject completion while required Worker or PM work remains."
+    expected_output:
+      - "complete | not_complete"
+      - "Acceptance mapping"
+      - "Missing evidence"
+      - "Next task if not complete"
+    receipt: null
+
+checks:
+  dirty_fingerprint: "goal-board-only"
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
