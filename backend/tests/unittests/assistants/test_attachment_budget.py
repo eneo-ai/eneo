@@ -21,6 +21,7 @@ from eneo.skills.domain.skill import (
     SkillTurnEffectiveMode,
     SkillTurnPlan,
 )
+from eneo.spaces.space_repo import AssistantMCPServerProjection
 from eneo.tokens.token_utils import TokenCountSource
 
 
@@ -1322,7 +1323,9 @@ async def test_governance_preflight_projects_each_personal_assistants_mcp_tools(
             has_knowledge=False,
         )
     ]
-    service.space_repo.project_assistant_mcp_servers.return_value = [projected_server]
+    service.space_repo.project_assistants_mcp_servers.return_value = {
+        assistant.id: [projected_server]
+    }
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_personal_default.return_value = (
         effective_config
@@ -1331,10 +1334,14 @@ async def test_governance_preflight_projects_each_personal_assistants_mcp_tools(
 
     await service.assert_personal_default_governance_context_fit()
 
-    service.space_repo.project_assistant_mcp_servers.assert_awaited_once_with(
-        space_id=assistant.space_id,
-        assistant_id=assistant.id,
-        mcp_servers=[configured_server],
+    service.space_repo.project_assistants_mcp_servers.assert_awaited_once_with(
+        [
+            AssistantMCPServerProjection(
+                space_id=assistant.space_id,
+                assistant_id=assistant.id,
+                mcp_servers=(configured_server,),
+            )
+        ]
     )
     assert service._validate_skill_activation_fit.await_args_list[-1].kwargs[
         "effective_mcp_servers"
@@ -1380,7 +1387,7 @@ async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
 
     await service.assert_personal_default_governance_context_fit()
 
-    service.space_repo.project_assistant_mcp_servers.assert_not_awaited()
+    service.space_repo.project_assistants_mcp_servers.assert_not_awaited()
     assert (
         service._validate_skill_activation_fit.await_args_list[-1].kwargs[
             "effective_mcp_servers"

@@ -79,6 +79,7 @@ from eneo.skills.domain.skill import (
     SkillTurnPlan,
 )
 from eneo.spaces.api.space_models import WizardType
+from eneo.spaces.space_repo import AssistantMCPServerProjection
 from eneo.spaces.space_service import SpaceService
 from eneo.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
@@ -135,6 +136,9 @@ if TYPE_CHECKING:
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.domain.skill_activation import (
         SkillActivationRuntime,
+    )
+    from eneo.completion_models.infrastructure.adapters.base_adapter import (
+        CompletionModelAdapter,
     )
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
@@ -564,6 +568,7 @@ class AssistantService:
         model: "CompletionModel",
         completion_prompt_files: list[File],
         effective_mcp_servers: list["MCPServer"],
+        preflight_adapter: "CompletionModelAdapter | None" = None,
     ) -> None:
         """Validate one model-specific Skill plan using the runtime calculator."""
         runtime = validation_plan.to_activation_runtime(
@@ -623,6 +628,7 @@ class AssistantService:
                 prompt_files=completion_prompt_files,
                 mcp_servers=effective_mcp_servers,
                 skill_runtime=runtime,
+                adapter=preflight_adapter,
             )
         )
         provider_assessments = runtime.assess_provider_payload_candidates(
@@ -782,7 +788,16 @@ class AssistantService:
                 "provider-wide or unrestricted model access cannot be validated safely"
             )
 
+        preflight_adapters: dict[UUID, CompletionModelAdapter] = {}
         if candidate_skill_ids:
+            preflight_adapters = (
+                await self.completion_service.load_skill_activation_preflight_adapters(
+                    [
+                        cast("AICompletionModel", model)
+                        for model in effective_config.available_models
+                    ]
+                )
+            )
             for model in effective_config.available_models:
                 await self._validate_skill_activation_fit(
                     validation_plan=policy_validation_plan,
@@ -794,11 +809,31 @@ class AssistantService:
                         if effective_config.mcp_enforced
                         else []
                     ),
+                    preflight_adapter=preflight_adapters[model.id],
                 )
 
         validation_inputs = await self.repo.get_personal_defaults_for_tenant(
             tenant_id=self.user.tenant_id
         )
+        projected_mcp_servers: dict[UUID, list[MCPServer]] = {}
+        if candidate_skill_ids and not effective_config.mcp_enforced:
+            mcp_projections = [
+                AssistantMCPServerProjection(
+                    space_id=validation_input.assistant.space_id,
+                    assistant_id=validation_input.assistant.id,
+                    mcp_servers=validation_input.configured_mcp_servers,
+                )
+                for validation_input in validation_inputs
+                if validation_input.configured_mcp_servers
+                and not validation_input.has_knowledge
+            ]
+            if mcp_projections:
+                projected_mcp_servers = (
+                    await self.space_repo.project_assistants_mcp_servers(
+                        mcp_projections
+                    )
+                )
+
         for validation_input in validation_inputs:
             assistant = validation_input.assistant
             # Reuse the policy loaded above; the service wrapper would fetch it again.
@@ -822,19 +857,17 @@ class AssistantService:
                     effective_mcp_servers = effective_config.available_mcp_servers
                 elif validation_input.configured_mcp_servers:
                     assert assistant.id is not None
-                    effective_mcp_servers = (
-                        await self.space_repo.project_assistant_mcp_servers(
-                            space_id=assistant.space_id,
-                            assistant_id=assistant.id,
-                            mcp_servers=list(validation_input.configured_mcp_servers),
-                        )
-                    )
+                    effective_mcp_servers = projected_mcp_servers[assistant.id]
+            preflight_adapter = (
+                preflight_adapters[model.id] if candidate_skill_ids else None
+            )
             await self._validate_skill_activation_fit(
                 validation_plan=assistant_plan.for_full_save_validation(),
                 candidate_skill_ids=candidate_skill_ids,
                 model=model,
                 completion_prompt_files=completion_prompt_files,
                 effective_mcp_servers=effective_mcp_servers,
+                preflight_adapter=preflight_adapter,
             )
 
     async def _assert_message_attachments_fit(
