@@ -33,8 +33,8 @@ text, chunks, embeddings, and version state remain in PostgreSQL/pgvector.
    and update size within one savepoint/transaction.
 4. Roll back the whole replacement on quota, embedding, chunking, database, or
    timeout failure.
-5. Product lists, retrieval, counts, sizes, quotas, crawler bootstrap, and stale
-   cleanup use active versions only.
+5. Product lists, retrieval, counts, sizes, crawler bootstrap, and stale cleanup
+   use active versions only; quota enforcement includes retained versions.
 6. Saved Question/Session/Analysis references and exact-ID authorization may
    read a superseded row.
 7. Explicit deletion and source-owner cascades remove every version and chunk.

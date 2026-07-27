@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from typing import TYPE_CHECKING, Any, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -93,7 +93,7 @@ async def persist_batch(
     ctx: CrawlContext,
     embedding_model: EmbeddingModelSpec | None,
     container: "Container",
-    existing_content_hashes: dict[str, bytes] | None = None,
+    existing_publications: dict[str, tuple[bytes, UUID]] | None = None,
 ) -> tuple[int, int, list[str], dict[str, list[str]]]:
     """
     Persist a batch of pages using the TWO-PHASE pattern.
@@ -243,7 +243,10 @@ async def persist_batch(
             try:
                 # 1. Compute content hash (local operation)
                 content_hash = hashlib.sha256(content.encode("utf-8")).digest()
-                if (existing_content_hashes or {}).get(url) == content_hash:
+                if (existing_publications or {}).get(url) == (
+                    content_hash,
+                    embedding_model.id,
+                ):
                     success_count += 1
                     successful_urls.append(url)
                     continue
@@ -439,6 +442,7 @@ async def persist_batch(
                                     InfoBlobs.id,
                                     InfoBlobs.source_id,
                                     InfoBlobs.content_hash,
+                                    InfoBlobs.embedding_model_id,
                                 )
                                 .where(
                                     InfoBlobs.title == prepared.title,
@@ -451,6 +455,8 @@ async def persist_batch(
                         if (
                             existing is not None
                             and existing.content_hash == prepared.content_hash
+                            and existing.embedding_model_id
+                            == prepared.embedding_model_id
                         ):
                             await savepoint.commit()
                             success_count += 1

@@ -131,7 +131,11 @@ class InfoBlobService:
         async with self.repo.session.begin_nested():
             await self.repo.lock_publication_identity(info_blob)
             active = await self.repo.get_active_for_publication(info_blob)
-            if active is not None and active.content_hash == info_blob.content_hash:
+            if (
+                active is not None
+                and active.content_hash == info_blob.content_hash
+                and active.embedding_model_id == embedding_model.id
+            ):
                 return await self.repo.refresh_publication_metadata(
                     active.id,
                     info_blob,

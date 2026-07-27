@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
+from psycopg2.extras import execute_values
 from sqlalchemy import create_engine, inspect
 from testcontainers.postgres import PostgresContainer
 
@@ -105,6 +106,45 @@ def _seed_legacy_info_blob(connection) -> UUID:
             ),
         )
     return info_blob_id
+
+
+def _seed_multi_batch_legacy_rows(
+    connection,
+    *,
+    legacy_id: UUID,
+) -> list[UUID]:
+    with connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT user_id, tenant_id, embedding_model_id
+            FROM info_blobs
+            WHERE id = %s
+            """,
+            (str(legacy_id),),
+        )
+        user_id, tenant_id, embedding_model_id = cursor.fetchone()
+        ids = [uuid4() for _ in range(1_001)]
+        execute_values(
+            cursor,
+            """
+            INSERT INTO info_blobs (
+                id, text, title, size, user_id, tenant_id, embedding_model_id
+            ) VALUES %s
+            """,
+            [
+                (
+                    str(info_blob_id),
+                    "legacy batch text",
+                    f"legacy-batch-{index}.txt",
+                    17,
+                    user_id,
+                    tenant_id,
+                    embedding_model_id,
+                )
+                for index, info_blob_id in enumerate(ids)
+            ],
+        )
+    return ids
 
 
 def _seed_legacy_duplicate_identities(
@@ -333,6 +373,10 @@ def test_info_blob_version_schema_round_trip_and_history_fence(
     connection = psycopg2.connect(database_url)
     try:
         legacy_id = _seed_legacy_info_blob(connection)
+        multi_batch_ids = _seed_multi_batch_legacy_rows(
+            connection,
+            legacy_id=legacy_id,
+        )
         duplicate_identities, untitled_ids = _seed_legacy_duplicate_identities(
             connection,
             legacy_id=legacy_id,
@@ -350,6 +394,18 @@ def test_info_blob_version_schema_round_trip_and_history_fence(
                 (str(legacy_id),),
             )
             assert cursor.fetchone() == (str(legacy_id), "active")
+
+            cursor.execute(
+                """
+                SELECT count(*)
+                FROM info_blobs
+                WHERE id = ANY(%s::uuid[])
+                  AND source_id = id
+                  AND version_state = 'active'
+                """,
+                ([str(value) for value in multi_batch_ids],),
+            )
+            assert cursor.fetchone() == (len(multi_batch_ids),)
 
             for older_id, newer_id in duplicate_identities.values():
                 cursor.execute(
@@ -473,6 +529,7 @@ def test_info_blob_version_schema_round_trip_and_history_fence(
             value for identity in duplicate_identities.values() for value in identity
         ]
         normalized_ids.extend(untitled_ids)
+        normalized_ids.extend(multi_batch_ids)
         with connection, connection.cursor() as cursor:
             cursor.execute(
                 "DELETE FROM info_blobs WHERE id = ANY(%s::uuid[])",

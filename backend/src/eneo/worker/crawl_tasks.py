@@ -727,7 +727,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # These will be populated by bootstrap
             crawl_context: CrawlContext
             existing_titles: list[str] = []
-            existing_content_hashes: dict[str, bytes] = {}
+            existing_publications: dict[str, tuple[bytes, UUID]] = {}
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -914,17 +914,21 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
                 # Fetch existing titles for stale detection and file hashes for skip optimization
-                stmt = sa.select(InfoBlobs.title, InfoBlobs.content_hash).where(
+                stmt = sa.select(
+                    InfoBlobs.title,
+                    InfoBlobs.content_hash,
+                    InfoBlobs.embedding_model_id,
+                ).where(
                     InfoBlobs.website_id == params.website_id,
                     active_info_blob_version(),
                 )
                 blob_result = await bootstrap_session.execute(stmt)
 
                 # Build lookups for O(1) operations
-                for title, hash_bytes in blob_result:
+                for title, hash_bytes, model_id in blob_result:
                     existing_titles.append(title)
-                    if hash_bytes is not None:
-                        existing_content_hashes[title] = hash_bytes
+                    if hash_bytes is not None and model_id is not None:
+                        existing_publications[title] = (hash_bytes, model_id)
 
             finally:
                 # Always close the bootstrap session to return connection to pool
@@ -1082,7 +1086,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             ctx=crawl_context,
                             embedding_model=embedding_model_spec,
                             container=container,
-                            existing_content_hashes=existing_content_hashes,
+                            existing_publications=existing_publications,
                         )
                         crawled_titles.update(successful_urls)
                         # Aggregate failure reasons and track failed URLs
@@ -1114,7 +1118,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         ctx=crawl_context,
                         embedding_model=embedding_model_spec,
                         container=container,
-                        existing_content_hashes=existing_content_hashes,
+                        existing_publications=existing_publications,
                     )
                     crawled_titles.update(successful_urls)
                     # Aggregate failure reasons and track failed URLs
@@ -1148,11 +1152,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         file_bytes = file.read_bytes()
                         new_file_hash = hashlib.sha256(file_bytes).digest()
 
-                        existing_file_hash = existing_content_hashes.get(filename)
+                        existing_file = existing_publications.get(filename)
 
-                        if (
-                            existing_file_hash is not None
-                            and new_file_hash == existing_file_hash
+                        if embedding_model_spec is not None and existing_file == (
+                            new_file_hash,
+                            embedding_model_spec.id,
                         ):
                             # File unchanged - skip processing
                             num_skipped_files += 1

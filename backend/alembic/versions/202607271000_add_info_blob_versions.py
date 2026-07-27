@@ -30,28 +30,35 @@ _SOURCE_INDEX = "ix_info_blobs_source_id"
 
 def _backfill_versions() -> None:
     bind = op.get_bind()
+    last_id = None
     while True:
-        result = bind.execute(
+        batch_size, last_id = bind.execute(
             sa.text(
                 f"""
                 WITH batch AS (
-                    SELECT ctid
+                    SELECT id
                     FROM {_TABLE}
                     WHERE source_id IS NULL OR version_state IS NULL
-                    ORDER BY ctid
+                      AND (:last_id IS NULL OR id > CAST(:last_id AS UUID))
+                    ORDER BY id
                     LIMIT :batch_size
                     FOR UPDATE
+                ), updated AS (
+                    UPDATE {_TABLE} AS info_blob
+                    SET source_id = COALESCE(info_blob.source_id, info_blob.id),
+                        version_state = COALESCE(info_blob.version_state, 'active')
+                    FROM batch
+                    WHERE info_blob.id = batch.id
+                    RETURNING info_blob.id
                 )
-                UPDATE {_TABLE} AS info_blob
-                SET source_id = COALESCE(info_blob.source_id, info_blob.id),
-                    version_state = COALESCE(info_blob.version_state, 'active')
-                FROM batch
-                WHERE info_blob.ctid = batch.ctid
+                SELECT
+                    (SELECT count(*) FROM updated),
+                    (SELECT id FROM batch ORDER BY id DESC LIMIT 1)
                 """
             ),
-            {"batch_size": _BACKFILL_BATCH_SIZE},
-        )
-        if result.rowcount < _BACKFILL_BATCH_SIZE:
+            {"batch_size": _BACKFILL_BATCH_SIZE, "last_id": last_id},
+        ).one()
+        if batch_size < _BACKFILL_BATCH_SIZE:
             break
 
     remaining = bind.execute(

@@ -399,13 +399,12 @@ class InfoBlobRepository:
             sa.and_(
                 InfoBlobs.sharepoint_item_id == sharepoint_item_id,
                 InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+                active_info_blob_version(),
             )
         )
         result = await self.session.execute(stmt)
         active_blobs = [
-            InfoBlobInDB.model_validate(blob)
-            for blob in result.scalars().all()
-            if blob.version_state == InfoBlobVersionState.ACTIVE.value
+            InfoBlobInDB.model_validate(blob) for blob in result.scalars().all()
         ]
         await self.session.execute(
             sa.delete(InfoBlobs).where(

@@ -15,6 +15,7 @@ from eneo.database.tables.info_blobs_table import (
     InfoBlobs,
     InfoBlobVersionState,
 )
+from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.spaces_table import Spaces
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import InfoBlobAdd
@@ -254,6 +255,145 @@ async def test_unchanged_document_refreshes_citation_metadata(db_container) -> N
         assert persisted.url == new_url
         assert [chunk.id for chunk in chunks] == [active_chunk.id]
         embeddings.get_embeddings.assert_not_awaited()
+
+
+async def test_same_content_is_reembedded_after_model_change(db_container) -> None:
+    title = "model-change.txt"
+    text = "Knowledge retained while its embedding model changes"
+
+    async with db_container() as container:
+        group, old_model, active, _ = await _seed_active_document(
+            container,
+            text=text,
+            title=title,
+        )
+        new_model = EmbeddingModels(
+            name=f"replacement-embedding-{uuid4().hex[:8]}",
+            open_source=True,
+            dimensions=3,
+            max_input=8_192,
+            max_batch_size=32,
+            family="test",
+            stability="stable",
+            hosting="self-hosted",
+        )
+        container.session().add(new_model)
+        await container.session().flush()
+        await container.session().execute(
+            sa.update(CollectionsTable)
+            .where(CollectionsTable.id == group.id)
+            .values(embedding_model_id=new_model.id)
+            .execution_options(synchronize_session=False)
+        )
+        await container.session().refresh(group)
+        active.group = group
+
+        embeddings = AsyncMock()
+        embeddings.get_embeddings.side_effect = _embedding_result
+        container.create_embeddings_service.override(providers.Object(embeddings))
+
+        published = await container.text_processor().process_text(
+            text=text,
+            title=title,
+            embedding_model=new_model,
+            group_id=group.id,
+        )
+
+        assert published.id != active.id
+        assert published.embedding_model_id == new_model.id
+        assert published.embedding_model_id != old_model.id
+        versions = (
+            await container.session().scalars(
+                sa.select(InfoBlobs)
+                .where(InfoBlobs.source_id == active.source_id)
+                .order_by(InfoBlobs.created_at, InfoBlobs.id)
+            )
+        ).all()
+        assert [version.version_state for version in versions] == [
+            InfoBlobVersionState.SUPERSEDED.value,
+            InfoBlobVersionState.ACTIVE.value,
+        ]
+        matches = await container.info_blob_chunk_repo().semantic_search(
+            [0.7, 0.8, 0.9],
+            group_ids=[group.id],
+        )
+        assert [match.info_blob_id for match in matches] == [published.id]
+
+
+async def test_sharepoint_family_delete_reads_only_active_version(
+    db_container,
+    user_integration_factory,
+) -> None:
+    async with db_container() as container:
+        group, embedding_model, _, _ = await _seed_active_document(
+            container,
+            text="Fixture knowledge",
+            title="fixture.txt",
+        )
+        session = container.session()
+        user = container.user()
+        user_integration = await user_integration_factory(
+            session,
+            tenant_id=user.tenant_id,
+        )
+        knowledge = IntegrationKnowledge(
+            name="SharePoint version deletion",
+            url="https://example.test/sharepoint",
+            space_id=group.space_id,
+            tenant_id=user.tenant_id,
+            embedding_model_id=embedding_model.id,
+            user_integration_id=user_integration.id,
+            size=321,
+        )
+        session.add(knowledge)
+        await session.flush()
+
+        source_id = uuid4()
+        item_id = f"sharepoint-{uuid4().hex}"
+        history = [
+            InfoBlobs(
+                title="retained.docx",
+                text=f"retained version {index}",
+                size=index + 1,
+                content_hash=sha256(str(index).encode()).digest(),
+                source_id=source_id,
+                version_state=InfoBlobVersionState.SUPERSEDED.value,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                integration_knowledge_id=knowledge.id,
+                embedding_model_id=embedding_model.id,
+                sharepoint_item_id=item_id,
+            )
+            for index in range(32)
+        ]
+        active = InfoBlobs(
+            title="retained.docx",
+            text="current version",
+            size=321,
+            content_hash=sha256(b"current version").digest(),
+            source_id=source_id,
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            integration_knowledge_id=knowledge.id,
+            embedding_model_id=embedding_model.id,
+            sharepoint_item_id=item_id,
+        )
+        session.add_all([*history, active])
+        await session.flush()
+
+        deleted = await container.info_blob_repo().delete_by_sharepoint_item_and_integration_knowledge(
+            item_id,
+            knowledge.id,
+        )
+
+        assert [(blob.id, blob.size) for blob in deleted] == [(active.id, 321)]
+        remaining = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(InfoBlobs.source_id == source_id)
+        )
+        assert remaining == 0
 
 
 async def test_untitled_documents_remain_independent_and_searchable(
