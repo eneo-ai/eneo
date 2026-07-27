@@ -662,6 +662,8 @@ class SpaceRepository:
                         user_id=c.user_id,
                         embedding_model_id=c.embedding_model.id,
                         space_id=c.space_id,  # Space_id blir som owner_space_id
+                        chunk_size=c.chunk_size,
+                        chunk_overlap=c.chunk_overlap,
                     )
                     for c in new_collections
                 ]
@@ -677,6 +679,8 @@ class SpaceRepository:
                     name=c.name,
                     size=_set_size_subquery(c),
                     embedding_model_id=c.embedding_model.id,
+                    chunk_size=c.chunk_size,
+                    chunk_overlap=c.chunk_overlap,
                 )
                 .where(CollectionsTable.id == c.id)
             )

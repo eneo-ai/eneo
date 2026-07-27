@@ -142,6 +142,15 @@ class Collection(Entity):
             chunk_overlap=record.chunk_overlap,
         )
 
-    def update(self, name: Union[str, NotProvided] = NOT_PROVIDED):
+    def update(
+        self,
+        name: Union[str, NotProvided] = NOT_PROVIDED,
+        chunk_size: Union[int, None, NotProvided] = NOT_PROVIDED,
+        chunk_overlap: Union[int, None, NotProvided] = NOT_PROVIDED,
+    ):
         if is_provided(name):
             self.name = name
+        if is_provided(chunk_size):
+            self.chunk_size = chunk_size
+        if is_provided(chunk_overlap):
+            self.chunk_overlap = chunk_overlap

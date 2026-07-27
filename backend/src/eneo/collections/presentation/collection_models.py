@@ -22,6 +22,8 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
     embedding_model: EmbeddingModelPublic
     metadata: CollectionMetadata
     space_id: UUID
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None
 
     @classmethod
     def from_domain(cls, collection: "Collection"):
@@ -39,8 +41,12 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
             ),
             permissions=collection.permissions,
             space_id=collection.space_id,
+            chunk_size=collection.chunk_size,
+            chunk_overlap=collection.chunk_overlap,
         )
 
 
 class CollectionUpdate(BaseModel):
     name: str
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None

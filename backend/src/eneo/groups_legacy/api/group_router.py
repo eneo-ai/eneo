@@ -32,7 +32,7 @@ from eneo.info_blobs.info_blob import (
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
-from eneo.main.models import PaginatedResponse
+from eneo.main.models import NOT_PROVIDED, PaginatedResponse
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.models.api import InfoBlobUpsertRequest
@@ -123,7 +123,16 @@ async def update_group(
 
     # Update collection
     collection_updated = await service.update_collection(
-        collection_id=id, name=group.name
+        collection_id=id,
+        name=group.name,
+        chunk_size=(
+            group.chunk_size if "chunk_size" in group.model_fields_set else NOT_PROVIDED
+        ),
+        chunk_overlap=(
+            group.chunk_overlap
+            if "chunk_overlap" in group.model_fields_set
+            else NOT_PROVIDED
+        ),
     )
 
     # Get space for context
