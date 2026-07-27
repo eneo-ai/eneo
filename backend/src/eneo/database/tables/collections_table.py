@@ -16,6 +16,8 @@ class CollectionsTable(BasePublic):
 
     name: Mapped[str] = mapped_column(nullable=False)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    chunk_size: Mapped[Optional[int]] = mapped_column(nullable=True)
+    chunk_overlap: Mapped[Optional[int]] = mapped_column(nullable=True)
 
     # Foreign keys
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))

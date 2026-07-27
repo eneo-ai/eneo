@@ -116,6 +116,8 @@ class IntegrationKnowledge(BasePublic):
     embedding_model_id: Mapped[UUID] = mapped_column(
         ForeignKey(EmbeddingModels.id, ondelete="CASCADE")
     )
+    chunk_size: Mapped[Optional[int]] = mapped_column(nullable=True)
+    chunk_overlap: Mapped[Optional[int]] = mapped_column(nullable=True)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     user_integration_id: Mapped[UUID] = mapped_column(
         ForeignKey(UserIntegration.id, ondelete="CASCADE")
