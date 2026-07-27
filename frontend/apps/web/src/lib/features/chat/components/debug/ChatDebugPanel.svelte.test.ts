@@ -181,7 +181,7 @@ describe("ChatDebugPanel", () => {
     await page.getByRole("button", { name: m.chat_debug_retry() }).click();
 
     await expect.element(page.getByText("list_events")).toBeVisible();
-    await expect.element(page.getByText("MCP", { exact: true })).toBeVisible();
+    await expect.element(page.getByText(/: MCP$/)).toBeVisible();
     expect(document.body.textContent).not.toMatch(
       /SENSITIVE_(QUESTION|ANSWER|REASONING|ARGUMENT|RESULT|CONTENT|INCIDENT|TITLE|URI)/
     );
