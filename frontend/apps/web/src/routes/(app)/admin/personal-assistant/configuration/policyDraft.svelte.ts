@@ -21,7 +21,7 @@
 import { invalidate } from "$app/navigation";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type { Eneo, SkillBindingReferenceInput, SkillBindingSummary } from "@eneo/eneo-js";
+import type { AssistantSkillBindingInput, AssistantSkillBindingSummary, Eneo } from "@eneo/eneo-js";
 import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
 
@@ -31,6 +31,7 @@ type CompletionModel = {
   provider_id?: string | null;
   nickname?: string | null;
   name: string;
+  supports_tool_calling?: boolean;
   // Mirrors the backend's accept set: the policy PUT rejects any model whose
   // `can_access` is false (effectively-deprecated, locked, not org-enabled, …),
   // so the picker must only offer accessible models.
@@ -63,7 +64,7 @@ type Policy = {
     disabled_tool_ids?: string[] | null;
   };
   prompt_enforcement: { enabled: boolean; prompt_library_id?: string | null };
-  skills: { bindings: SkillBindingSummary[] };
+  skills: { bindings: AssistantSkillBindingSummary[] };
 };
 
 type PolicyUpdate = {
@@ -82,7 +83,7 @@ type PolicyUpdate = {
     prompt_library_id: string | null;
   };
   skills?: {
-    bindings: SkillBindingReferenceInput[];
+    bindings: AssistantSkillBindingInput[];
   };
 };
 
@@ -123,7 +124,7 @@ export class PolicyDraft {
     limit: 25,
     next_cursor: null
   });
-  skillBindingSummaries = $state<SkillBindingSummary[]>([]);
+  skillBindingSummaries = $state<AssistantSkillBindingSummary[]>([]);
 
   // ---- Editable state ------------------------------------------------------
   modelsEnabled = $state(false);
@@ -136,7 +137,7 @@ export class PolicyDraft {
   disabledMcpToolIds = new SvelteSet<string>();
   promptEnabled = $state(false);
   selectedPromptId = $state<string | null>(null);
-  skillBindings = $state<SkillBindingReferenceInput[]>([]);
+  skillBindings = $state<AssistantSkillBindingInput[]>([]);
 
   // ---- Save lifecycle ------------------------------------------------------
   saving = $state(false);
@@ -197,7 +198,8 @@ export class PolicyDraft {
     this.skillBindingSummaries = policy.skills.bindings;
     this.skillBindings = policy.skills.bindings.map((binding) => ({
       skill_id: binding.skill_id,
-      skill_revision_id: binding.skill_revision_id
+      skill_revision_id: binding.skill_revision_id,
+      activation_mode: binding.activation_mode
     }));
     this.saveError = null;
   }
@@ -254,6 +256,16 @@ export class PolicyDraft {
   defaultModelId = $derived(
     this.selectedModels.find((entry) => entry.is_default)?.completion_model_id ?? null
   );
+  canSelectOnDemand = $derived(
+    this.modelsEnabled &&
+      this.providerSelections.size === 0 &&
+      this.selectedModels.length > 0 &&
+      this.selectedModels.every(
+        (entry) =>
+          this.#allModels.find((model) => model.id === entry.completion_model_id)
+            ?.supports_tool_calling === true
+      )
+  );
 
   // ---- Dirty tracking (against the last-saved baseline) --------------------
   #initialModelIds = $derived(
@@ -308,7 +320,8 @@ export class PolicyDraft {
   #initialSkillBindings = $derived(
     this.#policy.skills.bindings.map((binding) => ({
       skill_id: binding.skill_id,
-      skill_revision_id: binding.skill_revision_id
+      skill_revision_id: binding.skill_revision_id,
+      activation_mode: binding.activation_mode
     }))
   );
   #skillsDirty = $derived(
@@ -317,7 +330,8 @@ export class PolicyDraft {
         const initial = this.#initialSkillBindings[index];
         return (
           initial?.skill_id !== binding.skill_id ||
-          initial.skill_revision_id !== binding.skill_revision_id
+          initial.skill_revision_id !== binding.skill_revision_id ||
+          initial.activation_mode !== binding.activation_mode
         );
       })
   );
@@ -330,12 +344,17 @@ export class PolicyDraft {
       this.effectiveModelIds.has(this.defaultModelId)
   );
   mcpValid = $derived(!this.mcpEnabled || this.mcpSelections.size > 0);
+  skillsValid = $derived(
+    this.skillBindings.every((binding) => binding.activation_mode !== "on_demand") ||
+      this.canSelectOnDemand
+  );
   canSave = $derived(
     this.dirty &&
       (!this.modelsEnabled || this.effectiveModelIds.size > 0) &&
       this.defaultValid &&
       this.mcpValid &&
-      (!this.promptEnabled || this.selectedPromptId !== null)
+      (!this.promptEnabled || this.selectedPromptId !== null) &&
+      this.skillsValid
   );
 
   // ---- Summaries -----------------------------------------------------------

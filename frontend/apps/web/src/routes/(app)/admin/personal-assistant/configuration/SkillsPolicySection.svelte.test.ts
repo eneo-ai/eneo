@@ -5,6 +5,9 @@ import { emptySkillBindingCatalogPage } from "$lib/features/skills/skillBindingC
 import { m } from "$lib/paraglide/messages";
 import SkillsPolicySection from "./SkillsPolicySection.svelte";
 
+const badgeVariant = (enabled: boolean, valid: boolean) =>
+  enabled ? (valid ? ("default" as const) : ("destructive" as const)) : ("outline" as const);
+
 describe("SkillsPolicySection", () => {
   test("lets an admin configure Personal Chat Skills without a Space Skill permission", async () => {
     render(SkillsPolicySection, {
@@ -12,6 +15,9 @@ describe("SkillsPolicySection", () => {
       initialCatalogPage: emptySkillBindingCatalogPage(),
       bindingSummaries: [],
       summary: "0 Skills",
+      skillsValid: true,
+      canSelectOnDemand: false,
+      badgeVariant,
       onListCatalog: vi.fn(),
       onGetSkillPreview: vi.fn()
     });
@@ -27,6 +33,9 @@ describe("SkillsPolicySection", () => {
       initialCatalogPage: emptySkillBindingCatalogPage(),
       bindingSummaries: [],
       summary: "0 Skills",
+      skillsValid: true,
+      canSelectOnDemand: false,
+      badgeVariant,
       onListCatalog: vi.fn(),
       onGetSkillPreview: vi.fn()
     });
@@ -39,5 +48,51 @@ describe("SkillsPolicySection", () => {
     await expect
       .element(page.getByRole("link", { name: m.governance_manage_skills_action() }))
       .toHaveAttribute("href", "/spaces/organization/skills");
+  });
+
+  test("enables activation modes when the policy has a bounded model set", async () => {
+    render(SkillsPolicySection, {
+      skillBindings: [],
+      initialCatalogPage: emptySkillBindingCatalogPage(),
+      bindingSummaries: [],
+      summary: "0 Skills",
+      skillsValid: true,
+      canSelectOnDemand: true,
+      badgeVariant,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: vi.fn()
+    });
+
+    await expect
+      .element(
+        page.getByText(m.skills_activation_runtime_policy_selective(), {
+          exact: true
+        })
+      )
+      .toBeVisible();
+  });
+
+  test("marks an on-demand policy invalid when its model selection is unbounded", async () => {
+    render(SkillsPolicySection, {
+      skillBindings: [
+        {
+          skill_id: "00000000-0000-0000-0000-000000000001",
+          skill_revision_id: "00000000-0000-0000-0000-000000000002",
+          activation_mode: "on_demand"
+        }
+      ],
+      initialCatalogPage: emptySkillBindingCatalogPage(),
+      bindingSummaries: [],
+      summary: "1 Skill",
+      skillsValid: false,
+      canSelectOnDemand: false,
+      badgeVariant,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: vi.fn()
+    });
+
+    await expect
+      .element(page.getByText("1 Skill", { exact: true }))
+      .toHaveClass(/text-destructive/);
   });
 });

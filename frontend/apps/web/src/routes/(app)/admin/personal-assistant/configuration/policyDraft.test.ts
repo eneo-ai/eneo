@@ -61,6 +61,7 @@ describe("PolicyDraft", () => {
       position: 0,
       is_active: true,
       execution_blocked: false,
+      activation_mode: "always" as const,
       source: "organization" as const
     };
     const second = {
@@ -76,6 +77,7 @@ describe("PolicyDraft", () => {
       position: 1,
       is_active: true,
       execution_blocked: false,
+      activation_mode: "always" as const,
       source: "organization" as const
     };
     const draft = new PolicyDraft();
@@ -95,8 +97,16 @@ describe("PolicyDraft", () => {
     });
 
     draft.skillBindings = [
-      { skill_id: second.skill_id, skill_revision_id: second.skill_revision_id },
-      { skill_id: first.skill_id, skill_revision_id: first.skill_revision_id }
+      {
+        skill_id: second.skill_id,
+        skill_revision_id: second.skill_revision_id,
+        activation_mode: "on_demand"
+      },
+      {
+        skill_id: first.skill_id,
+        skill_revision_id: first.skill_revision_id,
+        activation_mode: "always"
+      }
     ];
     draft.save();
 
@@ -106,8 +116,89 @@ describe("PolicyDraft", () => {
     expect(update).toHaveBeenCalledWith({
       skills: {
         bindings: [
-          { skill_id: "skill-2", skill_revision_id: "revision-2" },
-          { skill_id: "skill-1", skill_revision_id: "revision-1" }
+          {
+            skill_id: "skill-2",
+            skill_revision_id: "revision-2",
+            activation_mode: "on_demand"
+          },
+          {
+            skill_id: "skill-1",
+            skill_revision_id: "revision-1",
+            activation_mode: "always"
+          }
+        ]
+      }
+    });
+  });
+
+  it("treats an activation-mode-only change as a saveable Skill change", async () => {
+    const update = vi.fn(async () => {});
+    const binding = {
+      skill_id: "skill-1",
+      skill_revision_id: "revision-1",
+      attachable_revision_id: "revision-1",
+      slug: "analysis",
+      revision_number: 1,
+      attachable_revision_number: 1,
+      display_name: "Analysis",
+      description: "Analysis guidance",
+      content_digest: "digest-1",
+      position: 0,
+      is_active: true,
+      execution_blocked: false,
+      activation_mode: "always" as const,
+      source: "organization" as const
+    };
+    const draft = new PolicyDraft();
+    draft.sync({
+      eneo: { governancePolicy: { update } } as never,
+      policy: {
+        models_restriction: {
+          enabled: true,
+          models: [{ completion_model_id: "model-1", is_default: true }],
+          provider_ids: []
+        },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        skills: { bindings: [binding] }
+      },
+      models: {
+        completionModels: [
+          {
+            id: "model-1",
+            name: "Model",
+            can_access: true,
+            supports_tool_calling: true
+          }
+        ]
+      },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      skills: emptySkillBindingCatalogPage()
+    });
+
+    draft.skillBindings = [{ ...draft.skillBindings[0], activation_mode: "on_demand" }];
+
+    expect(draft.dirty).toBe(true);
+    draft.toggleProvider("provider-1", true);
+    expect(draft.canSelectOnDemand).toBe(false);
+    expect(draft.canSave).toBe(false);
+
+    draft.toggleProvider("provider-1", false);
+    expect(draft.canSelectOnDemand).toBe(true);
+    expect(draft.canSave).toBe(true);
+    draft.save();
+    await draft.pendingConfirm?.submit();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update).toHaveBeenCalledWith({
+      skills: {
+        bindings: [
+          {
+            skill_id: "skill-1",
+            skill_revision_id: "revision-1",
+            activation_mode: "on_demand"
+          }
         ]
       }
     });
