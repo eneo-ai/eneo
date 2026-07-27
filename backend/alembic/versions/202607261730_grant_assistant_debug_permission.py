@@ -27,5 +27,5 @@ def downgrade() -> None:
     op.execute("""
         UPDATE roles
         SET permissions = array_remove(permissions, 'assistant_debug')
-        WHERE predefined_source IN ('Owner', 'AI Configurator')
+        WHERE 'assistant_debug' = ANY(permissions)
     """)

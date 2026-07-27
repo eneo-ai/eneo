@@ -220,7 +220,11 @@ describe("ChatDebugPanel", () => {
           })
         ]
       });
-    const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-2"));
+    const getTurnDiagnostics = vi
+      .fn()
+      .mockImplementation(({ messageId }: { messageId: string }) =>
+        Promise.resolve(diagnostics(messageId))
+      );
     const chat = createChat(getTurnDiagnostics, [message("message-1", "First question")], {
       ask,
       get

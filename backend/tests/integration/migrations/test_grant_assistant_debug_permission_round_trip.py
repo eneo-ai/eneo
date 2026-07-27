@@ -150,7 +150,7 @@ def test_upgrade_does_not_duplicate_existing_grant(round_trip_db):
     assert _permissions(conn, owner_id).count("assistant_debug") == 1
 
 
-def test_downgrade_preserves_unrelated_roles(round_trip_db):
+def test_downgrade_removes_permission_from_every_role(round_trip_db):
     conn = round_trip_db["conn"]
     cfg = round_trip_db["cfg"]
     tenant_id = _insert_tenant(conn, "downgrade")
@@ -170,4 +170,5 @@ def test_downgrade_preserves_unrelated_roles(round_trip_db):
     command.downgrade(cfg, PRE_REVISION)
 
     assert "assistant_debug" not in _permissions(conn, owner_id)
-    assert "assistant_debug" in _permissions(conn, custom_id)
+    assert "admin" in _permissions(conn, owner_id)
+    assert "assistant_debug" not in _permissions(conn, custom_id)
