@@ -273,6 +273,8 @@ async def add_info_blobs(
         await datastore.add(
             info_blob=info_blob,
             embedding_model=group.embedding_model,
+            chunk_size=group.chunk_size,
+            chunk_overlap=group.chunk_overlap,
         )
         info_blob_updated = await service.update_info_blob_size(info_blob.id)
         info_blobs_updated.append(info_blob_updated)

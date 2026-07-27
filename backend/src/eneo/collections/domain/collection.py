@@ -29,6 +29,8 @@ class Collection(Entity):
         size: int,
         num_info_blobs: int,
         embedding_model: "EmbeddingModel",
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -38,6 +40,8 @@ class Collection(Entity):
         self.size = size
         self.num_info_blobs = num_info_blobs
         self.embedding_model = embedding_model
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
 
     @overload
     @classmethod
@@ -134,6 +138,8 @@ class Collection(Entity):
             size=record.size,
             num_info_blobs=num_info_blobs,
             embedding_model=embedding_model,
+            chunk_size=record.chunk_size,
+            chunk_overlap=record.chunk_overlap,
         )
 
     def update(self, name: Union[str, NotProvided] = NOT_PROVIDED):
