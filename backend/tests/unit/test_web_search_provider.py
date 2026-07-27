@@ -37,6 +37,7 @@ def _make_service():
         mcp_server_repo=mock_repo,
         mcp_server_tool_repo=mock_tool_repo,
         user=mock_user,
+        mcp_state_repo=AsyncMock(),
     )
     return service, mock_repo, mock_tool_repo, mock_user
 
