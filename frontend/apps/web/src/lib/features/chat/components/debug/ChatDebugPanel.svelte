@@ -38,6 +38,7 @@
   const liveTurnPending = $derived(
     chat.askQuestion.isLoading || chat.pendingDiagnosticsMessageIds.length > 0
   );
+  const pendingDiagnosticsRefreshFailed = $derived(chat.pendingDiagnosticsRefreshFailed);
   const turnById = $derived.by(() => {
     const index = new SvelteMap<string, (typeof turns)[number]>();
     for (const turn of turns) index.set(turn.messageId, turn);
@@ -259,10 +260,30 @@
       <div class="min-h-0 flex-1 overscroll-contain overflow-y-auto [scrollbar-gutter:stable]">
         {#if liveTurnPending}
           <div class="px-5 pt-5">
-            <Alert.Root>
+            <Alert.Root variant={pendingDiagnosticsRefreshFailed ? "destructive" : undefined}>
               <Info aria-hidden="true" />
-              <Alert.Title>{m.chat_debug_live_turn_title()}</Alert.Title>
-              <Alert.Description>{m.chat_debug_live_turn_description()}</Alert.Description>
+              <Alert.Title>
+                {pendingDiagnosticsRefreshFailed
+                  ? m.chat_debug_unavailable_title()
+                  : m.chat_debug_live_turn_title()}
+              </Alert.Title>
+              <Alert.Description>
+                {pendingDiagnosticsRefreshFailed
+                  ? m.chat_debug_unavailable_description()
+                  : m.chat_debug_live_turn_description()}
+              </Alert.Description>
+              {#if pendingDiagnosticsRefreshFailed}
+                <Alert.Action>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onclick={() => void chat.retryPendingDiagnosticsMetadata()}
+                  >
+                    <RotateCcw data-icon="inline-start" aria-hidden="true" />
+                    {m.chat_debug_retry()}
+                  </Button>
+                </Alert.Action>
+              {/if}
             </Alert.Root>
           </div>
         {/if}

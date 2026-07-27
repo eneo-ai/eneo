@@ -48,7 +48,12 @@ export class ChatService {
 
   debugPanelOpen = $state(false);
   #pendingDiagnosticsMessageIds = $state<string[]>([]);
+  #failedDiagnosticsRefreshSessionId = $state<string | null>(null);
   pendingDiagnosticsMessageIds = $derived([...this.#pendingDiagnosticsMessageIds]);
+  pendingDiagnosticsRefreshFailed = $derived(
+    this.#failedDiagnosticsRefreshSessionId === this.currentConversation.id &&
+      this.#pendingDiagnosticsMessageIds.length > 0
+  );
 
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
@@ -251,6 +256,10 @@ export class ChatService {
 
   async getTurnDiagnostics(sessionId: string, messageId: string): Promise<ChatTurnDiagnostics> {
     return await this.#eneo.conversations.getTurnDiagnostics({ sessionId, messageId });
+  }
+
+  async retryPendingDiagnosticsMetadata() {
+    await this.#hydratePendingDiagnosticsMessages();
   }
 
   async getToolCallResult(toolCallId: string): Promise<string | null> {
@@ -905,6 +914,7 @@ export class ChatService {
     if (!sessionId || pendingMessageIds.length === 0) return;
 
     const streamGen = this.#streamGen;
+    this.#failedDiagnosticsRefreshSessionId = null;
     try {
       const loaded = await this.#eneo.conversations.get({ id: sessionId });
       if (this.currentConversation.id !== sessionId || this.#streamGen !== streamGen) return;
@@ -913,6 +923,7 @@ export class ChatService {
           (messageId) => !loaded.messages.some((message) => message.id === messageId)
         )
       ) {
+        this.#failedDiagnosticsRefreshSessionId = sessionId;
         return;
       }
 
@@ -920,8 +931,12 @@ export class ChatService {
       this.#pendingDiagnosticsMessageIds = this.#pendingDiagnosticsMessageIds.filter(
         (messageId) => !loaded.messages.some((message) => message.id === messageId)
       );
+      this.#failedDiagnosticsRefreshSessionId = null;
       this.#seedLockedFromHistory();
     } catch (error) {
+      if (this.currentConversation.id === sessionId && this.#streamGen === streamGen) {
+        this.#failedDiagnosticsRefreshSessionId = sessionId;
+      }
       console.error("Could not load persisted turn metadata for diagnostics", error);
     }
   }

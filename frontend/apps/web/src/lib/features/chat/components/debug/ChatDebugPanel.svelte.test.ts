@@ -34,7 +34,11 @@ function message(id: string, question: string, extra: Partial<ConversationMessag
 
 function createChat(
   getTurnDiagnostics: ReturnType<typeof vi.fn>,
-  messages: ConversationMessage[] = [message("message-1", "First question")]
+  messages: ConversationMessage[] = [message("message-1", "First question")],
+  overrides: {
+    ask?: ReturnType<typeof vi.fn>;
+    get?: ReturnType<typeof vi.fn>;
+  } = {}
 ) {
   const partner = {
     id: "assistant-1",
@@ -49,7 +53,8 @@ function createChat(
     conversations: {
       getTurnDiagnostics,
       preflight: vi.fn(),
-      ask: vi.fn(),
+      ask: overrides.ask ?? vi.fn(),
+      get: overrides.get ?? vi.fn(),
       list: vi.fn().mockResolvedValue({
         items: [],
         count: 0,
@@ -184,6 +189,59 @@ describe("ChatDebugPanel", () => {
 
     await userEvent.keyboard("{Escape}");
     await expect.element(trigger).toHaveFocus();
+  });
+
+  test("retries canonical metadata after a completed turn fails to refresh", async () => {
+    let finishStream!: () => void;
+    const ask = vi.fn().mockImplementation(
+      ({ callbacks }) =>
+        new Promise<void>((resolve) => {
+          callbacks.onFirstChunk({
+            ...message("message-2", "Latest question"),
+            session_id: "session-1"
+          });
+          finishStream = resolve;
+        })
+    );
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary"))
+      .mockResolvedValue({
+        id: "session-1",
+        name: "Conversation",
+        messages: [
+          message("message-1", "First question"),
+          message("message-2", "Latest question", {
+            completion_model: {
+              id: "model-1",
+              name: "gpt-4o",
+              token_limit: 128_000
+            } as NonNullable<ConversationMessage["completion_model"]>
+          })
+        ]
+      });
+    const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-2"));
+    const chat = createChat(getTurnDiagnostics, [message("message-1", "First question")], {
+      ask,
+      get
+    });
+    render(ChatDebugPanel, { chat, available: true });
+
+    await page.getByRole("button", { name: m.chat_debug_open() }).click();
+    const request = chat.askQuestion("Latest question");
+    await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-2"]));
+    finishStream();
+    await request;
+
+    await expect
+      .element(page.getByRole("alert").getByText(m.chat_debug_unavailable_title()))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.chat_debug_retry() }).click();
+
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(chat.pendingDiagnosticsMessageIds).toEqual([]);
+    await expect.element(page.getByText(m.chat_debug_live_turn_title())).not.toBeInTheDocument();
+    await expect.element(page.getByText("gpt-4o")).toBeVisible();
   });
 
   test("distinguishes legacy evidence from zero candidates and reveals large lists in chunks", async () => {
