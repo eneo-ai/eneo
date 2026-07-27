@@ -11,8 +11,9 @@ would fail with "Can't operate on closed transaction inside context manager",
 triggering unnecessary session recovery on every successful crawl.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 import sqlalchemy as sa
 
 

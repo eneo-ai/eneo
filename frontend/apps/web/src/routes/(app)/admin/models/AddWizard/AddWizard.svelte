@@ -284,9 +284,8 @@
         if (!result.success && result.error) {
           warnings.push(`${model.name}: ${result.error}`);
         }
-      } catch {
-        // Validation endpoint failure is non-fatal — we'll let the create
-        // call surface a real error if there is one.
+      } catch (error: unknown) {
+        warnings.push(`${model.name}: ${getErrorMessage(error)}`);
       }
     }
     return warnings;

@@ -29,6 +29,7 @@ from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from eneo.spaces.space import Space
+from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_repo import SpaceRepository
 from eneo.transcription_models.application.transcription_model_crud_service import (
@@ -245,6 +246,23 @@ class SpaceService:
             )
 
         return space
+
+    async def get_applications_projection(
+        self, id: UUID
+    ) -> SpaceApplicationsProjection:
+        projection = await self.repo.get_applications_projection(id)
+        actor = self.actor_manager.get_space_actor(projection.access)
+        if not actor.can_read_space():
+            raise UnauthorizedException(
+                "You do not have permission to read this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "space",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
+        return projection
 
     async def update_space(
         self,

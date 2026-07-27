@@ -3,7 +3,6 @@
 # Licensed under the MIT License.
 
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from eneo.governance_policy.domain.governance_policy import PolicyScope
@@ -11,6 +10,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
 )
+from eneo.skills.domain.skill import SkillRuntimeResolution
 
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.prompt_library.domain.prompt_library_repo import PromptLibraryRepo
+    from eneo.skills.application.skill_service import SkillService
     from eneo.users.user import UserInDB
 
 
@@ -44,12 +45,14 @@ class EffectiveConfigService:
         prompt_library_repo: "PromptLibraryRepo",
         completion_model_crud_service: "CompletionModelCRUDService",
         mcp_server_settings_service: "MCPServerSettingsService",
+        skill_service: "SkillService",
     ) -> None:
         self.user = user
         self.policy_repo = policy_repo
         self.prompt_library_repo = prompt_library_repo
         self.completion_model_crud_service = completion_model_crud_service
         self.mcp_server_settings_service = mcp_server_settings_service
+        self.skill_service = skill_service
 
     async def resolve_for(
         self, assistant: "Assistant", *, space_is_personal: bool
@@ -90,7 +93,8 @@ class EffectiveConfigService:
         # tenant_mcp_servers only when mcp_restriction_enabled. An all-disabled
         # policy row exists for any tenant whose admin merely opened the config
         # page, so skipping these keeps the chat hot path off two full-table
-        # scans per resolution. The independent fetches run concurrently.
+        # scans per resolution. These loads stay sequential because the
+        # request-scoped repositories share one SQLAlchemy AsyncSession.
         async def _load_models() -> "list[CompletionModel]":
             if not policy.models_restriction_enabled:
                 return []
@@ -113,9 +117,17 @@ class EffectiveConfigService:
             )
             return entry.text if entry is not None else None
 
-        tenant_models, tenant_mcp_servers, library_prompt_text = await asyncio.gather(
-            _load_models(), _load_mcp_servers(), _load_prompt_text()
-        )
+        async def _load_governance_skills() -> SkillRuntimeResolution:
+            if policy.id is None:
+                return SkillRuntimeResolution(eligible=(), blocked=())
+            return await self.skill_service.resolve_governance_bindings_for_runtime(
+                policy_id=policy.id
+            )
+
+        tenant_models = await _load_models()
+        tenant_mcp_servers = await _load_mcp_servers()
+        library_prompt_text = await _load_prompt_text()
+        governance_skill_resolution = await _load_governance_skills()
 
         return resolve(
             assistant=assistant,
@@ -124,4 +136,5 @@ class EffectiveConfigService:
             tenant_completion_models=tenant_models,
             tenant_mcp_servers=tenant_mcp_servers,
             library_prompt_text=library_prompt_text,
+            governance_skill_resolution=governance_skill_resolution,
         )

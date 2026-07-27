@@ -2,12 +2,17 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
+from pydantic import TypeAdapter
+
 from eneo.apps.app_runs.app_run import AppRun
 from eneo.apps.apps.app import App
 from eneo.database.tables.app_table import AppRuns
 from eneo.files.file_models import FileInfo
 from eneo.jobs.job_models import JobInDb
+from eneo.skills.domain.skill import SkillExecutionReference
 from eneo.users.user import UserSparse
+
+_SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
 
 
 class AppRunFactory:
@@ -18,6 +23,7 @@ class AppRunFactory:
         text: str | None,
         user_id: UUID,
         tenant_id: UUID,
+        skill_provenance: tuple[SkillExecutionReference, ...],
     ) -> AppRun:
         if app.id is None:
             raise ValueError("App must have an id before creating an app run")
@@ -41,15 +47,17 @@ class AppRunFactory:
             user=None,
             num_tokens_input=None,
             num_tokens_output=None,
+            skill_provenance=skill_provenance,
             job=None,
             completion_model_id=app.completion_model.id,
         )
 
-    def create_app_run_from_db(self, app_run_in_db: AppRuns):
-        input_files = [
-            FileInfo.model_validate(input_file.file)
-            for input_file in app_run_in_db.input_files
-        ]
+    def create_app_run_from_db(
+        self,
+        app_run_in_db: AppRuns,
+        *,
+        input_files: list[FileInfo] | None = None,
+    ) -> AppRun:
         user = UserSparse.model_validate(app_run_in_db.user)
         job_in_db = cast(JobInDb | None, app_run_in_db.job)
         job = JobInDb.model_validate(job_in_db) if job_in_db is not None else None
@@ -62,12 +70,19 @@ class AppRunFactory:
             app_id=app_run_in_db.app_id,
             user_id=app_run_in_db.user_id,
             tenant_id=app_run_in_db.tenant_id,
-            input_files=input_files,
+            input_files=input_files or [],
             input_text=app_run_in_db.input_text,
             output=app_run_in_db.output_text,
             user=user,
             num_tokens_input=app_run_in_db.num_tokens_input,
             num_tokens_output=app_run_in_db.num_tokens_output,
+            skill_provenance=(
+                _SKILL_PROVENANCE_ADAPTER.validate_python(
+                    app_run_in_db.skill_provenance
+                )
+                if app_run_in_db.skill_provenance is not None
+                else None
+            ),
             job=job,
             completion_model_id=app_run_in_db.completion_model_id,
         )

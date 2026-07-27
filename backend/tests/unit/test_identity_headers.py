@@ -5,13 +5,23 @@ headers only when its own server opted in via ``forward_identity``.
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import unquote
 from uuid import uuid4
 
+import httpx
 import pytest
+from mcp.shared._httpx_utils import create_mcp_http_client
 
+from eneo.authentication.auth_models import ApiKeyOwnership
+from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
+from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
+    MCPProxySessionFactory,
+)
+from tests.unit.api_key_test_utils import make_api_key
 
 
 def _user(**overrides):
@@ -53,11 +63,40 @@ class TestBuildIdentityHeaders:
         assert "\r" not in headers["X-Eneo-User-Name"]
         assert "\n" not in headers["X-Eneo-User-Name"]
 
-    def test_non_latin1_value_is_encodable(self):
-        # Emoji is not latin-1; the value must still encode as a request header.
-        user = _user(username="anna \U0001f600")
+    def test_values_are_ascii_and_decode_back_to_the_original(self):
+        # httpx encodes str header values as ASCII, so every emitted value must
+        # be ASCII; percent-encoding keeps it lossless (unquote round-trips).
+        user = _user(
+            username="Åsa Öberg \U0001f600",
+            tenant=SimpleNamespace(name="Härnösands kommun"),
+        )
         headers = build_identity_headers(user, user.tenant)
-        headers["X-Eneo-User-Name"].encode("latin-1")  # must not raise
+        for value in headers.values():
+            value.encode("ascii")  # must not raise
+        assert unquote(headers["X-Eneo-User-Name"]) == "Åsa Öberg \U0001f600"
+        assert unquote(headers["X-Eneo-Tenant-Name"]) == "Härnösands kommun"
+
+    @pytest.mark.asyncio
+    async def test_headers_construct_the_actual_http_clients(self):
+        # The mapping is handed verbatim to create_mcp_http_client (MCP
+        # transport) and to a plain httpx request (the connect diagnostic).
+        # Client/request construction is where httpx encodes headers, so it
+        # must succeed for Swedish and non-latin-1 identity values.
+        user = _user(
+            username="Åsa Öberg \U0001f600",
+            tenant=SimpleNamespace(name="Härnösands kommun"),
+        )
+        headers = build_identity_headers(user, user.tenant)
+
+        async with create_mcp_http_client(headers=headers) as client:
+            request = client.build_request(
+                "POST",
+                "http://localhost:9000",
+                headers={**headers, "Content-Type": "application/json"},
+            )
+        assert unquote(request.headers["X-Eneo-User-Name"]) == "Åsa Öberg \U0001f600"
+
+        httpx.Headers(headers)  # must not raise
 
     def test_empty_values_are_omitted(self):
         user = _user(username=None, email=None, roles=[], tenant=None, tenant_id=None)
@@ -101,3 +140,243 @@ class TestMCPClientIdentityForwarding:
         headers = await client._build_auth_headers()
         assert headers == {"Authorization": "Bearer secret"}
         assert "X-Eneo-User-Id" not in headers
+
+    @pytest.mark.asyncio
+    async def test_service_key_keeps_bearer_auth_without_fabricated_user_headers(self):
+        service_key = make_api_key(ownership=ApiKeyOwnership.SERVICE)
+        synthetic_service_user = _user(
+            id=service_key.id,
+            email=f"sk-{service_key.key_suffix}@service.key",
+            username=f"Service Key ({service_key.name})",
+            tenant_id=service_key.tenant_id,
+            active_api_key=service_key,
+        )
+
+        identity = build_identity_headers(synthetic_service_user, None)
+        client = MCPClient(
+            self._server(forward_identity=True),
+            auth_credentials={"token": "secret"},
+            identity_headers=identity,
+        )
+
+        headers = await client._build_auth_headers()
+
+        assert headers == {"Authorization": "Bearer secret"}
+        assert not any(name.startswith("X-Eneo-User-") for name in headers)
+
+
+class TestManagementPathsCarryIdentity:
+    """Connection validation (create/update) and tool discovery run as the
+    acting admin, so the service must hand the admin's identity headers to
+    every client it builds; each client applies its own server's
+    ``forward_identity`` gate (covered above)."""
+
+    def _recording_client_cls(self):
+        client = MagicMock()
+        client.list_tools = AsyncMock(return_value=[])
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=client)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        return MagicMock(return_value=cm)
+
+    def _service(self, user):
+        service = MCPServerService(
+            mcp_server_repo=AsyncMock(),
+            mcp_server_tool_repo=AsyncMock(),
+            user=user,
+            mcp_state_repo=AsyncMock(),
+        )
+        return service
+
+    @pytest.mark.asyncio
+    async def test_create_validation_carries_the_acting_admins_identity(self):
+        user = _user(permissions=["admin"])
+        service = self._service(user)
+        client_cls = self._recording_client_cls()
+
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", client_cls
+        ):
+            result = await service.create_mcp_server(
+                name="srv",
+                http_url="http://localhost:9000",
+                forward_identity=True,
+            )
+
+        assert result.connection.success
+        identity = client_cls.call_args.kwargs["identity_headers"]
+        assert identity["X-Eneo-User-Id"] == str(user.id)
+        assert identity["X-Eneo-User-Name"] == "anna"
+
+    @pytest.mark.asyncio
+    async def test_refresh_tools_discovery_carries_the_acting_admins_identity(self):
+        user = _user(permissions=["admin"])
+        service = self._service(user)
+        server = MagicMock()
+        server.id = uuid4()
+        server.name = "srv"
+        server.tenant_id = user.tenant_id
+        server.http_auth_config_schema = None
+        service.repo.one = AsyncMock(return_value=server)
+        service.tool_repo.by_server = AsyncMock(return_value=[])
+        client_cls = self._recording_client_cls()
+
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", client_cls
+        ):
+            result = await service.refresh_tools(server.id)
+
+        assert result.connection.success
+        identity = client_cls.call_args.kwargs["identity_headers"]
+        assert identity["X-Eneo-User-Id"] == str(user.id)
+
+    @pytest.mark.asyncio
+    async def test_identity_scoped_admin_sync_does_not_remove_user_only_tools(self):
+        user = _user(permissions=["admin"])
+        service = self._service(user)
+        server = MagicMock()
+        server.id = uuid4()
+        server.name = "srv"
+        server.tenant_id = user.tenant_id
+        server.forward_identity = True
+        existing = MCPServerTool(
+            mcp_server_id=server.id,
+            name="ordinary_only",
+            description="Approved ordinary-user tool",
+            input_schema={"type": "object", "properties": {}},
+        )
+        service.tool_repo.by_server = AsyncMock(return_value=[existing])
+        client_cls = self._recording_client_cls()
+
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", client_cls
+        ):
+            result = await service.discover_and_sync_tools(server)
+
+        assert result.connection.success
+        assert result.removed_tools == []
+        service.tool_repo.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_global_admin_sync_still_marks_missing_tools_removed(self):
+        user = _user(permissions=["admin"])
+        service = self._service(user)
+        server = MagicMock()
+        server.id = uuid4()
+        server.name = "srv"
+        server.tenant_id = user.tenant_id
+        server.forward_identity = False
+        existing = MCPServerTool(
+            mcp_server_id=server.id,
+            name="removed_tool",
+            description="Previously approved",
+            input_schema={"type": "object", "properties": {}},
+        )
+        service.tool_repo.by_server = AsyncMock(return_value=[existing])
+        client_cls = self._recording_client_cls()
+
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", client_cls
+        ):
+            result = await service.discover_and_sync_tools(server)
+
+        assert [change.tool.name for change in result.removed_tools] == ["removed_tool"]
+        assert existing.removed_from_remote is True
+        assert existing.requires_approval is True
+
+    @pytest.mark.asyncio
+    async def test_management_refresh_adds_tools_through_bounded_catalog_staging(self):
+        user = _user(permissions=["admin"])
+        service = self._service(user)
+        server = MagicMock()
+        server.id = uuid4()
+        server.name = "srv"
+        server.tenant_id = user.tenant_id
+        server.forward_identity = True
+        stored: list[MCPServerTool] = []
+
+        async def stage_observed(observations: list[MCPServerTool]):
+            stored.extend(observations)
+            return observations
+
+        service.tool_repo.by_server.side_effect = lambda _server_id: list(stored)
+        service.tool_repo.stage_observed.side_effect = stage_observed
+        client_cls = self._recording_client_cls()
+        client_cls.return_value.__aenter__.return_value.list_tools.return_value = [
+            {
+                "name": "new_tool",
+                "title": "New tool",
+                "description": "Pending contract",
+                "input_schema": {"type": "object"},
+            }
+        ]
+
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", client_cls
+        ):
+            result = await service.discover_and_sync_tools(server)
+
+        assert [change.tool.name for change in result.new_tools] == ["new_tool"]
+        service.tool_repo.stage_observed.assert_awaited_once()
+        service.tool_repo.upsert_by_server_and_name.assert_not_awaited()
+
+
+class TestTerminationCarriesIdentityOnTheWire:
+    """factory.terminate sends a plain httpx DELETE, so the opt-in gate can be
+    asserted on the actual outgoing request via a recording transport."""
+
+    def _server(self, forward_identity: bool):
+        return SimpleNamespace(
+            id=uuid4(),
+            name="srv",
+            http_url="http://localhost:9000",
+            http_auth_type="bearer",
+            http_auth_config_schema=None,
+            forward_identity=forward_identity,
+        )
+
+    def _record_http(self, monkeypatch):
+        recorded: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            recorded.append(request)
+            return httpx.Response(404)  # terminate treats 404 as success
+
+        real_client = httpx.AsyncClient
+
+        class RecordingClient(real_client):
+            def __init__(self, **kwargs):
+                super().__init__(transport=httpx.MockTransport(handler), **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", RecordingClient)
+        return recorded
+
+    @pytest.mark.asyncio
+    async def test_terminate_sends_identity_when_server_opted_in(self, monkeypatch):
+        recorded = self._record_http(monkeypatch)
+        factory = MCPProxySessionFactory(encryption_service=None)
+
+        await factory.terminate(
+            self._server(forward_identity=True),
+            "mcp-session-1",
+            identity_headers={"X-Eneo-User-Id": "u1"},
+        )
+
+        (request,) = recorded
+        assert request.method == "DELETE"
+        assert request.headers["X-Eneo-User-Id"] == "u1"
+        assert request.headers["Mcp-Session-Id"] == "mcp-session-1"
+
+    @pytest.mark.asyncio
+    async def test_terminate_omits_identity_when_server_not_opted_in(self, monkeypatch):
+        recorded = self._record_http(monkeypatch)
+        factory = MCPProxySessionFactory(encryption_service=None)
+
+        await factory.terminate(
+            self._server(forward_identity=False),
+            "mcp-session-1",
+            identity_headers={"X-Eneo-User-Id": "u1"},
+        )
+
+        (request,) = recorded
+        assert "X-Eneo-User-Id" not in request.headers

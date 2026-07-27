@@ -17,9 +17,10 @@ running live crawler jobs and Redis concurrency management.
 These tests verify the configuration and integration patterns.
 """
 
+from uuid import uuid4
+
 import pytest
 from httpx import AsyncClient
-from uuid import uuid4
 
 from eneo.tenants.crawler_settings_helper import get_crawler_setting
 

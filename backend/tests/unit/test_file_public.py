@@ -14,20 +14,20 @@ def _file_public(**overrides):
     return FilePublic(**values)
 
 
-def test_storage_key_is_exposed_only_as_download_capability():
-    public = _file_public(storage_key="tenant/file/original.pdf", file_type="text")
+def test_download_capability_is_an_explicit_projection():
+    public = _file_public(has_download_reference=True)
 
-    payload = public.model_dump()
-
-    assert payload["has_download_reference"] is True
-    assert "storage_key" not in payload
+    assert public.model_dump()["has_download_reference"] is True
 
 
-def test_missing_storage_key_has_no_download_capability():
+def test_download_capability_defaults_to_false():
     assert _file_public().has_download_reference is False
 
 
-def test_non_text_file_has_no_download_capability():
-    public = _file_public(storage_key="tenant/file/image.png", file_type="image")
+def test_storage_internals_never_reach_the_payload():
+    public = _file_public(has_download_reference=True)
 
-    assert public.has_download_reference is False
+    payload = public.model_dump()
+
+    assert "storage_key" not in payload
+    assert not any("object" in key for key in payload)

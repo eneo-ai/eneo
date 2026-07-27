@@ -1,58 +1,82 @@
-import io
-import re
+import base64
 import time
-from typing import Annotated
+import unicodedata
+from typing import Annotated, cast
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
 
-# Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_user_for_creation
-from eneo.authentication.signed_urls import generate_signed_token, verify_signed_token
+from eneo.authentication.signed_urls import (
+    generate_file_original_download_token,
+    generate_signed_token,
+    verify_file_original_download_token,
+    verify_signed_token,
+)
+from eneo.database.database import AsyncSession
 from eneo.files.file_models import (
     ContentDisposition,
+    FileContentRangeError,
+    FileDeletionPreview,
     FilePublic,
-    FileType,
+    OriginalSignedURLRequest,
     SignedURLRequest,
     SignedURLResponse,
 )
+from eneo.files.file_service import FileDownload
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     AuthenticationException,
-    BadRequestException,
-    NotFoundException,
+    ErrorCodes,
     UnauthorizedException,
 )
-from eneo.main.models import PaginatedResponse
+from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError, PaginatedResponse
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
 router = APIRouter()
+logger = get_logger(__name__)
+
+_file_upload_container_dependency = get_container(
+    with_user=True,
+    with_transaction=False,
+    with_upload_admission=True,
+)
+_FileUploadContainer = Annotated[
+    Container,
+    Depends(_file_upload_container_dependency),
+]
+
+
+async def _require_upload_user_for_creation(
+    container: _FileUploadContainer,
+) -> None:
+    await require_user_for_creation(container.user())
 
 
 @router.post(
     "/",
     response_model=FilePublic,
-    responses=responses.get_responses([400, 403, 413, 415]),
+    responses=responses.get_responses([400, 403, 413, 415, 503]),
     description="Upload a file; rejects unsupported media types and oversized files.",
+    dependencies=[Depends(_require_upload_user_for_creation)],
 )
 async def upload_file(
     upload_file: UploadFile,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
+    container: _FileUploadContainer,
 ):
     service = container.file_service()
     current_user = container.user()
-
-    # Upload file
     file = await service.save_file(upload_file)
 
-    # Build extra context with file details
     extra = {
         "size_bytes": file.size,
         "mimetype": getattr(file, "mimetype", None),
@@ -61,21 +85,33 @@ async def upload_file(
         else None,
     }
 
-    # Audit logging
     audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=current_user.tenant_id,
-        user=current_user,
-        action=ActionType.FILE_UPLOADED,
-        entity_type=EntityType.FILE,
-        entity_id=file.id,
-        description=f"Uploaded file '{file.name}' ({file.size} bytes)",
-        metadata=AuditMetadata.standard(
-            actor=current_user,
-            target=file,
-            extra=extra,
-        ),
-    )
+    session = cast(AsyncSession, container.session())
+    try:
+        async with session.begin():
+            await audit_service.log_async(
+                tenant_id=current_user.tenant_id,
+                user=current_user,
+                action=ActionType.FILE_UPLOADED,
+                entity_type=EntityType.FILE,
+                entity_id=file.id,
+                description=f"Uploaded file '{file.name}' ({file.size} bytes)",
+                metadata=AuditMetadata.standard(
+                    actor=current_user,
+                    target=file,
+                    extra=extra,
+                ),
+            )
+    except SQLAlchemyError as exc:
+        # FileService has already committed the File family. A transient audit
+        # lookup failure must not report that successful upload as failed.
+        logger.warning(
+            "File upload committed but audit logging was unavailable",
+            extra={
+                "file_id": str(file.id),
+                "error_type": type(exc).__name__,
+            },
+        )
 
     return file
 
@@ -91,11 +127,9 @@ async def get_files(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
-    files = await service.get_files()
+    files = await service.get_public_files()
 
-    return protocol.to_paginated_response(
-        [FilePublic(**item.model_dump()) for item in files]
-    )
+    return protocol.to_paginated_response(files)
 
 
 @router.get(
@@ -110,7 +144,7 @@ async def get_file(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
-    return await service.get_file_by_id(file_id=id)
+    return await service.get_public_file_by_id(file_id=id)
 
 
 @router.delete(
@@ -122,7 +156,7 @@ async def get_file(
         204: {
             "description": "File deleted successfully. No response body is returned."
         },
-        **responses.get_responses([403, 404]),
+        **responses.get_responses([403, 404, 409]),
     },
 )
 async def delete_file(
@@ -164,6 +198,23 @@ async def delete_file(
     )
 
 
+@router.get(
+    "/{id}/deletion-preview/",
+    response_model=FileDeletionPreview,
+    status_code=200,
+    responses=responses.get_responses([403, 404]),
+    description=(
+        "Preview whether deleting this File would remove active chat, Assistant, "
+        "App, or App-run attachments."
+    ),
+)
+async def get_file_deletion_preview(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FileDeletionPreview:
+    return await container.file_service().get_deletion_preview(id)
+
+
 @router.post(
     "/{id}/signed-url/",
     response_model=SignedURLResponse,
@@ -183,14 +234,9 @@ async def generate_signed_url(
     signed_url_req: SignedURLRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    # Verify the file exists and the user has access to it. Metadata-only
-    # lookup: minting and the audit trail need id/name, not text/blob columns.
+    # Verify the file exists and the user has access to it
     service = container.file_service()
-    current_user = container.user()
-    files = await service.get_file_infos(file_ids=[id])
-    if not files:
-        raise NotFoundException()
-    file = files[0]
+    await service.get_file_infos(file_ids=[id])
 
     # Calculate expiration time
     expires_at = int(time.time()) + signed_url_req.expires_in
@@ -201,7 +247,7 @@ async def generate_signed_url(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
-        tenant_id=current_user.tenant_id,
+        tenant_id=container.user().tenant_id,
     )
 
     # Build the full URL
@@ -209,25 +255,154 @@ async def generate_signed_url(
     base_url = str(request.base_url).rstrip("/")
     url = f"{base_url}/api/v1/files/{id}/download/?token={token}"
 
-    audit_service = container.audit_service()
-    await audit_service.log_async(
+    return SignedURLResponse(url=url, expires_at=expires_at)
+
+
+@router.post(
+    "/{id}/original/signed-url/",
+    response_model=SignedURLResponse,
+    status_code=200,
+    responses=responses.get_responses([403, 404]),
+    summary="Generate a signed URL for the exact original file",
+    description=(
+        "Checks ownership and exact-original availability, then returns a "
+        "short-lived URL that cannot be used for a processing download."
+    ),
+)
+async def generate_original_signed_url(
+    id: UUID,
+    request: Request,
+    signed_url_req: OriginalSignedURLRequest,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> SignedURLResponse:
+    service = container.file_service()
+    file = await service.ensure_original_available(id)
+    current_user = container.user()
+
+    expires_at = int(time.time()) + signed_url_req.expires_in
+    token = generate_file_original_download_token(
+        file_id=id,
+        expires_at=expires_at,
+        content_disposition=signed_url_req.content_disposition,
+        tenant_id=current_user.tenant_id,
+    )
+    await container.audit_service().log_async(
         tenant_id=current_user.tenant_id,
         user=current_user,
-        action=ActionType.FILE_SIGNED_URL_MINTED,
+        action=ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED,
         entity_type=EntityType.FILE,
         entity_id=id,
-        description=f"Minted signed URL for file '{file.name}' (expires {expires_at})",
+        description=f"Created an original download link for '{file.name}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
             target=file,
             extra={
-                "expires_at": expires_at,
                 "content_disposition": signed_url_req.content_disposition.value,
+                "expires_at": expires_at,
+                "expires_in_seconds": signed_url_req.expires_in,
             },
         ),
     )
+    base_url = str(request.base_url).rstrip("/")
+    return SignedURLResponse(
+        url=f"{base_url}/api/v1/files/{id}/original/download/?token={token}",
+        expires_at=expires_at,
+    )
 
-    return SignedURLResponse(url=url, expires_at=expires_at)
+
+def _validate_download_claims(
+    *,
+    file_id: UUID,
+    payload: dict[str, object] | None,
+) -> tuple[ContentDisposition, UUID | None]:
+    """Validate token claims; returns the disposition and the tenant claim.
+
+    The tenant claim (present on newly minted tokens) is enforced against the
+    file's tenant by the download service, refusing cross-tenant replay if a
+    URL leaks. Tokens minted before the claim existed carry None and skip the
+    check until they expire.
+    """
+    if not payload:
+        raise AuthenticationException("Invalid or expired token")
+    if str(file_id) != payload["file_id"]:
+        raise UnauthorizedException("Token not valid for this file")
+    tenant_claim = payload.get("tenant_id")
+    expected_tenant_id = UUID(str(tenant_claim)) if tenant_claim is not None else None
+    return ContentDisposition(str(payload["content_disposition"])), expected_tenant_id
+
+
+def _content_disposition_header(
+    disposition: ContentDisposition,
+    filename: str,
+) -> str:
+    safe_ascii = bool(filename) and all(
+        0x20 <= ord(character) <= 0x7E and character not in {'"', "\\"}
+        for character in filename
+    )
+    if safe_ascii:
+        return f'{disposition.value}; filename="{filename}"'
+
+    ascii_name = (
+        unicodedata.normalize("NFKD", filename)
+        .encode("ascii", errors="ignore")
+        .decode("ascii")
+    )
+    fallback = "".join(
+        character
+        if 0x20 <= ord(character) <= 0x7E and character not in {'"', "\\"}
+        else "_"
+        for character in ascii_name
+    )
+    fallback = fallback or "download"
+    encoded = quote(filename, safe="", encoding="utf-8", errors="strict")
+    return f"{disposition.value}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
+def _download_response(
+    download: FileDownload,
+    *,
+    content_disposition: ContentDisposition,
+    include_repr_digest: bool = False,
+) -> StreamingResponse:
+    headers = {
+        "Content-Disposition": _content_disposition_header(
+            content_disposition,
+            download.filename,
+        ),
+        "Content-Length": str(download.content_length),
+    }
+    if download.range_supported:
+        headers["Accept-Ranges"] = "bytes"
+    if include_repr_digest:
+        digest = base64.b64encode(download.sha256).decode("ascii")
+        headers["Repr-Digest"] = f"sha-256=:{digest}:"
+    if download.content_range is not None:
+        headers["Content-Range"] = download.content_range
+
+    async def response_chunks():
+        try:
+            async for chunk in download.chunks:
+                yield chunk
+        finally:
+            await download.aclose()
+
+    return StreamingResponse(
+        response_chunks(),
+        status_code=206 if download.content_range is not None else 200,
+        media_type=download.media_type,
+        headers=headers,
+    )
+
+
+def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
+    return JSONResponse(
+        status_code=416,
+        headers={"Content-Range": f"bytes */{exc.total_size}"},
+        content=GeneralError(
+            message=str(exc),
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ).model_dump(exclude_none=True, mode="json"),
+    )
 
 
 @router.get(
@@ -252,129 +427,77 @@ async def generate_signed_url(
         403: {"description": "Unauthorized - Not authorized to view this file"},
         404: {"description": "File content not found or file does not exist"},
         416: {"description": "Range not satisfiable"},
+        **responses.get_responses([503]),
     },
 )
 async def download_file_signed(
     id: UUID,
     token: Annotated[str, Query(description="The signed token for file access")],
-    container: Annotated[Container, Depends(get_container())],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_transaction=False)),
+    ],
     range: Annotated[str | None, Header()] = None,
 ):
-    payload = verify_signed_token(token)
-    if not payload:
-        raise AuthenticationException("Invalid or expired token")
+    content_disposition, expected_tenant_id = _validate_download_claims(
+        file_id=id,
+        payload=verify_signed_token(token),
+    )
 
-    # Verify the file ID in the token matches the requested file ID
-    if str(id) != payload["file_id"]:
-        raise UnauthorizedException("Token not valid for this file")
-
-    # Get the content disposition from the token
-    content_disposition = ContentDisposition(payload["content_disposition"])
-
-    # Get the file without auth
-    file_repo = container.file_repo()
-    file = await file_repo.get_by_id(file_id=payload["file_id"])
-
-    # Tenant binding: the signing-time tenant must match the file's tenant.
-    # Defends against cross-tenant replay if a signed URL ever leaks.
-    token_tenant_id = payload.get("tenant_id")
-    if token_tenant_id is None or str(file.tenant_id) != token_tenant_id:
-        raise UnauthorizedException("Token not valid for this file")
-
-    # "original" variant: stream the original upload bytes from external storage
-    # so a downstream consumer (e.g. an MCP tool) gets the real file rather than
-    # the extracted .txt. Falls through to the text/blob behavior when the
-    # original is unavailable (storage unconfigured or no key persisted).
-    object_storage = container.file_object_storage()
-    if (
-        payload.get("variant") == "original"
-        and file.storage_key
-        and object_storage.is_configured()
-    ):
-        headers = {
-            "Content-Disposition": (
-                f'{content_disposition.value}; filename="{file.name}"'
-            )
-        }
-        return StreamingResponse(
-            object_storage.open_stream(file.storage_key),
-            media_type=file.mimetype or "application/octet-stream",
-            headers=headers,
+    service = container.file_service(user=None)
+    try:
+        download = await service.get_download_no_auth(
+            id,
+            range_header=range,
+            expected_tenant_id=expected_tenant_id,
         )
+    except FileContentRangeError as exc:
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{exc.total_size}"},
+        )
+    return _download_response(
+        download,
+        content_disposition=content_disposition,
+    )
 
-    if file.text is None and file.blob is None:
-        raise NotFoundException("File content not found")
 
-    content_bytes = None
-    response_mimetype = file.mimetype
-    response_filename = file.name
-
-    if file.file_type == FileType.TEXT and file.text:
-        content_bytes = file.text.encode("utf-8")
-        # For text files (PDFs, DOCX, etc.), return as .txt with plain text mimetype
-        response_mimetype = "text/plain"
-        # Change file extension to .txt
-        if "." in file.name:
-            filename_without_ext = file.name.rsplit(".", 1)[0]
-            response_filename = f"{filename_without_ext}.txt"
-        else:
-            response_filename = f"{file.name}.txt"
-    elif file.blob:
-        content_bytes = file.blob
-    else:
-        return Response(status_code=404, content="File content not found")
-
-    total_size = len(content_bytes)
-    headers = {
-        "Content-Disposition": f'{content_disposition.value}; filename="{response_filename}"',
-        "Accept-Ranges": "bytes",
-    }
-
-    # Handle range request
-    if range:
-        # Only allow range requests for audio files
-        if file.file_type != FileType.AUDIO:
-            raise BadRequestException("Range is only allowed for audio files")
-
-        try:
-            range_match = re.match(r"bytes=(\d+)-(\d*)", range)
-            if range_match:
-                start = int(range_match.group(1))
-                end = (
-                    int(range_match.group(2))
-                    if range_match.group(2)
-                    else total_size - 1
-                )
-
-                # Validate range
-                if start >= total_size or end >= total_size or start > end:
-                    return Response(
-                        status_code=416,  # Range Not Satisfiable
-                        headers={"Content-Range": f"bytes */{total_size}"},
-                    )
-
-                # Create partial response
-                content = io.BytesIO(content_bytes[start : end + 1])
-
-                headers.update(
-                    {
-                        "Content-Range": f"bytes {start}-{end}/{total_size}",
-                        "Content-Length": str(end - start + 1),
-                    }
-                )
-
-                return StreamingResponse(
-                    content,
-                    status_code=206,  # Partial Content
-                    media_type=response_mimetype,
-                    headers=headers,
-                )
-        except Exception:
-            # If range parsing fails, fall back to full content
-            pass
-
-    # Return full content if range is not specified or invalid
-    headers["Content-Length"] = str(total_size)
-    content = io.BytesIO(content_bytes)
-
-    return StreamingResponse(content, media_type=response_mimetype, headers=headers)
+@router.get(
+    "/{id}/original/download/",
+    status_code=200,
+    response_class=Response,
+    response_model=None,
+    summary="Download the exact original file using a signed URL",
+    responses={
+        200: {"description": "Successfully downloaded the entire original file"},
+        206: {"description": "Successfully downloaded part of the original audio"},
+        **responses.get_responses([400, 401, 403, 404, 409, 416, 503]),
+    },
+)
+async def download_original_file_signed(
+    id: UUID,
+    token: Annotated[str, Query(description="The signed original-download token")],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_transaction=False)),
+    ],
+    range: Annotated[str | None, Header()] = None,
+) -> StreamingResponse | Response:
+    content_disposition, expected_tenant_id = _validate_download_claims(
+        file_id=id,
+        payload=verify_file_original_download_token(token),
+    )
+    service = container.file_service(user=None)
+    try:
+        download = await service.get_original_download_no_auth(
+            id,
+            range_header=range,
+            expected_tenant_id=expected_tenant_id,
+        )
+    except FileContentRangeError as exc:
+        return _range_not_satisfiable_response(exc)
+    return _download_response(
+        download,
+        content_disposition=content_disposition,
+        include_repr_digest=True,
+    )

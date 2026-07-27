@@ -21,7 +21,8 @@
 import { invalidate } from "$app/navigation";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type { Eneo } from "@eneo/eneo-js";
+import type { Eneo, SkillBindingReferenceInput, SkillBindingSummary } from "@eneo/eneo-js";
+import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
@@ -63,6 +64,7 @@ type Policy = {
     disabled_tool_ids?: string[] | null;
   };
   prompt_enforcement: { enabled: boolean; prompt_library_id?: string | null };
+  skills: { bindings: SkillBindingSummary[] };
 };
 
 type PolicyUpdate = {
@@ -80,6 +82,9 @@ type PolicyUpdate = {
     enabled: boolean;
     prompt_library_id: string | null;
   };
+  skills?: {
+    bindings: SkillBindingReferenceInput[];
+  };
 };
 
 export type PolicyPageData = {
@@ -89,6 +94,7 @@ export type PolicyPageData = {
   modelProviders?: ModelProvider[] | null;
   mcpSettings?: { items?: McpServer[] | null } | null;
   promptLibrary: { items: PromptOption[] };
+  skills: SkillBindingCatalogPage;
 };
 
 export type BadgeVariant = "default" | "outline" | "destructive";
@@ -96,7 +102,8 @@ export type BadgeVariant = "default" | "outline" | "destructive";
 const EMPTY_POLICY: Policy = {
   models_restriction: { enabled: false, models: [], provider_ids: [] },
   mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
-  prompt_enforcement: { enabled: false, prompt_library_id: null }
+  prompt_enforcement: { enabled: false, prompt_library_id: null },
+  skills: { bindings: [] }
 };
 
 export class PolicyDraft {
@@ -111,6 +118,13 @@ export class PolicyDraft {
   #allProviders = $state<ModelProvider[]>([]);
   #allMcpServers = $state<McpServer[]>([]);
   promptOptions = $state<PromptOption[]>([]);
+  skillCatalogPage = $state<SkillBindingCatalogPage>({
+    items: [],
+    count: 0,
+    limit: 25,
+    next_cursor: null
+  });
+  skillBindingSummaries = $state<SkillBindingSummary[]>([]);
 
   // ---- Editable state ------------------------------------------------------
   modelsEnabled = $state(false);
@@ -123,6 +137,7 @@ export class PolicyDraft {
   disabledMcpToolIds = new SvelteSet<string>();
   promptEnabled = $state(false);
   selectedPromptId = $state<string | null>(null);
+  skillBindings = $state<SkillBindingReferenceInput[]>([]);
 
   // ---- Save lifecycle ------------------------------------------------------
   saving = $state(false);
@@ -142,6 +157,7 @@ export class PolicyDraft {
     this.#allProviders = (data.modelProviders ?? []).filter((p) => p.is_active);
     this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
     this.promptOptions = data.promptLibrary.items;
+    this.skillCatalogPage = data.skills;
     this.#seed(data.policy, selectableModels);
   }
 
@@ -179,6 +195,11 @@ export class PolicyDraft {
     }
     this.promptEnabled = policy.prompt_enforcement.enabled;
     this.selectedPromptId = policy.prompt_enforcement.prompt_library_id ?? null;
+    this.skillBindingSummaries = policy.skills.bindings;
+    this.skillBindings = policy.skills.bindings.map((binding) => ({
+      skill_id: binding.skill_id,
+      skill_revision_id: binding.skill_revision_id
+    }));
     this.saveError = null;
   }
 
@@ -285,7 +306,23 @@ export class PolicyDraft {
         ? this.selectedPromptId !== (this.#policy.prompt_enforcement.prompt_library_id ?? null)
         : false)
   );
-  dirty = $derived(this.#modelsDirty || this.#mcpDirty || this.#promptDirty);
+  #initialSkillBindings = $derived(
+    this.#policy.skills.bindings.map((binding) => ({
+      skill_id: binding.skill_id,
+      skill_revision_id: binding.skill_revision_id
+    }))
+  );
+  #skillsDirty = $derived(
+    this.skillBindings.length !== this.#initialSkillBindings.length ||
+      this.skillBindings.some((binding, index) => {
+        const initial = this.#initialSkillBindings[index];
+        return (
+          initial?.skill_id !== binding.skill_id ||
+          initial.skill_revision_id !== binding.skill_revision_id
+        );
+      })
+  );
+  dirty = $derived(this.#modelsDirty || this.#mcpDirty || this.#promptDirty || this.#skillsDirty);
 
   // ---- Validation ----------------------------------------------------------
   defaultValid = $derived(
@@ -337,6 +374,11 @@ export class PolicyDraft {
               this.promptOptions.find((p) => p.id === this.selectedPromptId)?.name ??
               m.governance_prompt_unknown()
           })
+  );
+  skillsSummary = $derived(
+    this.skillBindings.length === 0
+      ? m.governance_skills_summary_none()
+      : m.governance_skills_summary_count({ count: this.skillBindings.length })
   );
 
   // ---- Helpers (arrow fields → safe to pass as props) ----------------------
@@ -431,6 +473,9 @@ export class PolicyDraft {
     if (this.promptEnabled && !initial.prompt_enforcement.enabled) {
       out.push(m.governance_confirm_prompt_forced());
     }
+    if (this.#skillsDirty) {
+      out.push(m.governance_confirm_skills_changed());
+    }
     return out;
   };
 
@@ -465,6 +510,11 @@ export class PolicyDraft {
         update.prompt_enforcement = {
           enabled: this.promptEnabled,
           prompt_library_id: this.promptEnabled ? this.selectedPromptId : null
+        };
+      }
+      if (this.#skillsDirty) {
+        update.skills = {
+          bindings: this.skillBindings
         };
       }
       await this.#eneo.governancePolicy.update(update);

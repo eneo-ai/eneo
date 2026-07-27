@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator, Coroutine, Sequence
+from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -9,8 +9,10 @@ from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.assistants.assistant_service import AssistantService
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.completion_models.infrastructure.context_builder import count_tokens
-from eneo.database.database import sessionmanager
+from eneo.database.database import AsyncSession, sessionmanager
+from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
+from eneo.files.file_service import FileService
 from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.logging.logging import LoggingDetails
@@ -29,6 +31,10 @@ from eneo.sessions.session import (
     SessionUpdate,
 )
 from eneo.sessions.sessions_repo import SessionRepository
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+)
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -85,6 +91,8 @@ async def persist_partial_question_answer(
     num_tokens_answer: int,
     completion_model_id: UUID | None = None,
     reasoning: str | None = None,
+    skill_provenance: Sequence[SkillExecutionReference] | None = None,
+    skill_activation: SkillActivationEvidenceV1 | None = None,
 ) -> None:
     """Persist the answer text on a previously-created placeholder question using a fresh
     DB session.
@@ -104,6 +112,8 @@ async def persist_partial_question_answer(
                 num_tokens_answer=num_tokens_answer,
                 completion_model_id=completion_model_id,
                 reasoning=reasoning,
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
             )
         logger.info(
             "Persisted partial chat answer on stream abort",
@@ -119,23 +129,69 @@ async def persist_partial_question_answer(
         )
 
 
+async def persist_final_skill_runtime_state(
+    *,
+    tenant_id: UUID,
+    question_id: UUID,
+    skill_provenance: Sequence[SkillExecutionReference],
+    skill_activation: SkillActivationEvidenceV1,
+) -> None:
+    """Commit final Skill evidence independently of a failing request transaction."""
+
+    async with sessionmanager.session() as session, session.begin():
+        repo = QuestionRepository(session)
+        await repo.update_skill_runtime_state(
+            question_id=question_id,
+            tenant_id=tenant_id,
+            skill_provenance=skill_provenance,
+            skill_activation=skill_activation,
+        )
+    logger.info(
+        "Persisted final Skill activation evidence after completion failure",
+        extra={"question_id": str(question_id)},
+    )
+
+
 class SessionService:
     def __init__(
         self,
         session_repo: SessionRepository,
         question_repo: QuestionRepository,
         user: UserInDB,
+        file_service: FileService | None = None,
         assistant_service: AssistantService | None = None,
         group_chat_service: GroupChatService | None = None,
         mcp_session_lifecycle_service: "McpSessionLifecycleService | None" = None,
+        file_content_loader_factory: (
+            Callable[[AsyncSession], FileContentLoader] | None
+        ) = None,
     ):
         super().__init__()
         self.session_repo = session_repo
         self.question_repo = question_repo
         self.user = user
+        self.file_service = file_service
         self.assistant_service = assistant_service
         self.group_chat_service = group_chat_service
         self.mcp_session_lifecycle_service = mcp_session_lifecycle_service
+        self._file_content_loader_factory = file_content_loader_factory
+
+    def _file_content_loader(self, session: AsyncSession) -> FileContentLoader | None:
+        if self._file_content_loader_factory is None:
+            return None
+        return self._file_content_loader_factory(session)
+
+    def _question_repository(self, session: AsyncSession) -> QuestionRepository:
+        loader = self._file_content_loader(session)
+        if loader is None:
+            return QuestionRepository(session)
+        return QuestionRepository(session, loader)
+
+    def _session_repository(self, session: AsyncSession) -> SessionRepository:
+        loader = self._file_content_loader(session)
+        if loader is None:
+            return SessionRepository(session)
+        return SessionRepository(session, loader)
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
@@ -278,16 +334,114 @@ class SessionService:
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
     ) -> SessionInDB:
+        """Create the conversation identity in a short committed transaction.
+
+        Completion setup may create durable external state, including MCP
+        protocol sessions, before the request transaction ends. Committing the
+        parent row here makes those child writes independently durable and
+        prevents a later request rollback from orphaning remote state.
+        """
+        session_add = self._build_session_add(
+            name=name,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
+        async with sessionmanager.session() as session, session.begin():
+            return await self._session_repository(session).add(session_add)
+
+    def _build_session_add(
+        self,
+        *,
+        name: str,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+    ) -> SessionAdd:
         user_id, api_key_id = self._principal_columns()
-        session_add = SessionAdd(
+        return SessionAdd(
             name=name,
             user_id=user_id,
             api_key_id=api_key_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with self._write_transaction():
-            return await self.session_repo.add(session_add)
+
+    def _build_question_placeholder(
+        self,
+        *,
+        question: str,
+        session_id: UUID,
+        assistant_id: UUID | None,
+        completion_model: CompletionModel | None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
+        skill_activation: SkillActivationEvidenceV1 | None = None,
+    ) -> QuestionAdd:
+        completion_model_id = completion_model.id if completion_model else None
+        completion_model_name = completion_model.name if completion_model else None
+        return QuestionAdd(
+            tenant_id=self.user.tenant_id,
+            question=question,
+            answer="",
+            num_tokens_question=safe_count_tokens(question, completion_model_name),
+            num_tokens_answer=0,
+            completion_model_id=completion_model_id,
+            session_id=session_id,
+            logging_details=None,
+            assistant_id=assistant_id,
+            tool_calls=None,
+            skill_provenance=list(skill_provenance) if skill_provenance else None,
+            skill_activation=skill_activation,
+        )
+
+    @staticmethod
+    async def _insert_question_placeholder(
+        repo: QuestionRepository,
+        question_add: QuestionAdd,
+        files: Sequence[File] | None,
+    ) -> UUID:
+        question_record = await repo.add(
+            question_add,
+            info_blob_chunks=[],
+            files=list(files or []),
+            generated_files=[],
+        )
+        assert question_record is not None, (
+            "question_repo.add must return the newly inserted row"
+        )
+        return question_record.id
+
+    async def create_session_with_question_placeholder(
+        self,
+        *,
+        name: str,
+        question: str,
+        files: Sequence[File] | None = None,
+        session_assistant_id: UUID | None = None,
+        question_assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+        completion_model: CompletionModel | None = None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
+        skill_activation: SkillActivationEvidenceV1 | None = None,
+    ) -> tuple[SessionInDB, UUID]:
+        """Commit a new conversation and its first user message atomically."""
+        session_add = self._build_session_add(
+            name=name,
+            assistant_id=session_assistant_id,
+            group_chat_id=group_chat_id,
+        )
+        async with sessionmanager.session() as db_session, db_session.begin():
+            session_record = await self._session_repository(db_session).add(session_add)
+            question_add = self._build_question_placeholder(
+                question=question,
+                session_id=session_record.id,
+                assistant_id=question_assistant_id,
+                completion_model=completion_model,
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
+            )
+            question_id = await self._insert_question_placeholder(
+                self._question_repository(db_session), question_add, files
+            )
+        return session_record, question_id
 
     async def create_question_placeholder(
         self,
@@ -297,6 +451,8 @@ class SessionService:
         files: Sequence[File] | None = None,
         assistant_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
+        skill_activation: SkillActivationEvidenceV1 | None = None,
     ) -> UUID:
         """Persist a placeholder Question row with the user's message and an empty answer.
 
@@ -304,44 +460,28 @@ class SessionService:
         stream finishes (normally or via abort). This guarantees the user's message is
         durably stored before any LLM token streams out.
 
-        Note: a placeholder row commits with the router's request transaction, so it
-        remains in the DB even if the LLM call later raises (rate limit, model
-        unavailable, network drop). The conversation lists endpoint will surface those
-        rows with `answer=""` — that is intentional, the row reflects what the user
-        asked.
+        The placeholder uses its own short transaction, so it remains in the DB
+        if later context construction, MCP discovery, or model preparation fails.
+        The conversation lists endpoint will surface the row with ``answer=""``;
+        that is intentional because the row records what the user asked.
 
         `num_tokens_question` is seeded with `count_tokens(question, model_name)` so
         analytics don't undercount aborted requests. The normal-completion path later
         overwrites it with the provider-reported prompt token count.
         """
-        completion_model_id = completion_model.id if completion_model else None
-        completion_model_name = completion_model.name if completion_model else None
-        initial_question_tokens = safe_count_tokens(question, completion_model_name)
-        question_add = QuestionAdd(
-            tenant_id=self.user.tenant_id,
+        question_add = self._build_question_placeholder(
             question=question,
-            answer="",
-            num_tokens_question=initial_question_tokens,
-            num_tokens_answer=0,
-            completion_model_id=completion_model_id,
             session_id=session.id,
-            logging_details=None,
             assistant_id=assistant_id,
-            tool_calls=None,
+            completion_model=completion_model,
+            skill_provenance=skill_provenance,
+            skill_activation=skill_activation,
         )
 
-        async with self._write_transaction():
-            question_record = await self.question_repo.add(
-                question_add,
-                info_blob_chunks=[],
-                files=list(files or []),
-                generated_files=[],
+        async with sessionmanager.session() as db_session, db_session.begin():
+            return await self._insert_question_placeholder(
+                self._question_repository(db_session), question_add, files
             )
-
-        assert question_record is not None, (
-            "question_repo.add must return the newly inserted row"
-        )
-        return question_record.id
 
     async def complete_question_with_answer(
         self,
@@ -358,6 +498,8 @@ class SessionService:
         tool_calls: list[ToolCallInfo] | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
+        skill_activation: SkillActivationEvidenceV1 | None = None,
     ) -> None:
         """Update a placeholder Question row with the final assistant answer."""
         completion_model_id = completion_model.id if completion_model else None
@@ -376,6 +518,8 @@ class SessionService:
                 generated_files=list(generated_files) if generated_files else None,
                 logging_details=logging_details,
                 mcp_tool_references=mcp_tool_references,
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
             )
 
     async def leave_feedback(

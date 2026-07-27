@@ -138,3 +138,30 @@ async def test_estimated_context_overflow_is_still_sent_to_provider():
         adapter.prepare_streaming.await_args.kwargs["context"].token_count
         == response.total_token_count
     )
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_uses_adapter_cumulative_input_estimate():
+    completion_model = _make_completion_model()
+    adapter = _DummyAdapter(model=completion_model)
+    adapter.get_response = AsyncMock(
+        return_value=Completion(
+            text="ok",
+            input_token_estimate=321,
+        )
+    )
+
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+        redis_client=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    response = await service.get_response(
+        model=completion_model,
+        text_input="hi",
+    )
+
+    assert response.total_token_count == 321

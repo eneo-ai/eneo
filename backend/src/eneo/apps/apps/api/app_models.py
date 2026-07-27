@@ -17,6 +17,7 @@ from eneo.main.models import (
     ResourcePermissionsMixin,
 )
 from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
+from eneo.skills.presentation.skill_models import SkillBindingReferenceInput
 from eneo.transcription_models.presentation import TranscriptionModelPublic
 
 
@@ -81,3 +82,4 @@ class AppUpdateRequest(BaseModel):
         default=NOT_PROVIDED,
         description="Icon ID referencing an uploaded icon. Set to null to remove.",
     )
+    skill_bindings: Optional[list[SkillBindingReferenceInput]] = None

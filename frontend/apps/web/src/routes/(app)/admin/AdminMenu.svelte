@@ -23,6 +23,7 @@
     LayoutTemplate,
     Cloud,
     Globe,
+    HardDrive,
     Plug,
     ShieldCheck
   } from "lucide-svelte";
@@ -53,7 +54,7 @@
   const groups = $derived<NavGroup[]>([
     {
       label: m.admin_section_overview(),
-      items: [navItem("/admin", IconLibrary, m.organisation())]
+      items: [navItem("/admin", IconLibrary, m.overview())]
     },
     {
       label: m.admin_section_governance(),
@@ -73,7 +74,8 @@
         navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
         navItem("/admin/web-search", Globe, m.web_search()),
-        navItem("/admin/integrations", Cloud, m.integrations())
+        navItem("/admin/integrations", Cloud, m.integrations()),
+        navItem("/admin/storage", HardDrive, m.storage_settings_nav())
       ]
     },
     {

@@ -10,6 +10,25 @@ if TYPE_CHECKING:
     )
 
 
+# Administrators can tune normal operating limits per MCP server. The wider
+# envelope is an application safety invariant: even a mistaken configuration
+# must not make an untrusted tools/list response unbounded.
+MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT = 256
+MCP_TOOL_CATALOG_HARD_MAX_COUNT = 4096
+MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES = 16 * 1024 * 1024
+MCP_TOOL_CATALOG_HARD_MAX_BYTES = 64 * 1024 * 1024
+MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES = 64 * 1024
+MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
+
+
+class MCPToolCatalogLimitExceeded(ValueError):
+    """A projected persisted tool catalog exceeds its server safety policy."""
+
+
+class MCPToolCatalogStagingTimeout(RuntimeError):
+    """A runtime catalog observation could not acquire its bounded DB window."""
+
+
 class MCPServerTool(Entity):
     """Domain entity for MCP server tool."""
 
@@ -43,6 +62,38 @@ class MCPServerTool(Entity):
         self.requires_approval = requires_approval
         self.removed_from_remote = removed_from_remote
 
+    @classmethod
+    def pending_discovery(
+        cls,
+        *,
+        mcp_server_id: UUID,
+        name: str,
+        title: str | None,
+        description: str | None,
+        input_schema: dict[str, Any] | None,
+    ) -> "MCPServerTool":
+        """Create a discovered definition that cannot run before approval."""
+        return cls(
+            mcp_server_id=mcp_server_id,
+            name=name,
+            title=title,
+            description=None,
+            input_schema=None,
+            is_enabled_by_default=True,
+            pending_description=description,
+            pending_input_schema=input_schema,
+            requires_approval=True,
+        )
+
+    def has_definition_drift(
+        self,
+        *,
+        description: str | None,
+        input_schema: dict[str, Any] | None,
+    ) -> bool:
+        """Return whether a live contract differs from the approved contract."""
+        return self.description != description or self.input_schema != input_schema
+
 
 class MCPServer(Entity):
     """Domain entity for MCP server (tenant-scoped, HTTP-only)."""
@@ -58,6 +109,10 @@ class MCPServer(Entity):
         purpose: str = "general",
         is_enabled: bool = True,
         forward_identity: bool = False,
+        identity_policy_generation: int = 0,
+        tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
+        tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
+        tool_definition_max_bytes: int = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
         env_vars: Optional[dict[str, Any]] = None,
         tags: Optional[list[str]] = None,
         icon_url: Optional[str] = None,
@@ -78,6 +133,10 @@ class MCPServer(Entity):
         self.purpose = purpose
         self.is_enabled = is_enabled
         self.forward_identity = forward_identity
+        self.identity_policy_generation = identity_policy_generation
+        self.tool_catalog_max_count = tool_catalog_max_count
+        self.tool_catalog_max_bytes = tool_catalog_max_bytes
+        self.tool_definition_max_bytes = tool_definition_max_bytes
         self.env_vars = env_vars
         self.tags = tags
         self.icon_url = icon_url

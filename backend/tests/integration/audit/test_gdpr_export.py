@@ -1,7 +1,8 @@
 """Integration tests for GDPR Article 15 export functionality."""
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from eneo.audit.application.audit_export_service import AuditExportService
 from eneo.audit.application.audit_service import AuditService

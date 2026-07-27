@@ -17,6 +17,7 @@ from eneo.governance_policy.domain.governance_policy_repo import (
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.roles.permissions import Permission, validate_permission
+from eneo.skills.domain.skill import SkillBindingReference
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     from eneo.prompt_library.application.prompt_library_service import (
         PromptLibraryService,
     )
+    from eneo.skills.application.skill_service import SkillService
+    from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingProjection
+    from eneo.spaces.space_service import SpaceService
 
 
 class GovernancePolicyService:
@@ -43,6 +47,8 @@ class GovernancePolicyService:
         mcp_server_settings_service: "MCPServerSettingsService",
         prompt_library_service: "PromptLibraryService",
         model_provider_repository: "ModelProviderRepository",
+        skill_service: "SkillService",
+        space_service: "SpaceService",
     ) -> None:
         self.user = user
         self.repo = repo
@@ -50,6 +56,25 @@ class GovernancePolicyService:
         self.mcp_server_settings_service = mcp_server_settings_service
         self.prompt_library_service = prompt_library_service
         self.model_provider_repository = model_provider_repository
+        self.skill_service = skill_service
+        self.space_service = space_service
+
+    async def get_skill_bindings(
+        self, policy: GovernancePolicy
+    ) -> list["ResolvedSkillBinding"]:
+        if policy.id is None:
+            return []
+        return await self.skill_service.list_governance_bindings(policy_id=policy.id)
+
+    async def get_skill_binding_projections(
+        self,
+        policy: GovernancePolicy,
+    ) -> list["SkillBindingProjection"]:
+        if policy.id is None:
+            return []
+        return await self.skill_service.list_governance_binding_projections(
+            policy_id=policy.id
+        )
 
     async def get_policy(self) -> GovernancePolicy:
         """Get the tenant's policy, auto-creating an empty one if none exists.
@@ -88,6 +113,7 @@ class GovernancePolicyService:
         ) = None,
         mcp_restriction: (tuple[bool, list[PolicyMcpServer], list[UUID]] | None) = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
+        skill_references: list[SkillBindingReference] | None = None,
     ) -> GovernancePolicy:
         policy = await self.get_policy_for_update()
 
@@ -118,7 +144,19 @@ class GovernancePolicyService:
                 await self._validate_prompt_belongs_to_tenant(prompt_id)
             policy.set_prompt_enforcement(enabled=enabled, prompt_library_id=prompt_id)
 
-        return await self.repo.save(policy, updated_by_user_id=self.user.id)
+        saved = await self.repo.save(policy, updated_by_user_id=self.user.id)
+
+        if skill_references is not None:
+            assert saved.id is not None
+            organization_space = await self.space_service.get_or_create_tenant_space()
+            assert organization_space.id is not None
+            await self.skill_service.replace_governance_bindings(
+                policy_id=saved.id,
+                organization_space_id=organization_space.id,
+                references=skill_references,
+            )
+
+        return saved
 
     async def _validate_providers_belong_to_tenant(
         self, provider_ids: list[UUID]

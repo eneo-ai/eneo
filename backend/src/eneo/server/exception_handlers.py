@@ -5,9 +5,26 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from eneo.files.file_models import (
+    FileInUseError,
+    FileOriginalNotFoundError,
+)
 from eneo.main.exceptions import EXCEPTION_MAP, ErrorCodes, UnauthorizedException
 from eneo.main.models import GeneralError
 from eneo.main.request_context import get_request_context
+from eneo.object_content.content import (
+    ContentTooLargeError,
+    InvalidContentRangeError,
+    ObjectContentBusyError,
+    ObjectContentIdempotencyConflictError,
+    ObjectContentIntegrityError,
+    ObjectContentStateError,
+    ObjectContentUnavailableError,
+)
+from eneo.object_content.deployment_policy import (
+    DeploymentPolicyConflict,
+    ObjectStoreTargetNotSelectable,
+)
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -88,7 +105,48 @@ logger = logging.getLogger(__name__)
 
 
 def add_exception_handlers(app: FastAPI):
-    for exception, (status_code, error_message, error_code) in EXCEPTION_MAP.items():
+    object_content_exception_map = {
+        ObjectContentUnavailableError: (
+            503,
+            None,
+            ErrorCodes.RESOURCE_NOT_READY,
+        ),
+        ObjectContentIntegrityError: (
+            503,
+            None,
+            ErrorCodes.RESOURCE_NOT_READY,
+        ),
+        ObjectContentIdempotencyConflictError: (
+            409,
+            None,
+            ErrorCodes.UNIQUE_ERROR,
+        ),
+        ObjectContentStateError: (409, None, ErrorCodes.BAD_REQUEST),
+        ObjectContentBusyError: (409, None, ErrorCodes.RESOURCE_NOT_READY),
+        FileInUseError: (409, None, ErrorCodes.FILE_IN_USE),
+        FileOriginalNotFoundError: (
+            404,
+            None,
+            ErrorCodes.FILE_ORIGINAL_NOT_FOUND,
+        ),
+        ContentTooLargeError: (413, None, ErrorCodes.FILE_TOO_LARGE),
+        InvalidContentRangeError: (416, None, ErrorCodes.BAD_REQUEST),
+        DeploymentPolicyConflict: (
+            409,
+            None,
+            ErrorCodes.DEPLOYMENT_POLICY_CONFLICT,
+        ),
+        ObjectStoreTargetNotSelectable: (
+            409,
+            None,
+            ErrorCodes.OBJECT_STORE_NOT_SELECTABLE,
+        ),
+    }
+    exception_handlers = (
+        *EXCEPTION_MAP.items(),
+        *object_content_exception_map.items(),
+    )
+    for exception, (status_code, error_message, error_code) in exception_handlers:
 
         def handler(
             request: Request,

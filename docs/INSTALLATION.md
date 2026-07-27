@@ -39,9 +39,18 @@ When VS Code opens:
 
 ### Step 3: Configure Environment
 
-Now edit `backend/.env` and add your AI provider key:
+Generate an encryption key before saving provider credentials in the admin UI:
 
 ```bash
+cd backend
+uv run python -m eneo.cli.generate_encryption_key
+```
+
+Add the generated value and your AI provider key to `backend/.env`:
+
+```bash
+ENCRYPTION_KEY=<generated-44-character-key>
+
 # Example for OpenAI
 OPENAI_API_KEY=sk-proj-your-actual-key-here
 
@@ -136,9 +145,13 @@ ENEO_SUPER_API_KEY=your-secure-api-key
 # Access to modules endpoint (higher privilege)
 ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 
-# Increase file upload limits (in bytes, 10MB example)
-UPLOAD_MAX_FILE_SIZE=10485760
 ```
+
+Platform admins set upload limits and choose storage for eligible new File and
+Icon writes in **Admin > Storage**. Changes take effect without restarting the
+backend or worker. Operators keep
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL, backup, and process
+safety ceiling; it is not the upload policy.
 
 ## Common Issues & Solutions
 
@@ -158,10 +171,17 @@ Then restart the backend.
 
 ### File Upload Errors (Large PDFs)
 
-Increase limits in `backend/.env`:
-```bash
-UPLOAD_MAX_FILE_SIZE=10485760  # 10MB in bytes
-```
+Ask a platform admin to review the configured and effective limits in
+**Admin > Storage**. For PostgreSQL-inline session uploads, the effective limit
+is the smaller of the admin policy and the operator's
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. For object-store session uploads,
+the effective limit is the smaller of the admin policy and the configured
+portable multipart envelope. The page identifies which value constrains the
+upload. FastAPI/Starlette multipart parsing happens before route admission and
+may use temporary disk. Eneo's admission check rejects an oversized File or
+Icon before its own capture/spool or any storage mutation. Operators must use
+ingress/request-body limits and configure and monitor temporary-disk capacity
+to protect that earlier parsing boundary.
 
 ### Login Issues During Development
 

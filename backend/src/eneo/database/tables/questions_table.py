@@ -1,9 +1,10 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
+from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import CompletionModels
@@ -30,6 +31,16 @@ class Questions(BasePublic):
     num_tokens_context: Mapped[Optional[int]] = mapped_column(nullable=True)
     tool_calls: Mapped[Optional[list[object]]] = mapped_column(JSONB, nullable=True)
     reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
+    skill_provenance: Mapped[Optional[list[dict[str, object]]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    skill_activation_data: Mapped[Optional[dict[str, object]]] = mapped_column(
+        "skill_activation",
+        JSONB,
+        nullable=True,
+        deferred=True,
+        deferred_raiseload=True,
+    )
 
     # Foreign keys
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
@@ -71,6 +82,15 @@ class Questions(BasePublic):
         order_by="[McpToolReference.tool_call_id, McpToolReference.order]"
     )
 
+    @property
+    def skill_activation(self) -> Optional[dict[str, object]]:
+        """Expose activation evidence only when an explicit query loaded it."""
+        state = sa_inspect(self)
+        assert state is not None
+        if "skill_activation_data" in state.unloaded:
+            return None
+        return self.skill_activation_data
+
 
 class InfoBlobReferences(BaseCrossReference):
     question_id: Mapped[UUID] = mapped_column(
@@ -95,3 +115,5 @@ class QuestionsFiles(BaseCrossReference):
     type: Mapped[str] = mapped_column()
 
     file: Mapped[Files] = relationship()
+
+    __table_args__ = (Index("ix_questions_files_file_id", "file_id"),)

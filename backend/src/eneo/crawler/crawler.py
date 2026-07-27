@@ -210,6 +210,8 @@ def create_runner(
     filepath_str = str(filepath)
     # Scrapy settings values have heterogeneous types; dict[str, Any] is correct here.
     settings: dict[str, Any] = {
+        # Crochet owns the platform-default Twisted reactor for this embedded runner.
+        "TWISTED_REACTOR": None,
         "FEEDS": {filepath_str: {"format": "jsonl", "item_classes": [CrawledPage]}},
         # All settings use get_crawler_setting() for tenant-aware resolution
         "CLOSESPIDER_ITEMCOUNT": get_crawler_setting(

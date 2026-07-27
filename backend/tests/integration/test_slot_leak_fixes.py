@@ -207,6 +207,7 @@ class TestSessionLifecycle:
         to return the connection to the pool before the long-running crawl begins.
         """
         import inspect
+
         from eneo.worker import crawl_tasks
 
         source = inspect.getsource(crawl_tasks.crawl_task)
@@ -309,6 +310,7 @@ class TestRedisTTLManagement:
         Note: Heartbeat logic was extracted to HeartbeatMonitor during refactoring.
         """
         import inspect
+
         from eneo.worker.crawl.heartbeat import HeartbeatMonitor
 
         source = inspect.getsource(HeartbeatMonitor._refresh_redis_ttl)
@@ -330,6 +332,7 @@ class TestZombieJobPrevention:
         Note: Preemption logic was extracted to HeartbeatMonitor during refactoring.
         """
         import inspect
+
         from eneo.worker.crawl.heartbeat import HeartbeatMonitor
 
         source = inspect.getsource(HeartbeatMonitor._check_preemption)
@@ -344,6 +347,7 @@ class TestZombieJobPrevention:
         and return preempted_during_crawl status.
         """
         import inspect
+
         from eneo.worker import crawl_tasks
 
         source = inspect.getsource(crawl_tasks.crawl_task)

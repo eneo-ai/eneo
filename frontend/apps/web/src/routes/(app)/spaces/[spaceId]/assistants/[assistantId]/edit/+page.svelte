@@ -4,7 +4,7 @@
 
   import { Button, Input, Tooltip } from "@eneo/ui";
   import { IconSparkles } from "@eneo/icons/sparkles";
-  import { afterNavigate, beforeNavigate } from "$app/navigation";
+  import { afterNavigate, beforeNavigate, invalidate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
   import { fade } from "svelte/transition";
@@ -30,6 +30,12 @@
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import {
+    loadSkillBindingCatalogPage,
+    loadSkillBindingPreview
+  } from "$lib/features/skills/skillBindingCatalog";
+  import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -54,14 +60,28 @@
   } = untrack(() =>
     initAssistantEditor({
       assistant: data.assistant,
+      skillBindings: data.skillBindings.map((binding) => ({
+        skill_id: binding.skill_id,
+        skill_revision_id: binding.skill_revision_id,
+        activation_mode: binding.activation_mode
+      })),
       eneo: data.eneo,
-      onUpdateDone() {
-        refreshCurrentSpace("applications");
+      onUpdateDone(_assistant, changes) {
+        void refreshCurrentSpace("applications");
+        if (changes.skill_bindings !== undefined || changes.completion_model !== undefined) {
+          void invalidate("space:skills").catch((error) => {
+            console.error("Failed to refresh Assistant Skill runtime", error);
+          });
+        }
       }
     })
   );
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  async function createSkill(value: SkillFormValue) {
+    return data.eneo.skills.create({ spaceId: $currentSpace.id, ...value });
+  }
 
   const effectiveConfig = $derived($resource.effective_config);
   const promptLocked = $derived(effectiveConfig?.prompt_locked === true);
@@ -240,7 +260,7 @@
               $update.completion_model
             );
 
-            await saveChanges();
+            if (!(await saveChanges())) return;
             showSavesChangedNotice = true;
             setTimeout(() => {
               showSavesChangedNotice = false;
@@ -393,6 +413,42 @@
           ></textarea>
         </Settings.Row>
 
+        {#if data.supportsDirectSkills && $currentSpace.hasPermission("read", "skill")}
+          <div id="skills" class="scroll-mt-20">
+            <Settings.Row
+              title={m.skills()}
+              description={m.skills_editor_description()}
+              hasChanges={$currentChanges.diff.skill_bindings !== undefined}
+              revertFn={() => discardChanges("skill_bindings")}
+            >
+              <SkillBindingsEditor
+                bind:bindings={$update.skill_bindings}
+                initialCatalogPage={data.skills}
+                bindingSummaries={data.skillBindings}
+                supportsActivationModes
+                skillRuntime={data.skillRuntime}
+                canEditBindings={data.assistant.permissions?.includes("edit") ?? false}
+                canCreateSkills={$currentSpace.organization !== true &&
+                  $currentSpace.hasPermission("create", "skill")}
+                onListCatalog={(params) =>
+                  loadSkillBindingCatalogPage({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    organizationSpace: data.currentSpace.organization === true,
+                    ...params
+                  })}
+                onGetSkillPreview={(target) =>
+                  loadSkillBindingPreview({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    target
+                  })}
+                onCreateSkill={createSkill}
+              />
+            </Settings.Row>
+          </div>
+        {/if}
+
         <Settings.Row
           title={m.attachments()}
           description={m.attach_further_instructions()}
@@ -512,7 +568,7 @@
           </Settings.Row>
         {/if}
 
-        {#if data.settings.file_storage_enabled}
+        {#if data.settings.file_references_enabled}
           <Settings.Row
             title={m.inline_file_text()}
             description={m.inline_file_text_description()}

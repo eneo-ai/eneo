@@ -13,6 +13,9 @@
   import type { Writable } from "svelte/store";
 
   type MCPServerSettings = components["schemas"]["MCPServerSettingsPublic"];
+  const DEFAULT_TOOL_CATALOG_MAX_COUNT = 256;
+  const DEFAULT_TOOL_CATALOG_MAX_MIB = 16;
+  const DEFAULT_TOOL_DEFINITION_MAX_KIB = 64;
 
   type Props = {
     openController: Writable<boolean>;
@@ -51,6 +54,9 @@
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
   let forward_identity = $state(false);
+  let tool_catalog_max_count = $state(DEFAULT_TOOL_CATALOG_MAX_COUNT);
+  let tool_catalog_max_mib = $state(DEFAULT_TOOL_CATALOG_MAX_MIB);
+  let tool_definition_max_kib = $state(DEFAULT_TOOL_DEFINITION_MAX_KIB);
 
   // Authentication credentials
   let bearer_token = $state("");
@@ -70,6 +76,14 @@
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
       forward_identity = mcpServer.forward_identity ?? false;
+      tool_catalog_max_count = mcpServer.tool_catalog_max_count ?? DEFAULT_TOOL_CATALOG_MAX_COUNT;
+      tool_catalog_max_mib = Math.round(
+        (mcpServer.tool_catalog_max_bytes ?? DEFAULT_TOOL_CATALOG_MAX_MIB * 1024 * 1024) /
+          (1024 * 1024)
+      );
+      tool_definition_max_kib = Math.round(
+        (mcpServer.tool_definition_max_bytes ?? DEFAULT_TOOL_DEFINITION_MAX_KIB * 1024) / 1024
+      );
     } else {
       name = "";
       description = "";
@@ -78,6 +92,9 @@
       documentation_url = "";
       security_classification = null;
       forward_identity = false;
+      tool_catalog_max_count = DEFAULT_TOOL_CATALOG_MAX_COUNT;
+      tool_catalog_max_mib = DEFAULT_TOOL_CATALOG_MAX_MIB;
+      tool_definition_max_kib = DEFAULT_TOOL_DEFINITION_MAX_KIB;
     }
     // Always clear auth credentials (they're stored securely, not shown).
     // The stored header name is not exposed by the API either; in edit mode
@@ -113,6 +130,9 @@
       if (description) data.description = description;
       if (documentation_url) data.documentation_url = documentation_url;
       data.forward_identity = forward_identity;
+      data.tool_catalog_max_count = tool_catalog_max_count;
+      data.tool_catalog_max_bytes = tool_catalog_max_mib * 1024 * 1024;
+      data.tool_definition_max_bytes = tool_definition_max_kib * 1024;
 
       // Security classification — send id or null
       data.security_classification = security_classification
@@ -145,6 +165,9 @@
         api_key_token = "";
         security_classification = null;
         forward_identity = false;
+        tool_catalog_max_count = DEFAULT_TOOL_CATALOG_MAX_COUNT;
+        tool_catalog_max_mib = DEFAULT_TOOL_CATALOG_MAX_MIB;
+        tool_definition_max_kib = DEFAULT_TOOL_DEFINITION_MAX_KIB;
       }
 
       $openController = false;
@@ -473,6 +496,83 @@
               {isWebSearch ? m.web_search_forward_identity_hint() : m.mcp_forward_identity_hint()}
             </p>
           </div>
+
+          <details class="border-dimmer mt-5 border-t pt-4">
+            <summary class="text-default cursor-pointer text-sm font-medium">
+              {m.mcp_catalog_safety()}
+            </summary>
+            <p class="text-muted mt-2 text-xs leading-relaxed">
+              {m.mcp_catalog_safety_hint()}
+            </p>
+            <div class="mt-4 grid gap-4 sm:grid-cols-3">
+              <div>
+                <label
+                  for="mcp-tool-catalog-max-count"
+                  class="text-default mb-1.5 block text-sm font-medium"
+                >
+                  {m.mcp_catalog_max_count()}
+                </label>
+                <input
+                  id="mcp-tool-catalog-max-count"
+                  type="number"
+                  min="1"
+                  max="4096"
+                  step="1"
+                  bind:value={tool_catalog_max_count}
+                  required
+                  aria-describedby="mcp-tool-catalog-max-count-hint"
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                />
+                <p id="mcp-tool-catalog-max-count-hint" class="text-muted mt-1.5 text-xs">
+                  {m.mcp_catalog_max_count_hint()}
+                </p>
+              </div>
+              <div>
+                <label
+                  for="mcp-tool-catalog-max-mib"
+                  class="text-default mb-1.5 block text-sm font-medium"
+                >
+                  {m.mcp_catalog_max_mib()}
+                </label>
+                <input
+                  id="mcp-tool-catalog-max-mib"
+                  type="number"
+                  min="1"
+                  max="64"
+                  step="1"
+                  bind:value={tool_catalog_max_mib}
+                  required
+                  aria-describedby="mcp-tool-catalog-max-mib-hint"
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                />
+                <p id="mcp-tool-catalog-max-mib-hint" class="text-muted mt-1.5 text-xs">
+                  {m.mcp_catalog_max_mib_hint()}
+                </p>
+              </div>
+              <div>
+                <label
+                  for="mcp-tool-definition-max-kib"
+                  class="text-default mb-1.5 block text-sm font-medium"
+                >
+                  {m.mcp_tool_definition_max_kib()}
+                </label>
+                <input
+                  id="mcp-tool-definition-max-kib"
+                  type="number"
+                  min="1"
+                  max="1024"
+                  step="1"
+                  bind:value={tool_definition_max_kib}
+                  required
+                  aria-describedby="mcp-tool-definition-max-kib-hint"
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                />
+                <p id="mcp-tool-definition-max-kib-hint" class="text-muted mt-1.5 text-xs">
+                  {m.mcp_tool_definition_max_kib_hint()}
+                </p>
+              </div>
+            </div>
+          </details>
         </fieldset>
 
         <!-- Security Classification -->

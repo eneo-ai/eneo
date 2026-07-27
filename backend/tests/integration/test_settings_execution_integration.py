@@ -11,14 +11,15 @@ This verifies the CRITICAL gap: that settings don't just store correctly,
 but actually propagate through all layers to affect worker behavior.
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
 from httpx import AsyncClient
 
 from eneo.tenants.crawler_settings_helper import (
-    get_crawler_setting,
-    get_all_crawler_settings,
     CRAWLER_SETTING_SPECS,
+    get_all_crawler_settings,
+    get_crawler_setting,
 )
 
 

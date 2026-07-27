@@ -6,7 +6,12 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from eneo.skills.presentation.skill_models import (
+    SkillBindingReferenceInput,
+    SkillBindingSummary,
+)
 
 
 class PolicyCompletionModelInput(BaseModel):
@@ -43,10 +48,17 @@ class PromptEnforcementInput(BaseModel):
     prompt_library_id: UUID | None = None
 
 
+class SkillsPolicyInput(BaseModel):
+    bindings: list[SkillBindingReferenceInput] = Field(
+        default_factory=lambda: list[SkillBindingReferenceInput]()
+    )
+
+
 class GovernancePolicyUpdate(BaseModel):
     models_restriction: ModelsRestrictionInput | None = None
     mcp_restriction: McpRestrictionInput | None = None
     prompt_enforcement: PromptEnforcementInput | None = None
+    skills: SkillsPolicyInput | None = None
 
 
 # Output models — minimal references. The full completion-model /
@@ -81,9 +93,14 @@ class PromptEnforcementPublic(BaseModel):
     prompt_library_id: UUID | None
 
 
+class SkillsPolicyPublic(BaseModel):
+    bindings: list[SkillBindingSummary]
+
+
 class GovernancePolicyPublic(BaseModel):
     models_restriction: ModelsRestrictionPublic
     mcp_restriction: McpRestrictionPublic
     prompt_enforcement: PromptEnforcementPublic
+    skills: SkillsPolicyPublic
     updated_at: datetime | None
     updated_by_user_id: UUID | None

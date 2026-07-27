@@ -17,7 +17,8 @@ from eneo.main.logging import get_logger
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from eneo.server.dependencies.container import get_container
-from eneo.users.user import UserInDB
+from eneo.tenants.tenant import TenantState
+from eneo.users.user import UserInDB, UserState
 
 logger = get_logger(__name__)
 
@@ -181,6 +182,23 @@ async def require_user_identity(
         )
 
 
+async def require_platform_admin(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Require the deployment authority on a currently eligible real user."""
+    if (
+        user.state is not UserState.ACTIVE
+        or user.deleted_at is not None
+        or user.tenant.state is not TenantState.ACTIVE
+        or Permission.ADMIN not in user.permissions
+        or not user.is_platform_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Active tenant admin platform authority is required.",
+        )
+
+
 async def require_user_for_creation(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
 ) -> None:
@@ -240,6 +258,7 @@ APPS_READ_OVERRIDES: frozenset[str] = frozenset(
 FILES_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "generate_signed_url",
+        "generate_original_signed_url",
     }
 )
 

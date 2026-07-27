@@ -84,7 +84,7 @@
 
   // Handle save with success feedback
   async function handleSave() {
-    await saveChanges();
+    if (!(await saveChanges())) return;
     showSaveSuccess = true;
     clearTimeout(saveSuccessTimeout);
     saveSuccessTimeout = setTimeout(() => {

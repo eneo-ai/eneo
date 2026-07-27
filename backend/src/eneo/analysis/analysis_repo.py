@@ -20,6 +20,8 @@ from eneo.database.tables.questions_table import (
 )
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
+from eneo.files.file_content_loader import FileContentLoader
+from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import SessionInDB
 
 
@@ -100,9 +102,24 @@ class AssistantInsightQuestionRow(NamedTuple):
 
 
 class AnalysisRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        file_content_loader: FileContentLoader,
+    ) -> None:
         super().__init__()
         self.session = session
+        self.file_content_loader = file_content_loader
+
+    async def _hydrate_sessions(
+        self,
+        sessions: list[SessionInDB],
+    ) -> list[SessionInDB]:
+        await attach_question_files(
+            [question for session in sessions for question in session.questions],
+            loader=self.file_content_loader,
+        )
+        return sessions
 
     async def _get_count(
         self, table: type, tenant_id: UUID | None = None
@@ -238,7 +255,9 @@ class AnalysisRepository:
         )
 
         sessions = await self.session.scalars(stmt)
-        return [SessionInDB.model_validate(session) for session in sessions]
+        return await self._hydrate_sessions(
+            [SessionInDB.model_validate(session) for session in sessions]
+        )
 
     async def get_group_chat_sessions_since(
         self,
@@ -301,7 +320,9 @@ class AnalysisRepository:
 
         sessions = await self.session.scalars(stmt)
 
-        return [SessionInDB.model_validate(session) for session in sessions]
+        return await self._hydrate_sessions(
+            [SessionInDB.model_validate(session) for session in sessions]
+        )
 
     async def get_assistant_question_texts_since(
         self,

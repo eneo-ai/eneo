@@ -19,6 +19,8 @@ from eneo.database.tables.questions_table import (
 )
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
+from eneo.files.file_content_loader import FileContentLoader
+from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import (
     SessionAdd,
     SessionFeedback,
@@ -29,12 +31,43 @@ from eneo.sessions.session import (
 
 
 class SessionRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        file_content_loader: FileContentLoader | None = None,
+    ):
         super().__init__()
         self.delegate: BaseRepositoryDelegate[SessionInDB] = BaseRepositoryDelegate(
             session, Sessions, SessionInDB, with_options=self._options()
         )
         self.session = session
+        self.file_content_loader = file_content_loader
+
+    async def _hydrate_sessions(
+        self,
+        sessions: list[SessionInDB],
+    ) -> list[SessionInDB]:
+        if self.file_content_loader is None:
+            if any(
+                question.questions_files
+                for session in sessions
+                for question in session.questions
+            ):
+                raise RuntimeError("Session files require FileContentLoader")
+            return sessions
+        await attach_question_files(
+            [question for session in sessions for question in session.questions],
+            loader=self.file_content_loader,
+        )
+        return sessions
+
+    async def _hydrate_optional(
+        self,
+        session: SessionInDB | None,
+    ) -> SessionInDB | None:
+        if session is None:
+            return None
+        return (await self._hydrate_sessions([session]))[0]
 
     @staticmethod
     def _options() -> list[Any]:
@@ -122,13 +155,15 @@ class SessionRepository:
         stmt_with_options = self._add_options(stmt)
         session = await self.session.scalar(stmt_with_options)
 
-        return SessionInDB.model_validate(session)
+        return (await self._hydrate_sessions([SessionInDB.model_validate(session)]))[0]
 
     async def get(self, id: UUID) -> SessionInDB | None:
         query = self._exclude_helper_run_sessions(
             sa.select(Sessions).where(Sessions.id == id)
         )
-        return await self.delegate.get_model_from_query(query)
+        return await self._hydrate_optional(
+            await self.delegate.get_model_from_query(query)
+        )
 
     async def get_for_helper_run(self, id: UUID, tenant_id: UUID) -> SessionInDB | None:
         """Load a helper-run session with its prior questions eager-loaded.
@@ -144,7 +179,9 @@ class SessionRepository:
         query = self._filter_by_tenant(
             sa.select(Sessions).where(Sessions.id == id), tenant_id
         )
-        return await self.delegate.get_model_from_query(query)
+        return await self._hydrate_optional(
+            await self.delegate.get_model_from_query(query)
+        )
 
     async def _get_total_count(
         self,
@@ -239,7 +276,9 @@ class SessionRepository:
                 )
                 if limit is not None:
                     query = query.limit(limit + 1)
-                items = await self.delegate.get_models_from_query(query)
+                items = await self._hydrate_sessions(
+                    await self.delegate.get_models_from_query(query)
+                )
                 items.reverse()
                 return (items, total_count)
             else:
@@ -253,7 +292,9 @@ class SessionRepository:
         if limit is not None:
             query = query.limit(limit + 1)
 
-        sessions = await self.delegate.get_models_from_query(query)
+        sessions = await self._hydrate_sessions(
+            await self.delegate.get_models_from_query(query)
+        )
         return sessions, total_count
 
     @staticmethod
@@ -395,7 +436,9 @@ class SessionRepository:
                 )
                 if limit is not None:
                     query = query.limit(limit + 1)
-                items = await self.delegate.get_models_from_query(query)
+                items = await self._hydrate_sessions(
+                    await self.delegate.get_models_from_query(query)
+                )
                 items.reverse()
                 return (items, total_count)
             else:
@@ -409,7 +452,9 @@ class SessionRepository:
         if limit is not None:
             query = query.limit(limit + 1)
 
-        sessions = await self.delegate.get_models_from_query(query)
+        sessions = await self._hydrate_sessions(
+            await self.delegate.get_models_from_query(query)
+        )
         return sessions, total_count
 
     async def get_metadata_by_group_chat(
@@ -500,8 +545,10 @@ class SessionRepository:
         if end_date is not None:
             query = query.filter(Sessions.created_at <= end_date)
 
-        sessions = await self.delegate.get_models_from_query(query)
+        sessions = await self._hydrate_sessions(
+            await self.delegate.get_models_from_query(query)
+        )
         return sessions
 
     async def delete(self, id: UUID) -> SessionInDB | None:
-        return await self.delegate.delete(id)
+        return await self._hydrate_optional(await self.delegate.delete(id))

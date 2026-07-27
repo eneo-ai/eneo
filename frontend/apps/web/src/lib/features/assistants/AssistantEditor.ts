@@ -1,6 +1,9 @@
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import type { Eneo, Assistant } from "@eneo/eneo-js";
+import { mergeParentSkillBindings } from "$lib/features/skills/mergeParentSkillBindings";
+import type { Eneo, Assistant, AssistantSkillBindingInput, components } from "@eneo/eneo-js";
+
+type AssistantUpdate = components["schemas"]["PartialAssistantUpdatePublic"];
 
 const [getAssistantEditor, setAssistantEditor] =
   createContext<ReturnType<typeof initAssistantEditor>>("Edit an Assistant");
@@ -11,12 +14,16 @@ const [getAssistantEditor, setAssistantEditor] =
  */
 function initAssistantEditor(data: {
   assistant: Assistant;
+  skillBindings?: AssistantSkillBindingInput[];
   eneo: Eneo;
-  onUpdateDone?: (assistant: Assistant) => void;
+  onUpdateDone?: (assistant: Assistant, changes: AssistantUpdate) => void;
 }) {
   const editor = createResourceEditor({
     eneo: data.eneo,
-    resource: data.assistant,
+    resource: {
+      ...data.assistant,
+      skill_bindings: data.skillBindings ?? []
+    },
     defaults: {
       prompt: { description: "", text: "" },
       insight_enabled: false,
@@ -25,12 +32,13 @@ function initAssistantEditor(data: {
       mcp_tools: []
     },
     updateResource: async (resource, changes) => {
+      const assistantUpdate = changes as AssistantUpdate;
       const updated = await data.eneo.assistants.update({
         assistant: resource,
-        update: changes as Parameters<typeof data.eneo.assistants.update>[0]["update"]
+        update: assistantUpdate
       });
-      data.onUpdateDone?.(updated);
-      return updated;
+      data.onUpdateDone?.(updated, assistantUpdate);
+      return mergeParentSkillBindings(updated, resource.skill_bindings, changes);
     },
     editableFields: {
       name: true,
@@ -46,6 +54,7 @@ function initAssistantEditor(data: {
       integration_knowledge_list: ["id"],
       mcp_servers: ["id"],
       mcp_tools: ["tool_id", "is_enabled"] as unknown as true,
+      skill_bindings: ["skill_id", "skill_revision_id", "activation_mode"],
       attachments: ["id"],
       data_retention_days: true
     } as Record<string, unknown>,

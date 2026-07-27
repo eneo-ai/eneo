@@ -5,10 +5,11 @@ After bugs are fixed, these tests should pass.
 """
 
 import json
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
-from datetime import datetime, timezone
+
+import pytest
 
 from eneo.audit.infrastructure.audit_session_service import AuditSessionService
 
@@ -346,10 +347,10 @@ class TestNullEmailBug:
     @pytest.fixture
     def mock_log(self):
         """Create a proper mock audit log object that passes Pydantic validation."""
-        from eneo.audit.domain.audit_log import AuditLog
         from eneo.audit.domain.action_types import ActionType
-        from eneo.audit.domain.entity_types import EntityType
         from eneo.audit.domain.actor_types import ActorType
+        from eneo.audit.domain.audit_log import AuditLog
+        from eneo.audit.domain.entity_types import EntityType
         from eneo.audit.domain.outcome import Outcome
 
         now = datetime.now(timezone.utc)

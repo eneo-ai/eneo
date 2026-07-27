@@ -6,8 +6,9 @@ Tests PostgreSQL JSONB atomic merge operations for crawler settings:
 - Race condition prevention via atomic operations
 """
 
-import pytest
 import asyncio
+
+import pytest
 
 
 @pytest.mark.asyncio

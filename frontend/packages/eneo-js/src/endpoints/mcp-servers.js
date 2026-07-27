@@ -51,6 +51,9 @@ export function initMCPServers(client) {
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
      * @param {boolean} [params.forward_identity] Forward acting user/tenant identity headers to this server
+     * @param {number} [params.tool_catalog_max_count] Maximum accepted tools per catalog
+     * @param {number} [params.tool_catalog_max_bytes] Maximum accepted serialized bytes per catalog
+     * @param {number} [params.tool_definition_max_bytes] Maximum accepted serialized bytes per tool definition
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
@@ -67,6 +70,9 @@ export function initMCPServers(client) {
       http_auth_config_schema,
       config_schema,
       forward_identity,
+      tool_catalog_max_count,
+      tool_catalog_max_bytes,
+      tool_definition_max_bytes,
       tags,
       icon_url,
       documentation_url,
@@ -83,6 +89,9 @@ export function initMCPServers(client) {
         http_auth_config_schema,
         config_schema,
         forward_identity,
+        tool_catalog_max_count,
+        tool_catalog_max_bytes,
+        tool_definition_max_bytes,
         tags,
         icon_url,
         documentation_url,
@@ -109,6 +118,9 @@ export function initMCPServers(client) {
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
      * @param {boolean} [params.forward_identity] Forward acting user/tenant identity headers to this server
+     * @param {number} [params.tool_catalog_max_count] Maximum accepted tools per catalog
+     * @param {number} [params.tool_catalog_max_bytes] Maximum accepted serialized bytes per catalog
+     * @param {number} [params.tool_definition_max_bytes] Maximum accepted serialized bytes per tool definition
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
@@ -125,6 +137,9 @@ export function initMCPServers(client) {
       http_auth_config_schema,
       config_schema,
       forward_identity,
+      tool_catalog_max_count,
+      tool_catalog_max_bytes,
+      tool_definition_max_bytes,
       tags,
       icon_url,
       documentation_url,
@@ -140,6 +155,9 @@ export function initMCPServers(client) {
         http_auth_config_schema,
         config_schema,
         forward_identity,
+        tool_catalog_max_count,
+        tool_catalog_max_bytes,
+        tool_definition_max_bytes,
         tags,
         icon_url,
         documentation_url,

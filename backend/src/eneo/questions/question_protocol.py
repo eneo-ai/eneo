@@ -31,6 +31,7 @@ def to_question_public(question: Question) -> Message:
                 "assistant_id",
                 "assistant_name",
                 "mcp_tool_references",
+                "skill_activation",
                 "tool_calls",
             }
         ),

@@ -16,6 +16,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.files.file_models import File
 from eneo.logging.logging import LoggingDetails
 from eneo.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
+from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -59,6 +60,22 @@ class FunctionDefinition:
     name: str
     description: str
     schema: dict[str, object]
+
+
+def function_definition_to_tool(
+    definition: FunctionDefinition,
+) -> dict[str, object]:
+    """Serialize one built-in function exactly as it is sent to providers."""
+
+    return {
+        "type": "function",
+        "function": {
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": definition.schema,
+            "strict": True,
+        },
+    }
 
 
 @dataclass
@@ -127,6 +144,9 @@ class Completion:
     error: Optional[str] = None
     error_code: Optional[int] = None
     usage: Optional[TokenUsage] = None
+    # Cumulative request-payload count when at least one provider round omitted
+    # prompt usage. Provider-reported usage remains separate and authoritative.
+    input_token_estimate: Optional[int] = None
 
 
 class CompletionModelBase(BaseModel):
@@ -201,6 +221,14 @@ class CompletionModelBase(BaseModel):
         # Keep provider_type out of create/update schemas; response projections
         # that know the provider override this method.
         return None
+
+    def get_model_route(self, *, provider_type: str | None = None) -> str:
+        """Return the provider route used for both requests and tokenization."""
+        return resolve_model_route(
+            model_name=self.name,
+            provider_type=provider_type or self._provider_type(),
+            litellm_model_name=self.litellm_model_name,
+        )
 
 
 class CompletionModelCreate(CompletionModelBase):

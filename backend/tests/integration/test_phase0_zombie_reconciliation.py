@@ -32,7 +32,6 @@ from eneo.main.config import Settings
 from eneo.main.models import Status
 from eneo.worker.feeder.watchdog import OrphanWatchdog
 
-
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -104,6 +103,7 @@ async def clean_redis(redis_client: aioredis.Redis):
 async def test_embedding_model_id(db_container):
     """Get the fixture embedding model ID for tests."""
     from sqlalchemy import select
+
     from eneo.database.tables.ai_models_table import EmbeddingModels
 
     async with db_container() as container:
@@ -660,9 +660,10 @@ class TestPhase0ZombieCounterReconciliation:
         - After cleanup: Redis counter = 0 or deleted
         - Expired job marked FAILED
         """
+        from sqlalchemy import select
+
         from eneo.database.tables.job_table import Jobs
         from eneo.database.tables.websites_table import CrawlRuns
-        from sqlalchemy import select
 
         # Setup Redis with zombie counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"

@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -12,7 +13,8 @@ from eneo.apps.apps.app_factory import AppFactory
 from eneo.database.database import AsyncSession
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import Apps, AppsFiles, AppsPrompts, InputFields
-from eneo.files.file_models import File
+from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
+from eneo.files.file_models import File, FileMetadata
 from eneo.prompts.prompt import Prompt
 from eneo.prompts.prompt_repo import PromptRepository
 from eneo.transcription_models.domain.transcription_model_repo import (
@@ -25,14 +27,35 @@ class AppRepository:
         self,
         session: AsyncSession,
         factory: AppFactory,
+        file_content_loader: FileContentLoader,
         prompt_repo: PromptRepository,
         transcription_model_repo: TranscriptionModelRepository,
     ):
         super().__init__()
         self.session = session
         self.factory = factory
+        self.file_content_loader = file_content_loader
         self.prompt_repo = prompt_repo
         self.transcription_model_repo = transcription_model_repo
+
+    async def _load_attachments(
+        self,
+        records: Sequence[Apps],
+    ) -> dict[UUID, list[File]]:
+        groups = [
+            FileAttachmentGroup(
+                owner_kind="app",
+                owner_id=record.id,
+                tenant_id=record.tenant_id,
+                files=tuple(
+                    FileMetadata.model_validate(attachment.file)
+                    for attachment in record.attachments
+                ),
+            )
+            for record in records
+        ]
+        loaded = await self.file_content_loader.load_attachment_groups(groups)
+        return {record.id: loaded[("app", record.id)] for record in records}
 
     def _options(self) -> list[ExecutableOption]:
         return [
@@ -167,7 +190,10 @@ class AppRepository:
         await self._set_attachments(entry_in_db, app.attachments)
 
         return self.factory.create_app_from_db(
-            entry_in_db, prompt=app.prompt, transcription_model=app.transcription_model
+            entry_in_db,
+            attachments=app.attachments,
+            prompt=app.prompt,
+            transcription_model=app.transcription_model,
         )
 
     async def get(self, id: UUID) -> App | None:
@@ -187,8 +213,12 @@ class AppRepository:
                 entry_in_db.transcription_model_id
             )
 
+        attachments = await self._load_attachments([entry_in_db])
         return self.factory.create_app_from_db(
-            entry_in_db, prompt=prompt, transcription_model=transcription_model
+            entry_in_db,
+            attachments=attachments[entry_in_db.id],
+            prompt=prompt,
+            transcription_model=transcription_model,
         )
 
     async def update(self, app: App) -> App:
@@ -229,7 +259,10 @@ class AppRepository:
         await self._set_attachments(entry_in_db, app.attachments)
 
         return self.factory.create_app_from_db(
-            entry_in_db, prompt=app.prompt, transcription_model=app.transcription_model
+            entry_in_db,
+            attachments=app.attachments,
+            prompt=app.prompt,
+            transcription_model=app.transcription_model,
         )
 
     async def delete(self, id: UUID) -> None:
@@ -244,7 +277,8 @@ class AppRepository:
         for option in self._options():
             stmt = stmt.options(option)
 
-        records = await self.session.scalars(stmt)
+        records = list(await self.session.scalars(stmt))
+        attachments = await self._load_attachments(records)
 
         apps: list[App] = []
         for record in records:
@@ -258,7 +292,10 @@ class AppRepository:
                 )
 
             app = self.factory.create_app_from_db(
-                app_in_db=record, prompt=prompt, transcription_model=transcription_model
+                app_in_db=record,
+                attachments=attachments[record.id],
+                prompt=prompt,
+                transcription_model=transcription_model,
             )
             apps.append(app)
 

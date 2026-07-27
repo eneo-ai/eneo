@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 API_V2_CRITICAL_MODULES = [
     "assistants",
     "apps",

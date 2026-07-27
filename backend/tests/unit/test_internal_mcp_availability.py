@@ -22,7 +22,7 @@ def _file(*, stored=True):
     return SimpleNamespace(
         id=uuid4(),
         file_type=FileType.TEXT,
-        storage_key="tenant/file" if stored else None,
+        original_available=stored,
     )
 
 

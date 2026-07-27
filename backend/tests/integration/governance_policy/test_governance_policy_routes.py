@@ -100,3 +100,49 @@ async def test_mcp_restriction_rejects_empty_enabled_grant(client, admin_token):
     )
 
     assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_skill_policy_rejects_unusable_personal_assistant_baseline(
+    client, admin_token, db_container
+):
+    async with db_container() as container:
+        await container.space_init_service().get_personal_space()
+        skill = await container.organization_skill_service().create_organization_skill(
+            slug=f"oversized-{uuid4().hex[:8]}",
+            display_name="Oversized instructions",
+            description="Regression fixture for governance context fit",
+            instructions="overflow " * 10_000,
+        )
+        skill = (
+            await container.organization_skill_service().publish(
+                skill_id=skill.id,
+                expected_revision_id=skill.current_revision.id,
+            )
+        ).skill
+
+    response = await client.put(
+        "/api/v1/admin/governance-policy/",
+        json={
+            "skills": {
+                "bindings": [
+                    {
+                        "skill_id": str(skill.id),
+                        "skill_revision_id": str(skill.current_revision.id),
+                    }
+                ]
+            }
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "context window" in response.json()["message"]
+
+    persisted = await client.get(
+        "/api/v1/admin/governance-policy/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert persisted.status_code == 200, persisted.text
+    assert persisted.json()["skills"]["bindings"] == []
