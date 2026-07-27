@@ -51,6 +51,8 @@ async def transcription_task(
             embedding_model=embedding_model,
             title=params.filename,
             group_id=params.group_id,
+            chunk_size=group.chunk_size,
+            chunk_overlap=group.chunk_overlap,
         )
         assert info_blob is not None
 
@@ -83,6 +85,8 @@ async def upload_info_blob_task(
             mimetype=params.mimetype,
             group_id=params.group_id,
             embedding_model=embedding_model,
+            chunk_size=group.chunk_size,
+            chunk_overlap=group.chunk_overlap,
         )
         assert info_blob is not None
 

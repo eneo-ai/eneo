@@ -36,6 +36,8 @@ class TextProcessor:
         group_id: UUID | None = None,
         website_id: UUID | None = None,
         content_hash: bytes | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ):
         text = self.extractor.extract(filepath, mimetype)
 
@@ -46,6 +48,8 @@ class TextProcessor:
             group_id=group_id,
             website_id=website_id,
             content_hash=content_hash,  # Pass hash for files too
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
     async def process_text(
@@ -58,6 +62,8 @@ class TextProcessor:
         website_id: UUID | None = None,
         url: str | None = None,
         content_hash: bytes | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ):
         info_blob_add = InfoBlobAdd(
             title=title,
@@ -73,7 +79,12 @@ class TextProcessor:
         info_blob = await self.info_blob_service.add_info_blob_without_validation(
             info_blob_add
         )
-        await self.datastore.add(info_blob=info_blob, embedding_model=embedding_model)
+        await self.datastore.add(
+            info_blob=info_blob,
+            embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
         info_blob_updated = await self.info_blob_service.update_info_blob_size(
             info_blob.id
         )

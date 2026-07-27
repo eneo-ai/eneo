@@ -1182,6 +1182,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 website_id=params.website_id,
                                 embedding_model=file_embedding_model,
                                 content_hash=new_file_hash,
+                                chunk_size=crawl_context.chunk_size,
+                                chunk_overlap=crawl_context.chunk_overlap,
                             )
 
                         await execute_with_recovery(
