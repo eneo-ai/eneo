@@ -14,6 +14,7 @@ import {
   type Paginated,
   type UploadedFile,
   type ConversationMessage,
+  type ChatTurnDiagnostics,
   EneoError,
   type ConversationTools,
   type SSE
@@ -44,6 +45,8 @@ export class ChatService {
   loadedConversations = $state<ConversationSparse[]>([]);
   hasMoreConversations = $derived(this.loadedConversations.length < this.totalConversations);
   #nextCursor = $state<string | null>(null);
+
+  debugPanelOpen = $state(false);
 
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
@@ -232,6 +235,14 @@ export class ChatService {
     this.currentConversation = emptyConversation();
     this.#resetLocked();
     this.#clearPreflight();
+  }
+
+  setDebugPanelOpen(open: boolean) {
+    this.debugPanelOpen = open;
+  }
+
+  async getTurnDiagnostics(sessionId: string, messageId: string): Promise<ChatTurnDiagnostics> {
+    return await this.#eneo.conversations.getTurnDiagnostics({ sessionId, messageId });
   }
 
   async getToolCallResult(toolCallId: string): Promise<string | null> {

@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
 
 from eneo.questions.question import QuestionAdd
@@ -261,3 +264,92 @@ async def test_skill_runtime_state_update_is_tenant_scoped():
     assert tenant_id in compiled.params.values()
     assert compiled.params["skill_provenance"] == []
     assert compiled.params["skill_activation"] == evidence.model_dump(mode="json")
+
+
+async def test_skill_activation_evidence_read_is_bounded_to_one_turn():
+    question_id = uuid4()
+    session_id = uuid4()
+    tenant_id = uuid4()
+    evidence = SkillActivationEvidenceV1(
+        effective_mode=SkillTurnEffectiveMode.EAGER,
+        available=(),
+        blocked=(),
+        initially_active=(),
+        selected_model_id=uuid4(),
+        selected_model_route="gpt-4o",
+        skill_context_tokens=0,
+        skill_context_token_limit=1_000,
+        token_count_source="litellm",
+    )
+    session = AsyncMock()
+    result = MagicMock()
+    result.one_or_none.return_value = SimpleNamespace(
+        skill_activation_data=evidence.model_dump(mode="json")
+    )
+    session.execute.return_value = result
+    file_loader = MagicMock()
+    repo = QuestionRepository(session, file_content_loader=file_loader)
+
+    stored = await repo.get_skill_activation_evidence(
+        id=question_id,
+        session_id=session_id,
+        tenant_id=tenant_id,
+    )
+
+    assert stored is not None
+    assert stored.evidence == evidence
+    file_loader.assert_not_called()
+    statement = session.execute.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert sql.startswith("SELECT questions.skill_activation")
+    assert "questions.id =" in sql
+    assert "questions.session_id =" in sql
+    assert "questions.tenant_id =" in sql
+    assert "questions.question" not in sql
+    assert "questions.answer" not in sql
+    assert {question_id, session_id, tenant_id}.issubset(set(compiled.params.values()))
+
+
+async def test_skill_activation_evidence_read_rejects_untyped_body_fields():
+    evidence = SkillActivationEvidenceV1(
+        effective_mode=SkillTurnEffectiveMode.EAGER,
+        available=(),
+        blocked=(),
+        initially_active=(),
+        selected_model_id=uuid4(),
+        selected_model_route="gpt-4o",
+        skill_context_tokens=0,
+        skill_context_token_limit=1_000,
+        token_count_source="litellm",
+    ).model_dump(mode="json")
+    evidence["instructions"] = "secret-instructions"
+    session = AsyncMock()
+    result = MagicMock()
+    result.one_or_none.return_value = SimpleNamespace(skill_activation_data=evidence)
+    session.execute.return_value = result
+    repo = QuestionRepository(session, file_content_loader=MagicMock())
+
+    with pytest.raises(ValidationError):
+        await repo.get_skill_activation_evidence(
+            id=uuid4(),
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+        )
+
+
+async def test_turn_without_activation_evidence_is_distinct_from_missing_message():
+    session = AsyncMock()
+    result = MagicMock()
+    result.one_or_none.return_value = SimpleNamespace(skill_activation_data=None)
+    session.execute.return_value = result
+    repo = QuestionRepository(session)
+
+    stored = await repo.get_skill_activation_evidence(
+        id=uuid4(),
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+    )
+
+    assert stored is not None
+    assert stored.evidence is None

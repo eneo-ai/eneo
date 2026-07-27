@@ -212,6 +212,45 @@ async def test_logging_details_rejects_service_key(
     assert response.json().get("code") == "session_auth_required"
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_chat_turn_diagnostics_reject_service_keys(
+    client, tenant_admin_service_secret
+):
+    resp = await client.get(
+        f"/api/v1/conversations/{uuid4()}/messages/{uuid4()}/diagnostics/",
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert "session token" in resp.text.lower()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_chat_turn_diagnostics_reject_user_owned_api_keys(client, admin_token):
+    response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"debug-gate-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "ownership": "user",
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 201, response.text
+
+    resp = await client.get(
+        f"/api/v1/conversations/{uuid4()}/messages/{uuid4()}/diagnostics/",
+        headers={"X-API-Key": response.json()["secret"]},
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert "session token" in resp.text.lower()
+
+
 # ---------------------------------------------------------------------------
 # 3. User-identity gate — (b)-class endpoints reject service keys
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@ roles:
       - websites
       - integrations
       - shared_spaces
+      - assistant_debug
 
   - name: 'Owner'
     permissions:
@@ -38,3 +39,4 @@ roles:
       - integrations
       - shared_spaces
       - api_keys
+      - assistant_debug

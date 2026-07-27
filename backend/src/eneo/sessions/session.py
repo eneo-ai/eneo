@@ -80,6 +80,7 @@ class GroupChatInfo(BaseModel):
 
 
 class AskChatResponse(BaseModel):
+    id: Optional[UUID] = None
     session_id: UUID
     question: str
     answer: str

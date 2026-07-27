@@ -5,10 +5,11 @@
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.main.models import ModelId
 from eneo.questions.question import UseTools
+from eneo.skills.domain.skill import SkillActivationEvidenceV1
 
 
 class _ConversationTarget(BaseModel):
@@ -146,3 +147,13 @@ class ConversationRenameRequest(BaseModel):
         if not self.name:
             raise ValueError("name cannot be empty")
         return self
+
+
+class ChatTurnDiagnostics(BaseModel):
+    """Body-free Skill activation diagnostics for one persisted chat turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: UUID
+    message_id: UUID
+    skill_activation: SkillActivationEvidenceV1 | None

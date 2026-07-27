@@ -101,6 +101,22 @@ export function initConversations(client) {
     },
 
     /**
+     * Load body-free diagnostics for one persisted chat turn.
+     * @param {{ sessionId: string, messageId: string }} params
+     * @returns {Promise<import('../types/resources').ChatTurnDiagnostics>}
+     * @throws {EneoError}
+     */
+    getTurnDiagnostics: async ({ sessionId, messageId }) => {
+      return await client.fetch(
+        "/api/v1/conversations/{session_id}/messages/{message_id}/diagnostics/",
+        {
+          method: "get",
+          params: { path: { session_id: sessionId, message_id: messageId } }
+        }
+      );
+    },
+
+    /**
      * Delete a specific conversation.
      * @param  {{id: string} | Conversation} conversation conversation
      * @returns {Promise<true>} true on success, otherwise throws
