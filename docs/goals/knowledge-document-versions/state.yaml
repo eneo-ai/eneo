@@ -72,6 +72,7 @@ tasks:
       - backend/alembic/versions/202607271000_add_info_blob_versions.py
       - backend/alembic/versions/202607271100_merge_info_blob_and_debug_permission.py
       - backend/src/eneo/database/tables/info_blobs_table.py
+      - backend/src/eneo/admin/quota_service.py
       - backend/src/eneo/info_blobs/**
       - backend/src/eneo/embedding_models/infrastructure/datastore.py
       - backend/src/eneo/worker/crawl/**
@@ -87,6 +88,7 @@ tasks:
       - backend/tests/integration/embedding_models/test_embedding_model_lifecycle.py
       - backend/tests/integration/object_content/test_reference_fence.py
       - backend/tests/integration/test_ingestion_failure_safety.py
+      - backend/tests/unittests/admin/test_quota_service.py
       - backend/tests/unittests/info_blobs/**
       - backend/tests/unittests/integration/test_sharepoint_content_service.py
       - backend/tests/unittests/worker/test_persist_batch_logic.py
@@ -129,9 +131,10 @@ checks:
     result: pass
     task: T010
     commands:
-      - "25 real PostgreSQL publication/failure/reference tests passed"
+      - "Review 1 F1-F4 verified and fixed in existing migration, repository, quota, service, and crawler owners"
+      - "9 focused unit/real PostgreSQL publication tests and 24 crawler persistence tests passed"
       - "1 PostgreSQL 13 migration round-trip/history-fence test passed; Alembic head 202607271100 only"
-      - "4077 backend non-integration tests passed; 1309 deselected"
+      - "4078 backend non-integration tests passed; 1312 deselected"
       - "whole-backend Pyright 0 errors/0 warnings/0 informations"
       - "changed Python Ruff/format, OpenAPI generated-schema drift, docs-site build, diff and Goal checker passed"
       - "Claude session knowledge-document-versions iteration 5: GREEN_LIGHT yes, MIN_SCORE 8, no blockers"

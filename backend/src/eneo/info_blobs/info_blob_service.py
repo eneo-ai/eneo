@@ -132,7 +132,10 @@ class InfoBlobService:
             await self.repo.lock_publication_identity(info_blob)
             active = await self.repo.get_active_for_publication(info_blob)
             if active is not None and active.content_hash == info_blob.content_hash:
-                return active
+                return await self.repo.refresh_publication_metadata(
+                    active.id,
+                    info_blob,
+                )
 
             source_id = active.source_id if active is not None else None
             if active is not None and not await self.repo.supersede(active.id):
@@ -148,6 +151,7 @@ class InfoBlobService:
                 embedding_model=embedding_model,
             )
             updated = await self.update_info_blob_size(published.id)
+            await self.quota_service.ensure_capacity(0)
             return updated
 
     async def add_info_blobs(

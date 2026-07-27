@@ -20,6 +20,7 @@ from dependency_injector import providers
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing_extensions import TypedDict
 
+from eneo.admin.quota_service import ensure_quota_capacity
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
 from eneo.database.tables.info_blobs_table import (
@@ -27,7 +28,10 @@ from eneo.database.tables.info_blobs_table import (
     InfoBlobVersionState,
     active_info_blob_version,
 )
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 from eneo.info_blobs.info_blob import InfoBlobChunk
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.worker.crawl_context import (
@@ -390,6 +394,27 @@ async def persist_batch(
     try:
         async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
             async with sessionmanager.session() as session, session.begin():
+                tenant_limit, user_limit = (
+                    await session.execute(
+                        sa.select(Tenants.quota_limit, Users.quota_limit)
+                        .select_from(Users)
+                        .join(Tenants, Tenants.id == Users.tenant_id)
+                        .where(
+                            Users.id == ctx.user_id,
+                            Tenants.id == ctx.tenant_id,
+                        )
+                    )
+                ).one()
+                quota_repo = InfoBlobRepository(session)
+                tenant_usage = await quota_repo.get_retained_size_of_tenant(
+                    ctx.tenant_id
+                )
+                user_usage = (
+                    await quota_repo.get_retained_size_of_user(ctx.user_id)
+                    if user_limit is not None
+                    else 0
+                )
+
                 for prepared in prepared_pages:
                     # Per-page savepoint keeps the previous complete version visible
                     # unless the replacement and all of its chunks are ready together.
@@ -432,6 +457,23 @@ async def persist_batch(
                             successful_urls.append(prepared.url)
                             continue
 
+                        chunk_sizes = [
+                            len(chunk_text.encode("utf-8")) + len(embedding) * 4
+                            for chunk_text, embedding in zip(
+                                prepared.chunks,
+                                prepared.embeddings,
+                            )
+                        ]
+                        stored_size = len(prepared.content.encode("utf-8")) + sum(
+                            chunk_sizes
+                        )
+                        ensure_quota_capacity(
+                            tenant_usage=tenant_usage,
+                            tenant_limit=tenant_limit,
+                            user_usage=user_usage,
+                            user_limit=user_limit,
+                            size_in_bytes=stored_size,
+                        )
                         source_id = (
                             existing.source_id if existing is not None else uuid4()
                         )
@@ -453,7 +495,7 @@ async def persist_batch(
                             "text": prepared.content,
                             "title": prepared.title,
                             "url": prepared.url,
-                            "size": len(prepared.content.encode("utf-8")),
+                            "size": stored_size,
                             "content_hash": prepared.content_hash,
                             "user_id": prepared.user_id,
                             "tenant_id": prepared.tenant_id,
@@ -477,13 +519,17 @@ async def persist_batch(
                             {
                                 "text": chunk_text,
                                 "chunk_no": i,
-                                "size": len(chunk_text.encode("utf-8")),
+                                "size": chunk_size,
                                 "embedding": embedding,
                                 "info_blob_id": info_blob_id,
                                 "tenant_id": prepared.tenant_id,
                             }
-                            for i, (chunk_text, embedding) in enumerate(
-                                zip(prepared.chunks, prepared.embeddings)
+                            for i, (chunk_text, embedding, chunk_size) in enumerate(
+                                zip(
+                                    prepared.chunks,
+                                    prepared.embeddings,
+                                    chunk_sizes,
+                                )
                             )
                         ]
 
@@ -497,6 +543,8 @@ async def persist_batch(
                         await session.execute(insert_chunks_stmt)
 
                         await savepoint.commit()
+                        tenant_usage += stored_size
+                        user_usage += stored_size
                         success_count += 1
                         successful_urls.append(
                             prepared.url

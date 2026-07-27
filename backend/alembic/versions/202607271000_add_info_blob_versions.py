@@ -69,6 +69,81 @@ def _backfill_versions() -> None:
         )
 
 
+def _normalize_duplicate_identity(
+    *,
+    predicate: str,
+    partition_by: str,
+) -> None:
+    op.execute(
+        f"""
+        WITH ranked AS (
+            SELECT
+                id,
+                first_value(id) OVER publication AS canonical_source_id,
+                row_number() OVER publication AS version_position,
+                count(*) OVER (
+                    PARTITION BY {partition_by}
+                ) AS version_count
+            FROM {_TABLE}
+            WHERE {predicate}
+            WINDOW publication AS (
+                PARTITION BY {partition_by}
+                ORDER BY updated_at DESC, created_at DESC, id DESC
+            )
+        )
+        UPDATE {_TABLE} AS info_blob
+        SET source_id = ranked.canonical_source_id,
+            version_state = CASE
+                WHEN ranked.version_position = 1 THEN 'active'
+                ELSE 'superseded'
+            END
+        FROM ranked
+        WHERE info_blob.id = ranked.id
+          AND ranked.version_count > 1
+          AND (
+              info_blob.source_id IS DISTINCT FROM ranked.canonical_source_id
+              OR info_blob.version_state IS DISTINCT FROM CASE
+                  WHEN ranked.version_position = 1 THEN 'active'
+                  ELSE 'superseded'
+              END
+          )
+        """
+    )
+
+
+def _normalize_legacy_duplicate_versions() -> None:
+    # Publication ownership follows the same precedence as InfoBlobRepository.
+    # Missing and blank identities stay independent rather than being collapsed.
+    _normalize_duplicate_identity(
+        predicate=("group_id IS NOT NULL AND NULLIF(BTRIM(title), '') IS NOT NULL"),
+        partition_by="group_id, title",
+    )
+    _normalize_duplicate_identity(
+        predicate=(
+            "group_id IS NULL AND website_id IS NOT NULL "
+            "AND NULLIF(BTRIM(title), '') IS NOT NULL"
+        ),
+        partition_by="website_id, title",
+    )
+    _normalize_duplicate_identity(
+        predicate=(
+            "group_id IS NULL AND website_id IS NULL "
+            "AND integration_knowledge_id IS NOT NULL "
+            "AND NULLIF(BTRIM(sharepoint_item_id), '') IS NOT NULL"
+        ),
+        partition_by="integration_knowledge_id, sharepoint_item_id",
+    )
+    _normalize_duplicate_identity(
+        predicate=(
+            "group_id IS NULL AND website_id IS NULL "
+            "AND integration_knowledge_id IS NOT NULL "
+            "AND NULLIF(BTRIM(sharepoint_item_id), '') IS NULL "
+            "AND NULLIF(BTRIM(title), '') IS NOT NULL"
+        ),
+        partition_by="integration_knowledge_id, title",
+    )
+
+
 def _create_indexes() -> None:
     op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {_ACTIVE_SOURCE_INDEX}")
     op.execute(
@@ -95,6 +170,7 @@ def upgrade() -> None:
             """
         )
         _backfill_versions()
+        _normalize_legacy_duplicate_versions()
         op.execute(
             f"""
             ALTER TABLE {_TABLE}

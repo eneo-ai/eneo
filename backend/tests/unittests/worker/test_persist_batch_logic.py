@@ -62,9 +62,18 @@ def create_mock_session():
 
     # These methods ARE coroutines, so use AsyncMock
     mock_session.execute = AsyncMock()
+    mock_session.scalar = AsyncMock(return_value=0)
     mock_session.begin_nested = AsyncMock(return_value=AsyncMock())
 
     return mock_session
+
+
+def create_mock_result():
+    return MagicMock(
+        one=lambda: (1_000_000, None),
+        one_or_none=lambda: None,
+        scalar_one=lambda: uuid4(),
+    )
 
 
 def create_mock_sessionmanager(mock_session):
@@ -297,9 +306,7 @@ class TestEmbeddingSemaphoreBehavior:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
         mock_sm = create_mock_sessionmanager(mock_session)
 
         with (
@@ -377,9 +384,7 @@ class TestEmbeddingSemaphoreBehavior:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -474,9 +479,7 @@ class TestMemoryCapsEnforcement:
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -532,9 +535,7 @@ class TestPhase2SavepointBehavior:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(return_value=savepoint_mock)
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -589,7 +590,7 @@ class TestPhase2SavepointBehavior:
                 return MagicMock(one_or_none=lambda: None)
             elif "INSERT" in stmt_str:
                 operation_order.append("INSERT")
-            return MagicMock(scalar_one=lambda: uuid4())
+            return create_mock_result()
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
@@ -632,6 +633,58 @@ class TestPhase2SavepointBehavior:
         assert select_idx > 0, "SELECT must be after BEGIN_NESTED"
         assert first_insert_idx > select_idx, "INSERT must be after SELECT"
         assert commit_idx > first_insert_idx, "COMMIT must be after INSERTs"
+
+    @pytest.mark.asyncio
+    async def test_retained_quota_rejects_page_before_publication(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        page_buffer = [
+            {
+                "url": "https://example.com/over-quota",
+                "content": "Content that cannot fit",
+            }
+        ]
+        statements: list[str] = []
+        savepoint = AsyncMock()
+        savepoint.commit = AsyncMock()
+        savepoint.rollback = AsyncMock()
+        mock_session = create_mock_session()
+        mock_session.begin_nested = AsyncMock(return_value=savepoint)
+        mock_session.scalar = AsyncMock(side_effect=[9, 0])
+
+        async def execute(stmt, params=None):
+            statement = str(stmt)
+            statements.append(statement)
+            if "tenants" in statement and "users" in statement:
+                return MagicMock(one=lambda: (10, None))
+            if "FROM info_blobs" in statement:
+                return MagicMock(one_or_none=lambda: None)
+            return create_mock_result()
+
+        mock_session.execute = AsyncMock(side_effect=execute)
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("eneo.database.database.sessionmanager", mock_sm),
+        ):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, urls, _ = await persist_batch(
+                page_buffer=page_buffer,
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+            )
+
+        assert (success, failed, urls) == (0, 1, [])
+        assert not any(
+            "INSERT INTO info_blobs" in statement for statement in statements
+        )
+        savepoint.rollback.assert_awaited_once()
 
 
 # =============================================================================
@@ -682,9 +735,7 @@ class TestSuccessfulUrlsTracking:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(side_effect=create_savepoint)
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -788,9 +839,7 @@ class TestSuccessfulUrlsTracking:
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(return_value=savepoint)
-        mock_session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one=lambda: uuid4())
-        )
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
 
         mock_sm = create_mock_sessionmanager(mock_session)
 
@@ -910,9 +959,7 @@ class TestPhaseIsolation:
             # CRITICAL: Use MagicMock for session (not AsyncMock) - see create_mock_session() docstring
             mock_session = MagicMock()
             mock_session.begin_nested = AsyncMock(return_value=AsyncMock())
-            mock_session.execute = AsyncMock(
-                return_value=MagicMock(scalar_one=lambda: uuid4())
-            )
+            mock_session.execute = AsyncMock(return_value=create_mock_result())
 
             # session.begin() returns an async context manager
             @asynccontextmanager
@@ -994,7 +1041,7 @@ class TestTransactionWallTimeGuard:
             persist_count += 1
             if persist_count >= 2:
                 await asyncio.sleep(2)  # Will trigger timeout
-            return MagicMock(scalar_one=lambda: uuid4())
+            return create_mock_result()
 
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()

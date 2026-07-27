@@ -110,25 +110,40 @@ class InfoBlobRepository:
 
     async def lock_publication_identity(self, info_blob: InfoBlobAdd) -> None:
         identity = self._publication_identity(info_blob)
+        if identity is None:
+            return
         await self.session.execute(
             sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
             {"identity": identity},
         )
 
     @staticmethod
-    def _publication_identity(info_blob: InfoBlobAdd) -> str:
+    def _publication_identity(info_blob: InfoBlobAdd) -> str | None:
+        title = info_blob.title if info_blob.title and info_blob.title.strip() else None
         if info_blob.group_id is not None:
-            return f"group:{info_blob.group_id}:title:{info_blob.title}"
+            return f"group:{info_blob.group_id}:title:{title}" if title else None
         if info_blob.website_id is not None:
-            return f"website:{info_blob.website_id}:title:{info_blob.title}"
+            return f"website:{info_blob.website_id}:title:{title}" if title else None
         if info_blob.integration_knowledge_id is not None:
-            source = info_blob.sharepoint_item_id or info_blob.title
-            return f"integration:{info_blob.integration_knowledge_id}:source:{source}"
+            item_id = (
+                info_blob.sharepoint_item_id
+                if info_blob.sharepoint_item_id and info_blob.sharepoint_item_id.strip()
+                else None
+            )
+            source = item_id or title
+            return (
+                f"integration:{info_blob.integration_knowledge_id}:source:{source}"
+                if source
+                else None
+            )
         raise ValueError("InfoBlob publication requires a source owner")
 
     async def get_active_for_publication(
         self, info_blob: InfoBlobAdd
     ) -> InfoBlobInDB | None:
+        if self._publication_identity(info_blob) is None:
+            return None
+
         conditions = [active_info_blob_version()]
         if info_blob.group_id is not None:
             conditions.extend(
@@ -148,7 +163,10 @@ class InfoBlobRepository:
             conditions.append(
                 InfoBlobs.integration_knowledge_id == info_blob.integration_knowledge_id
             )
-            if info_blob.sharepoint_item_id is not None:
+            if (
+                info_blob.sharepoint_item_id is not None
+                and info_blob.sharepoint_item_id.strip()
+            ):
                 conditions.append(
                     InfoBlobs.sharepoint_item_id == info_blob.sharepoint_item_id
                 )
@@ -161,6 +179,21 @@ class InfoBlobRepository:
             sa.select(InfoBlobs).where(*conditions).with_for_update()
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
+
+    async def refresh_publication_metadata(
+        self,
+        info_blob_id: UUID,
+        info_blob: InfoBlobAdd,
+    ) -> InfoBlobInDB:
+        record = await self.session.scalar(
+            sa.update(InfoBlobs)
+            .where(InfoBlobs.id == info_blob_id, active_info_blob_version())
+            .values(title=info_blob.title, url=info_blob.url)
+            .returning(InfoBlobs)
+        )
+        if record is None:
+            raise RuntimeError("The active knowledge version changed during publish")
+        return InfoBlobInDB.model_validate(record)
 
     async def supersede(self, info_blob_id: UUID) -> bool:
         result = await self.session.execute(
@@ -521,6 +554,9 @@ class InfoBlobRepository:
             .where(active_info_blob_version())
         )
 
+    def _retained_sum_stmt(self):
+        return sa.select(sa.func.sum(InfoBlobs.size)).select_from(InfoBlobs)
+
     async def get_total_size_of_group(self, group_id: UUID):
         stmt = self._sum_stmt().where(InfoBlobs.group_id == group_id)
 
@@ -551,6 +587,12 @@ class InfoBlobRepository:
 
         return size
 
+    async def get_retained_size_of_user(self, user_id: UUID) -> int:
+        size = await self.session.scalar(
+            self._retained_sum_stmt().where(InfoBlobs.user_id == user_id)
+        )
+        return size or 0
+
     async def get_total_size_of_tenant(self, tenant_id: UUID):
         stmt = self._sum_stmt().join(Users).where(Users.tenant_id == tenant_id)
 
@@ -560,6 +602,12 @@ class InfoBlobRepository:
             return 0
 
         return size
+
+    async def get_retained_size_of_tenant(self, tenant_id: UUID) -> int:
+        size = await self.session.scalar(
+            self._retained_sum_stmt().join(Users).where(Users.tenant_id == tenant_id)
+        )
+        return size or 0
 
     async def get_ids(self):
         stmt = sa.select(InfoBlobs.id).where(active_info_blob_version())

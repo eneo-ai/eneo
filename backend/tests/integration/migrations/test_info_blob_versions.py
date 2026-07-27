@@ -107,6 +107,212 @@ def _seed_legacy_info_blob(connection) -> UUID:
     return info_blob_id
 
 
+def _seed_legacy_duplicate_identities(
+    connection,
+    *,
+    legacy_id: UUID,
+) -> tuple[dict[str, tuple[UUID, UUID]], tuple[UUID, UUID]]:
+    with connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT user_id, tenant_id, embedding_model_id
+            FROM info_blobs
+            WHERE id = %s
+            """,
+            (str(legacy_id),),
+        )
+        user_id, tenant_id, embedding_model_id = cursor.fetchone()
+
+        group_id = uuid4()
+        website_id = uuid4()
+        space_id = uuid4()
+        integration_id = uuid4()
+        tenant_integration_id = uuid4()
+        user_integration_id = uuid4()
+        integration_knowledge_id = uuid4()
+        cursor.execute(
+            """
+            INSERT INTO groups (
+                id, name, size, user_id, tenant_id, embedding_model_id
+            ) VALUES (%s, 'legacy duplicates', 0, %s, %s, %s)
+            """,
+            (str(group_id), user_id, tenant_id, embedding_model_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO websites (
+                id, name, url, download_files, crawl_type, update_interval, size,
+                tenant_id, user_id, embedding_model_id
+            ) VALUES (
+                %s, 'legacy website', 'https://example.test', false, 'CRAWL',
+                'never', 0, %s, %s, %s
+            )
+            """,
+            (str(website_id), tenant_id, user_id, embedding_model_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO spaces (id, name, tenant_id, user_id)
+            VALUES (%s, 'legacy integration space', %s, %s)
+            """,
+            (str(space_id), tenant_id, user_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO integrations (id, name, description)
+            VALUES (%s, %s, 'migration test integration')
+            """,
+            (str(integration_id), f"migration-{integration_id}"),
+        )
+        cursor.execute(
+            """
+            INSERT INTO tenant_integrations (id, tenant_id, integration_id)
+            VALUES (%s, %s, %s)
+            """,
+            (str(tenant_integration_id), tenant_id, str(integration_id)),
+        )
+        cursor.execute(
+            """
+            INSERT INTO user_integrations (
+                id, user_id, tenant_id, tenant_integration_id, authenticated
+            ) VALUES (%s, %s, %s, %s, true)
+            """,
+            (
+                str(user_integration_id),
+                user_id,
+                tenant_id,
+                str(tenant_integration_id),
+            ),
+        )
+        cursor.execute(
+            """
+            INSERT INTO integration_knowledge (
+                id, name, url, space_id, embedding_model_id, tenant_id,
+                user_integration_id, size
+            ) VALUES (%s, 'legacy integration knowledge', NULL, %s, %s, %s, %s, 0)
+            """,
+            (
+                str(integration_knowledge_id),
+                str(space_id),
+                embedding_model_id,
+                tenant_id,
+                str(user_integration_id),
+            ),
+        )
+
+        identities: dict[str, tuple[UUID, UUID]] = {}
+        rows: list[
+            tuple[
+                UUID, str, str | None, UUID | None, UUID | None, UUID | None, str | None
+            ]
+        ] = []
+        for name, title, owner in (
+            ("group", "group-title", (group_id, None, None)),
+            ("website", "website-title", (None, website_id, None)),
+            (
+                "integration-title",
+                "integration-title",
+                (None, None, integration_knowledge_id),
+            ),
+        ):
+            older_id, newer_id = uuid4(), uuid4()
+            identities[name] = (older_id, newer_id)
+            rows.extend(
+                [
+                    (older_id, f"older {name}", title, *owner, None),
+                    (newer_id, f"newer {name}", title, *owner, None),
+                ]
+            )
+
+        older_item_id, newer_item_id = uuid4(), uuid4()
+        identities["integration-item"] = (older_item_id, newer_item_id)
+        rows.extend(
+            [
+                (
+                    older_item_id,
+                    "older integration item",
+                    "old provider title",
+                    None,
+                    None,
+                    integration_knowledge_id,
+                    "provider-item-1",
+                ),
+                (
+                    newer_item_id,
+                    "newer integration item",
+                    "new provider title",
+                    None,
+                    None,
+                    integration_knowledge_id,
+                    "provider-item-1",
+                ),
+            ]
+        )
+
+        untitled_ids = (uuid4(), uuid4())
+        rows.extend(
+            [
+                (untitled_ids[0], "null title", None, group_id, None, None, None),
+                (untitled_ids[1], "blank title", "   ", group_id, None, None, None),
+            ]
+        )
+        cursor.executemany(
+            """
+            INSERT INTO info_blobs (
+                id, text, title, size, user_id, tenant_id, embedding_model_id,
+                group_id, website_id, integration_knowledge_id,
+                sharepoint_item_id, created_at, updated_at
+            ) VALUES (
+                %s, %s, %s, 10, %s, %s, %s, %s, %s, %s, %s,
+                NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day'
+            )
+            """,
+            [
+                (
+                    str(row[0]),
+                    row[1],
+                    row[2],
+                    user_id,
+                    tenant_id,
+                    embedding_model_id,
+                    str(row[3]) if row[3] is not None else None,
+                    str(row[4]) if row[4] is not None else None,
+                    str(row[5]) if row[5] is not None else None,
+                    row[6],
+                )
+                for row in rows[::2]
+            ],
+        )
+        cursor.executemany(
+            """
+            INSERT INTO info_blobs (
+                id, text, title, size, user_id, tenant_id, embedding_model_id,
+                group_id, website_id, integration_knowledge_id,
+                sharepoint_item_id, created_at, updated_at
+            ) VALUES (
+                %s, %s, %s, 10, %s, %s, %s, %s, %s, %s, %s,
+                NOW(), NOW()
+            )
+            """,
+            [
+                (
+                    str(row[0]),
+                    row[1],
+                    row[2],
+                    user_id,
+                    tenant_id,
+                    embedding_model_id,
+                    str(row[3]) if row[3] is not None else None,
+                    str(row[4]) if row[4] is not None else None,
+                    str(row[5]) if row[5] is not None else None,
+                    row[6],
+                )
+                for row in rows[1::2]
+            ],
+        )
+    return identities, untitled_ids
+
+
 def _assert_orm_parity(database_url: str) -> None:
     engine = create_engine(database_url)
     try:
@@ -127,6 +333,10 @@ def test_info_blob_version_schema_round_trip_and_history_fence(
     connection = psycopg2.connect(database_url)
     try:
         legacy_id = _seed_legacy_info_blob(connection)
+        duplicate_identities, untitled_ids = _seed_legacy_duplicate_identities(
+            connection,
+            legacy_id=legacy_id,
+        )
 
         command.upgrade(config, _VERSION_REVISION)
 
@@ -140,6 +350,37 @@ def test_info_blob_version_schema_round_trip_and_history_fence(
                 (str(legacy_id),),
             )
             assert cursor.fetchone() == (str(legacy_id), "active")
+
+            for older_id, newer_id in duplicate_identities.values():
+                cursor.execute(
+                    """
+                    SELECT id, source_id, version_state
+                    FROM info_blobs
+                    WHERE id IN (%s, %s)
+                    ORDER BY created_at, id
+                    """,
+                    (str(older_id), str(newer_id)),
+                )
+                assert cursor.fetchall() == [
+                    (str(older_id), str(newer_id), "superseded"),
+                    (str(newer_id), str(newer_id), "active"),
+                ]
+
+            cursor.execute(
+                """
+                SELECT id, source_id, version_state
+                FROM info_blobs
+                WHERE id IN (%s, %s)
+                ORDER BY id
+                """,
+                tuple(str(value) for value in untitled_ids),
+            )
+            assert cursor.fetchall() == sorted(
+                [
+                    (str(untitled_ids[0]), str(untitled_ids[0]), "active"),
+                    (str(untitled_ids[1]), str(untitled_ids[1]), "active"),
+                ]
+            )
 
             cursor.execute(
                 """
@@ -228,6 +469,16 @@ def test_info_blob_version_schema_round_trip_and_history_fence(
                 )
 
         connection.rollback()
+        normalized_ids = [
+            value for identity in duplicate_identities.values() for value in identity
+        ]
+        normalized_ids.extend(untitled_ids)
+        with connection, connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM info_blobs WHERE id = ANY(%s::uuid[])",
+                ([str(value) for value in normalized_ids],),
+            )
+
         _assert_orm_parity(database_url)
 
         command.downgrade(config, "-1")
