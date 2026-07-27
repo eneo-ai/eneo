@@ -358,7 +358,7 @@ jobs:
         run: bun run build
         env:
           # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=8192
 
   frontend-e2e:
     name: Frontend E2E
