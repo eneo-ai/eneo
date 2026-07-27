@@ -20,13 +20,26 @@ function message(id: string | null, question = "Question"): ConversationMessage 
 }
 
 describe("turn debug projection", () => {
-  it("defaults selectors to persisted turns and excludes a live final turn", () => {
+  it("keeps persisted turns visible before the live message exists", () => {
     const messages = [message("message-1", "First"), message("message-2", "Second")];
 
-    expect(listPersistedDebugTurns(messages, true)).toEqual([
-      { messageId: "message-1", turnNumber: 1, questionExcerpt: "First" }
+    expect(listPersistedDebugTurns(messages, [])).toEqual([
+      { messageId: "message-1", turnNumber: 1, questionExcerpt: "First" },
+      { messageId: "message-2", turnNumber: 2, questionExcerpt: "Second" }
     ]);
-    expect(listPersistedDebugTurns(messages, false).at(-1)?.messageId).toBe("message-2");
+  });
+
+  it("excludes only messages awaiting canonical persisted metadata", () => {
+    const messages = [
+      message("message-1", "First"),
+      message("message-2", "Second"),
+      message("message-3", "Third")
+    ];
+
+    expect(listPersistedDebugTurns(messages, ["message-2"])).toEqual([
+      { messageId: "message-1", turnNumber: 1, questionExcerpt: "First" },
+      { messageId: "message-3", turnNumber: 3, questionExcerpt: "Third" }
+    ]);
   });
 
   it("projects only safe model, tool, reference, and file metadata", () => {

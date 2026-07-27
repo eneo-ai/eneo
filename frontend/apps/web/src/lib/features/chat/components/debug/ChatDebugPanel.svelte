@@ -31,11 +31,13 @@
   let requestGeneration = 0;
 
   const messages = $derived(chat.currentConversation.messages ?? []);
-  const turns = $derived(listPersistedDebugTurns(messages, chat.askQuestion.isLoading));
+  const turns = $derived(listPersistedDebugTurns(messages, chat.pendingDiagnosticsMessageIds));
   const contextKey = $derived(
     `${chat.partner.type}:${chat.partner.id}:${chat.currentConversation.id}`
   );
-  const liveTurnPending = $derived(chat.askQuestion.isLoading && messages.length > 0);
+  const liveTurnPending = $derived(
+    chat.askQuestion.isLoading || chat.pendingDiagnosticsMessageIds.length > 0
+  );
   const turnById = $derived.by(() => {
     const index = new SvelteMap<string, (typeof turns)[number]>();
     for (const turn of turns) index.set(turn.messageId, turn);

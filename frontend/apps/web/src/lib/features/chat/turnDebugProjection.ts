@@ -30,14 +30,13 @@ export type TurnDebugDetails = {
 
 export function listPersistedDebugTurns(
   messages: ConversationMessage[],
-  streaming: boolean
+  pendingMessageIds: readonly string[]
 ): DebugTurnOption[] {
-  const lastIndex = messages.length - 1;
   const turns: DebugTurnOption[] = [];
 
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
-    if (!message.id || (streaming && index === lastIndex)) continue;
+    if (!message.id || pendingMessageIds.includes(message.id)) continue;
     turns.push({
       messageId: message.id,
       turnNumber: index + 1,

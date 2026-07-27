@@ -22,6 +22,7 @@ function chatService(
   preflight = vi.fn(),
   overrides: {
     ask?: ReturnType<typeof vi.fn>;
+    get?: ReturnType<typeof vi.fn>;
     getTurnDiagnostics?: ReturnType<typeof vi.fn>;
   } = {}
 ) {
@@ -30,6 +31,7 @@ function chatService(
       conversations: {
         preflight,
         ask: overrides.ask ?? vi.fn(),
+        get: overrides.get ?? vi.fn(),
         getTurnDiagnostics: overrides.getTurnDiagnostics ?? vi.fn(),
         list: vi.fn().mockResolvedValue({
           items: [],
@@ -128,5 +130,81 @@ describe("ChatService turn diagnostics", () => {
       sessionId: "session-1",
       messageId: "message-1"
     });
+  });
+
+  it.each([
+    { panelOpenDuringStream: true, scenario: "when the panel is already open" },
+    { panelOpenDuringStream: false, scenario: "when the panel opens after completion" }
+  ])("rehydrates a completed live turn $scenario", async ({ panelOpenDuringStream }) => {
+    let finishStream!: () => void;
+    const ask = vi.fn().mockImplementation(
+      ({ callbacks }) =>
+        new Promise<void>((resolve) => {
+          callbacks.onFirstChunk({
+            id: "message-1",
+            session_id: "session-1",
+            question: "Hello",
+            answer: "",
+            files: [],
+            generated_files: [],
+            references: [],
+            tools: { assistants: [] },
+            web_search_references: []
+          });
+          finishStream = resolve;
+        })
+    );
+    const get = vi.fn().mockResolvedValue({
+      id: "session-1",
+      name: "Hello",
+      messages: [
+        {
+          id: "message-1",
+          question: "Hello",
+          answer: "Answer",
+          completion_model: {
+            id: "model-1",
+            name: "gpt-4o",
+            token_limit: 128000
+          },
+          references: [],
+          files: [],
+          generated_files: [],
+          web_search_references: [],
+          mcp_tool_references: [],
+          tool_calls: [
+            {
+              server_name: "warehouse",
+              tool_name: "query",
+              result_status: "complete"
+            }
+          ],
+          tools: { assistants: [] }
+        }
+      ]
+    });
+    const chat = chatService(vi.fn(), { ask, get });
+    if (panelOpenDuringStream) chat.setDebugPanelOpen(true);
+
+    const request = chat.askQuestion("Hello");
+    await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-1"]));
+
+    finishStream();
+    await request;
+    if (!panelOpenDuringStream) {
+      expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-1"]);
+      chat.setDebugPanelOpen(true);
+    }
+    await vi.waitFor(() => expect(get).toHaveBeenCalledWith({ id: "session-1" }));
+
+    expect(chat.pendingDiagnosticsMessageIds).toEqual([]);
+    expect(chat.currentConversation.messages[0].completion_model?.name).toBe("gpt-4o");
+    expect(chat.currentConversation.messages[0].tool_calls).toEqual([
+      {
+        server_name: "warehouse",
+        tool_name: "query",
+        result_status: "complete"
+      }
+    ]);
   });
 });

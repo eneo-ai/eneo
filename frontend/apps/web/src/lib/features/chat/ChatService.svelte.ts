@@ -47,6 +47,8 @@ export class ChatService {
   #nextCursor = $state<string | null>(null);
 
   debugPanelOpen = $state(false);
+  #pendingDiagnosticsMessageIds = $state<string[]>([]);
+  pendingDiagnosticsMessageIds = $derived([...this.#pendingDiagnosticsMessageIds]);
 
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
@@ -220,11 +222,13 @@ export class ChatService {
     waitFor(data.initialConversation, {
       onLoaded: (initialConversation) => {
         this.currentConversation = initialConversation;
+        this.#pendingDiagnosticsMessageIds = [];
         this.#seedLockedFromHistory();
         this.#clearPreflight();
       },
       onNull: () => {
         this.currentConversation = emptyConversation();
+        this.#pendingDiagnosticsMessageIds = [];
         this.#resetLocked();
         this.#clearPreflight();
       }
@@ -233,12 +237,16 @@ export class ChatService {
 
   newConversation() {
     this.currentConversation = emptyConversation();
+    this.#pendingDiagnosticsMessageIds = [];
     this.#resetLocked();
     this.#clearPreflight();
   }
 
   setDebugPanelOpen(open: boolean) {
     this.debugPanelOpen = open;
+    if (open && !this.askQuestion.isLoading) {
+      void this.#hydratePendingDiagnosticsMessages();
+    }
   }
 
   async getTurnDiagnostics(sessionId: string, messageId: string): Promise<ChatTurnDiagnostics> {
@@ -503,6 +511,7 @@ export class ChatService {
     try {
       const loaded = await this.#eneo.conversations.get(conversation);
       this.currentConversation = loaded;
+      this.#pendingDiagnosticsMessageIds = [];
       this.#seedLockedFromHistory();
       this.#clearPreflight();
       return loaded;
@@ -582,6 +591,7 @@ export class ChatService {
               ref =
                 this.currentConversation.messages[this.currentConversation.messages?.length - 1];
               Object.assign(ref, chunk);
+              this.#markDiagnosticsPending(ref.id);
               this.currentConversation.id = chunk.session_id;
               this.currentConversation.name = question;
             },
@@ -838,6 +848,7 @@ export class ChatService {
         } else if (error instanceof EneoError && !ref.answer) {
           // If streaming started but no content arrived yet, remove the empty message
           this.currentConversation.messages.pop();
+          this.#clearDiagnosticsPending(ref.id);
           console.error(error);
           throw error;
         } else {
@@ -867,11 +878,53 @@ export class ChatService {
 
       if (this.#streamGen === streamGen) {
         this.reloadHistory();
+        if (this.debugPanelOpen) {
+          void this.#hydratePendingDiagnosticsMessages();
+        }
       }
 
       // The $effect in constructor now handles automatic token calculation
     }
   );
+
+  #markDiagnosticsPending(messageId: string | null | undefined) {
+    if (!messageId || this.#pendingDiagnosticsMessageIds.includes(messageId)) return;
+    this.#pendingDiagnosticsMessageIds = [...this.#pendingDiagnosticsMessageIds, messageId];
+  }
+
+  #clearDiagnosticsPending(messageId: string | null | undefined) {
+    if (!messageId) return;
+    this.#pendingDiagnosticsMessageIds = this.#pendingDiagnosticsMessageIds.filter(
+      (pendingMessageId) => pendingMessageId !== messageId
+    );
+  }
+
+  async #hydratePendingDiagnosticsMessages() {
+    const sessionId = this.currentConversation.id;
+    const pendingMessageIds = [...this.#pendingDiagnosticsMessageIds];
+    if (!sessionId || pendingMessageIds.length === 0) return;
+
+    const streamGen = this.#streamGen;
+    try {
+      const loaded = await this.#eneo.conversations.get({ id: sessionId });
+      if (this.currentConversation.id !== sessionId || this.#streamGen !== streamGen) return;
+      if (
+        pendingMessageIds.some(
+          (messageId) => !loaded.messages.some((message) => message.id === messageId)
+        )
+      ) {
+        return;
+      }
+
+      this.currentConversation = loaded;
+      this.#pendingDiagnosticsMessageIds = this.#pendingDiagnosticsMessageIds.filter(
+        (messageId) => !loaded.messages.some((message) => message.id === messageId)
+      );
+      this.#seedLockedFromHistory();
+    } catch (error) {
+      console.error("Could not load persisted turn metadata for diagnostics", error);
+    }
+  }
 
   // Fetch prompt tokens and effective limit from backend.
   // When loading an existing conversation, approximate history tokens from message text.
