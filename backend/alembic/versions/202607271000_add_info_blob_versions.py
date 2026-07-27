@@ -26,6 +26,7 @@ _SOURCE_NOT_NULL = "ck_info_blobs_source_id_not_null"
 _STATE_NOT_NULL = "ck_info_blobs_version_state_not_null"
 _ACTIVE_SOURCE_INDEX = "uq_info_blobs_active_source"
 _SOURCE_INDEX = "ix_info_blobs_source_id"
+_INCOMPLETE_VERSION_PREDICATE = "(source_id IS NULL OR version_state IS NULL)"
 
 
 def _backfill_versions() -> None:
@@ -38,7 +39,7 @@ def _backfill_versions() -> None:
                 WITH batch AS (
                     SELECT id
                     FROM {_TABLE}
-                    WHERE source_id IS NULL OR version_state IS NULL
+                    WHERE {_INCOMPLETE_VERSION_PREDICATE}
                       AND (:last_id IS NULL OR id > CAST(:last_id AS UUID))
                     ORDER BY id
                     LIMIT :batch_size

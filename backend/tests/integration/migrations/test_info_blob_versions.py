@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import runpy
 from collections.abc import Generator
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -145,6 +146,42 @@ def _seed_multi_batch_legacy_rows(
             ],
         )
     return ids
+
+
+def _assert_backfill_cursor_applies_to_every_incomplete_row(
+    connection,
+    *,
+    last_id: UUID,
+) -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[3]
+        / "alembic/versions/202607271000_add_info_blob_versions.py"
+    )
+    predicate = runpy.run_path(str(migration_path))["_INCOMPLETE_VERSION_PREDICATE"]
+
+    with connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            ALTER TABLE info_blobs
+                ADD COLUMN IF NOT EXISTS source_id UUID,
+                ADD COLUMN IF NOT EXISTS version_state VARCHAR(16)
+            """
+        )
+        cursor.execute(
+            f"""
+            SELECT id
+            FROM info_blobs
+            WHERE {predicate}
+              AND id > %s
+            ORDER BY id
+            LIMIT 1000
+            """,
+            (str(last_id),),
+        )
+        selected_ids = [UUID(row[0]) for row in cursor.fetchall()]
+
+    assert selected_ids
+    assert all(selected_id > last_id for selected_id in selected_ids)
 
 
 def _seed_legacy_duplicate_identities(
@@ -380,6 +417,11 @@ def test_info_blob_version_schema_round_trip_and_history_fence(
         duplicate_identities, untitled_ids = _seed_legacy_duplicate_identities(
             connection,
             legacy_id=legacy_id,
+        )
+
+        _assert_backfill_cursor_applies_to_every_incomplete_row(
+            connection,
+            last_id=sorted(multi_batch_ids)[499],
         )
 
         command.upgrade(config, _VERSION_REVISION)
