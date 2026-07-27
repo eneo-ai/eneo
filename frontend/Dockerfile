@@ -4,7 +4,7 @@ FROM oven/bun:1.3.0-slim AS builder
 WORKDIR /app
 COPY . .
 
-ENV NODE_OPTIONS=--max-old-space-size=8192
+ENV NODE_OPTIONS=--max-old-space-size=6144
 
 # Install dependencies with Bun (uses frozen lockfile)
 RUN bun install --frozen-lockfile
