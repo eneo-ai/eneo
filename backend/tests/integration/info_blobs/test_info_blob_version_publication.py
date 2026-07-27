@@ -304,15 +304,14 @@ async def test_same_content_is_reembedded_after_model_change(db_container) -> No
         assert published.embedding_model_id != old_model.id
         versions = (
             await container.session().scalars(
-                sa.select(InfoBlobs)
-                .where(InfoBlobs.source_id == active.source_id)
-                .order_by(InfoBlobs.created_at, InfoBlobs.id)
+                sa.select(InfoBlobs).where(InfoBlobs.source_id == active.source_id)
             )
         ).all()
-        assert [version.version_state for version in versions] == [
-            InfoBlobVersionState.SUPERSEDED.value,
-            InfoBlobVersionState.ACTIVE.value,
-        ]
+        states_by_id = {version.id: version.version_state for version in versions}
+        assert states_by_id == {
+            active.id: InfoBlobVersionState.SUPERSEDED.value,
+            published.id: InfoBlobVersionState.ACTIVE.value,
+        }
         matches = await container.info_blob_chunk_repo().semantic_search(
             [0.7, 0.8, 0.9],
             group_ids=[group.id],
