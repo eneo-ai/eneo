@@ -369,6 +369,12 @@ It never moves the full installation automatically, falls back during an
 outage, or treats both placements as writable. Interrupted work resumes from
 its stored intent.
 
+Moves toward PostgreSQL stay available while the object store is degraded, so
+you can bring content back inline during an outage; queueing toward the
+degraded store remains blocked. Individual items still need the store
+reachable to copy their bytes, and retry with a typed failure reason until it
+is.
+
 Before removing object-store configuration, move eligible content inline and
 leave the worker and endpoint running through the configured orphan grace and
 two complete inventory observations. This lets the existing cleanup lifecycle

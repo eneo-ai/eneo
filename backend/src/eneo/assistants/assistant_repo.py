@@ -45,6 +45,7 @@ from eneo.files.file_models import File, FileMetadata
 from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt import Prompt
+from eneo.skills.domain.skill import PersonalDefaultsSnapshot
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
@@ -166,6 +167,45 @@ class AssistantRepository:
         self.file_content_loader = file_content_loader
         self.completion_model_repo = completion_model_repo
         self.user = user
+
+    @staticmethod
+    async def get_personal_defaults_snapshot(
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+    ) -> PersonalDefaultsSnapshot:
+        """Return a clock-free version digest for personal-default rows.
+
+        PostgreSQL assigns ``updated_at`` from transaction-start time, so an
+        older transaction can commit after a newer one without changing a
+        maximum timestamp. ``xmin`` changes on every row update regardless of
+        clock ordering.
+        """
+        row_versions_digest = sa.literal_column(
+            "md5(string_agg(assistants.id::text || ':' || "
+            "assistants.xmin::text, ',' ORDER BY assistants.id))",
+            type_=sa.String(),
+        )
+        assistant_count, row_versions_digest = (
+            await session.execute(
+                sa.select(
+                    sa.func.count(Assistants.id),
+                    row_versions_digest,
+                )
+                .select_from(Assistants)
+                .join(Spaces, Assistants.space_id == Spaces.id)
+                .where(
+                    Spaces.tenant_id == tenant_id,
+                    Spaces.user_id.is_not(None),
+                    Assistants.is_default == sa.true(),
+                )
+            )
+        ).one()
+        return PersonalDefaultsSnapshot(
+            assistant_count=assistant_count,
+            row_versions_digest=row_versions_digest,
+            runtime_policy_version=None,
+        )
 
     async def _load_attachments(
         self,

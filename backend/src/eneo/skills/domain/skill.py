@@ -482,6 +482,50 @@ class PersonalChatPinAdvance:
     to_revision_number: int | None = None
 
 
+@dataclass(frozen=True)
+class PersonalDefaultsSnapshot:
+    assistant_count: int
+    row_versions_digest: str | None
+    runtime_policy_version: str | None
+
+
+@dataclass(frozen=True)
+class PersonalChatPinOverride:
+    skill_id: UUID
+    from_revision_id: UUID
+    to_revision_id: UUID
+
+
+@dataclass(frozen=True)
+class PersonalChatPinAdvanceStage:
+    """A read-only pin candidate, awaiting fit validation and a confirmed apply.
+
+    ``policy_version`` is the policy row's version marker at stage time; the
+    confirm step refuses the apply when it moved, so a policy edit that
+    commits during the fit scan can never merge with a stale validation.
+    """
+
+    advance: PersonalChatPinAdvance
+    policy_id: UUID | None = None
+    policy_version: str | None = None
+    personal_defaults_snapshot: PersonalDefaultsSnapshot | None = None
+
+
+class PersonalChatPinConfirmOutcome(str, Enum):
+    """Result of the short apply that follows a validated staged move.
+
+    Anything except CONFIRMED means the state the validation depended on
+    changed while it ran; the caller raises and the administrator retries
+    against the live state.
+    """
+
+    CONFIRMED = "confirmed"
+    POLICY_CHANGED = "policy_changed"
+    PUBLICATION_CHANGED = "publication_changed"
+    PERSONAL_DEFAULTS_CHANGED = "personal_defaults_changed"
+    BLOCKED = "blocked"
+
+
 class SkillHasBindingsError(Exception):
     pass
 
@@ -492,6 +536,14 @@ class SkillHasActiveAppRunsError(Exception):
 
 class SkillRevisionConflictError(Exception):
     pass
+
+
+class SkillNotPublishedForBindingError(Exception):
+    """A binding change targeted a Skill with no published revision."""
+
+
+class SkillBlockedForBindingError(Exception):
+    """A binding change targeted a Skill under an active execution block."""
 
 
 class SkillSlugConflictError(Exception):

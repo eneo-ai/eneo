@@ -138,6 +138,65 @@ async def _create_inline_content(
         return prepared.id, user_id
 
 
+async def _create_object_store_content(
+    database: DatabaseSessionManager,
+    *,
+    payload: bytes,
+    idempotency_key: str,
+) -> tuple[UUID, UUID]:
+    content_id = uuid4()
+    digest = sha256(payload).digest()
+    async with database.session() as session, session.begin():
+        tenant_id = (await session.scalars(select(Tenants.id))).one()
+        user_id = (await session.scalars(select(Users.id))).one()
+        owner = Files(
+            name=f"{idempotency_key}.bin",
+            mimetype="application/octet-stream",
+            file_type="text",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            parent_file_id=None,
+        )
+        session.add(owner)
+        await session.flush()
+        session.add(
+            ObjectContents(
+                id=content_id,
+                tenant_id=tenant_id,
+                created_by_user_id=user_id,
+                storage_kind=StorageKind.OBJECT_STORE.value,
+                state=ContentState.AVAILABLE.value,
+                access_class=ContentAccessClass.PRIVATE_RESOURCE.value,
+                sha256=digest,
+                size_bytes=len(payload),
+                declared_media_type="application/octet-stream",
+                verified_media_type="application/octet-stream",
+                idempotency_key=idempotency_key,
+                request_fingerprint=digest,
+                available_at=func.now(),
+            )
+        )
+        await session.flush()
+        session.add(
+            ObjectStoreObjects(
+                content_id=content_id,
+                storage_kind=StorageKind.OBJECT_STORE.value,
+                object_key=f"test/object-content/{content_id.hex}",
+                verification_chunk_size_bytes=max(len(payload), 1),
+                verification_chunk_sha256=digest,
+            )
+        )
+        session.add(
+            FileContentReferences(
+                file_id=owner.id,
+                content_id=content_id,
+                variant="original",
+                ordinal=0,
+            )
+        )
+    return content_id, user_id
+
+
 async def _queue_move(
     database: DatabaseSessionManager,
     *,
@@ -346,6 +405,105 @@ async def test_admin_command_requires_readiness_before_queueing(
         assert move is not None
         assert content.storage_kind == StorageKind.POSTGRES_INLINE.value
         assert move.target_kind == StorageKind.OBJECT_STORE.value
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_degraded_store_still_queues_moves_back_to_postgres(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content_id, actor_id = await _create_object_store_content(
+        object_content_database,
+        payload=b"move back despite degraded store",
+        idempotency_key=f"move-{uuid4().hex}",
+    )
+
+    class Runtime:
+        inline_maximum_bytes = real_object_store.settings.inline_maximum_bytes
+        object_store_maximum_bytes = real_object_store.settings.maximum_multipart_bytes
+
+        async def storage_capabilities(self) -> tuple[StorageCapability, ...]:
+            return (
+                StorageCapability(
+                    target=StorageKind.OBJECT_STORE,
+                    configured=True,
+                    selectable=False,
+                    readiness_code=ObjectContentReadinessCode.STORE_DEGRADED,
+                ),
+            )
+
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "object_content_runtime",
+        Runtime(),
+    )
+    async with object_content_database.session() as session:
+        container = cast(
+            Container,
+            SimpleNamespace(
+                session=lambda: session,
+                user=lambda: SimpleNamespace(id=actor_id),
+            ),
+        )
+        queued = await deployment_policy_router.queue_object_content_moves(
+            MoveQueueRequest(target=StorageKind.POSTGRES_INLINE, limit=1),
+            container,
+        )
+        async with session.begin():
+            move = await session.get(ObjectContentMoves, content_id)
+
+            assert queued.queued_count == 1
+            assert move is not None
+            assert move.target_kind == StorageKind.POSTGRES_INLINE.value
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_unconfigured_store_queue_toward_postgres_reports_reality(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Runtime:
+        inline_maximum_bytes = 1024
+        object_store_maximum_bytes = None
+        configured = False
+        selectable = False
+
+        async def storage_capabilities(self) -> tuple[StorageCapability, ...]:
+            return (
+                StorageCapability(
+                    target=StorageKind.OBJECT_STORE,
+                    configured=self.configured,
+                    selectable=self.selectable,
+                    readiness_code=(
+                        ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "object_content_runtime",
+        Runtime(),
+    )
+    async with object_content_database.session() as session, session.begin():
+        actor_id = (await session.scalars(select(Users.id))).one()
+    async with object_content_database.session() as session:
+        container = cast(
+            Container,
+            SimpleNamespace(
+                session=lambda: session,
+                user=lambda: SimpleNamespace(id=actor_id),
+            ),
+        )
+        queued = await deployment_policy_router.queue_object_content_moves(
+            MoveQueueRequest(target=StorageKind.POSTGRES_INLINE, limit=1),
+            container,
+        )
+
+    assert queued.queued_count == 0
 
 
 @pytest.mark.integration

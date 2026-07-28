@@ -15,20 +15,59 @@ Real Postgres via testcontainers; seeds follow
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.governance_policy_table import GovernancePolicies
+from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.skill_table import GovernancePolicySkillBindings
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.users_table import Users
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.skills.domain.skill import (
     PersonalChatPinAdvanceOutcome,
+    PersonalChatPinConfirmOutcome,
     SkillBindingReference,
     SkillRevisionConflictError,
 )
+from eneo.skills.infrastructure.skill_repo_impl import (
+    acquire_personal_default_fit_lock,
+)
+
+
+async def _wait_until_advisory_lock(db_container, *, pid: int, task) -> None:
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        async with db_container() as observer:
+            is_waiting = await observer.session().scalar(
+                sa.text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_stat_activity AS activity
+                        JOIN pg_locks AS lock ON lock.pid = activity.pid
+                        WHERE activity.pid = :pid
+                          AND activity.wait_event_type = 'Lock'
+                          AND lock.locktype = 'advisory'
+                          AND NOT lock.granted
+                    )
+                    """
+                ),
+                {"pid": pid},
+            )
+        if is_waiting:
+            return
+        if task.done():
+            outcome = await task
+            raise AssertionError(
+                f"Confirm completed before waiting for the fit token: {outcome}"
+            )
+    raise AssertionError(f"Database session {pid} did not wait for the fit token")
 
 
 async def _org_space_id(session, *, tenant_id: UUID) -> UUID:
@@ -118,6 +157,37 @@ async def _binding_row(session, *, policy_id: UUID, skill_id: UUID):
     ).one()
 
 
+async def _advance(
+    repo,
+    *,
+    tenant_id: UUID,
+    skill_id: UUID,
+    expected_pinned_revision_id: UUID,
+    expected_published_revision_id: UUID,
+):
+    """Stage + confirm, the way the service drives the repo (fit scan aside)."""
+    stage = await repo.stage_personal_chat_skill_pin_advance(
+        tenant_id=tenant_id,
+        skill_id=skill_id,
+        expected_pinned_revision_id=expected_pinned_revision_id,
+        expected_published_revision_id=expected_published_revision_id,
+    )
+    if stage is None:
+        return None
+    if stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED:
+        confirm = await repo.confirm_personal_chat_skill_pin_advance(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+            policy_id=stage.policy_id,
+            policy_version=stage.policy_version,
+            personal_defaults_snapshot=stage.personal_defaults_snapshot,
+            expected_pinned_revision_id=expected_pinned_revision_id,
+            expected_published_revision_id=expected_published_revision_id,
+        )
+        assert confirm is PersonalChatPinConfirmOutcome.CONFIRMED
+    return stage.advance
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_advances_only_the_reviewed_pin_and_preserves_everything_else(
@@ -167,7 +237,8 @@ async def test_advances_only_the_reviewed_pin_and_preserves_everything_else(
             user_id=admin_user.id,
         )
 
-        advance = await repo.advance_personal_chat_skill_pin(
+        advance = await _advance(
+            repo,
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_pinned_revision_id=old_revision.id,
@@ -219,7 +290,8 @@ async def test_repeating_the_advance_is_a_typed_no_op(db_container, admin_user):
             user_id=admin_user.id,
         )
 
-        first = await repo.advance_personal_chat_skill_pin(
+        first = await _advance(
+            repo,
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_pinned_revision_id=old_revision.id,
@@ -230,7 +302,8 @@ async def test_repeating_the_advance_is_a_typed_no_op(db_container, admin_user):
 
         # A retry with the now-current pin as the reviewed revision reports
         # already-current instead of failing or writing again.
-        second = await repo.advance_personal_chat_skill_pin(
+        second = await _advance(
+            repo,
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_pinned_revision_id=published.id,
@@ -243,7 +316,8 @@ async def test_repeating_the_advance_is_a_typed_no_op(db_container, admin_user):
         # Once the pin is current there is no write left to guard, so even a
         # stale reviewed revision is a clean no-op instead of a conflict.
         # This is what makes re-running an interrupted rollout safe.
-        retried = await repo.advance_personal_chat_skill_pin(
+        retried = await _advance(
+            repo,
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_pinned_revision_id=uuid4(),
@@ -286,7 +360,8 @@ async def test_a_stale_reviewed_revision_loses_instead_of_overwriting(
         )
 
         with pytest.raises(SkillRevisionConflictError):
-            await repo.advance_personal_chat_skill_pin(
+            await _advance(
+                repo,
                 tenant_id=admin_user.tenant_id,
                 skill_id=skill.id,
                 expected_pinned_revision_id=uuid4(),  # reviewed some other state
@@ -296,7 +371,8 @@ async def test_a_stale_reviewed_revision_loses_instead_of_overwriting(
         # The reviewed target must also be the live published revision: a
         # publish that lands after the review may not be applied silently.
         with pytest.raises(SkillRevisionConflictError):
-            await repo.advance_personal_chat_skill_pin(
+            await _advance(
+                repo,
                 tenant_id=admin_user.tenant_id,
                 skill_id=skill.id,
                 expected_pinned_revision_id=old_revision.id,
@@ -320,7 +396,8 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
         unbound = await _published_skill(
             repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
         )
-        not_bound = await repo.advance_personal_chat_skill_pin(
+        not_bound = await _advance(
+            repo,
             tenant_id=admin_user.tenant_id,
             skill_id=unbound.id,
             expected_pinned_revision_id=unbound.current_revision.id,
@@ -354,7 +431,8 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
         await repo.unpublish_organization(
             tenant_id=admin_user.tenant_id, skill_id=bound.id
         )
-        unpublished = await repo.advance_personal_chat_skill_pin(
+        unpublished = await _advance(
+            repo,
             tenant_id=admin_user.tenant_id,
             skill_id=bound.id,
             expected_pinned_revision_id=old_revision.id,
@@ -379,7 +457,8 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
             reason="Confirmed unsafe instructions",
         )
         assert blocked is not None
-        stopped = await repo.advance_personal_chat_skill_pin(
+        stopped = await _advance(
+            repo,
             tenant_id=admin_user.tenant_id,
             skill_id=bound.id,
             expected_pinned_revision_id=old_revision.id,
@@ -391,7 +470,8 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
         assert row.skill_revision_id == old_revision.id
 
         assert (
-            await repo.advance_personal_chat_skill_pin(
+            await _advance(
+                repo,
                 tenant_id=uuid4(),  # no such tenant
                 skill_id=bound.id,
                 expected_pinned_revision_id=old_revision.id,
@@ -401,68 +481,610 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
         )
 
 
-# Lock-wait helpers mirroring test_skill_concurrency.py.
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_validation_holds_no_locks_at_all(db_container, admin_user):
+    """A governance binding replacement commits while validation is open."""
+    import sqlalchemy as sa2
 
+    from eneo.database.tables.skill_table import Skills
 
-async def _backend_pid(container) -> int:
-    pid = await container.session().scalar(sa.text("SELECT pg_backend_pid()"))
-    assert isinstance(pid, int)
-    return pid
-
-
-async def _wait_until_database_lock(db_session, *, pid: int) -> None:
-    deadline = asyncio.get_running_loop().time() + 5
-    while asyncio.get_running_loop().time() < deadline:
-        async with db_session() as session:
-            wait_event_type = await session.scalar(
-                sa.text(
-                    "SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"
-                ).bindparams(pid=pid)
-            )
-        if wait_event_type == "Lock":
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError(f"Database session {pid} did not wait for the expected lock")
-
-
-async def _wait_for_held_write(
-    event: asyncio.Event, writer: asyncio.Task[object]
-) -> None:
-    event_waiter = asyncio.create_task(event.wait())
-    try:
-        done, _ = await asyncio.wait(
-            {event_waiter, writer},
-            timeout=5,
-            return_when=asyncio.FIRST_COMPLETED,
+    async with db_container() as container:
+        session = container.session()
+        repo = container.skill_repo()
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
         )
-        if writer in done:
-            await writer
-            raise AssertionError("Writer completed without holding its transaction")
-        if event_waiter not in done:
-            writer.cancel()
-            await asyncio.gather(writer, return_exceptions=True)
-            raise AssertionError("Writer did not reach the held transaction state")
-        await event_waiter
-    finally:
-        if not event_waiter.done():
-            event_waiter.cancel()
-            await asyncio.gather(event_waiter, return_exceptions=True)
+        old_revision = skill.current_revision
+        policy_id = await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+
+    async with db_container() as staging:
+        stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert stage is not None
+        assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+
+        # While the staging transaction is open (the fit scan would run
+        # here), another session must be able to write-lock both rows.
+        async with db_container() as prober:
+            probe = prober.session()
+            locked_policy = await probe.scalar(
+                sa2.select(GovernancePolicies.id)
+                .where(GovernancePolicies.id == stage.policy_id)
+                .with_for_update(nowait=True)
+            )
+            assert locked_policy == stage.policy_id
+            locked_skill = await probe.scalar(
+                sa2.select(Skills.id)
+                .where(Skills.id == skill.id)
+                .with_for_update(nowait=True)
+            )
+            assert locked_skill == skill.id
+            await acquire_personal_default_fit_lock(
+                session=probe,
+                tenant_id=admin_user.tenant_id,
+                shared=True,
+            )
+            await probe.rollback()
+
+        async with db_container() as editor:
+            editor_repo = editor.skill_repo()
+            replacement = (
+                await editor_repo.resolve_published_references_for_binding_update(
+                    tenant_id=admin_user.tenant_id,
+                    references=[
+                        SkillBindingReference(
+                            skill_id=skill.id,
+                            skill_revision_id=published.id,
+                        )
+                    ],
+                )
+            )
+            await editor.session().execute(sa2.text("SET LOCAL lock_timeout = '1s'"))
+            await editor_repo.replace_policy_bindings(
+                policy_id=policy_id,
+                tenant_id=admin_user.tenant_id,
+                skill_space_id=org,
+                bindings=replacement,
+            )
+
+        confirm = await staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            policy_id=stage.policy_id,
+            policy_version=stage.policy_version,
+            personal_defaults_snapshot=stage.personal_defaults_snapshot,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert confirm is PersonalChatPinConfirmOutcome.POLICY_CHANGED
+        await staging.session().rollback()
+
+    async with db_container() as verifier:
+        binding = await _binding_row(
+            verifier.session(),
+            policy_id=policy_id,
+            skill_id=skill.id,
+        )
+        assert binding.skill_revision_id == published.id
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_advances_to_different_skills_serialize_on_the_policy_row(
-    db_container, db_session, admin_user
+async def test_personal_default_change_during_validation_refuses_the_apply(
+    db_container, admin_user
 ):
-    """Two concurrent advances must not both validate a partial baseline.
+    async with db_container() as container:
+        await container.space_init_service().get_personal_space()
+        session = container.session()
+        repo = container.skill_repo()
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        policy_id = await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
 
-    The fit validation that follows an advance judges the whole Personal Chat
-    policy, so the advance takes the policy-row lock — the same lock every
-    policy save takes. Without it, two advances to different Skills could each
-    pass validation against the other's uncommitted state and jointly commit
-    an over-budget configuration (write skew). This pins the serialization:
-    the second advance waits on the policy lock until the first commits.
-    """
+    async with db_container() as staging:
+        stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert stage is not None
+        assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+
+        async with db_container() as editor:
+            assistant_id = await editor.session().scalar(
+                sa.select(Assistants.id)
+                .join(Spaces, Spaces.id == Assistants.space_id)
+                .where(
+                    Spaces.tenant_id == admin_user.tenant_id,
+                    Spaces.user_id.is_not(None),
+                    Assistants.is_default == sa.true(),
+                )
+                .limit(1)
+            )
+            assert assistant_id is not None
+            await editor.session().execute(
+                sa.update(Assistants)
+                .where(Assistants.id == assistant_id)
+                .values(updated_at=sa.func.clock_timestamp())
+            )
+
+        confirm = await staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            policy_id=stage.policy_id,
+            policy_version=stage.policy_version,
+            personal_defaults_snapshot=stage.personal_defaults_snapshot,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+        await staging.session().rollback()
+
+    async with db_container() as verifier:
+        binding = await _binding_row(
+            verifier.session(),
+            policy_id=policy_id,
+            skill_id=skill.id,
+        )
+        assert binding.skill_revision_id == old_revision.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_adding_mcp_to_personal_default_during_validation_refuses_the_apply(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        await container.space_init_service().get_personal_space()
+        session = container.session()
+        assistant_id = await session.scalar(
+            sa.select(Assistants.id)
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_not(None),
+                Assistants.is_default == sa.true(),
+            )
+            .limit(1)
+        )
+        assert assistant_id is not None
+        mcp_server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"Pin advance MCP {uuid4().hex[:8]}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=False,
+        )
+        session.add(mcp_server)
+        await session.flush()
+
+        repo = container.skill_repo()
+        await repo.get_or_seed_runtime_policy(tenant_id=admin_user.tenant_id)
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        policy_id = await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+        mcp_server_id = mcp_server.id
+
+    async with db_container() as staging:
+        stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert stage is not None
+        assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+
+        async with db_container() as editor:
+            await editor.assistant_service().add_mcp_to_assistant(
+                assistant_id=assistant_id,
+                mcp_server_id=mcp_server_id,
+            )
+
+        confirm = await staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            policy_id=stage.policy_id,
+            policy_version=stage.policy_version,
+            personal_defaults_snapshot=stage.personal_defaults_snapshot,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+        await staging.session().rollback()
+
+    async with db_container() as verifier:
+        binding = await _binding_row(
+            verifier.session(),
+            policy_id=policy_id,
+            skill_id=skill.id,
+        )
+        assert binding.skill_revision_id == old_revision.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_an_in_flight_assistant_save_drains_before_the_apply(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        await container.space_init_service().get_personal_space()
+        session = container.session()
+        repo = container.skill_repo()
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        assistant_id = await session.scalar(
+            sa.select(Assistants.id)
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_not(None),
+                Assistants.is_default == sa.true(),
+            )
+            .limit(1)
+        )
+        assert assistant_id is not None
+        second_user = Users(
+            email=f"pin-advance-{uuid4().hex[:8]}@example.com",
+            tenant_id=admin_user.tenant_id,
+            state="active",
+        )
+        session.add(second_user)
+        await session.flush()
+        second_space = Spaces(
+            name="Second personal space",
+            tenant_id=admin_user.tenant_id,
+            user_id=second_user.id,
+        )
+        session.add(second_space)
+        await session.flush()
+        session.add(
+            Assistants(
+                name="Second personal default",
+                user_id=second_user.id,
+                completion_model_id=None,
+                completion_model_kwargs={},
+                logging_enabled=True,
+                is_default=True,
+                published=False,
+                space_id=second_space.id,
+            )
+        )
+        await session.flush()
+        staged_count, staged_max = (
+            await session.execute(
+                sa.select(
+                    sa.func.count(Assistants.id), sa.func.max(Assistants.updated_at)
+                )
+                .join(Spaces, Spaces.id == Assistants.space_id)
+                .where(
+                    Spaces.tenant_id == admin_user.tenant_id,
+                    Spaces.user_id.is_not(None),
+                    Assistants.is_default == sa.true(),
+                )
+            )
+        ).one()
+        assert staged_count == 2
+        assert staged_max is not None
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        policy_id = await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+
+    async with db_container() as editor:
+        old_timestamp = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        assert old_timestamp < staged_max
+        await acquire_personal_default_fit_lock(
+            session=editor.session(),
+            tenant_id=admin_user.tenant_id,
+            shared=True,
+        )
+        await editor.session().execute(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant_id)
+            .values(updated_at=old_timestamp)
+        )
+        changed_count, changed_max = (
+            await editor.session().execute(
+                sa.select(
+                    sa.func.count(Assistants.id), sa.func.max(Assistants.updated_at)
+                )
+                .join(Spaces, Spaces.id == Assistants.space_id)
+                .where(
+                    Spaces.tenant_id == admin_user.tenant_id,
+                    Spaces.user_id.is_not(None),
+                    Assistants.is_default == sa.true(),
+                )
+            )
+        ).one()
+        assert changed_count == staged_count
+        assert changed_max == staged_max
+
+        async with db_container() as staging:
+            stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+                tenant_id=admin_user.tenant_id,
+                skill_id=skill.id,
+                expected_pinned_revision_id=old_revision.id,
+                expected_published_revision_id=published.id,
+            )
+            assert stage is not None
+            assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+            pid = await staging.session().scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(pid, int)
+
+            confirm_task = asyncio.create_task(
+                staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+                    tenant_id=admin_user.tenant_id,
+                    skill_id=skill.id,
+                    policy_id=stage.policy_id,
+                    policy_version=stage.policy_version,
+                    personal_defaults_snapshot=stage.personal_defaults_snapshot,
+                    expected_pinned_revision_id=old_revision.id,
+                    expected_published_revision_id=published.id,
+                )
+            )
+            try:
+                await _wait_until_advisory_lock(
+                    db_container,
+                    pid=pid,
+                    task=confirm_task,
+                )
+                await editor.session().commit()
+                confirm = await confirm_task
+            finally:
+                if not confirm_task.done():
+                    confirm_task.cancel()
+                    await asyncio.gather(confirm_task, return_exceptions=True)
+
+            assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+            await staging.session().rollback()
+
+    async with db_container() as verifier:
+        binding = await _binding_row(
+            verifier.session(),
+            policy_id=policy_id,
+            skill_id=skill.id,
+        )
+        assert binding.skill_revision_id == old_revision.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_runtime_policy_change_during_validation_refuses_the_apply(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        session = container.session()
+        repo = container.skill_repo()
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        runtime_policy = await repo.get_or_seed_runtime_policy(
+            tenant_id=admin_user.tenant_id
+        )
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        policy_id = await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+
+    async with db_container() as staging:
+        stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert stage is not None
+        assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+
+        async with db_container() as editor:
+            await editor.skill_repo().update_runtime_policy(
+                tenant_id=admin_user.tenant_id,
+                policy=replace(
+                    runtime_policy,
+                    context_share_percent=runtime_policy.context_share_percent + 1,
+                ),
+            )
+
+        confirm = await staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            policy_id=stage.policy_id,
+            policy_version=stage.policy_version,
+            personal_defaults_snapshot=stage.personal_defaults_snapshot,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+        await staging.session().rollback()
+
+    async with db_container() as verifier:
+        binding = await _binding_row(
+            verifier.session(),
+            policy_id=policy_id,
+            skill_id=skill.id,
+        )
+        assert binding.skill_revision_id == old_revision.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_policy_change_during_validation_refuses_the_apply(
+    db_container, admin_user
+):
+    """A policy save that commits while the fit scan runs must refuse the
+    staged apply: the validation no longer describes the state it guards."""
+    import sqlalchemy as sa2
+
+    async with db_container() as container:
+        session = container.session()
+        repo = container.skill_repo()
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+
+    async with db_container() as staging:
+        stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert stage is not None
+        assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+
+        # A concurrent policy save commits mid-scan. Every save rewrites the
+        # policy row, which is exactly what the version marker watches.
+        async with db_container() as editor:
+            await editor.session().execute(
+                sa2.update(GovernancePolicies)
+                .where(GovernancePolicies.id == stage.policy_id)
+                .values(updated_at=sa2.func.now())
+            )
+
+        confirm = await staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            policy_id=stage.policy_id,
+            policy_version=stage.policy_version,
+            personal_defaults_snapshot=stage.personal_defaults_snapshot,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert confirm is PersonalChatPinConfirmOutcome.POLICY_CHANGED
+        await staging.session().rollback()
+
+    async with db_container() as verifier:
+        # This is what the service's raise produces: the staged pin is gone.
+        binding = await verifier.session().execute(
+            sa.select(GovernancePolicySkillBindings.skill_revision_id).where(
+                GovernancePolicySkillBindings.policy_id == stage.policy_id,
+                GovernancePolicySkillBindings.skill_id == skill.id,
+            )
+        )
+        assert binding.scalar_one() == old_revision.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_concurrent_advances_cannot_jointly_commit_unvalidated_state(
+    db_container, admin_user
+):
+    """The write-skew regression: two advances to different Skills validate
+    concurrently, but the first confirmed apply bumps the policy row, so the
+    second must refuse and revalidate instead of committing blind."""
     async with db_container() as container:
         session = container.session()
         repo = container.skill_repo()
@@ -489,52 +1111,76 @@ async def test_advances_to_different_skills_serialize_on_the_policy_row(
                 ),
             ],
         )
-        published_by_skill = {}
+        published = {}
         for skill in (first, second):
-            published_by_skill[skill.id] = await _publish_second_revision(
+            published[skill.id] = await _publish_second_revision(
                 repo,
                 tenant_id=admin_user.tenant_id,
                 skill_id=skill.id,
                 user_id=admin_user.id,
             )
 
-    first_finished = asyncio.Event()
-    release_first = asyncio.Event()
-    second_pid = asyncio.get_running_loop().create_future()
+    async with db_container() as session_a:
+        stage_a = await session_a.skill_repo().stage_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=first.id,
+            expected_pinned_revision_id=first_old.id,
+            expected_published_revision_id=published[first.id].id,
+        )
+        assert stage_a is not None
+        assert stage_a.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
 
-    async def first_writer():
-        async with db_container() as container:
-            advance = await container.skill_repo().advance_personal_chat_skill_pin(
-                tenant_id=admin_user.tenant_id,
-                skill_id=first.id,
-                expected_pinned_revision_id=first_old.id,
-                expected_published_revision_id=published_by_skill[first.id].id,
+        async with db_container() as session_b:
+            # B stages and validates while A's transaction is still open —
+            # neither sees the other's uncommitted pin.
+            stage_b = (
+                await session_b.skill_repo().stage_personal_chat_skill_pin_advance(
+                    tenant_id=admin_user.tenant_id,
+                    skill_id=second.id,
+                    expected_pinned_revision_id=second_old.id,
+                    expected_published_revision_id=published[second.id].id,
+                )
             )
-            first_finished.set()
-            await release_first.wait()
-            return advance
+            assert stage_b is not None
+            assert stage_b.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
 
-    async def second_writer():
-        async with db_container() as container:
-            second_pid.set_result(await _backend_pid(container))
-            return await container.skill_repo().advance_personal_chat_skill_pin(
-                tenant_id=admin_user.tenant_id,
-                skill_id=second.id,
-                expected_pinned_revision_id=second_old.id,
-                expected_published_revision_id=published_by_skill[second.id].id,
+            # A confirms and commits first (context exit commits).
+            confirm_a = (
+                await session_a.skill_repo().confirm_personal_chat_skill_pin_advance(
+                    tenant_id=admin_user.tenant_id,
+                    skill_id=first.id,
+                    policy_id=stage_a.policy_id,
+                    policy_version=stage_a.policy_version,
+                    personal_defaults_snapshot=stage_a.personal_defaults_snapshot,
+                    expected_pinned_revision_id=first_old.id,
+                    expected_published_revision_id=published[first.id].id,
+                )
             )
+            assert confirm_a is PersonalChatPinConfirmOutcome.CONFIRMED
+            await session_a.session().commit()
 
-    first_task = asyncio.create_task(first_writer())
-    await _wait_for_held_write(first_finished, first_task)
-    second_task = asyncio.create_task(second_writer())
-    pid = await asyncio.wait_for(second_pid, timeout=5)
-    try:
-        await _wait_until_database_lock(db_session, pid=pid)
-    finally:
-        release_first.set()
-    first_advance, second_advance = await asyncio.gather(first_task, second_task)
+            confirm_b = (
+                await session_b.skill_repo().confirm_personal_chat_skill_pin_advance(
+                    tenant_id=admin_user.tenant_id,
+                    skill_id=second.id,
+                    policy_id=stage_b.policy_id,
+                    policy_version=stage_b.policy_version,
+                    personal_defaults_snapshot=stage_b.personal_defaults_snapshot,
+                    expected_pinned_revision_id=second_old.id,
+                    expected_published_revision_id=published[second.id].id,
+                )
+            )
+            assert confirm_b is PersonalChatPinConfirmOutcome.POLICY_CHANGED
+            await session_b.session().rollback()
 
-    assert first_advance is not None
-    assert first_advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
-    assert second_advance is not None
-    assert second_advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+    # A fresh retry revalidates against the committed state and succeeds.
+    async with db_container() as retry:
+        advance = await _advance(
+            retry.skill_repo(),
+            tenant_id=admin_user.tenant_id,
+            skill_id=second.id,
+            expected_pinned_revision_id=second_old.id,
+            expected_published_revision_id=published[second.id].id,
+        )
+        assert advance is not None
+        assert advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
