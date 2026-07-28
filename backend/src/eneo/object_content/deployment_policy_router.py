@@ -310,15 +310,16 @@ async def queue_object_content_moves(
     request: MoveQueueRequest,
     container: _PolicyAdminContainer,
 ) -> MoveQueuePublic:
-    object_store_capability = next(
-        fact
-        for fact in await object_content_runtime.storage_capabilities()
-        if fact.target is StorageKind.OBJECT_STORE
-    )
-    if not object_store_capability.selectable:
-        raise ObjectContentUnavailableError(
-            "Compatible object storage is not ready for a new move command"
+    if request.target is StorageKind.OBJECT_STORE:
+        object_store_capability = next(
+            fact
+            for fact in await object_content_runtime.storage_capabilities()
+            if fact.target is StorageKind.OBJECT_STORE
         )
+        if not object_store_capability.selectable:
+            raise ObjectContentUnavailableError(
+                "Compatible object storage is not ready for a new move command"
+            )
     maximum_bytes = (
         object_content_runtime.inline_maximum_bytes
         if request.target is StorageKind.POSTGRES_INLINE
