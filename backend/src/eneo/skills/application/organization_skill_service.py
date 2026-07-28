@@ -2,7 +2,6 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.main.exceptions import (
-    BadRequestException,
     NotFoundException,
     SkillRevisionConflictException,
     UnauthorizedException,
@@ -23,6 +22,8 @@ from eneo.skills.domain.skill import (
     Skill,
     SkillAdoptionCursor,
     SkillAdoptionProjectionPage,
+    SkillBlockedForBindingError,
+    SkillNotPublishedForBindingError,
     SkillPublicationChange,
     SkillRevision,
     SkillRevisionChange,
@@ -423,13 +424,9 @@ class OrganizationSkillService:
         if advance.outcome is PersonalChatPinAdvanceOutcome.NOT_BOUND:
             raise NotFoundException("Personal Chat has no binding for this Skill")
         if advance.outcome is PersonalChatPinAdvanceOutcome.NOT_PUBLISHED:
-            raise BadRequestException(
-                "Personal Chat can only use published organisation Skill versions"
-            )
+            raise SkillNotPublishedForBindingError
         if advance.outcome is PersonalChatPinAdvanceOutcome.BLOCKED:
-            raise BadRequestException(
-                "Blocked organisation Skills cannot receive new or changed bindings"
-            )
+            raise SkillBlockedForBindingError
         if advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED:
             assert (
                 advance.from_revision_id is not None
@@ -454,9 +451,7 @@ class OrganizationSkillService:
                 expected_published_revision_id=expected_published_revision_id,
             )
             if confirm is PersonalChatPinConfirmOutcome.BLOCKED:
-                raise BadRequestException(
-                    "Blocked organisation Skills cannot receive new or changed bindings"
-                )
+                raise SkillBlockedForBindingError
             if confirm is not PersonalChatPinConfirmOutcome.CONFIRMED:
                 raise SkillRevisionConflictException(
                     "The Personal Chat policy or the Skill changed while the "

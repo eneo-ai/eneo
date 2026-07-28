@@ -485,7 +485,8 @@ class PersonalChatPinAdvance:
 @dataclass(frozen=True)
 class PersonalDefaultsSnapshot:
     assistant_count: int
-    latest_change_at: datetime | None
+    row_versions_digest: str | None
+    runtime_policy_version: str | None
 
 
 @dataclass(frozen=True)
@@ -535,6 +536,14 @@ class SkillHasActiveAppRunsError(Exception):
 
 class SkillRevisionConflictError(Exception):
     pass
+
+
+class SkillNotPublishedForBindingError(Exception):
+    """A binding change targeted a Skill with no published revision."""
+
+
+class SkillBlockedForBindingError(Exception):
+    """A binding change targeted a Skill under an active execution block."""
 
 
 class SkillSlugConflictError(Exception):

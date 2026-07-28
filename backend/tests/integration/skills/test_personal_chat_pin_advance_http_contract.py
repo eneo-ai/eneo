@@ -333,3 +333,80 @@ async def test_a_publish_after_the_review_is_refused_not_silently_applied(
     assert policy_response.status_code == 200, policy_response.text
     bindings = policy_response.json()["skills"]["bindings"]
     assert [b["skill_revision_id"] for b in bindings] == [first_revision_id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_unpublished_and_blocked_refusals_carry_their_own_codes(
+    client, admin_token, db_container
+):
+    """SDK and localized UI consumers pick recovery from the stable code:
+    9053 means publish the Skill first, 9054 means clear the execution
+    block. Neither may collapse into the generic BAD_REQUEST contract."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    async with db_container() as container:
+        await container.space_init_service().get_personal_space()
+
+    create_response = await client.post(
+        "/api/v1/skills/organization/",
+        json={
+            "slug": f"pin-advance-codes-{uuid4().hex[:8]}",
+            "display_name": "Pin advance codes",
+            "description": "Approved guidance.",
+            "instructions": "Follow the approved instructions.",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201, create_response.text
+    skill_id = create_response.json()["id"]
+    first_revision_id = create_response.json()["current_revision"]["id"]
+
+    # Never published: the advance names the publication gap.
+    not_published = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
+        json={
+            "expected_pinned_revision_id": first_revision_id,
+            "expected_published_revision_id": first_revision_id,
+        },
+        headers=headers,
+    )
+    assert not_published.status_code == 400, not_published.text
+    assert not_published.json()["eneo_error_code"] == 9053
+
+    # Published, bound, then blocked: the advance names the block.
+    assert (
+        await client.post(
+            f"/api/v1/skills/organization/{skill_id}/publish/",
+            json={"expected_revision_id": first_revision_id},
+            headers=headers,
+        )
+    ).status_code == 200
+    bind_response = await client.put(
+        "/api/v1/admin/governance-policy/",
+        json={
+            "skills": {
+                "bindings": [
+                    {"skill_id": skill_id, "skill_revision_id": first_revision_id}
+                ]
+            }
+        },
+        headers=headers,
+    )
+    assert bind_response.status_code == 200, bind_response.text
+    block_response = await client.post(
+        f"/api/v1/settings/skills/{skill_id}/execution-block",
+        json={"reason": "Confirmed unsafe instructions"},
+        headers=headers,
+    )
+    assert block_response.status_code in (200, 201), block_response.text
+
+    blocked = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
+        json={
+            "expected_pinned_revision_id": first_revision_id,
+            "expected_published_revision_id": first_revision_id,
+        },
+        headers=headers,
+    )
+    assert blocked.status_code == 400, blocked.text
+    assert blocked.json()["eneo_error_code"] == 9054

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import TypeVar
 from uuid import UUID, uuid4
 
@@ -1190,6 +1191,21 @@ class SkillRepoImpl:
     _POLICY_ROW_VERSION = sa.cast(
         sa.literal_column("governance_policies.xmin"), sa.Text
     ).label("policy_version")
+    _RUNTIME_POLICY_ROW_VERSION = sa.cast(
+        sa.literal_column("skill_runtime_policies.xmin"), sa.Text
+    ).label("runtime_policy_version")
+
+    async def _runtime_policy_version(
+        self, *, tenant_id: UUID, shared_lock: bool
+    ) -> str | None:
+        query = (
+            sa.select(self._RUNTIME_POLICY_ROW_VERSION)
+            .select_from(SkillRuntimePolicies)
+            .where(SkillRuntimePolicies.tenant_id == tenant_id)
+        )
+        if shared_lock:
+            query = query.with_for_update(read=True, of=SkillRuntimePolicies)
+        return await self.session.scalar(query)
 
     async def stage_personal_chat_skill_pin_advance(
         self,
@@ -1304,6 +1320,13 @@ class SkillRepoImpl:
                 tenant_id=tenant_id,
             )
         )
+        personal_defaults_snapshot = replace(
+            personal_defaults_snapshot,
+            runtime_policy_version=await self._runtime_policy_version(
+                tenant_id=tenant_id,
+                shared_lock=False,
+            ),
+        )
         return PersonalChatPinAdvanceStage(
             advance=PersonalChatPinAdvance(
                 outcome=PersonalChatPinAdvanceOutcome.ADVANCED,
@@ -1333,6 +1356,7 @@ class SkillRepoImpl:
         The personal-default snapshot covers saves of prompts, descriptions,
         attachments, model selection, MCP server and tool selection, knowledge,
         and Skill bindings because those paths all rewrite the Assistant row.
+        It also versions the tenant Skill runtime policy used by fit planning.
         Tenant-level model and MCP catalogue changes are outside this snapshot;
         their administrator flows own their validation.
 
@@ -1340,13 +1364,18 @@ class SkillRepoImpl:
         apply instead of waiting. Publication and block state are rechecked
         under the Skill lock. The exclusive tenant fit token then drains
         in-flight Assistant saves before the snapshot recheck; later saves wait
-        until this transaction commits and validate against the new pin.
+        until this transaction commits and validate against the new pin. The
+        runtime-policy row is then held FOR SHARE, draining an in-flight update
+        and making later updates wait until this short apply completes.
 
         Waiting for the token cannot deadlock: an Assistant save holds only its
         row and the shared token, never policy, Skill, or binding locks. A
         governance save holds the policy row and never takes this token, so the
-        NOWAIT policy lock refuses before confirm can wait. The binding recheck,
-        guarded write, and policy-row bump then finish the short apply.
+        NOWAIT policy lock refuses before confirm can wait. Runtime-policy
+        updates hold only their own row FOR UPDATE; they take neither the token
+        nor policy, Skill, or binding locks, so our FOR SHARE wait cannot form a
+        cycle. The binding recheck, guarded write, and policy-row bump then
+        finish the short apply.
         """
         try:
             async with self.session.begin_nested():
@@ -1389,11 +1418,19 @@ class SkillRepoImpl:
             tenant_id=tenant_id,
             shared=False,
         )
+        runtime_policy_version = await self._runtime_policy_version(
+            tenant_id=tenant_id,
+            shared_lock=True,
+        )
         current_personal_defaults_snapshot = (
             await AssistantRepository.get_personal_defaults_snapshot(
                 session=self.session,
                 tenant_id=tenant_id,
             )
+        )
+        current_personal_defaults_snapshot = replace(
+            current_personal_defaults_snapshot,
+            runtime_policy_version=runtime_policy_version,
         )
         if current_personal_defaults_snapshot != personal_defaults_snapshot:
             return PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED

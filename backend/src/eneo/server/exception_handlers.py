@@ -27,9 +27,11 @@ from eneo.object_content.deployment_policy import (
 )
 from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
+    SkillBlockedForBindingError,
     SkillExecutionBlockConflictError,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
+    SkillNotPublishedForBindingError,
     SkillSlugConflictError,
 )
 
@@ -155,6 +157,16 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         409,
         "This Skill is still attached. Remove every binding before deleting it.",
         ErrorCodes.SKILL_STILL_ATTACHED,
+    ),
+    SkillNotPublishedForBindingError: (
+        400,
+        "Personal Chat can only use published organisation Skill versions",
+        ErrorCodes.SKILL_NOT_PUBLISHED_FOR_BINDING,
+    ),
+    SkillBlockedForBindingError: (
+        400,
+        "Blocked organisation Skills cannot receive new or changed bindings",
+        ErrorCodes.SKILL_BLOCKED_FOR_BINDING,
     ),
     SkillExecutionBlockConflictError: (
         409,

@@ -15,6 +15,8 @@ Real Postgres via testcontainers; seeds follow
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -24,6 +26,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.governance_policy_table import GovernancePolicies
 from eneo.database.tables.skill_table import GovernancePolicySkillBindings
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.users_table import Users
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.skills.domain.skill import (
     PersonalChatPinAdvanceOutcome,
@@ -688,6 +691,48 @@ async def test_an_in_flight_assistant_save_drains_before_the_apply(
             .limit(1)
         )
         assert assistant_id is not None
+        second_user = Users(
+            email=f"pin-advance-{uuid4().hex[:8]}@example.com",
+            tenant_id=admin_user.tenant_id,
+            state="active",
+        )
+        session.add(second_user)
+        await session.flush()
+        second_space = Spaces(
+            name="Second personal space",
+            tenant_id=admin_user.tenant_id,
+            user_id=second_user.id,
+        )
+        session.add(second_space)
+        await session.flush()
+        session.add(
+            Assistants(
+                name="Second personal default",
+                user_id=second_user.id,
+                completion_model_id=None,
+                completion_model_kwargs={},
+                logging_enabled=True,
+                is_default=True,
+                published=False,
+                space_id=second_space.id,
+            )
+        )
+        await session.flush()
+        staged_count, staged_max = (
+            await session.execute(
+                sa.select(
+                    sa.func.count(Assistants.id), sa.func.max(Assistants.updated_at)
+                )
+                .join(Spaces, Spaces.id == Assistants.space_id)
+                .where(
+                    Spaces.tenant_id == admin_user.tenant_id,
+                    Spaces.user_id.is_not(None),
+                    Assistants.is_default == sa.true(),
+                )
+            )
+        ).one()
+        assert staged_count == 2
+        assert staged_max is not None
         skill = await _published_skill(
             repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
         )
@@ -711,6 +756,8 @@ async def test_an_in_flight_assistant_save_drains_before_the_apply(
         )
 
     async with db_container() as editor:
+        old_timestamp = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        assert old_timestamp < staged_max
         await acquire_personal_default_fit_lock(
             session=editor.session(),
             tenant_id=admin_user.tenant_id,
@@ -719,8 +766,23 @@ async def test_an_in_flight_assistant_save_drains_before_the_apply(
         await editor.session().execute(
             sa.update(Assistants)
             .where(Assistants.id == assistant_id)
-            .values(updated_at=sa.func.clock_timestamp())
+            .values(updated_at=old_timestamp)
         )
+        changed_count, changed_max = (
+            await editor.session().execute(
+                sa.select(
+                    sa.func.count(Assistants.id), sa.func.max(Assistants.updated_at)
+                )
+                .join(Spaces, Spaces.id == Assistants.space_id)
+                .where(
+                    Spaces.tenant_id == admin_user.tenant_id,
+                    Spaces.user_id.is_not(None),
+                    Assistants.is_default == sa.true(),
+                )
+            )
+        ).one()
+        assert changed_count == staged_count
+        assert changed_max == staged_max
 
         async with db_container() as staging:
             stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
@@ -760,6 +822,80 @@ async def test_an_in_flight_assistant_save_drains_before_the_apply(
 
             assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
             await staging.session().rollback()
+
+    async with db_container() as verifier:
+        binding = await _binding_row(
+            verifier.session(),
+            policy_id=policy_id,
+            skill_id=skill.id,
+        )
+        assert binding.skill_revision_id == old_revision.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_runtime_policy_change_during_validation_refuses_the_apply(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        session = container.session()
+        repo = container.skill_repo()
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        runtime_policy = await repo.get_or_seed_runtime_policy(
+            tenant_id=admin_user.tenant_id
+        )
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        policy_id = await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+
+    async with db_container() as staging:
+        stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert stage is not None
+        assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+
+        async with db_container() as editor:
+            await editor.skill_repo().update_runtime_policy(
+                tenant_id=admin_user.tenant_id,
+                policy=replace(
+                    runtime_policy,
+                    context_share_percent=runtime_policy.context_share_percent + 1,
+                ),
+            )
+
+        confirm = await staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            policy_id=stage.policy_id,
+            policy_version=stage.policy_version,
+            personal_defaults_snapshot=stage.personal_defaults_snapshot,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+        await staging.session().rollback()
 
     async with db_container() as verifier:
         binding = await _binding_row(

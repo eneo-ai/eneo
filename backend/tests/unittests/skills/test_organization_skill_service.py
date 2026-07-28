@@ -31,6 +31,8 @@ from eneo.skills.domain.skill import (
     SkillAdoptionResourceKind,
     SkillAdoptionRevisionCount,
     SkillAdoptionSummary,
+    SkillBlockedForBindingError,
+    SkillNotPublishedForBindingError,
     SkillPublicationChange,
     SkillRevision,
     SkillRevisionChange,
@@ -804,7 +806,8 @@ def _stage(outcome, *, to_number=2):
         policy_version="1234",
         personal_defaults_snapshot=PersonalDefaultsSnapshot(
             assistant_count=1,
-            latest_change_at=None,
+            row_versions_digest=None,
+            runtime_policy_version="5678",
         ),
     )
 
@@ -906,7 +909,7 @@ async def test_pin_advance_refused_confirm_maps_to_the_conflict_contract():
     repo.confirm_personal_chat_skill_pin_advance.return_value = (
         PersonalChatPinConfirmOutcome.BLOCKED
     )
-    with pytest.raises(BadRequestException, match="Blocked organisation Skills"):
+    with pytest.raises(SkillBlockedForBindingError):
         await service.advance_personal_chat_binding(
             skill_id=uuid4(),
             expected_pinned_revision_id=uuid4(),
@@ -964,9 +967,7 @@ async def test_pin_advance_maps_each_refusal_to_its_established_response():
     repo.stage_personal_chat_skill_pin_advance.return_value = _stage(
         PersonalChatPinAdvanceOutcome.NOT_PUBLISHED
     )
-    with pytest.raises(
-        BadRequestException, match="published organisation Skill versions"
-    ):
+    with pytest.raises(SkillNotPublishedForBindingError):
         await service.advance_personal_chat_binding(
             skill_id=uuid4(),
             expected_pinned_revision_id=uuid4(),
@@ -976,7 +977,7 @@ async def test_pin_advance_maps_each_refusal_to_its_established_response():
     repo.stage_personal_chat_skill_pin_advance.return_value = _stage(
         PersonalChatPinAdvanceOutcome.BLOCKED
     )
-    with pytest.raises(BadRequestException, match="Blocked organisation Skills"):
+    with pytest.raises(SkillBlockedForBindingError):
         await service.advance_personal_chat_binding(
             skill_id=uuid4(),
             expected_pinned_revision_id=uuid4(),

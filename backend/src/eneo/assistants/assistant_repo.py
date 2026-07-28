@@ -174,11 +174,23 @@ class AssistantRepository:
         session: AsyncSession,
         tenant_id: UUID,
     ) -> PersonalDefaultsSnapshot:
-        assistant_count, latest_change_at = (
+        """Return a clock-free version digest for personal-default rows.
+
+        PostgreSQL assigns ``updated_at`` from transaction-start time, so an
+        older transaction can commit after a newer one without changing a
+        maximum timestamp. ``xmin`` changes on every row update regardless of
+        clock ordering.
+        """
+        row_versions_digest = sa.literal_column(
+            "md5(string_agg(assistants.id::text || ':' || "
+            "assistants.xmin::text, ',' ORDER BY assistants.id))",
+            type_=sa.String(),
+        )
+        assistant_count, row_versions_digest = (
             await session.execute(
                 sa.select(
                     sa.func.count(Assistants.id),
-                    sa.func.max(Assistants.updated_at),
+                    row_versions_digest,
                 )
                 .select_from(Assistants)
                 .join(Spaces, Assistants.space_id == Spaces.id)
@@ -191,7 +203,8 @@ class AssistantRepository:
         ).one()
         return PersonalDefaultsSnapshot(
             assistant_count=assistant_count,
-            latest_change_at=latest_change_at,
+            row_versions_digest=row_versions_digest,
+            runtime_policy_version=None,
         )
 
     async def _load_attachments(

@@ -3386,6 +3386,8 @@
   "eneo_error_9050": "This Skill is used by an App run that is queued or in progress. Wait for the run to finish, then delete the Skill.",
   "eneo_error_9051": "This Skill is still attached. Remove it from every Assistant, App, and organisation policy before deleting it.",
   "eneo_error_9052": "The execution block changed after you reviewed it. Review the block state below before trying again.",
+  "eneo_error_9053": "Personal Chat can only use published versions of organisation Skills. Publish the Skill, then try again.",
+  "eneo_error_9054": "Blocked Skills cannot receive new or changed bindings. Clear the execution block, then try again.",
   "organization_skills_execution_refresh_error": "The execution block changed after you reviewed it, and the current state could not be loaded. Reload the page before trying again.",
   "skills_library_load_older": "Load older revisions",
   "skills_library_loading_older": "Loading revisions…",
