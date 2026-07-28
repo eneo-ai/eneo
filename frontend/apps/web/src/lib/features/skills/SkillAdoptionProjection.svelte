@@ -235,7 +235,7 @@
         <dd
           class={[
             "mt-1 text-xl font-semibold tabular-nums",
-            summary.behind_published_count > 0 && "text-primary"
+            summary.behind_published_count > 0 && "text-accent-default"
           ]}
         >
           {summary.behind_published_count}
