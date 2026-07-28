@@ -16,7 +16,10 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_factory import AssistantFactory
-from eneo.assistants.assistant_repo import AssistantRepository
+from eneo.assistants.assistant_repo import (
+    AssistantRepository,
+    PersonalDefaultValidationInput,
+)
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.completion_models.infrastructure.context_builder import (
@@ -89,6 +92,10 @@ from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
+
+# Personal defaults are validated tenant-wide; pages keep a fleet-sized
+# tenant from being resident in memory all at once.
+_PERSONAL_DEFAULT_VALIDATION_PAGE_SIZE = 100
 
 _ON_DEMAND_REJECTION_DEFAULT = (
     "On-demand Skills cannot be enabled for this configuration"
@@ -812,9 +819,37 @@ class AssistantService:
                     preflight_adapter=preflight_adapters[model.id],
                 )
 
-        validation_inputs = await self.repo.get_personal_defaults_for_tenant(
-            tenant_id=self.user.tenant_id
-        )
+        # Walk the tenant's personal defaults one bounded page at a time — a
+        # fleet-sized tenant must never be resident all at once. The MCP
+        # projection is scoped to each page for the same reason.
+        page_cursor: tuple[datetime, UUID] | None = None
+        while True:
+            page = await self.repo.get_personal_defaults_page(
+                tenant_id=self.user.tenant_id,
+                limit=_PERSONAL_DEFAULT_VALIDATION_PAGE_SIZE,
+                after=page_cursor,
+            )
+            await self._validate_personal_default_page(
+                validation_inputs=page.items,
+                effective_config=effective_config,
+                policy_plan=policy_plan,
+                candidate_skill_ids=candidate_skill_ids,
+                preflight_adapters=preflight_adapters,
+            )
+            if page.next_after is None:
+                break
+            page_cursor = page.next_after
+
+    async def _validate_personal_default_page(
+        self,
+        *,
+        validation_inputs: list[PersonalDefaultValidationInput],
+        effective_config: "EffectiveConfig",
+        policy_plan: SkillTurnPlan,
+        candidate_skill_ids: frozenset[UUID],
+        preflight_adapters: dict[UUID, "CompletionModelAdapter"],
+    ) -> None:
+        """Validate one page of personal defaults against the governed plan."""
         projected_mcp_servers: dict[UUID, list[MCPServer]] = {}
         if candidate_skill_ids and not effective_config.mcp_enforced:
             mcp_projections = [
@@ -2329,6 +2364,7 @@ class AssistantService:
         )
 
         question_id: UUID | None = None
+        question_created_at: datetime | None = None
         is_new_session = session_id is None
         if not is_new_session:
             assert session_id is not None
@@ -2349,6 +2385,7 @@ class AssistantService:
                 (
                     session,
                     question_id,
+                    question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=name,
                     question=question,
@@ -2365,6 +2402,7 @@ class AssistantService:
                 (
                     session,
                     question_id,
+                    question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=name,
                     question=question,
@@ -2393,7 +2431,10 @@ class AssistantService:
 
         if not is_new_session:
             # Existing conversations need only the new placeholder transaction.
-            question_id = await self.session_service.create_question_placeholder(
+            (
+                question_id,
+                question_created_at,
+            ) = await self.session_service.create_question_placeholder(
                 question=question,
                 session=session,
                 files=files,
@@ -2483,6 +2524,7 @@ class AssistantService:
             info_blob_references = datastore_result.info_blobs
 
         final_response = AssistantResponse(
+            created_at=question_created_at,
             question=question,
             files=files,
             session=session,

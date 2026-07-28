@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -50,7 +51,9 @@ def _make_session_service(*, question_id: UUID | None = None) -> SessionService:
     session.begin = MagicMock()
 
     session_repo = SimpleNamespace(session=session, add=AsyncMock())
-    return_value = SimpleNamespace(id=question_id or uuid4())
+    return_value = SimpleNamespace(
+        id=question_id or uuid4(), created_at=datetime.now(timezone.utc)
+    )
     question_repo = AsyncMock()
     question_repo.session = session
     question_repo.add = AsyncMock(return_value=return_value)
@@ -133,7 +136,7 @@ async def test_create_question_placeholder_inserts_row_with_seeded_question_toke
         ) as count_mock,
         _independent_placeholder_store(service),
     ):
-        returned = await service.create_question_placeholder(
+        returned, returned_created_at = await service.create_question_placeholder(
             question="how do I cancel a stream?",
             session=_make_session_in_db(),
             files=None,
@@ -142,6 +145,7 @@ async def test_create_question_placeholder_inserts_row_with_seeded_question_toke
         )
 
     assert returned == new_question_id
+    assert returned_created_at is not None
     count_mock.assert_called_once_with("how do I cancel a stream?", "gpt-4")
     service.question_repo.add.assert_awaited_once()
 

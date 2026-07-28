@@ -99,6 +99,7 @@ async def test_persisted_aggregate_files_reload_through_object_content(
         (
             session,
             question_id,
+            _question_created_at,
         ) = await container.session_service().create_session_with_question_placeholder(
             name="Hydrated history",
             question="Use the attached policy",
