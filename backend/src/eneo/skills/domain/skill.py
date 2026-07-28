@@ -790,6 +790,15 @@ class SkillActivationReference(BaseModel):
     content_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
     position: int = Field(ge=0, strict=True)
     source: SkillBindingSource
+    # Identity labels captured at execution time so retained evidence stays
+    # readable after a Skill is renamed or deleted. Optional because evidence
+    # persisted before these fields existed has no labels to recover.
+    display_name: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SKILL_DISPLAY_NAME_LENGTH
+    )
+    slug: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SKILL_SLUG_LENGTH
+    )
 
     @classmethod
     def from_binding(
@@ -806,6 +815,8 @@ class SkillActivationReference(BaseModel):
             content_digest=binding.content_digest,
             position=binding.position,
             source=binding.source,
+            display_name=binding.display_name,
+            slug=binding.slug,
         )
 
 

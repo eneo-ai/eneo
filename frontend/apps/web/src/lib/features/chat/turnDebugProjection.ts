@@ -3,10 +3,12 @@ import type { ConversationMessage } from "@eneo/eneo-js";
 export type DebugTurnOption = {
   messageId: string;
   turnNumber: number;
+  createdAt: string | null;
 };
 
 export type TurnDebugDetails = {
   model: { id: string; name: string; route: string } | null;
+  createdAt: string | null;
   inputTokens: number;
   outputTokens: number;
   tools: Array<{
@@ -47,7 +49,8 @@ export function listPersistedDebugTurns(
     if (!message.id || pendingMessageIds.includes(message.id)) continue;
     turns.push({
       messageId: message.id,
-      turnNumber: index + 1
+      turnNumber: index + 1,
+      createdAt: message.created_at ?? null
     });
   }
 
@@ -91,23 +94,26 @@ export function projectTurnDebugDetails(
     });
   }
 
-  return {
-    model: message.completion_model
+  // The activation evidence records the id and route LiteLLM actually used,
+  // so when it is present it wins over the model snapshot on the message;
+  // the snapshot still provides the human-readable display name.
+  const completionModel = message.completion_model;
+  const model =
+    completionModel || modelFallback
       ? {
-          id: message.completion_model.id,
-          name: message.completion_model.name,
+          id: modelFallback?.id ?? completionModel!.id,
+          name: completionModel?.name ?? modelFallback!.route,
           route:
-            message.completion_model.litellm_model_name ??
-            message.completion_model.deployment_name ??
-            message.completion_model.name
+            modelFallback?.route ??
+            completionModel!.litellm_model_name ??
+            completionModel!.deployment_name ??
+            completionModel!.name
         }
-      : modelFallback
-        ? {
-            id: modelFallback.id,
-            name: modelFallback.route,
-            route: modelFallback.route
-          }
-        : null,
+      : null;
+
+  return {
+    createdAt: message.created_at ?? null,
+    model,
     inputTokens: message.num_tokens_question ?? 0,
     outputTokens: message.num_tokens_answer ?? 0,
     tools,

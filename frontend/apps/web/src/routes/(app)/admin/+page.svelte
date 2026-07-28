@@ -5,12 +5,10 @@
 -->
 
 <script lang="ts">
-  import type { SkillRuntimePolicyUpdate } from "@eneo/eneo-js";
   import { Page, Settings } from "$lib/components/layout/index.js";
   import { Input } from "@eneo/ui";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getEneo } from "$lib/core/Eneo.js";
-  import SkillRuntimePolicySettings from "$lib/features/skills/SkillRuntimePolicySettings.svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
 
@@ -121,22 +119,6 @@
       showModelPricing = previousValue; // Revert on error
     }
   }
-
-  async function saveSkillRuntimePolicy(policy: SkillRuntimePolicyUpdate) {
-    const updatedPolicy = await eneo.settings.updateSkillRuntimePolicy(policy);
-    const modelProjections = await eneo.settings
-      .getSkillRuntimeModelProjections()
-      .catch(() => null);
-    return { policy: updatedPolicy, modelProjections };
-  }
-
-  async function resetSkillRuntimePolicy() {
-    const policy = await eneo.settings.resetSkillRuntimePolicy();
-    const modelProjections = await eneo.settings
-      .getSkillRuntimeModelProjections()
-      .catch(() => null);
-    return { policy, modelProjections };
-  }
 </script>
 
 <svelte:head>
@@ -172,20 +154,6 @@
           description={m.show_model_pricing_description()}
         >
           <Input.Switch bind:value={showModelPricing} sideEffect={handleToggleModelPricing} />
-        </Settings.Row>
-      </Settings.Group>
-      <Settings.Group title={m.skills_runtime_policy_group()}>
-        <Settings.Row
-          title={m.skills_runtime_policy_title()}
-          description={m.skills_runtime_policy_description()}
-          fullWidth
-        >
-          <SkillRuntimePolicySettings
-            initialPolicy={data.skillRuntimePolicy}
-            initialModelProjections={data.skillRuntimeModelProjections}
-            onSave={saveSkillRuntimePolicy}
-            onReset={resetSkillRuntimePolicy}
-          />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

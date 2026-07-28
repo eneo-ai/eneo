@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
@@ -81,6 +82,13 @@ class GroupChatInfo(BaseModel):
 
 class AskChatResponse(BaseModel):
     id: Optional[UUID] = None
+    # The protocol helper has always passed these along with the computed
+    # pricing-gated completion model, but Pydantic silently dropped them while
+    # they were undeclared. Declared so streamed first chunks carry the same
+    # persisted identity a conversation reload provides.
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    completion_model: Optional[CompletionModelPublic] = None
     session_id: UUID
     question: str
     answer: str

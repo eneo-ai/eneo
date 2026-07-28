@@ -490,10 +490,10 @@
                           {activationModeLabel(activationMode(row))}
                         </span>
                       </Select.Trigger>
-                      <Select.Content>
+                      <Select.Content class="w-(--bits-select-anchor-width) min-w-56">
                         <Select.Group>
                           <Select.Item value="always" label={activationModeLabel("always")}>
-                            <span class="flex flex-col gap-0.5">
+                            <span class="flex flex-col items-start gap-0.5 text-left">
                               <span>{activationModeLabel("always")}</span>
                               <span class="text-muted-foreground text-xs font-normal">
                                 {m.skills_activation_mode_always_description()}
@@ -505,7 +505,7 @@
                             label={activationModeLabel("on_demand")}
                             disabled={!canChooseOnDemand}
                           >
-                            <span class="flex flex-col gap-0.5">
+                            <span class="flex flex-col items-start gap-0.5 text-left">
                               <span>{activationModeLabel("on_demand")}</span>
                               <span class="text-muted-foreground text-xs font-normal">
                                 {m.skills_activation_mode_on_demand_description()}
