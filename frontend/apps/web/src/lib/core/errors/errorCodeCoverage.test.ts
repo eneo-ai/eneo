@@ -102,6 +102,26 @@ describe("error code localization coverage", () => {
     }
   });
 
+  /**
+   * `SkillSlugConflictError` is raised once, in the repository
+   * (`skill_repo_impl.py:308`), for both the Space catalogue and the
+   * organisation catalogue. One code therefore serves both scopes, and its
+   * message cannot name the one it thinks it is in — an organisation
+   * collision described as a Space collision sends the administrator to look
+   * in the wrong catalogue.
+   */
+  it("keeps the identifier conflict message free of a scope it cannot know", () => {
+    const SCOPE_WORDS = [/\bspace\b/i, /\borganisation\b/i, /\borganization\b/i, /\bkatalog/i];
+
+    for (const catalogue of [en, sv] as Record<string, string>[]) {
+      const message = catalogue.eneo_error_9048;
+      expect(message).toBeTruthy();
+      for (const word of SCOPE_WORDS) {
+        expect(message, `eneo_error_9048 names a scope: ${word}`).not.toMatch(word);
+      }
+    }
+  });
+
   it("does not exempt a code that is already localized", () => {
     const contradictory = [...UNLOCALIZED_BY_DESIGN.keys()].filter((code) =>
       localizedCodes().has(code)
