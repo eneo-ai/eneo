@@ -162,12 +162,12 @@ def to_ask_conversation_response(
         public_model = CompletionModelPublic.from_domain(
             completion_model, show_pricing=show_pricing
         )
-    return AskChatResponse(  # type: ignore[call-arg]
-        created_at=created_at,  # type: ignore[call-arg]
-        updated_at=updated_at,  # type: ignore[call-arg]
+    return AskChatResponse(
+        created_at=created_at,
+        updated_at=updated_at,
         session_id=session.id,
-        id=question_id,  # type: ignore[call-arg]
-        completion_model=public_model,  # type: ignore[call-arg]
+        id=question_id,
+        completion_model=public_model,
         files=[FilePublic(**file.model_dump()) for file in files],
         generated_files=[],
         question=question,

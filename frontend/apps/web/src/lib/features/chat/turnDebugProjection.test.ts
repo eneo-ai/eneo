@@ -24,8 +24,8 @@ describe("turn debug projection", () => {
     const messages = [message("message-1", "First"), message("message-2", "Second")];
 
     expect(listPersistedDebugTurns(messages, [])).toEqual([
-      { messageId: "message-1", turnNumber: 1 },
-      { messageId: "message-2", turnNumber: 2 }
+      { messageId: "message-1", turnNumber: 1, createdAt: null },
+      { messageId: "message-2", turnNumber: 2, createdAt: null }
     ]);
   });
 
@@ -37,8 +37,8 @@ describe("turn debug projection", () => {
     ];
 
     expect(listPersistedDebugTurns(messages, ["message-2"])).toEqual([
-      { messageId: "message-1", turnNumber: 1 },
-      { messageId: "message-3", turnNumber: 3 }
+      { messageId: "message-1", turnNumber: 1, createdAt: null },
+      { messageId: "message-3", turnNumber: 3, createdAt: null }
     ]);
   });
 
@@ -90,6 +90,28 @@ describe("turn debug projection", () => {
     expect(projected.knowledge).toEqual([{ order: 1, title: "MCP", uri: null }]);
     expect(projected.files[0].name).toBe("input.pdf");
     expect(serialized).not.toMatch(/SENSITIVE_/);
+  });
+
+  it("prefers the activation evidence for model id and route, keeping the display name", () => {
+    const source = {
+      ...message("message-1"),
+      completion_model: {
+        id: "model-1",
+        name: "Model display",
+        litellm_model_name: "gpt-x"
+      }
+    } as unknown as ConversationMessage;
+
+    const projected = projectTurnDebugDetails(source, {
+      id: "deployment-1",
+      route: "provider/gpt-x"
+    });
+
+    expect(projected.model).toEqual({
+      id: "deployment-1",
+      name: "Model display",
+      route: "provider/gpt-x"
+    });
   });
 
   it("projects tool metadata from the live streaming field", () => {
