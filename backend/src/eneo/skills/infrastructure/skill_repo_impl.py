@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -28,6 +28,8 @@ from eneo.skills.domain.skill import (
     SKILL_RUNTIME_POLICY_DEFAULTS,
     PersonalChatPinAdvance,
     PersonalChatPinAdvanceOutcome,
+    PersonalChatPinAdvanceStage,
+    PersonalChatPinConfirmOutcome,
     PublishedSkill,
     PublishedSkillDeactivationError,
     PublishedSkillDeletionError,
@@ -86,6 +88,17 @@ def _escape_like_literal(value: str) -> str:
 
 _CurrentSkillRevision = aliased(SkillRevisions, name="current_skill_revision")
 _PublishedSkillRevision = aliased(SkillRevisions, name="published_skill_revision")
+
+
+_LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
+
+
+def _is_lock_not_available(error: DBAPIError) -> bool:
+    orig = error.orig
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return sqlstate == _LOCK_NOT_AVAILABLE_SQLSTATE or (
+        _LOCK_NOT_AVAILABLE_SQLSTATE in str(orig)
+    )
 
 
 class SkillRepoImpl:
@@ -1142,55 +1155,74 @@ class SkillRepoImpl:
             .with_for_update(of=Skills)
         )
 
-    async def advance_personal_chat_skill_pin(
+    _POLICY_ROW_VERSION = sa.cast(
+        sa.literal_column("governance_policies.xmin"), sa.Text
+    ).label("policy_version")
+
+    async def stage_personal_chat_skill_pin_advance(
         self,
         *,
         tenant_id: UUID,
         skill_id: UUID,
         expected_pinned_revision_id: UUID,
         expected_published_revision_id: UUID,
-    ) -> PersonalChatPinAdvance | None:
-        """Move the tenant's Personal Chat pin for one Skill to its published
-        revision, and change nothing else.
+    ) -> PersonalChatPinAdvanceStage | None:
+        """Stage the Personal Chat pin move while holding only the binding's
+        own row lock.
 
-        Lock order is policy → Skill → binding. The fit validation that runs
-        after this write judges the whole Personal Chat baseline, so the
-        policy row — the same lock every policy save takes — must serialize
-        concurrent advances and policy edits; without it, two advances to
-        different Skills could each validate a partial state and jointly
-        commit an over-budget configuration. Publish and unpublish take only
-        the Skill lock, so this order cannot deadlock with them.
+        The fit validation that follows judges the whole Personal Chat
+        baseline and can take long on a large tenant, so this phase takes no
+        policy or Skill write locks: governance saves, publication changes,
+        and emergency blocks stay unblocked while the scan runs. What keeps
+        that honest:
 
-        The write itself is guarded by the pinned revision the administrator
-        reviewed: a concurrent change to the binding raises
-        SkillRevisionConflictError and writes nothing, rather than
-        overwriting a pin someone else moved.
+        - the staged UPDATE's row lock serializes every binding change of
+          the policy (a binding replacement deletes this row, so it waits);
+        - the policy row version captured here is rechecked under lock by
+          ``confirm_personal_chat_skill_pin_advance``, and every policy save
+          rewrites the policy row, so an edit that commits mid-scan refuses
+          the apply instead of merging with a stale validation;
+        - publication and block state are unlocked reads here and are
+          rechecked under the Skill lock at confirm time.
+
+        The write is guarded by what the administrator reviewed: a pin or
+        published revision that no longer matches raises
+        SkillRevisionConflictError and writes nothing.
         """
-        policy_id = (
+        policy = (
             await self.session.execute(
-                sa.select(GovernancePolicies.id)
-                .where(
+                sa.select(GovernancePolicies.id, self._POLICY_ROW_VERSION).where(
                     GovernancePolicies.tenant_id == tenant_id,
                     GovernancePolicies.scope
                     == PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
                 )
-                .with_for_update()
             )
-        ).scalar_one_or_none()
-        skill_row = await self._lock_organization_skill(
-            tenant_id=tenant_id, skill_id=skill_id
+        ).one_or_none()
+        skill_row = await self.session.scalar(
+            sa.select(Skills)
+            .join(Spaces, Spaces.id == Skills.space_id)
+            .where(
+                Skills.id == skill_id,
+                *self._organization_scope(tenant_id),
+            )
         )
         if skill_row is None:
             return None
         if skill_row.published_revision_number is None:
-            return PersonalChatPinAdvance(
-                outcome=PersonalChatPinAdvanceOutcome.NOT_PUBLISHED
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.NOT_PUBLISHED
+                )
             )
         active_block = await self.get_active_execution_block(
             tenant_id=tenant_id, skill_id=skill_id
         )
         if active_block is not None:
-            return PersonalChatPinAdvance(outcome=PersonalChatPinAdvanceOutcome.BLOCKED)
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.BLOCKED
+                )
+            )
 
         published = (
             await self.session.execute(
@@ -1202,14 +1234,16 @@ class SkillRepoImpl:
             )
         ).one()
         # The move may only reach the exact revision the administrator
-        # previewed. A publish that lands between review and this lock makes
+        # previewed. A publish that lands between review and this call makes
         # the live published revision a target the administrator never saw.
         if published.id != expected_published_revision_id:
             raise SkillRevisionConflictError
 
-        if policy_id is None:
-            return PersonalChatPinAdvance(
-                outcome=PersonalChatPinAdvanceOutcome.NOT_BOUND
+        if policy is None:
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.NOT_BOUND
+                )
             )
         binding = (
             await self.session.execute(
@@ -1224,23 +1258,27 @@ class SkillRepoImpl:
                     == GovernancePolicySkillBindings.skill_revision_id,
                 )
                 .where(
-                    GovernancePolicySkillBindings.policy_id == policy_id,
+                    GovernancePolicySkillBindings.policy_id == policy.id,
                     GovernancePolicySkillBindings.skill_id == skill_id,
                 )
                 .with_for_update(of=GovernancePolicySkillBindings)
             )
         ).one_or_none()
         if binding is None:
-            return PersonalChatPinAdvance(
-                outcome=PersonalChatPinAdvanceOutcome.NOT_BOUND
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.NOT_BOUND
+                )
             )
         if binding.skill_revision_id == published.id:
-            return PersonalChatPinAdvance(
-                outcome=PersonalChatPinAdvanceOutcome.ALREADY_CURRENT,
-                from_revision_id=published.id,
-                from_revision_number=published.revision_number,
-                to_revision_id=published.id,
-                to_revision_number=published.revision_number,
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.ALREADY_CURRENT,
+                    from_revision_id=published.id,
+                    from_revision_number=published.revision_number,
+                    to_revision_id=published.id,
+                    to_revision_number=published.revision_number,
+                )
             )
         if binding.skill_revision_id != expected_pinned_revision_id:
             raise SkillRevisionConflictError
@@ -1258,13 +1296,83 @@ class SkillRepoImpl:
         )
         # The row lock above guarantees exactly this row; scalar_one enforces it.
         updated.scalar_one()
-        return PersonalChatPinAdvance(
-            outcome=PersonalChatPinAdvanceOutcome.ADVANCED,
-            from_revision_id=binding.skill_revision_id,
-            from_revision_number=binding.revision_number,
-            to_revision_id=published.id,
-            to_revision_number=published.revision_number,
+        return PersonalChatPinAdvanceStage(
+            advance=PersonalChatPinAdvance(
+                outcome=PersonalChatPinAdvanceOutcome.ADVANCED,
+                from_revision_id=binding.skill_revision_id,
+                from_revision_number=binding.revision_number,
+                to_revision_id=published.id,
+                to_revision_number=published.revision_number,
+            ),
+            policy_id=policy.id,
+            policy_version=policy.policy_version,
         )
+
+    async def confirm_personal_chat_skill_pin_advance(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        policy_id: UUID,
+        policy_version: str,
+        expected_published_revision_id: UUID,
+    ) -> PersonalChatPinConfirmOutcome:
+        """Short apply after a validated staged move: lock, recheck, bump.
+
+        The policy lock is taken NOWAIT because this transaction already
+        holds the binding row lock that a policy save's binding replacement
+        waits on; waiting here could deadlock, while failing fast maps to
+        the same reviewed-state conflict and a clean retry. A version
+        mismatch means a policy edit committed during the fit scan, so the
+        validation no longer describes the state being changed. Publication
+        and block state are rechecked under the Skill lock. Finally the
+        policy row is rewritten so any concurrently staged advance sees the
+        version move and refuses its own apply instead of write-skewing.
+        """
+        try:
+            async with self.session.begin_nested():
+                locked_version = (
+                    await self.session.execute(
+                        sa.select(self._POLICY_ROW_VERSION)
+                        .select_from(GovernancePolicies)
+                        .where(GovernancePolicies.id == policy_id)
+                        .with_for_update(nowait=True)
+                    )
+                ).scalar_one_or_none()
+        except DBAPIError as error:
+            if _is_lock_not_available(error):
+                return PersonalChatPinConfirmOutcome.POLICY_CHANGED
+            raise
+        if locked_version != policy_version:
+            return PersonalChatPinConfirmOutcome.POLICY_CHANGED
+
+        skill_row = await self._lock_organization_skill(
+            tenant_id=tenant_id, skill_id=skill_id
+        )
+        if skill_row is None or skill_row.published_revision_number is None:
+            return PersonalChatPinConfirmOutcome.PUBLICATION_CHANGED
+        published_id = await self.session.scalar(
+            sa.select(SkillRevisions.id).where(
+                SkillRevisions.skill_id == skill_id,
+                SkillRevisions.revision_number == skill_row.published_revision_number,
+            )
+        )
+        if published_id != expected_published_revision_id:
+            return PersonalChatPinConfirmOutcome.PUBLICATION_CHANGED
+        active_block = await self.get_active_execution_block(
+            tenant_id=tenant_id, skill_id=skill_id
+        )
+        if active_block is not None:
+            return PersonalChatPinConfirmOutcome.BLOCKED
+
+        bumped = await self.session.execute(
+            sa.update(GovernancePolicies)
+            .where(GovernancePolicies.id == policy_id)
+            .values(updated_at=sa.func.now())
+            .returning(GovernancePolicies.id)
+        )
+        assert bumped.scalar_one() == policy_id
+        return PersonalChatPinConfirmOutcome.CONFIRMED
 
     async def publish_organization(
         self,

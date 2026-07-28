@@ -482,6 +482,34 @@ class PersonalChatPinAdvance:
     to_revision_number: int | None = None
 
 
+@dataclass(frozen=True)
+class PersonalChatPinAdvanceStage:
+    """A staged pin move, awaiting fit validation and a confirmed apply.
+
+    ``policy_version`` is the policy row's version marker at stage time; the
+    confirm step refuses the apply when it moved, so a policy edit that
+    commits during the fit scan can never merge with a stale validation.
+    """
+
+    advance: PersonalChatPinAdvance
+    policy_id: UUID | None = None
+    policy_version: str | None = None
+
+
+class PersonalChatPinConfirmOutcome(str, Enum):
+    """Result of the short apply that follows a validated staged move.
+
+    Anything except CONFIRMED means the state the validation depended on
+    changed while it ran; the caller raises, which rolls the staged write
+    back, and the administrator retries against the live state.
+    """
+
+    CONFIRMED = "confirmed"
+    POLICY_CHANGED = "policy_changed"
+    PUBLICATION_CHANGED = "publication_changed"
+    BLOCKED = "blocked"
+
+
 class SkillHasBindingsError(Exception):
     pass
 

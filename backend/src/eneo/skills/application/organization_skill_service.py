@@ -15,6 +15,7 @@ from eneo.skills.domain.skill import (
     OrganizationSkillSummaryProjectionPage,
     PersonalChatPinAdvance,
     PersonalChatPinAdvanceOutcome,
+    PersonalChatPinConfirmOutcome,
     PublishedSkillProjection,
     PublishedSkillSummaryPage,
     PublishedSkillSummaryProjection,
@@ -396,15 +397,16 @@ class OrganizationSkillService:
     ) -> PersonalChatPinAdvance:
         """Move the Personal Chat pin for one Skill to its published revision.
 
-        Admin-only. The repo guards the write with the pinned revision the
-        administrator reviewed; after an actual change, the same governance
-        fit validation that guards every policy save runs against the new
-        pin, so an advance can never admit a configuration the next save
-        would reject. A failed validation raises and rolls the advance back.
+        Admin-only, in three steps sharing one transaction: the repo stages
+        the guarded write holding only the binding's own row lock, the same
+        governance fit validation as every policy save then runs with no
+        policy or Skill write locks held, and a short confirm relocks and
+        rechecks everything the validation depended on. Any refusal raises,
+        which rolls the staged write back.
         """
         self._require_admin()
         try:
-            advance = await self.repo.advance_personal_chat_skill_pin(
+            stage = await self.repo.stage_personal_chat_skill_pin_advance(
                 tenant_id=self.user.tenant_id,
                 skill_id=skill_id,
                 expected_pinned_revision_id=expected_pinned_revision_id,
@@ -416,8 +418,9 @@ class OrganizationSkillService:
                 "changed after you reviewed it. Reload the Skill and review "
                 "again."
             ) from error
-        if advance is None:
+        if stage is None:
             raise NotFoundException()
+        advance = stage.advance
         if advance.outcome is PersonalChatPinAdvanceOutcome.NOT_BOUND:
             raise NotFoundException("Personal Chat has no binding for this Skill")
         if advance.outcome is PersonalChatPinAdvanceOutcome.NOT_PUBLISHED:
@@ -432,6 +435,24 @@ class OrganizationSkillService:
             await (
                 self.assistant_service.assert_personal_default_governance_context_fit()
             )
+            assert stage.policy_id is not None and stage.policy_version is not None
+            confirm = await self.repo.confirm_personal_chat_skill_pin_advance(
+                tenant_id=self.user.tenant_id,
+                skill_id=skill_id,
+                policy_id=stage.policy_id,
+                policy_version=stage.policy_version,
+                expected_published_revision_id=expected_published_revision_id,
+            )
+            if confirm is PersonalChatPinConfirmOutcome.BLOCKED:
+                raise BadRequestException(
+                    "Blocked organisation Skills cannot receive new or changed bindings"
+                )
+            if confirm is not PersonalChatPinConfirmOutcome.CONFIRMED:
+                raise SkillRevisionConflictException(
+                    "The Personal Chat policy or the Skill changed while the "
+                    "move was being validated. Reload the Skill and review "
+                    "again."
+                )
         return advance
 
     async def delete(self, *, skill_id: UUID) -> Skill:
