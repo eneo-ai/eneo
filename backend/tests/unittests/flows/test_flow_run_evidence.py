@@ -309,6 +309,16 @@ def _attempt_with_provenance(
     )
 
 
+def _attempt_with_rag(
+    *,
+    run: FlowRun,
+    step_order: int,
+    rag: dict[str, Any],
+) -> FlowStepAttempt:
+    attempt = _attempt_with_provenance(run, {"rag": rag})
+    return attempt.model_copy(update={"step_order": step_order})
+
+
 def _attempt_retention_marker_payload(
     run: FlowRun,
     *,
@@ -362,6 +372,9 @@ def _step_result_for_run(
     *,
     step_id: UUID | None = None,
     output_payload_json: dict[str, Any] | None = None,
+    # A completed step names its current attempt; step-level RAG summaries
+    # report only that identified attempt's retrieval.
+    current_attempt_no: int | None = 1,
 ) -> FlowStepResult:
     now = datetime.now(timezone.utc)
     return FlowStepResult(
@@ -371,6 +384,7 @@ def _step_result_for_run(
         tenant_id=run.tenant_id,
         step_id=step_id or uuid4(),
         step_order=1,
+        current_attempt_no=current_attempt_no,
         assistant_id=uuid4(),
         input_payload_json=None,
         effective_prompt=None,
@@ -731,18 +745,9 @@ def test_build_debug_export_preserves_degraded_rag_metadata_from_step_results():
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=1,
+        current_attempt_no=1,
         assistant_id=uuid4(),
         input_payload_json={
-            "rag": {
-                "status": "no_chunks",
-                "chunks_retrieved": 0,
-                "query_derivation": {
-                    "strategy": "input_text",
-                    "input_truncated": True,
-                    "query_length": 2048,
-                },
-                "retrieval_policy": {"version": 1, "mode": "best_effort"},
-            },
             "diagnostics": [
                 {
                     "code": "rag_retrieval_no_chunks",
@@ -770,12 +775,31 @@ def test_build_debug_export_preserves_degraded_rag_metadata_from_step_results():
         updated_at=now,
     )
 
-    export = build_debug_export(run=run, version=version, step_results=[result])
+    degraded_attempt = _attempt_with_rag(
+        run=run,
+        step_order=1,
+        rag={
+            "status": "no_chunks",
+            "chunks_retrieved": 0,
+            "query_derivation": {
+                "strategy": "input_text",
+                "input_truncated": True,
+                "query_length": 2048,
+            },
+            "retrieval_policy": {"version": 1, "mode": "best_effort"},
+        },
+    )
+    export = build_debug_export(
+        run=run,
+        version=version,
+        step_results=[result],
+        step_attempts=[degraded_attempt],
+    )
     evidence = build_evidence_bundle(
         run=run,
         version=version,
         step_results=[result],
-        step_attempts=[],
+        step_attempts=[degraded_attempt],
     ).to_dict()
 
     assert result.input_payload_json is not None
@@ -1166,33 +1190,9 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=1,
+        current_attempt_no=1,
         assistant_id=uuid4(),
-        input_payload_json={
-            "rag": {
-                "attempted": True,
-                "status": "success",
-                "source_ids": ["source-1", "source-2"],
-                "source_ids_short": ["source-1", "source-2"],
-                "references": [
-                    {
-                        "id": "source-1",
-                        "id_short": "source-1",
-                        "title": "Knowledge A",
-                        "matched_chunk_count": 1,
-                        "best_score": 0.8,
-                        "chunks": [],
-                    },
-                    {
-                        "id": "source-2",
-                        "id_short": "source-2",
-                        "title": None,
-                        "matched_chunk_count": 1,
-                        "best_score": 0.7,
-                        "chunks": [],
-                    },
-                ],
-            }
-        },
+        input_payload_json=None,
         effective_prompt=None,
         output_payload_json=None,
         model_parameters_json=None,
@@ -1204,7 +1204,43 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
         updated_at=now,
     )
 
-    export = build_debug_export(run=run, version=version, step_results=[result])
+    export = build_debug_export(
+        run=run,
+        version=version,
+        step_results=[result],
+        step_attempts=[
+            _attempt_with_rag(
+                run=run,
+                step_order=1,
+                rag={
+                    "attempted": True,
+                    "status": "success",
+                    "source_ids": ["source-1", "source-2"],
+                    "source_ids_short": ["source-1", "source-2"],
+                    "references": [
+                        {
+                            "id": "source-1",
+                            "id_short": "source-1",
+                            "title": "Knowledge A",
+                            "matched_chunk_count": 1,
+                            "recorded_passage_count": 0,
+                            "best_score": 0.8,
+                            "passages": [],
+                        },
+                        {
+                            "id": "source-2",
+                            "id_short": "source-2",
+                            "title": None,
+                            "matched_chunk_count": 1,
+                            "recorded_passage_count": 0,
+                            "best_score": 0.7,
+                            "passages": [],
+                        },
+                    ],
+                },
+            )
+        ],
+    )
 
     assert export["run"]["summary"]["steps_count"] == 1
     assert export["run"]["summary"]["completed_steps"] == 1
@@ -1283,19 +1319,75 @@ def test_normalize_rag_payload_adds_prompt_context_display_names_and_usage_state
     ]
 
 
-def test_normalize_rag_payload_derives_reference_match_count_from_display_chunks() -> (
-    None
-):
+def test_recorded_passage_survives_deletion_of_its_source_document() -> None:
+    """Evidence is self-contained: nothing re-reads the info blob to render it."""
+    passage = "Beslutet grundas pa 4 kap. 1 socialtjanstlagen."
+    normalized = normalize_rag_payload(
+        {
+            "references": [
+                {
+                    "id": "deleted-source",
+                    "id_short": "deleted-",
+                    "title": "Raderat underlag",
+                    "matched_chunk_count": 1,
+                    "recorded_passage_count": 1,
+                    "passages": [
+                        {
+                            "chunk_no": 4,
+                            "score": 0.77,
+                            "text": passage,
+                            "recording": "complete",
+                            "passage_bytes": len(passage.encode("utf-8")),
+                            "recorded_bytes": len(passage.encode("utf-8")),
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert normalized is not None
+    reference = normalized["references"][0]
+    assert reference["passages"][0]["text"] == passage
+    assert reference["title"] == "Raderat underlag"
+    assert reference["usage_state"] == "retrieved_candidate"
+
+
+def test_normalize_rag_payload_keeps_recorded_and_matched_counts_distinct() -> None:
     normalized = normalize_rag_payload(
         {
             "references": [
                 {
                     "id": "source-1",
                     "id_short": "source-1",
-                    "chunks": [
-                        {"chunk_no": 1, "score": 0.9, "snippet": "First snippet"},
-                        {"chunk_no": 2, "score": 0.7, "snippet": ""},
-                        {"chunk_no": 3, "score": 0.6, "snippet": "Third snippet"},
+                    "matched_chunk_count": 9,
+                    "recorded_passage_count": 2,
+                    "passages": [
+                        {"chunk_no": 1, "score": 0.9, "text": "First passage"},
+                        {"chunk_no": 3, "score": 0.6, "text": "Third passage"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert normalized is not None
+    reference = normalized["references"][0]
+    assert reference["matched_chunk_count"] == 9
+    assert reference["recorded_passage_count"] == 2
+
+
+def test_normalize_rag_payload_derives_missing_counts_from_recorded_passages() -> None:
+    normalized = normalize_rag_payload(
+        {
+            "references": [
+                {
+                    "id": "source-1",
+                    "id_short": "source-1",
+                    "passages": [
+                        {"chunk_no": 1, "score": 0.9, "text": "First passage"},
+                        {"chunk_no": 2, "score": 0.7, "text": ""},
+                        {"chunk_no": 3, "score": 0.6, "text": "Third passage"},
                     ],
                 }
             ]
@@ -1305,6 +1397,7 @@ def test_normalize_rag_payload_derives_reference_match_count_from_display_chunks
     assert normalized is not None
     reference = normalized["references"][0]
     assert reference["matched_chunk_count"] == 2
+    assert reference["recorded_passage_count"] == 2
 
 
 def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
@@ -2737,6 +2830,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=1,
+        current_attempt_no=1,
         assistant_id=uuid4(),
         input_payload_json={
             "input_source": "flow_input",
@@ -2842,15 +2936,29 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
                         "source_container_id": "website-1",
                         "usage_state": "inserted_into_prompt",
                         "matched_chunk_count": 1,
+                        "recorded_passage_count": 1,
                         "best_score": 0.82,
-                        "chunks": [],
+                        "passages": [
+                            {
+                                "chunk_no": 1,
+                                "score": 0.82,
+                                "text": "Beslutet grundas pa 4 kap. 1 SoL.",
+                                "recording": "complete",
+                                "passage_bytes": 33,
+                                "recorded_bytes": 33,
+                            }
+                        ],
                     }
                 ],
                 "unique_sources": 1,
+                "sources_with_recorded_passages": 1,
+                "passages_recorded": 1,
+                "passages_truncated": 0,
+                "embedding_model": {"id": "embedding-1", "name": "text-embedding-3"},
+                "embedding_model_status": "recorded",
                 "source_names": ["Beslut till underlag"],
                 "source_display_names": ["Beslut till underlag"],
                 "reference_metadata_status": "success",
-                "references_truncated": False,
             },
         },
         started_at=started_at,
@@ -3032,6 +3140,7 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=1,
+        current_attempt_no=1,
         assistant_id=uuid4(),
         input_payload_json={
             "input_source": "flow_input",
@@ -3075,6 +3184,7 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=2,
+        current_attempt_no=1,
         assistant_id=uuid4(),
         input_payload_json={
             "input_source": "previous_step",
@@ -3523,6 +3633,7 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=1,
+        current_attempt_no=1,
         assistant_id=uuid4(),
         input_payload_json={},
         effective_prompt=None,
@@ -3722,6 +3833,7 @@ def test_render_evidence_json_export_uses_provenance_citation_compliance_and_run
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=1,
+        current_attempt_no=1,
         assistant_id=uuid4(),
         input_payload_json={},
         effective_prompt=None,
@@ -3909,6 +4021,7 @@ def test_render_evidence_json_export_surfaces_inherited_citation_context() -> No
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=3,
+        current_attempt_no=1,
         assistant_id=uuid4(),
         input_payload_json={},
         effective_prompt=None,

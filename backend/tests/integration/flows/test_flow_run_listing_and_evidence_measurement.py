@@ -95,7 +95,12 @@ PAGE_LIMIT = 50
 DEEP_OFFSET = 250
 # Run page, result-file hydration, token aggregation, and final-output versions.
 RUN_LISTING_STATEMENT_COUNT = 4
-EVIDENCE_QUERY_COUNT = 12
+# Includes one narrow evidence-access-context row that resolves whether this
+# reader may see verbatim passage text, and one aggregate that sizes stored
+# attempt provenance so an oversized export refuses and an oversized view
+# narrows its load before any provenance is materialized. Both are constant
+# cost per bundle, independent of flow, step, attempt or source counts.
+EVIDENCE_QUERY_COUNT = 14
 REPORT_PATH_ENV = "FLOW_RUN_LISTING_EVIDENCE_REPORT_PATH"
 SECRET_SENTINEL = "flow-evidence-secret-20260726"
 _BASE_TIME = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)

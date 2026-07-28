@@ -78,7 +78,12 @@ class EvidenceStepKnowledgeRetrievalSummary(BaseModel):
     attempted: JsonValue
     retrieval_duration_ms: JsonValue
     unique_sources: JsonValue
-    references_truncated: JsonValue
+    sources_with_recorded_passages: JsonValue
+    passages_recorded: JsonValue
+    passages_truncated: JsonValue
+    passages_withheld: JsonValue
+    embedding_model: JsonValue
+    embedding_model_status: JsonValue
     reference_metadata_status: JsonValue
     retrieval_error_type: JsonValue = None
     error_code: JsonValue = None

@@ -99,6 +99,65 @@ class PreseedStep(TypedDict):
     step_order: int
 
 
+def _recorded_passage_byte_expressions() -> tuple[Any, Any]:
+    """The one SQL reading of the persisted passage-byte aggregate.
+
+    Returns (bytes, is_corrupt). Absent RAG measures zero — a run without
+    retrieval holds no passages. A malformed or negative value is corruption:
+    it must never measure as zero, because zero would let unreadable evidence
+    slip under an exact size budget, and it must never reach a bare cast,
+    because that fails the whole statement. Both readers share this expression
+    so the two cannot drift apart again.
+    """
+    raw = sa.func.jsonb_extract_path_text(
+        FlowStepAttempts.provenance_json,
+        "rag",
+        "recorded_passage_bytes",
+    )
+    is_numeric = raw.op("~")(sa.literal(r"^[0-9]{1,15}$"))
+    passage_bytes = sa.case(
+        (is_numeric, sa.cast(raw, sa.BigInteger)),
+        else_=sa.literal(0, sa.BigInteger),
+    )
+    is_corrupt = sa.and_(raw.is_not(None), sa.not_(is_numeric))
+    return passage_bytes, is_corrupt
+
+
+@dataclass(frozen=True, slots=True)
+class StepAttemptPage:
+    """One snapshot's admitted attempts and the counts that qualify them.
+
+    `current_total` and `current_admitted` exist so a caller can say when a
+    step's current attempt was excluded by a budget — silently missing current
+    evidence would read as the step never having retrieved anything.
+    """
+
+    attempts: list[FlowStepAttempt]
+    total_count: int
+    current_total: int
+    current_admitted: int
+    current_step_orders_not_loaded: tuple[int, ...] = ()
+    corrupt_passage_aggregates: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class StepAttemptProvenanceSize:
+    """How much attempt provenance a run holds, measured without loading it.
+
+    The two byte measures answer different questions and must not be
+    conflated. `recorded_passage_bytes` sums the exact aggregate each RAG
+    payload stores about its own passages — the right measure for a
+    passage-size limit. `stored_provenance_bytes` is the stored size of the
+    whole provenance object, RAG or not — a materialization-cost measure,
+    where TOAST compression makes it a floor, never a passage count.
+    """
+
+    attempt_count: int
+    stored_provenance_bytes: int
+    recorded_passage_bytes: int
+    corrupt_passage_aggregates: int = 0
+
+
 @dataclass(frozen=True, slots=True)
 class FlowRunDispatchRedriveGenerationConflict:
     current_dispatch_exhausted_at: datetime | None
@@ -805,28 +864,243 @@ class FlowRunRepository:
         )
         return [FlowStepResult.model_validate(row) for row in rows]
 
+    async def measure_step_attempt_provenance(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> StepAttemptProvenanceSize:
+        """Size a run's attempt provenance without materializing any of it.
+
+        One aggregate over the run's attempts, so a caller can refuse or narrow
+        the work before the JSON is fetched, decoded and copied. `pg_column_size`
+        reports the *stored* size, which TOAST may have compressed, so treat it
+        as a floor on the serialized cost rather than an exact byte count.
+        """
+        # Every RAG payload stores its own passage-byte aggregate, so the exact
+        # passage total is one jsonb field extraction away — no payload is
+        # decoded or materialized to measure it. The shared guarded expression
+        # keeps a malformed persisted value from failing the statement, and
+        # counts it as corruption instead of silently measuring zero.
+        recorded_passage_bytes, is_corrupt = _recorded_passage_byte_expressions()
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("attempt_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.pg_column_size(FlowStepAttempts.provenance_json)
+                        ),
+                        0,
+                    ).label("provenance_bytes"),
+                    sa.func.coalesce(sa.func.sum(recorded_passage_bytes), 0).label(
+                        "passage_bytes"
+                    ),
+                    sa.func.coalesce(
+                        sa.func.sum(sa.case((is_corrupt, 1), else_=0)), 0
+                    ).label("corrupt_aggregates"),
+                )
+                .where(FlowStepAttempts.flow_run_id == run_id)
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+            )
+        ).one()
+        return StepAttemptProvenanceSize(
+            attempt_count=int(row.attempt_count),
+            stored_provenance_bytes=int(row.provenance_bytes),
+            recorded_passage_bytes=int(row.passage_bytes),
+            corrupt_passage_aggregates=int(row.corrupt_aggregates),
+        )
+
     async def list_step_attempts(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
-    ) -> list[FlowStepAttempt]:
-        rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowStepAttempts)
-                    .where(FlowStepAttempts.flow_run_id == run_id)
-                    .where(FlowStepAttempts.tenant_id == tenant_id)
-                    .order_by(
-                        FlowStepAttempts.step_order.asc(),
-                        FlowStepAttempts.attempt_no.asc(),
+        limit: int | None = None,
+        history_byte_budget: int | None = None,
+        passage_byte_budget: int | None = None,
+    ) -> StepAttemptPage:
+        """Attempts for a run, oldest first, with snapshot-consistent totals.
+
+        With `limit`, one statement ranks every attempt — each step's current
+        attempt first, then history newest first — and admits rows while the
+        row limit and both cumulative budgets hold: stored provenance bytes
+        bound what the database ships, and exact recorded passage bytes bound
+        what the JSON expands to, because TOAST compression makes stored size
+        only a floor on logical size. Current attempts consume the budgets
+        first; when one is excluded the page says so, because the totals ride
+        in the same statement — even when nothing is admitted at all.
+        """
+        base = (
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        if limit is None:
+            rows = (
+                (
+                    await self.session.execute(
+                        base.order_by(
+                            FlowStepAttempts.step_order.asc(),
+                            FlowStepAttempts.attempt_no.asc(),
+                        )
                     )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
+            attempts = [FlowStepAttempt.model_validate(row) for row in rows]
+            # An unlimited read loads everything, so no current attempt can be
+            # excluded and the current counts carry no signal.
+            return StepAttemptPage(
+                attempts=attempts,
+                total_count=len(attempts),
+                current_total=0,
+                current_admitted=0,
+            )
+
+        current_pairs = (
+            sa.select(
+                FlowStepResults.step_id,
+                FlowStepResults.current_attempt_no,
+            )
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.current_attempt_no.is_not(None))
+        ).subquery()
+        is_current_flag = sa.case(
+            (
+                sa.exists(
+                    sa.select(sa.literal(1))
+                    .select_from(current_pairs)
+                    .where(current_pairs.c.step_id == FlowStepAttempts.step_id)
+                    .where(
+                        current_pairs.c.current_attempt_no
+                        == FlowStepAttempts.attempt_no
+                    )
+                ),
+                0,
+            ),
+            else_=1,
         )
-        return [FlowStepAttempt.model_validate(row) for row in rows]
+        stored_bytes = sa.func.coalesce(
+            sa.func.pg_column_size(FlowStepAttempts.provenance_json), 0
+        )
+        passage_bytes, is_corrupt = _recorded_passage_byte_expressions()
+        admission_order = (
+            is_current_flag.asc(),
+            FlowStepAttempts.step_order.desc(),
+            FlowStepAttempts.attempt_no.desc(),
+        )
+        ranked = (
+            sa.select(
+                FlowStepAttempts.id.label("attempt_id"),
+                FlowStepAttempts.step_order.label("step_order"),
+                is_current_flag.label("is_current"),
+                sa.case((is_corrupt, 1), else_=0).label("is_corrupt"),
+                sa.func.row_number().over(order_by=admission_order).label("row_rank"),
+                sa.func.sum(stored_bytes)
+                .over(order_by=admission_order)
+                .label("cumulative_stored"),
+                sa.func.sum(passage_bytes)
+                .over(order_by=admission_order)
+                .label("cumulative_passages"),
+            )
+            .where(
+                FlowStepAttempts.flow_run_id == run_id,
+                FlowStepAttempts.tenant_id == tenant_id,
+            )
+            .subquery()
+        )
+        admitted = sa.select(ranked.c.attempt_id, ranked.c.is_current).where(
+            ranked.c.row_rank <= limit
+        )
+        if history_byte_budget is not None:
+            admitted = admitted.where(ranked.c.cumulative_stored <= history_byte_budget)
+        if passage_byte_budget is not None:
+            # A corrupt aggregate has an unknowable logical size; admitting it
+            # under a size budget would be a silent bypass, so it is excluded
+            # and reported instead.
+            admitted = admitted.where(
+                ranked.c.cumulative_passages <= passage_byte_budget
+            ).where(ranked.c.is_corrupt == 0)
+        admitted_sq = admitted.subquery()
+        excluded_currents = (
+            sa.select(
+                sa.func.coalesce(
+                    sa.func.array_agg(sa.distinct(ranked.c.step_order)).filter(
+                        ranked.c.is_current == 0
+                    ),
+                    sa.literal([], sa.ARRAY(sa.Integer)),
+                ).label("step_orders")
+            )
+            .select_from(
+                ranked.outerjoin(
+                    admitted_sq, admitted_sq.c.attempt_id == ranked.c.attempt_id
+                )
+            )
+            .where(admitted_sq.c.attempt_id.is_(None))
+            .subquery()
+        )
+        totals = (
+            sa.select(
+                sa.func.count().label("total_count"),
+                sa.func.coalesce(sa.func.sum(1 - ranked.c.is_current), 0).label(
+                    "current_total"
+                ),
+                sa.func.coalesce(sa.func.sum(ranked.c.is_corrupt), 0).label(
+                    "corrupt_aggregates"
+                ),
+            )
+            .select_from(ranked)
+            .subquery()
+        )
+        # The totals row always exists, so zero admission still reports the
+        # run's counts from the same statement and snapshot.
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    totals.c.total_count,
+                    totals.c.current_total,
+                    totals.c.corrupt_aggregates,
+                    excluded_currents.c.step_orders,
+                    FlowStepAttempts,
+                    admitted_sq.c.is_current,
+                )
+                .select_from(totals)
+                .outerjoin(excluded_currents, sa.literal(True))
+                .outerjoin(admitted_sq, sa.literal(True))
+                .outerjoin(
+                    FlowStepAttempts,
+                    FlowStepAttempts.id == admitted_sq.c.attempt_id,
+                )
+            )
+        ).all()
+        total_count = int(rows[0][0]) if rows else 0
+        current_total = int(rows[0][1]) if rows else 0
+        corrupt_aggregates = int(rows[0][2]) if rows else 0
+        raw_excluded_orders = cast(
+            "Sequence[int]", rows[0][3] if rows and rows[0][3] is not None else ()
+        )
+        excluded_current_orders = tuple(
+            sorted(int(order) for order in raw_excluded_orders)
+        )
+        attempts_with_flag = [
+            (FlowStepAttempt.model_validate(row[4]), int(row[5]))
+            for row in rows
+            if row[4] is not None
+        ]
+        current_admitted = sum(1 for _, flag in attempts_with_flag if flag == 0)
+        attempts = [attempt for attempt, _ in attempts_with_flag]
+        attempts.sort(key=lambda item: (item.step_order, item.attempt_no))
+        return StepAttemptPage(
+            attempts=attempts,
+            total_count=total_count,
+            current_total=current_total,
+            current_admitted=current_admitted,
+            current_step_orders_not_loaded=excluded_current_orders,
+            corrupt_passage_aggregates=corrupt_aggregates,
+        )
 
     async def list_step_input_file_ids(
         self,

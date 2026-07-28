@@ -33,6 +33,7 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
     FlowVersions,
 )
+from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
 from eneo.flows import FlowRepository, FlowVersionRepository
@@ -453,7 +454,14 @@ async def _seed_flow_run_contract_data(
                         ],
                     },
                     "unique_sources": 1,
-                    "references_truncated": False,
+                    "sources_with_recorded_passages": 1,
+                    "passages_recorded": 1,
+                    "passages_truncated": 0,
+                    "embedding_model": {
+                        "id": "embedding-1",
+                        "name": "text-embedding-3",
+                    },
+                    "embedding_model_status": "recorded",
                     "reference_metadata_status": "success",
                     "source_names": ["https://kunskap.example.se/beslut/underlag"],
                     "source_display_names": ["kunskap.example.se/beslut/underlag"],
@@ -463,9 +471,19 @@ async def _seed_flow_run_contract_data(
                             "id_short": "source-1",
                             "title": "https://kunskap.example.se/beslut/underlag",
                             "usage_state": "inserted_into_prompt",
-                            "hit_count": 1,
                             "best_score": 0.82,
-                            "chunks": [],
+                            "matched_chunk_count": 1,
+                            "recorded_passage_count": 1,
+                            "passages": [
+                                {
+                                    "chunk_no": 1,
+                                    "score": 0.82,
+                                    "text": "Beslutet grundas pa 4 kap. 1 SoL.",
+                                    "recording": "complete",
+                                    "passage_bytes": 33,
+                                    "recorded_bytes": 33,
+                                }
+                            ],
                         }
                     ],
                 },
@@ -2040,6 +2058,25 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         payload["summary"]["rag_sources"][0]["source_container_label"]
         == "kunskap.example.se"
     )
+    # The recorded passage is evidence in its own right: it survives deletion of
+    # the document it came from, because nothing re-reads the source to render it.
+    async with db_container() as container:
+        source_session = container.session()
+        await source_session.execute(
+            sa.delete(InfoBlobs).where(InfoBlobs.tenant_id == trace_user.tenant_id)
+        )
+        await source_session.commit()
+    reread = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+    assert reread.status_code == 200, reread.text
+    reread_step = reread.json()["debug_export"]["steps"][0]
+    assert reread_step["rag"]["references"][0]["passages"][0]["text"] == (
+        "Beslutet grundas pa 4 kap. 1 SoL."
+    )
+    assert reread_step["rag"]["references"][0]["id"] == "source-1"
+
     assert payload["summary"]["citations"]["tracking_mode"] == "passive_inline_scan"
     assert payload["summary"]["citations"]["citation_expected"] is False
     assert payload["summary"]["citations"]["citation_observed"] is False

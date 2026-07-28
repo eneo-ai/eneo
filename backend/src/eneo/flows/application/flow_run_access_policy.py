@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, TypeGuard, get_args
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeGuard, get_args
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.rag_evidence import PassageDisclosure
 from eneo.flows.flow_access_policy import (
     FlowApiAction,
     user_can_perform_flow_action,
@@ -12,9 +13,9 @@ from eneo.flows.flow_access_policy import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
+    FlowEvidenceAccessContext,
     FlowEvidencePolicy,
     classification_level_for_space,
-    flow_metadata_marks_sensitive,
     resolve_flow_evidence_policy,
     resolve_service_key_evidence_capability,
 )
@@ -67,6 +68,14 @@ class FlowRunAccessPolicy:
         self.flow_run_repo = flow_run_repo
         self.space_service = space_service
         self.actor_manager = actor_manager
+        # One authorization pass asks the same questions about the same flow
+        # several times. The policy is request-scoped, so each lookup is
+        # answered once instead of once per question.
+        self._flow_by_id: dict[UUID, object] = {}
+        self._space_access_by_flow_id: dict[UUID, tuple["SpaceActor | None", int]] = {}
+        self._evidence_access_context_by_flow_id: dict[
+            UUID, FlowEvidenceAccessContext
+        ] = {}
 
     def is_tenant_admin(self) -> bool:
         return Permission.ADMIN in self.user.permissions
@@ -92,15 +101,40 @@ class FlowRunAccessPolicy:
         await self.ensure_can_access_run(run, access_kind=access_kind)
         return run
 
+    async def _load_evidence_access_context(
+        self, *, flow_id: UUID
+    ) -> FlowEvidenceAccessContext:
+        cached = self._evidence_access_context_by_flow_id.get(flow_id)
+        if cached is None:
+            cached = await self.flow_repo.get_evidence_access_context(
+                flow_id=flow_id, tenant_id=self.user.tenant_id
+            )
+            self._evidence_access_context_by_flow_id[flow_id] = cached
+        return cached
+
+    async def _load_flow(self, *, flow_id: UUID) -> Any:
+        cached = self._flow_by_id.get(flow_id)
+        if cached is None:
+            cached = await self.flow_repo.get(
+                flow_id=flow_id, tenant_id=self.user.tenant_id
+            )
+            self._flow_by_id[flow_id] = cached
+        return cached
+
     async def load_space_access(
         self, *, flow_id: UUID
     ) -> tuple["SpaceActor | None", int]:
         if self.space_service is None or self.actor_manager is None:
             return None, 0
-        flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        cached_access = self._space_access_by_flow_id.get(flow_id)
+        if cached_access is not None:
+            return cached_access
+        flow = await self._load_flow(flow_id=flow_id)
         space = await self.space_service.get_space(flow.space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
-        return actor, classification_level_for_space(space)
+        access = (actor, classification_level_for_space(space))
+        self._space_access_by_flow_id[flow_id] = access
+        return access
 
     async def space_role(self, *, flow_id: UUID) -> FlowRunSpaceRole | None:
         actor, _classification_level = await self.load_space_access(flow_id=flow_id)
@@ -237,10 +271,42 @@ class FlowRunAccessPolicy:
 
         self.deny_run_access(auth_layer="flow_run_owner")
 
+    async def passage_disclosure_for_run(
+        self,
+        run: FlowRun,
+        *,
+        access_kind: FlowRunAccessKind,
+    ) -> PassageDisclosure:
+        """Whether this reader may see verbatim retrieved passage text.
+
+        Reuses the sensitivity distinctions this policy already owns rather than
+        introducing a second classification concept. Source identity, titles and
+        counts are never gated here: withholding *which* sources a step
+        retrieved would defeat the transparency the evidence exists to provide.
+        """
+        # Sensitivity and classification are properties of the data, not of the
+        # reader, so they are read directly rather than through the space
+        # service, whose membership check a tenant admin is not subject to.
+        # A tenant admin bypasses authorization, never the data's classification.
+        context = await self._load_evidence_access_context(flow_id=run.flow_id)
+        if not context.sensitive and not context.classified:
+            return "text_disclosed"
+        # A raw export has already cleared the sensitive-flow and classification
+        # gates in `ensure_can_access_run`, so reaching here means the reader is
+        # entitled to the underlying content.
+        if access_kind == "evidence_export_raw":
+            return "text_disclosed"
+        if context.sensitive:
+            return "text_withheld_sensitive_flow"
+        return "text_withheld_classified_space"
+
     async def _ensure_sensitive_flow_export_allowed(self, *, flow_id: UUID) -> None:
-        flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        # The access context resolves sensitivity fail-closed: metadata that
+        # cannot be parsed counts as sensitive instead of raising and taking
+        # the whole export path down with it.
+        context = await self._load_evidence_access_context(flow_id=flow_id)
         if (
-            flow_metadata_marks_sensitive(flow.metadata_json)
+            context.sensitive
             and not self._evidence_policy().allow_sensitive_flow_exports
         ):
             self.deny_evidence_access(

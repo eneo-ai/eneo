@@ -28,6 +28,9 @@ from eneo.database.tables.flow_tables import (
     FlowSteps,
 )
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
+from eneo.database.tables.security_classifications_table import (
+    SecurityClassification,
+)
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
@@ -46,6 +49,10 @@ from eneo.flows.domain.flow import (
     FlowSparse,
     FlowStep,
     FlowStepResult,
+)
+from eneo.flows.flow_evidence_policy import (
+    FlowEvidenceAccessContext,
+    flow_metadata_marks_sensitive_or_unreadable,
 )
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -322,6 +329,48 @@ class FlowRepository:
             await self.session.execute(sa.insert(FlowSteps).values(rows))
 
         return await self.get(flow_id, tenant_id)
+
+    async def get_evidence_access_context(
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowEvidenceAccessContext:
+        """Read only what decides whether evidence content may be disclosed.
+
+        `get` loads the whole Flow aggregate including every step, and reading
+        the space through the space service enforces membership that a tenant
+        admin is not subject to. This one row answers the question directly.
+        """
+        stmt = (
+            sa.select(
+                Flows.id,
+                Flows.space_id,
+                Flows.metadata_json,
+                SecurityClassification.security_level,
+            )
+            .select_from(Flows)
+            .join(Spaces, Spaces.id == Flows.space_id)
+            .outerjoin(
+                SecurityClassification,
+                SecurityClassification.id == Spaces.security_classification_id,
+            )
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            raise NotFoundException("Flow not found.")
+        resolved_flow_id, space_id, metadata_json, security_level = row
+        return FlowEvidenceAccessContext(
+            flow_id=resolved_flow_id,
+            space_id=space_id,
+            sensitive=flow_metadata_marks_sensitive_or_unreadable(metadata_json),
+            classification_level=(
+                security_level if isinstance(security_level, int) else 0
+            ),
+        )
 
     async def get(self, flow_id: UUID, tenant_id: UUID) -> Flow:
         stmt = (

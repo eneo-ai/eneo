@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Final, Mapping, cast
+from uuid import UUID
 
 from eneo.authentication.auth_models import (
     ResourcePermissionLevel,
@@ -11,6 +12,10 @@ from eneo.authentication.auth_models import (
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_metadata import FlowMetadataParseMode, parse_flow_metadata
 from eneo.main.exceptions import BadRequestException
+
+# Spaces at this level or above withhold verbatim evidence content below a
+# raw export. Owned here with the rest of the sensitivity vocabulary.
+CLASSIFIED_SECURITY_LEVEL: Final[int] = 3
 
 FLOW_EVIDENCE_POLICY_SETTINGS_KEY: Final[str] = "evidence_policy"
 FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY: Final[str] = "version"
@@ -37,6 +42,25 @@ FLOW_EVIDENCE_POLICY_CLASS3_KEYS: Final[frozenset[str]] = frozenset(
         FLOW_EVIDENCE_POLICY_SERVICE_KEY_RAW_KEY,
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowEvidenceAccessContext:
+    """The two facts that decide whether evidence content may be disclosed.
+
+    Read as one narrow row rather than through the full Flow aggregate: the
+    decision needs sensitivity and the space's classification, not the flow's
+    steps, and it must not depend on a space read that enforces membership.
+    """
+
+    flow_id: UUID
+    space_id: UUID
+    sensitive: bool
+    classification_level: int
+
+    @property
+    def classified(self) -> bool:
+        return self.classification_level >= CLASSIFIED_SECURITY_LEVEL
 
 
 class EvidenceCapabilityLevel(IntEnum):
@@ -260,6 +284,22 @@ def flow_metadata_marks_sensitive(
         metadata_json,
         mode=FlowMetadataParseMode.PERSISTED_READ,
     ).care_data_policy.sensitive
+
+
+def flow_metadata_marks_sensitive_or_unreadable(
+    metadata_json: FlowPersistedJsonObject | Mapping[str, object] | None,
+) -> bool:
+    """Sensitivity for a disclosure decision, failing closed when unreadable.
+
+    Persisted metadata that cannot be parsed cannot be shown to be
+    non-sensitive, so it withholds content. Raising instead would make the
+    evidence view unreachable for the flow, which hides the whole trace rather
+    than the part that needs protecting.
+    """
+    try:
+        return flow_metadata_marks_sensitive(metadata_json)
+    except BadRequestException:
+        return True
 
 
 def resolve_service_key_evidence_capability(

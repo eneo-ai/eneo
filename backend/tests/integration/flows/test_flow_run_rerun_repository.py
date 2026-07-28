@@ -1794,7 +1794,7 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
         )
-        step_attempts = await run_repo.list_step_attempts(
+        step_attempt_page = await run_repo.list_step_attempts(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
         )
@@ -1802,7 +1802,7 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
             run=run,
             version=version,
             step_results=step_results,
-            step_attempts=step_attempts,
+            step_attempts=step_attempt_page.attempts,
             rerun_operations=await rerun_repo.list_rerun_operations_for_run(
                 run_id=scenario.flow_run_id,
                 tenant_id=scenario.tenant_id,

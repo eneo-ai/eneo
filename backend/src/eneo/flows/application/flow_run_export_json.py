@@ -39,6 +39,11 @@ from eneo.flows.citation_sidecar import (
     summarize_step_citations,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.rag_evidence import (
+    is_mapped_rag_payload,
+    iter_retrieved_source_payloads,
+    iter_step_rag_payloads,
+)
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_retention_tombstone import (
     FlowRetentionTombstone,
@@ -585,8 +590,9 @@ def _collect_rag_sources(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
         rag = _as_json_object(provenance.get("rag"))
         if rag is None:
             continue
-        references = _as_json_object_list(rag.get("references"))
-        for reference in references:
+        # A mapped step records one payload per provider call, so sources are
+        # read through the canonical iterator rather than the top level only.
+        for reference in iter_retrieved_source_payloads(rag):
             name = _resolve_rag_source_name(reference)
             key = _resolve_rag_source_key(reference, name)
             if key is None:
@@ -699,31 +705,34 @@ def _merge_tracked_rag_summaries(
     rag_payloads: list[FlowPersistedJsonObject],
 ) -> dict[str, Any]:
     summary: dict[str, Any] | None = None
-    for payload in rag_payloads:
-        tracking = _as_json_object(payload.get("tracking"))
-        current = dict(default_rag_tracking())
-        if tracking is not None:
-            current.update(tracking)
-        if summary is None:
-            summary = current
-            continue
-        for key in (
-            "retrieval_tracked",
-            "prompt_context_inclusion_tracked",
-            "citation_tracked",
-            "material_influence_tracked",
-        ):
-            value = current.get(key)
-            if isinstance(value, bool):
-                summary[key] = bool(summary.get(key)) or value
-        selection_basis = current.get("selection_basis")
-        if not isinstance(summary.get("selection_basis"), str) and isinstance(
-            selection_basis, str
-        ):
-            summary["selection_basis"] = selection_basis.strip()
-        note = current.get("note")
-        if not isinstance(summary.get("note"), str) and isinstance(note, str):
-            summary["note"] = note.strip()
+    # A mapped step carries its tracking on each per-call payload, so the merge
+    # walks the same canonical payload tree the source collector walks.
+    for step_payload in rag_payloads:
+        for payload in iter_step_rag_payloads(step_payload):
+            tracking = _as_json_object(payload.get("tracking"))
+            current = dict(default_rag_tracking())
+            if tracking is not None:
+                current.update(tracking)
+            if summary is None:
+                summary = current
+                continue
+            for key in (
+                "retrieval_tracked",
+                "prompt_context_inclusion_tracked",
+                "citation_tracked",
+                "material_influence_tracked",
+            ):
+                value = current.get(key)
+                if isinstance(value, bool):
+                    summary[key] = bool(summary.get(key)) or value
+            selection_basis = current.get("selection_basis")
+            if not isinstance(summary.get("selection_basis"), str) and isinstance(
+                selection_basis, str
+            ):
+                summary["selection_basis"] = selection_basis.strip()
+            note = current.get("note")
+            if not isinstance(summary.get("note"), str) and isinstance(note, str):
+                summary["note"] = note.strip()
     return summary or dict(default_rag_tracking())
 
 
@@ -1141,8 +1150,18 @@ def _build_step_knowledge_retrieval_summary(
     attempts: list[dict[str, Any]],
     result: dict[str, Any],
 ) -> dict[str, Any] | None:
+    # The step summary reports the step's current attempt. An older attempt's
+    # sources are still in the exported attempt list, but presenting them here
+    # would describe a superseded retrieval as the step's current one.
+    current_attempt_no = result.get("current_attempt_no")
     rag_payload: dict[str, Any] | None = None
+    if not isinstance(current_attempt_no, int):
+        # Current attempt unknown: report no step-level retrieval summary
+        # rather than promoting a superseded attempt's sources.
+        return None
     for attempt in reversed(attempts):
+        if attempt.get("attempt_no") != current_attempt_no:
+            continue
         provenance = _as_json_object(attempt.get("provenance_json"))
         if provenance is None:
             continue
@@ -1151,20 +1170,25 @@ def _build_step_knowledge_retrieval_summary(
             rag_payload = rag
             break
     if rag_payload is None:
-        input_payload = _as_json_object(result.get("input_payload_json"))
-        if input_payload is not None:
-            raw_rag = _as_json_object(input_payload.get("rag"))
-            if raw_rag is not None:
-                rag_payload = raw_rag
-    if rag_payload is None:
         return None
     prompt_context = _as_json_object(rag_payload.get("prompt_context"))
     return {
         "status": rag_payload.get("status"),
         "attempted": rag_payload.get("attempted"),
         "retrieval_duration_ms": rag_payload.get("retrieval_duration_ms"),
-        "unique_sources": rag_payload.get("unique_sources"),
-        "references_truncated": rag_payload.get("references_truncated"),
+        "unique_sources": (
+            rag_payload.get("sources_total")
+            if is_mapped_rag_payload(rag_payload)
+            else rag_payload.get("unique_sources")
+        ),
+        "sources_with_recorded_passages": rag_payload.get(
+            "sources_with_recorded_passages"
+        ),
+        "passages_recorded": rag_payload.get("passages_recorded"),
+        "passages_truncated": rag_payload.get("passages_truncated"),
+        "passages_withheld": rag_payload.get("passages_withheld"),
+        "embedding_model": rag_payload.get("embedding_model"),
+        "embedding_model_status": rag_payload.get("embedding_model_status"),
         "reference_metadata_status": rag_payload.get("reference_metadata_status"),
         "retrieval_error_type": rag_payload.get("retrieval_error_type"),
         "error_code": rag_payload.get("error_code"),

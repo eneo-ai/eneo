@@ -62,6 +62,10 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_evidence_policy import (
+    FlowEvidenceAccessContext,
+    flow_metadata_marks_sensitive_or_unreadable,
+)
 from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
 from eneo.flows.flow_run_provenance import FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
 from eneo.flows.flow_run_step_inputs import (
@@ -71,6 +75,10 @@ from eneo.flows.flow_run_step_inputs import (
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
+)
+from eneo.flows.infrastructure.flow_run_repo import (
+    StepAttemptPage,
+    StepAttemptProvenanceSize,
 )
 from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunCommandResult,
@@ -95,9 +103,66 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission
 
+# Preflight sizing double: zero everywhere means the evidence view never
+# narrows its load and an export preflight never refuses in these tests.
+EMPTY_PROVENANCE_SIZE = StepAttemptProvenanceSize(
+    attempt_count=0,
+    stored_provenance_bytes=0,
+    recorded_passage_bytes=0,
+)
+
+
+def _attempts_page(attempts):
+    """The repository returns admitted attempts with snapshot-consistent counts."""
+    items = list(attempts)
+    return StepAttemptPage(
+        attempts=items,
+        total_count=len(items),
+        current_total=0,
+        current_admitted=0,
+    )
+
+
+def flow_run_repo_mock() -> AsyncMock:
+    """A flow-run repository double with the preflight already answered.
+
+    Every evidence path sizes stored provenance before loading it, so a bare
+    AsyncMock would fail the comparison with a mock object. One owner for that
+    default keeps the answer out of every individual test.
+    """
+    repo = AsyncMock()
+    repo.measure_step_attempt_provenance.return_value = EMPTY_PROVENANCE_SIZE
+    return repo
+
 
 def _flow_repo() -> AsyncMock:
     return AsyncMock()
+
+
+def _seed_flow_repo(flow_repo, flow) -> None:
+    """Answer both flow reads the access policy makes with the real flow.
+
+    The disclosure decision reads a narrow typed evidence-access context; a
+    double that returned a mock there would withhold every passage.
+    """
+    flow_repo.get.return_value = flow
+    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+        flow_id=flow.id,
+        space_id=flow.space_id,
+        sensitive=flow_metadata_marks_sensitive_or_unreadable(flow.metadata_json),
+        classification_level=0,
+    )
+
+
+def _access_policy_double() -> AsyncMock:
+    """Access-policy double that answers the disclosure question it must answer.
+
+    The real policy returns a typed passage-disclosure decision; a double that
+    returned a mock here would silently mask every passage.
+    """
+    policy = AsyncMock(spec=FlowRunAccessPolicy)
+    policy.passage_disclosure_for_run.return_value = "text_disclosed"
+    return policy
 
 
 def _runtime_upload_repo(*bound_file_ids: UUID) -> AsyncMock:
@@ -301,6 +366,9 @@ def _step_result_record(
     output_payload_json: dict[str, object] | None = None,
     effective_prompt: str | None = None,
     error_message: str | None = None,
+    # A completed step names the attempt that produced it; step-level RAG is
+    # reported only for that identified current attempt.
+    current_attempt_no: int | None = 1,
 ) -> FlowStepResult:
     now = datetime.now(timezone.utc)
     return FlowStepResult(
@@ -310,6 +378,7 @@ def _step_result_record(
         tenant_id=run.tenant_id,
         step_id=uuid4(),
         step_order=step_order,
+        current_attempt_no=current_attempt_no,
         assistant_id=uuid4(),
         input_payload_json=input_payload_json,
         effective_prompt=effective_prompt,
@@ -580,7 +649,7 @@ def _form_schema_flow(user) -> Flow:
 @pytest.mark.asyncio
 async def test_create_run_rejects_unpublished_flow(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -601,7 +670,7 @@ async def test_create_run_rejects_unpublished_flow(user):
 @pytest.mark.asyncio
 async def test_create_run_enforces_tenant_concurrency_limit(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -613,7 +682,8 @@ async def test_create_run_enforces_tenant_concurrency_limit(user):
         max_concurrent_runs=1,
     )
     flow = _flow(user=user, published_version=1)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     flow_run_repo.count_active_runs.return_value = 1
 
@@ -630,9 +700,10 @@ async def test_create_run_enforces_tenant_concurrency_limit(user):
 @pytest.mark.asyncio
 async def test_create_run_creates_preseeded_run(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=2)
+    _seed_flow_repo(flow_repo, flow)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -642,7 +713,7 @@ async def test_create_run_creates_preseeded_run(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=2)
@@ -679,9 +750,10 @@ async def test_create_run_creates_preseeded_run(user):
 @pytest.mark.asyncio
 async def test_create_run_maps_runtime_upload_binding_race_to_public_error(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     step_id = uuid4()
     file_id = uuid4()
     service = _flow_run_service(
@@ -693,7 +765,7 @@ async def test_create_run_maps_runtime_upload_binding_race_to_public_error(user)
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
@@ -715,9 +787,10 @@ async def test_create_run_maps_runtime_upload_binding_race_to_public_error(user)
 @pytest.mark.asyncio
 async def test_create_run_returns_created_run(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     created_run = _run(user=user, flow_id=flow.id)
     service = _flow_run_service(
         user=user,
@@ -728,7 +801,7 @@ async def test_create_run_returns_created_run(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
@@ -743,9 +816,10 @@ async def test_create_run_returns_created_run(user):
 @pytest.mark.asyncio
 async def test_create_run_replays_existing_run_for_matching_idempotency_key(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     existing_run = _run(user=user, flow_id=flow.id)
     version = _version(user=user, flow=flow, version=1)
     service = _flow_run_service(
@@ -757,7 +831,7 @@ async def test_create_run_replays_existing_run_for_matching_idempotency_key(user
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = version
@@ -892,9 +966,10 @@ async def test_create_run_with_idempotency_key_creates_when_no_retained_row_exis
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     created_run = _run(user=user, flow_id=flow.id)
     service = _flow_run_service(
         user=user,
@@ -905,7 +980,7 @@ async def test_create_run_with_idempotency_key_creates_when_no_retained_row_exis
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
@@ -928,7 +1003,7 @@ async def test_create_run_with_idempotency_key_creates_when_no_retained_row_exis
 async def test_create_run_persists_service_key_principal(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=service_user, published_version=1)
     created_run = _run(user=user, flow_id=flow.id).model_copy(
@@ -949,7 +1024,7 @@ async def test_create_run_persists_service_key_principal(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _version(
@@ -980,9 +1055,10 @@ async def test_create_run_persists_service_key_principal(user):
 @pytest.mark.asyncio
 async def test_create_run_replays_idempotent_run_before_concurrency_limit(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     existing_run = _run(user=user, flow_id=flow.id)
     service = _flow_run_service(
         user=user,
@@ -993,7 +1069,7 @@ async def test_create_run_replays_idempotent_run_before_concurrency_limit(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=0,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     expected_fingerprint = service._build_idempotency_fingerprint(
         tenant_id=user.tenant_id,
@@ -1021,9 +1097,10 @@ async def test_create_run_replays_idempotent_run_before_concurrency_limit(user):
 @pytest.mark.asyncio
 async def test_create_run_rejects_invalid_idempotency_key(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -1033,8 +1110,7 @@ async def test_create_run_rejects_invalid_idempotency_key(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
-
+    _seed_flow_repo(flow_repo, flow)
     with pytest.raises(BadRequestException) as exc_info:
         await service.create_run(
             flow_id=flow.id,
@@ -1048,9 +1124,10 @@ async def test_create_run_rejects_invalid_idempotency_key(user):
 @pytest.mark.asyncio
 async def test_create_run_rejects_idempotency_key_replay_with_different_payload(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     existing_run = _run(user=user, flow_id=flow.id)
     version = _version(user=user, flow=flow, version=1)
     service = _flow_run_service(
@@ -1062,7 +1139,7 @@ async def test_create_run_rejects_idempotency_key_replay_with_different_payload(
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = version
     flow_run_repo.get_idempotent_run.return_value = (
@@ -1084,7 +1161,7 @@ async def test_create_run_rejects_idempotency_key_replay_with_different_payload(
 @pytest.mark.asyncio
 async def test_create_run_rejects_missing_required_form_field(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _form_schema_flow(user)
     service = _flow_run_service(
@@ -1096,7 +1173,7 @@ async def test_create_run_rejects_missing_required_form_field(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
@@ -1120,7 +1197,7 @@ async def test_create_run_rejects_missing_required_form_field(user):
 @pytest.mark.asyncio
 async def test_create_run_validates_against_published_metadata(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     draft_flow = _flow(user=user, published_version=1, metadata_json=None)
     published_metadata = {
@@ -1161,7 +1238,7 @@ async def test_create_run_validates_against_published_metadata(user):
 @pytest.mark.asyncio
 async def test_create_run_ignores_draft_only_form_fields(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     draft_flow = _flow(
         user=user,
@@ -1221,9 +1298,10 @@ async def test_create_run_ignores_malformed_draft_metadata(
     metadata_json: dict[str, object],
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1, metadata_json=metadata_json)
+    _seed_flow_repo(flow_repo, flow)
     created_run = _run(user=user, flow_id=flow.id)
     service = _flow_run_service(
         user=user,
@@ -1234,7 +1312,7 @@ async def test_create_run_ignores_malformed_draft_metadata(
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
     published_flow = flow.model_copy(update={"metadata_json": None})
@@ -1258,7 +1336,7 @@ async def test_create_run_rejects_malformed_published_form_schema_before_side_ef
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     draft_flow = _flow(user=user, published_version=1, metadata_json=None)
     published_flow = draft_flow.model_copy(
@@ -1298,7 +1376,7 @@ async def test_create_run_rejects_malformed_published_form_schema_before_side_ef
 @pytest.mark.asyncio
 async def test_create_run_rejects_invalid_select_option(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _form_schema_flow(user)
     service = _flow_run_service(
@@ -1310,7 +1388,7 @@ async def test_create_run_rejects_invalid_select_option(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
@@ -1336,7 +1414,7 @@ async def test_create_run_rejects_invalid_select_option(user):
 @pytest.mark.asyncio
 async def test_create_run_rejects_invalid_multiselect_shape(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _form_schema_flow(user)
     service = _flow_run_service(
@@ -1348,7 +1426,7 @@ async def test_create_run_rejects_invalid_multiselect_shape(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
@@ -1373,7 +1451,7 @@ async def test_create_run_rejects_invalid_multiselect_shape(user):
 @pytest.mark.asyncio
 async def test_create_run_normalizes_multiselect_number_and_date_fields(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _form_schema_flow(user)
     created_run = _run(user=user, flow_id=flow.id)
@@ -1387,7 +1465,7 @@ async def test_create_run_normalizes_multiselect_number_and_date_fields(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
@@ -1412,7 +1490,7 @@ async def test_create_run_normalizes_multiselect_number_and_date_fields(user):
 @pytest.mark.asyncio
 async def test_create_run_preserves_unknown_payload_fields_for_forward_compat(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _form_schema_flow(user)
     created_run = _run(user=user, flow_id=flow.id)
@@ -1426,7 +1504,7 @@ async def test_create_run_preserves_unknown_payload_fields_for_forward_compat(us
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
@@ -1447,7 +1525,7 @@ async def test_create_run_preserves_unknown_payload_fields_for_forward_compat(us
 @pytest.mark.asyncio
 async def test_create_run_rejects_stale_expected_flow_version(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(
         user=user,
@@ -1469,8 +1547,7 @@ async def test_create_run_rejects_stale_expected_flow_version(user):
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
-
+    _seed_flow_repo(flow_repo, flow)
     with pytest.raises(BadRequestException) as exc_info:
         await service.create_run(
             flow_id=flow.id,
@@ -1488,11 +1565,12 @@ async def test_create_run_rejects_stale_expected_flow_version(user):
 @pytest.mark.asyncio
 async def test_create_run_persists_expected_version_and_step_inputs(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     file_repo = AsyncMock()
     runtime_upload_repo = AsyncMock()
     flow = _flow(user=user, published_version=2)
+    _seed_flow_repo(flow_repo, flow)
     runtime_step = flow.steps[0].model_copy(
         update={
             "input_config": {
@@ -1517,7 +1595,7 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
         runtime_upload_repo=runtime_upload_repo,
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_run_repo.create.return_value = created_run
     file_id = uuid4()
@@ -1586,11 +1664,12 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
 async def test_create_run_validates_service_key_step_inputs_by_principal_owner(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     file_repo = AsyncMock()
     runtime_upload_repo = AsyncMock()
     flow = _flow(user=user, published_version=2)
+    _seed_flow_repo(flow_repo, flow)
     runtime_step = flow.steps[0].model_copy(
         update={
             "input_config": {
@@ -1623,7 +1702,7 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
         runtime_upload_repo=runtime_upload_repo,
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_run_repo.create.return_value = created_run
     file_id = uuid4()
@@ -1676,11 +1755,12 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
 @pytest.mark.asyncio
 async def test_create_run_rejects_runtime_step_input_mimetype(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     file_repo = AsyncMock()
     runtime_upload_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     runtime_step = flow.steps[0].model_copy(
         update={
             "input_config": {
@@ -1704,7 +1784,7 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
         runtime_upload_repo=runtime_upload_repo,
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
@@ -1752,7 +1832,7 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
 @pytest.mark.asyncio
 async def test_list_runs_delegates_to_repo(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow_id = uuid4()
     expected = [_run(user=user, flow_id=flow_id)]
@@ -1784,7 +1864,7 @@ async def test_list_runs_delegates_to_repo(user):
 @pytest.mark.asyncio
 async def test_list_runs_delegates_status_filter_to_repo(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow_id = uuid4()
     statuses = [FlowRunStatus.COMPLETED]
@@ -1821,7 +1901,7 @@ async def test_list_runs_delegates_status_filter_to_repo(user):
 @pytest.mark.asyncio
 async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow_id = uuid4()
     expected = [_run(user=user, flow_id=flow_id)]
@@ -1857,7 +1937,7 @@ async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
 async def test_list_runs_filters_service_key_runs_by_service_principal(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow_id = uuid4()
     expected = [
@@ -1900,15 +1980,16 @@ async def test_list_runs_filters_service_key_runs_by_service_principal(user):
 async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
     actor_manager.get_space_actor_from_space.return_value = actor
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.list_runs.return_value = []
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=service_user,
@@ -1941,7 +2022,7 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
 
 @pytest.mark.asyncio
 async def test_list_runs_with_result_files_and_token_usage_enriches_page(user):
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_id = uuid4()
     run_with_file = _run(user=user, flow_id=flow_id)
     run_with_usage = _run(user=user, flow_id=flow_id)
@@ -1997,7 +2078,7 @@ async def test_list_runs_with_result_files_and_token_usage_enriches_page(user):
 
 @pytest.mark.asyncio
 async def test_get_run_detail_includes_tenant_scoped_webhook_deliveries(user):
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     webhook_delivery_repo = AsyncMock(spec=FlowRunWebhookDeliveryRepository)
     flow = _flow(user)
     run = _run(user=user, flow_id=flow.id)
@@ -2030,7 +2111,7 @@ async def test_get_run_detail_includes_tenant_scoped_webhook_deliveries(user):
 
 @pytest.mark.asyncio
 async def test_list_runs_bulk_loads_each_historical_completed_version_once(user):
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user, published_version=2)
     version_one = _runtime_version(user, flow, version=1)
@@ -2107,7 +2188,7 @@ async def test_list_runs_bulk_loads_each_historical_completed_version_once(user)
 async def test_list_runs_with_result_files_and_token_usage_exact_limit_has_no_more(
     user,
 ):
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_id = uuid4()
     run_one = _run(user=user, flow_id=flow_id)
     run_two = _run(user=user, flow_id=flow_id)
@@ -2144,7 +2225,7 @@ async def test_list_runs_with_result_files_and_token_usage_exact_limit_has_no_mo
 async def test_list_runs_with_result_files_and_token_usage_empty_page_skips_enrichment(
     user,
 ):
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_id = uuid4()
     flow_run_repo.list_runs.return_value = []
     service = _flow_run_service(
@@ -2171,7 +2252,7 @@ async def test_list_runs_with_result_files_and_token_usage_empty_page_skips_enri
 async def test_list_runs_with_result_files_and_token_usage_rejects_foreign_tenant_row(
     user,
 ):
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_id = uuid4()
     foreign_run = _run(user=user, flow_id=flow_id).model_copy(
         update={"tenant_id": uuid4()}
@@ -2200,7 +2281,7 @@ async def test_list_runs_with_result_files_and_token_usage_rejects_foreign_tenan
 
 @pytest.mark.asyncio
 async def test_get_run_with_result_files_and_token_usage_enriches_single_run(user):
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_id = uuid4()
     run = _run(user=user, flow_id=flow_id)
     result_file = _result_file(user=user, run=run, file_id=uuid4())
@@ -2243,7 +2324,7 @@ async def test_get_run_with_result_files_and_token_usage_enriches_single_run(use
 async def test_get_evidence_rejects_service_key_even_for_own_run(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = FlowRunEvidenceService(
         user=service_user,
@@ -2280,7 +2361,7 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
         flow_evidence=ResourcePermissionLevel.READ
     )
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
@@ -2293,10 +2374,10 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
     )
     flow = _flow(user=user).model_copy(update={"id": run.flow_id})
     version = _version(user=user, flow=flow, version=1)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     flow_version_repo.get.return_value = version.model_copy(
         update={"flow_id": run.flow_id}
     )
@@ -2326,7 +2407,7 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
         flow_evidence=ResourcePermissionLevel.WRITE
     )
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
@@ -2339,10 +2420,10 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
     )
     flow = _flow(user=user).model_copy(update={"id": run.flow_id})
     version = _version(user=user, flow=flow, version=1)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     flow_version_repo.get.return_value = version.model_copy(
         update={"flow_id": run.flow_id}
     )
@@ -2372,7 +2453,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
         flow_evidence=ResourcePermissionLevel.ADMIN
     )
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
@@ -2380,6 +2461,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
         get_current_role=lambda: "admin"
     )
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id).model_copy(
         update={
             "principal_type": PrincipalType.SERVICE_KEY,
@@ -2390,14 +2472,14 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
         }
     )
     version = _version(user=user, flow=flow, version=1)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     space_service.get_space.return_value = SimpleNamespace(
         id=flow.space_id,
         security_classification=SimpleNamespace(security_level=3),
     )
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     flow_version_repo.get.return_value = version
     service = FlowRunEvidenceService(
         user=service_user,
@@ -2429,7 +2511,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_de
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     sensitive_flow = _flow(
         user=user,
@@ -2461,7 +2543,7 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     sensitive_flow = _flow(
         user=user,
@@ -2471,7 +2553,7 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
     version = _version(user=user, flow=sensitive_flow, version=1)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     flow_repo.get.return_value = sensitive_flow
     flow_version_repo.get.return_value = version
     allowed_user = _trace_user(
@@ -2507,7 +2589,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
@@ -2555,7 +2637,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     admin_user = user.model_copy(
         update={
@@ -2596,7 +2678,7 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     sensitive_flow = _flow(
         user=user,
@@ -2607,7 +2689,7 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
     flow_repo.get.return_value = sensitive_flow
     flow_version_repo.get.return_value = version
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     service = FlowRunEvidenceService(
         user=_trace_user(user),
         flow_repo=flow_repo,
@@ -2635,17 +2717,18 @@ async def test_export_evidence_json_rejects_cross_tenant_injected_run_for_tenant
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     admin_user = user.model_copy(
         update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
     )
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id).model_copy(update={"tenant_id": uuid4()})
     version = _version(user=user, flow=flow, version=1)
     flow_version_repo.get.return_value = version
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     service = FlowRunEvidenceService(
         user=admin_user,
         flow_repo=flow_repo,
@@ -2675,7 +2758,7 @@ async def test_service_key_unknown_access_kind_fails_closed(user):
         flow_evidence=ResourcePermissionLevel.ADMIN
     )
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
@@ -2710,17 +2793,18 @@ async def test_service_key_unknown_access_kind_fails_closed(user):
 async def test_get_run_rejects_other_service_key_run_even_with_space_admin_role(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
     actor_manager.get_space_actor_from_space.return_value = actor
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=service_user,
@@ -2748,7 +2832,7 @@ async def test_get_run_rejects_other_service_key_run_even_with_space_admin_role(
 async def test_get_run_rejects_service_key_for_other_principals_run(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=service_user,
@@ -2779,7 +2863,7 @@ async def test_get_run_rejects_service_key_for_other_principals_run(user):
 @pytest.mark.asyncio
 async def test_get_run_rejects_other_users_run_for_non_admin(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -2802,7 +2886,7 @@ async def test_get_run_rejects_other_users_run_for_non_admin(user):
 @pytest.mark.asyncio
 async def test_get_run_allows_other_users_run_for_tenant_admin(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     admin_user = user.model_copy(
         update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
@@ -2827,17 +2911,18 @@ async def test_get_run_allows_other_users_run_for_tenant_admin(user):
 @pytest.mark.asyncio
 async def test_get_run_allows_space_admin_to_view_other_users_run_status(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
     actor_manager.get_space_actor_from_space.return_value = actor
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=user,
@@ -2863,18 +2948,19 @@ async def test_get_run_allows_space_admin_to_view_other_users_run_status(user):
 @pytest.mark.asyncio
 async def test_list_step_results_allows_space_admin_for_other_users_run_content(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
     actor_manager.get_space_actor_from_space.return_value = actor
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=user,
@@ -2900,9 +2986,10 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
 @pytest.mark.asyncio
 async def test_get_run_versioned_view_loads_run_definition_and_results(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     assert flow.id is not None
     run = _run(user=user, flow_id=flow.id)
     version = _runtime_version(user=user, flow=flow, version=run.flow_version)
@@ -2947,9 +3034,10 @@ async def test_get_run_versioned_view_loads_run_definition_and_results(user):
 @pytest.mark.asyncio
 async def test_get_run_versioned_view_rejects_checksum_drift_before_results(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     assert flow.id is not None
     run = _run(user=user, flow_id=flow.id)
     version = _runtime_version(user=user, flow=flow, version=run.flow_version)
@@ -2978,9 +3066,10 @@ async def test_get_run_versioned_view_rejects_matching_checksum_invalid_runtime_
     user,
 ) -> None:
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     assert flow.id is not None
     run = _run(user=user, flow_id=flow.id)
     invalid_definition = build_published_definition_json(
@@ -3025,9 +3114,10 @@ async def test_get_run_versioned_view_rejects_matching_checksum_invalid_runtime_
 @pytest.mark.asyncio
 async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     assert flow.id is not None
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
@@ -3066,19 +3156,20 @@ async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user
 @pytest.mark.asyncio
 async def test_get_evidence_allows_space_admin_for_other_users_run(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
     actor_manager.get_space_actor_from_space.return_value = actor
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
-    flow_repo.get.return_value = flow
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = FlowRunEvidenceService(
@@ -3110,17 +3201,18 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
     actor_manager.get_space_actor_from_space.return_value = actor
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     space_service.get_space.return_value = SimpleNamespace(
         id=flow.space_id,
@@ -3156,19 +3248,20 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "owner")
     actor_manager.get_space_actor_from_space.return_value = actor
     flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
-    flow_repo.get.return_value = flow
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     space_service.get_space.return_value = SimpleNamespace(
         id=flow.space_id,
@@ -3213,7 +3306,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
         }
     )
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
@@ -3224,8 +3317,8 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
     run = _run(user=trace_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
-    flow_repo.get.return_value = flow
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=trace_user, flow=flow, version=1)
     space_service.get_space.return_value = SimpleNamespace(
         id=flow.space_id,
@@ -3258,7 +3351,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
 @pytest.mark.asyncio
 async def test_create_run_rejects_oversized_input_payload(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -3270,7 +3363,8 @@ async def test_create_run_rejects_oversized_input_payload(user):
         max_concurrent_runs=5,
     )
     flow = _flow(user=user, published_version=1)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     flow_run_repo.count_active_runs.return_value = 0
 
@@ -3390,7 +3484,7 @@ async def test_create_run_rejects_invalid_published_snapshot(
     error_context,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -3402,7 +3496,8 @@ async def test_create_run_rejects_invalid_published_snapshot(
         max_concurrent_runs=5,
     )
     flow = _flow(user=user, published_version=1)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
@@ -3424,11 +3519,12 @@ async def test_create_run_rejects_invalid_published_snapshot(
 @pytest.mark.asyncio
 async def test_create_run_rejects_checksum_drift_before_creation_work(user) -> None:
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     version = _runtime_version(user=user, flow=flow, version=1)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = version.model_copy(
         update={"definition_checksum": "stored-checksum-does-not-match"}
     )
@@ -3460,9 +3556,10 @@ async def test_create_run_rejects_matching_checksum_invalid_runtime_step_before_
     user,
 ) -> None:
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     invalid_definition = build_published_definition_json(
         flow_id=flow.id,
         name=flow.name,
@@ -3476,7 +3573,7 @@ async def test_create_run_rejects_matching_checksum_invalid_runtime_step_before_
             for index, step in enumerate(flow.steps)
         ],
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=1,
@@ -3510,7 +3607,7 @@ async def test_create_run_rejects_published_snapshot_without_executable_steps_as
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -3522,7 +3619,8 @@ async def test_create_run_rejects_published_snapshot_without_executable_steps_as
         max_concurrent_runs=5,
     )
     flow = _flow(user=user, published_version=1)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
@@ -3551,7 +3649,7 @@ async def test_create_run_rejects_loaded_published_flow_without_id_as_internal_i
 ):
     requested_flow_id = uuid4()
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -3563,7 +3661,7 @@ async def test_create_run_rejects_loaded_published_flow_without_id_as_internal_i
         max_concurrent_runs=5,
     )
     flow = _flow(user=user, published_version=1).model_copy(update={"id": None})
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=requested_flow_id,
@@ -3593,7 +3691,7 @@ async def test_create_run_rejects_loaded_published_flow_without_id_as_internal_i
 @pytest.mark.asyncio
 async def test_cancel_run_marks_pending_steps_cancelled(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={"status": FlowRunStatus.RUNNING}
@@ -3633,7 +3731,7 @@ async def test_cancel_run_translates_terminalizer_missing_run_race_to_public_not
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={"status": FlowRunStatus.RUNNING}
@@ -3665,7 +3763,7 @@ async def test_cancel_run_translates_terminalizer_missing_run_race_to_public_not
 @pytest.mark.asyncio
 async def test_cancel_run_does_not_terminalize_flow_mismatch(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     terminalizer = AsyncMock()
     run_id = uuid4()
@@ -3707,7 +3805,7 @@ async def test_cancel_run_does_not_terminalize_flow_mismatch(user):
 )
 async def test_cancel_run_is_noop_for_terminal_status(user, status):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(update={"status": status})
     flow_run_repo.get.return_value = run
@@ -3747,9 +3845,10 @@ async def test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_c
     user,
 ):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     draft_step = flow.steps[broken_order - 1]
     broken_step: dict[str, object] = {"step_order": broken_order}
     if include_step_id:
@@ -3772,7 +3871,7 @@ async def test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_c
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
@@ -3800,7 +3899,7 @@ async def test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_c
 @pytest.mark.asyncio
 async def test_create_run_rejects_missing_snapshot_identifiers_without_fallback(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1).model_copy(
         update={"steps": [_step(1)]}
@@ -3814,7 +3913,7 @@ async def test_create_run_rejects_missing_snapshot_identifiers_without_fallback(
         runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
@@ -3847,9 +3946,10 @@ async def test_create_run_rejects_missing_snapshot_identifiers_without_fallback(
 async def test_get_evidence_redacts_sensitive_values(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id).model_copy(
         update={
             "input_payload_json": {
@@ -3909,13 +4009,15 @@ async def test_get_evidence_redacts_sensitive_values(user):
         )
     ]
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
-    flow_run_repo.list_step_attempts.return_value = [
-        _step_attempt_record(
-            run,
-            step_order=1,
-            error_message="Bearer should-hide",
-        )
-    ]
+    flow_run_repo.list_step_attempts.return_value = _attempts_page(
+        [
+            _step_attempt_record(
+                run,
+                step_order=1,
+                error_message="Bearer should-hide",
+            )
+        ]
+    )
 
     service = FlowRunEvidenceService(
         user=user,
@@ -3992,11 +4094,12 @@ async def test_get_evidence_redacts_sensitive_values(user):
 async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id)
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
@@ -4021,49 +4124,56 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.list_step_results.return_value = [
-        _step_result_record(
-            run,
-            step_order=1,
-            input_payload_json={
-                "text": "hello",
-                "rag": {
-                    "attempted": True,
-                    "status": "success",
-                    "version": 1,
-                    "timeout_seconds": 30,
-                    "include_info_blobs": False,
-                    "chunks_retrieved": 5,
-                    "raw_chunks_count": 5,
-                    "deduped_chunks_count": 2,
-                    "unique_sources": 2,
-                    "source_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
-                    "source_ids_short": ["aaaaaaaa"],
-                    "error_code": None,
-                    "retrieval_duration_ms": 87,
-                    "retrieval_error_type": None,
-                    "references_truncated": False,
-                    "references": [
-                        {
-                            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                            "id_short": "aaaaaaaa",
-                            "title": "Sundsvall source",
-                            "matched_chunk_count": 2,
-                            "best_score": 0.92,
-                            "chunks": [
-                                {
-                                    "chunk_no": 1,
-                                    "score": 0.92,
-                                    "snippet": "Sundsvall redovisar positivt resultat.",
-                                }
-                            ],
-                        }
-                    ],
-                },
-            },
-        )
+        _step_result_record(run, step_order=1, input_payload_json={"text": "hello"})
     ]
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
-    flow_run_repo.list_step_attempts.return_value = []
+    # Retrieval evidence lives in attempt provenance, the single owner.
+    flow_run_repo.list_step_attempts.return_value = _attempts_page(
+        [
+            _step_attempt_record(
+                run,
+                step_order=1,
+                provenance_json={
+                    "rag": {
+                        "attempted": True,
+                        "status": "success",
+                        "version": 1,
+                        "timeout_seconds": 30,
+                        "include_info_blobs": False,
+                        "chunks_retrieved": 5,
+                        "raw_chunks_count": 5,
+                        "deduped_chunks_count": 2,
+                        "unique_sources": 2,
+                        "source_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+                        "source_ids_short": ["aaaaaaaa"],
+                        "error_code": None,
+                        "retrieval_duration_ms": 87,
+                        "retrieval_error_type": None,
+                        "references": [
+                            {
+                                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                                "id_short": "aaaaaaaa",
+                                "title": "Sundsvall source",
+                                "matched_chunk_count": 2,
+                                "recorded_passage_count": 1,
+                                "best_score": 0.92,
+                                "passages": [
+                                    {
+                                        "chunk_no": 1,
+                                        "score": 0.92,
+                                        "text": "Sundsvall redovisar positivt resultat.",
+                                        "recording": "complete",
+                                        "passage_bytes": 38,
+                                        "recorded_bytes": 38,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                },
+            )
+        ]
+    )
 
     service = FlowRunEvidenceService(
         user=user,
@@ -4088,12 +4198,11 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
         evidence["debug_export"]["steps"][0]["rag"]["references"][0]["title"]
         == "Sundsvall source"
     )
-    assert (
-        evidence["debug_export"]["steps"][0]["rag"]["references"][0]["chunks"][0][
-            "chunk_no"
-        ]
-        == 1
-    )
+    passage = evidence["debug_export"]["steps"][0]["rag"]["references"][0]["passages"][
+        0
+    ]
+    assert passage["chunk_no"] == 1
+    assert passage["text"] == "Sundsvall redovisar positivt resultat."
     assert evidence["debug_export"]["steps"][0]["rag"]["source_ids_short"] == [
         "aaaaaaaa"
     ]
@@ -4103,9 +4212,10 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
 async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _published_flow_version(
@@ -4138,22 +4248,24 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
         )
     ]
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
-    flow_run_repo.list_step_attempts.return_value = [
-        _step_attempt_record(
-            run,
-            step_order=1,
-            attempt_no=2,
-            started_at=datetime(2026, 3, 20, 12, 0, 0, tzinfo=timezone.utc),
-            finished_at=datetime(2026, 3, 20, 12, 0, 5, tzinfo=timezone.utc),
-            requested_model="gpt-4.1",
-            response_model="gpt-4.1-mini",
-            provider="openai",
-            finish_reason="stop",
-            provider_response_id="resp-123",
-            num_tokens_input=11,
-            num_tokens_output=13,
-        )
-    ]
+    flow_run_repo.list_step_attempts.return_value = _attempts_page(
+        [
+            _step_attempt_record(
+                run,
+                step_order=1,
+                attempt_no=2,
+                started_at=datetime(2026, 3, 20, 12, 0, 0, tzinfo=timezone.utc),
+                finished_at=datetime(2026, 3, 20, 12, 0, 5, tzinfo=timezone.utc),
+                requested_model="gpt-4.1",
+                response_model="gpt-4.1-mini",
+                provider="openai",
+                finish_reason="stop",
+                provider_response_id="resp-123",
+                num_tokens_input=11,
+                num_tokens_output=13,
+            )
+        ]
+    )
 
     service = FlowRunEvidenceService(
         user=user,
@@ -4183,14 +4295,15 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
 async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detail(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     run_owner_user_id = uuid4()
     run = _run(user=user, flow_id=flow.id).model_copy(
         update={"principal_user_id": run_owner_user_id}
     )
-    flow_repo.get.return_value = flow
+    _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
@@ -4205,8 +4318,8 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
-    access_policy = AsyncMock(spec=FlowRunAccessPolicy)
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    access_policy = _access_policy_double()
 
     service = FlowRunEvidenceService(
         user=user,
@@ -4275,7 +4388,7 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
     principal = FlowPrincipal.from_user(service_user)
     assert principal.actor_api_key_id is not None
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=service_user, published_version=1)
     run = _run(user=service_user, flow_id=flow.id)
@@ -4292,8 +4405,8 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
-    access_policy = AsyncMock(spec=FlowRunAccessPolicy)
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    access_policy = _access_policy_double()
     service = FlowRunEvidenceService(
         user=service_user,
         flow_repo=flow_repo,
@@ -4325,9 +4438,10 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
 async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _published_flow_version(
@@ -4343,19 +4457,21 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = [
-        _step_attempt_record(
-            run,
-            step_order=1,
-            provenance_json={
-                "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-                "llm": {
-                    "effective_prompt": "Bearer secret " + ("x" * 20000),
-                    "tool_calls": {"result": "y" * 20000},
+    flow_run_repo.list_step_attempts.return_value = _attempts_page(
+        [
+            _step_attempt_record(
+                run,
+                step_order=1,
+                provenance_json={
+                    "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+                    "llm": {
+                        "effective_prompt": "Bearer secret " + ("x" * 20000),
+                        "tool_calls": {"result": "y" * 20000},
+                    },
                 },
-            },
-        )
-    ]
+            )
+        ]
+    )
 
     service = FlowRunEvidenceService(
         user=user,
@@ -4381,9 +4497,10 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
 async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _published_flow_version(
@@ -4416,7 +4533,7 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
         )
     ]
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
-    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
 
     service = FlowRunEvidenceService(
         user=user,
@@ -4439,9 +4556,10 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
 async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
     run = _run(user=user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _published_flow_version(
@@ -4467,7 +4585,7 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_step_attempts.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
 
     service = FlowRunEvidenceService(
         user=user,
@@ -4489,7 +4607,7 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
 @pytest.mark.asyncio
 async def test_list_step_results_filters_by_run_and_flow(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -4523,7 +4641,7 @@ async def test_list_step_results_filters_by_run_and_flow(user):
 @pytest.mark.asyncio
 async def test_list_step_results_with_files_composes_per_step_views(user):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     service = _flow_run_service(
         user=user,
@@ -4665,7 +4783,7 @@ def _file(
 
 def _artifact_service(user, *, file_repo, result_file=None, run=None):
     flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
+    flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
     if run is None:
         run = _run(user=user, flow_id=uuid4())

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from copy import deepcopy
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,6 +15,15 @@ from eneo.flows.domain.flow import (
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
+)
+from eneo.flows.domain.rag_evidence import (
+    MAPPED_CALL_COLLECTION_KEYS,
+    PassageDisclosure,
+    RetrievedKnowledgeEvidence,
+    apply_passage_disclosure,
+    disclosed_passage_bytes_in,
+    omitted_view_totals,
+    recompute_mapped_aggregates,
 )
 from eneo.flows.flow_run_provenance import normalize_rag_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -68,6 +79,7 @@ class DebugRunSummaryProjection(BaseModel):
     duration_ms: int | None
     models_used: list[str]
     token_usage: DebugRunTokenUsageProjection | None = None
+    knowledge_evidence_view: RunViewPassageOmission | None = None
 
 
 def build_debug_export(
@@ -79,6 +91,7 @@ def build_debug_export(
     result_files: list[FlowRunStepResultFile] | None = None,
     rerun_operations: list[FlowRunRerunOperation] | None = None,
     rerun_invalidated_steps: list[FlowRunRerunInvalidatedStep] | None = None,
+    knowledge_evidence_view: RunViewPassageOmission | None = None,
 ) -> dict[str, Any]:
     definition_snapshot = version.definition_json
     evidence_generated_at = _latest_evidence_timestamp(
@@ -89,19 +102,10 @@ def build_debug_export(
         rerun_operations=rerun_operations or [],
         rerun_invalidated_steps=rerun_invalidated_steps or [],
     )
-    rag_by_step_order: dict[int, dict[str, Any]] = {}
-    for result in step_results or []:
-        input_payload = result.input_payload_json
-        step_order = result.step_order
-        if not isinstance(input_payload, dict):
-            continue
-        rag_metadata = input_payload.get("rag")
-        if not isinstance(rag_metadata, dict):
-            continue
-        normalized_step_order = parse_step_order(step_order)
-        if normalized_step_order is None:
-            continue
-        rag_by_step_order[normalized_step_order] = rag_metadata
+    rag_by_step_order = _current_attempt_rag_by_step_order(
+        step_results=step_results or [],
+        step_attempts=step_attempts or [],
+    )
     attempts_by_step_order: dict[int, list[DebugAttemptProjection]] = {}
     for attempt in step_attempts or []:
         normalized_step_order = parse_step_order(attempt.step_order)
@@ -147,6 +151,7 @@ def build_debug_export(
         duration_ms=_calculate_duration_ms(run.created_at, run.updated_at),
         models_used=_collect_models_used(step_attempts or []),
         token_usage=_build_run_token_usage_summary(step_attempts or []),
+        knowledge_evidence_view=knowledge_evidence_view,
     )
 
     return {
@@ -332,3 +337,246 @@ def _collect_models_used(step_attempts: list[FlowStepAttempt]) -> list[str]:
         if isinstance(candidate, str) and candidate.strip():
             models.append(candidate.strip())
     return list(dict.fromkeys(models))
+
+
+def withhold_attempt_passages(
+    step_attempts: Sequence[FlowStepAttempt],
+    *,
+    disclosure: PassageDisclosure,
+) -> list[FlowStepAttempt]:
+    """Apply a passage-disclosure decision to attempt provenance.
+
+    Attempt provenance is the only owner of verbatim passages, so this is the
+    single place every evidence surface — ordinary view, redacted export and raw
+    export — passes through.
+    """
+    attempts = list(step_attempts)
+    if disclosure == "text_disclosed":
+        return attempts
+    masked: list[FlowStepAttempt] = []
+    for attempt in attempts:
+        provenance = attempt.provenance_json
+        if not isinstance(provenance, dict):
+            masked.append(attempt)
+            continue
+        rag = provenance.get("rag")
+        if not isinstance(rag, dict):
+            masked.append(attempt)
+            continue
+        next_provenance = dict(provenance)
+        next_provenance["rag"] = apply_passage_disclosure(
+            deepcopy(cast(dict[str, Any], rag)),
+            disclosure=disclosure,
+        )
+        masked.append(attempt.model_copy(update={"provenance_json": next_provenance}))
+    return masked
+
+
+def _current_attempt_rag_by_step_order(
+    *,
+    step_results: Sequence[FlowStepResult],
+    step_attempts: Sequence[FlowStepAttempt],
+) -> dict[int, dict[str, Any]]:
+    """Retrieval evidence for each step's *current* attempt.
+
+    Attempt provenance is the single owner of retrieval evidence, but a step can
+    have several attempts. Showing the newest attempt that happens to contain
+    RAG would present an earlier attempt's sources as the step's current ones —
+    for example when a rerun fails before retrieval. The step result names its
+    current attempt, so that is the attempt the step view reports. Run-wide
+    history still aggregates every attempt explicitly.
+    """
+    current_attempt_by_step_order: dict[int, int] = {}
+    for result in step_results:
+        normalized_step_order = parse_step_order(result.step_order)
+        if normalized_step_order is None or result.current_attempt_no is None:
+            continue
+        current_attempt_by_step_order[normalized_step_order] = result.current_attempt_no
+
+    rag_by_step_order: dict[int, dict[str, Any]] = {}
+    for attempt in sorted(
+        step_attempts,
+        key=lambda item: (parse_step_order(item.step_order) or 0, item.attempt_no),
+    ):
+        normalized_step_order = parse_step_order(attempt.step_order)
+        if normalized_step_order is None:
+            continue
+        current_attempt_no = current_attempt_by_step_order.get(normalized_step_order)
+        if current_attempt_no is None or attempt.attempt_no != current_attempt_no:
+            # No identified current attempt means the step's current evidence
+            # is unknown; showing an older attempt's sources as current would
+            # misattribute them.
+            continue
+        provenance = attempt.provenance_json
+        if not isinstance(provenance, dict):
+            continue
+        rag_metadata = provenance.get("rag")
+        if not isinstance(rag_metadata, dict):
+            continue
+        rag_by_step_order[normalized_step_order] = cast(dict[str, Any], rag_metadata)
+    return rag_by_step_order
+
+
+EvidenceExportDetail = Literal["raw", "redacted"]
+
+
+class RunViewPassageOmission(BaseModel):
+    """Passage text an interactive run view left out of its response.
+
+    Two distinct narrowings can occur, and each is reported separately. When a
+    run's stored attempt history is too large to load whole, the view admits
+    current attempts first and recent history next, under row and byte
+    budgets; what did not fit is reported as ``attempts_not_loaded``, and any
+    excluded CURRENT attempt is named per step so its empty trace cannot be
+    read as the step never having retrieved. The loaded evidence is then
+    trimmed to the view byte budget — an output-size cap on the response.
+
+    It never applies to an evidence export: an export returns the evidence that
+    is actually retained, or fails, but never a quiet subset.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    byte_budget: int
+    returned_passage_bytes: int
+    passages_omitted: int
+    passage_bytes_omitted: int
+    attempts_with_omitted_passages: int
+    attempts_not_loaded: int = 0
+    current_attempts_not_loaded: int = 0
+    current_step_orders_not_loaded: list[int] = []
+
+    @property
+    def omitted_any(self) -> bool:
+        return self.passages_omitted > 0
+
+
+def omit_passages_beyond_view_budget(
+    step_attempts: Sequence[FlowStepAttempt],
+    *,
+    step_results: Sequence[FlowStepResult],
+    byte_budget: int,
+    attempts_not_loaded: int = 0,
+    current_attempts_not_loaded: int = 0,
+    current_step_orders_not_loaded: tuple[int, ...] = (),
+) -> tuple[list[FlowStepAttempt], RunViewPassageOmission]:
+    """Trim passage text from an interactive run view's response.
+
+    A run's attempt count is unbounded, so a per-attempt policy alone lets a
+    heavily rerun flow return a very large view. Each step's current attempt is
+    admitted first because that is what the step view renders; superseded
+    attempts lose their passage text first. Sources, titles and counts always
+    survive, and the omission is reported as counts so the view can say what it
+    left out.
+
+    The evidence itself is untouched on disk: this shapes one response.
+    """
+    attempts = list(step_attempts)
+    current_attempt_by_step_order: dict[int, int] = {}
+    for result in step_results:
+        normalized_step_order = parse_step_order(result.step_order)
+        if normalized_step_order is None or result.current_attempt_no is None:
+            continue
+        current_attempt_by_step_order[normalized_step_order] = result.current_attempt_no
+
+    def admission_rank(item: tuple[int, FlowStepAttempt]) -> tuple[int, int, int]:
+        index, attempt = item
+        step_order = parse_step_order(attempt.step_order) or 0
+        is_current = current_attempt_by_step_order.get(step_order) == attempt.attempt_no
+        return (0 if is_current else 1, step_order, index)
+
+    remaining = max(0, byte_budget)
+    returned_bytes = 0
+    passages_omitted = 0
+    bytes_omitted = 0
+    attempts_with_omitted_passages = 0
+    bounded_by_index: dict[int, FlowStepAttempt] = {}
+
+    for index, attempt in sorted(enumerate(attempts), key=admission_rank):
+        provenance = attempt.provenance_json
+        if not isinstance(provenance, dict):
+            continue
+        rag = provenance.get("rag")
+        if not isinstance(rag, dict):
+            continue
+        next_rag = deepcopy(cast(dict[str, Any], rag))
+        omitted_before = omitted_view_totals(next_rag)
+        for payload in _mutable_rag_payloads(next_rag):
+            evidence = RetrievedKnowledgeEvidence.from_payload(payload)
+            if not evidence.sources:
+                continue
+            bounded = evidence.release_passages_beyond(remaining, budget="view")
+            remaining = max(0, remaining - bounded.disclosed_passage_bytes)
+            returned_bytes += bounded.disclosed_passage_bytes
+            bounded.write_into(payload)
+        recompute_mapped_aggregates(next_rag)
+        omitted_after = omitted_view_totals(next_rag)
+        omitted_passages = omitted_after[0] - omitted_before[0]
+        if omitted_passages > 0:
+            passages_omitted += omitted_passages
+            bytes_omitted += omitted_after[1] - omitted_before[1]
+            attempts_with_omitted_passages += 1
+        next_provenance = dict(provenance)
+        next_provenance["rag"] = next_rag
+        bounded_by_index[index] = attempt.model_copy(
+            update={"provenance_json": next_provenance}
+        )
+
+    return (
+        [
+            bounded_by_index.get(index, attempt)
+            for index, attempt in enumerate(attempts)
+        ],
+        RunViewPassageOmission(
+            byte_budget=byte_budget,
+            returned_passage_bytes=returned_bytes,
+            passages_omitted=passages_omitted,
+            passage_bytes_omitted=bytes_omitted,
+            attempts_with_omitted_passages=attempts_with_omitted_passages,
+            attempts_not_loaded=attempts_not_loaded,
+            current_attempts_not_loaded=current_attempts_not_loaded,
+            current_step_orders_not_loaded=list(current_step_orders_not_loaded),
+        ),
+    )
+
+
+def exported_passage_bytes(
+    step_attempts: Sequence[FlowStepAttempt],
+    *,
+    detail: EvidenceExportDetail,
+) -> int:
+    """Passage bytes an export would carry, before deciding whether it may.
+
+    A redacted export withholds some text, so it is measured by what it will
+    actually contain. A raw export returns everything retained and is measured
+    that way.
+    """
+    total = 0
+    for attempt in step_attempts:
+        provenance = attempt.provenance_json
+        if not isinstance(provenance, dict):
+            continue
+        rag = provenance.get("rag")
+        if not isinstance(rag, dict):
+            continue
+        typed_rag = cast(dict[str, Any], rag)
+        if detail == "raw":
+            for payload in _mutable_rag_payloads(typed_rag):
+                total += RetrievedKnowledgeEvidence.from_payload(
+                    payload
+                ).recorded_passage_bytes
+        else:
+            total += disclosed_passage_bytes_in(typed_rag)
+    return total
+
+
+def _mutable_rag_payloads(rag_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    payloads = [rag_payload]
+    for collection_key in MAPPED_CALL_COLLECTION_KEYS:
+        calls = rag_payload.get(collection_key)
+        if not isinstance(calls, list):
+            continue
+        for call in cast(list[object], calls):
+            if isinstance(call, dict):
+                payloads.extend(_mutable_rag_payloads(cast(dict[str, Any], call)))
+    return payloads

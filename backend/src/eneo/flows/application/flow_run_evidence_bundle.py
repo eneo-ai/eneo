@@ -6,7 +6,10 @@ from typing import Any, Sequence, cast
 from uuid import UUID
 
 from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
-from eneo.flows.application.flow_run_evidence import build_debug_export
+from eneo.flows.application.flow_run_evidence import (
+    RunViewPassageOmission,
+    build_debug_export,
+)
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
@@ -197,6 +200,7 @@ def build_evidence_bundle(
         UUID, Sequence[FlowRunStepInputFileMetadata]
     ]
     | None = None,
+    knowledge_evidence_view: RunViewPassageOmission | None = None,
 ) -> EvidenceBundle:
     resolved_runtime_input_file_metadata_by_step_result_id = (
         runtime_input_file_metadata_by_step_result_id or {}
@@ -257,6 +261,7 @@ def build_evidence_bundle(
             result_files=list(result_files),
             rerun_operations=list(rerun_operations),
             rerun_invalidated_steps=list(rerun_invalidated_steps),
+            knowledge_evidence_view=knowledge_evidence_view,
         ),
     )
 

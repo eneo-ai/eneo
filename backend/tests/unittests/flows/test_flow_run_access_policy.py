@@ -26,6 +26,10 @@ from eneo.flows.application.flow_run_access_policy import (
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.flow_evidence_policy import (
+    FlowEvidenceAccessContext,
+    flow_metadata_marks_sensitive,
+)
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.roles.permissions import Permission
 
@@ -434,3 +438,171 @@ async def test_load_run_fails_closed_on_unknown_access_kind(user):
 
     assert exc_info.value.code == "flow_run_access_denied"
     assert exc_info.value.context == {"auth_layer": "flow_run_access_kind"}
+
+
+def _sensitive_metadata() -> dict[str, object]:
+    return {"care_data_policy": {"sensitive": True}}
+
+
+def _disclosure_policy(
+    user,
+    *,
+    metadata_json: dict[str, object] | None = None,
+    security_level: int = 0,
+    role: str = "owner",
+) -> tuple[FlowRunAccessPolicy, FlowRun]:
+    flow_run_repo = AsyncMock()
+    flow_repo = AsyncMock()
+    policy = _policy_with_space(
+        user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        role=role,
+        security_level=security_level,
+    )
+    flow = flow_repo.get.return_value
+    flow_repo.get.return_value = SimpleNamespace(
+        id=flow.id,
+        tenant_id=flow.tenant_id,
+        space_id=flow.space_id,
+        metadata_json=metadata_json,
+    )
+    # The disclosure decision reads the narrow evidence-access context, so the
+    # double answers it with the real typed value rather than a mock.
+    flow_repo.get_evidence_access_context.return_value = FlowEvidenceAccessContext(
+        flow_id=flow.id,
+        space_id=flow.space_id,
+        sensitive=flow_metadata_marks_sensitive(metadata_json),
+        classification_level=security_level,
+    )
+    run = _run(user, flow_repo.get.return_value.id)
+    flow_run_repo.get.return_value = run
+    return policy, run
+
+
+def _tenant_admin(user):
+    return user.model_copy(update={"permissions": {Permission.ADMIN}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "access_kind",
+    ["evidence_view", "evidence_export_redacted", "evidence_export_raw"],
+)
+async def test_ordinary_flow_discloses_passage_text_on_every_surface(
+    user, access_kind: FlowRunAccessKind
+) -> None:
+    policy, run = _disclosure_policy(user)
+
+    assert (
+        await policy.passage_disclosure_for_run(run, access_kind=access_kind)
+        == "text_disclosed"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("access_kind", "expected"),
+    [
+        ("evidence_view", "text_withheld_sensitive_flow"),
+        ("evidence_export_redacted", "text_withheld_sensitive_flow"),
+        ("evidence_export_raw", "text_disclosed"),
+    ],
+)
+async def test_sensitive_flow_withholds_passage_text_below_raw_export(
+    user, access_kind: FlowRunAccessKind, expected: str
+) -> None:
+    policy, run = _disclosure_policy(user, metadata_json=_sensitive_metadata())
+
+    assert (
+        await policy.passage_disclosure_for_run(run, access_kind=access_kind)
+        == expected
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("access_kind", "expected"),
+    [
+        ("evidence_view", "text_withheld_classified_space"),
+        ("evidence_export_redacted", "text_withheld_classified_space"),
+        ("evidence_export_raw", "text_disclosed"),
+    ],
+)
+async def test_classified_space_withholds_passage_text_below_raw_export(
+    user, access_kind: FlowRunAccessKind, expected: str
+) -> None:
+    policy, run = _disclosure_policy(user, security_level=3)
+
+    assert (
+        await policy.passage_disclosure_for_run(run, access_kind=access_kind)
+        == expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_service_principal_sees_the_same_disclosure_decision(user) -> None:
+    service_user = _service_key_user(
+        user,
+        resource_permissions=ResourcePermissions(
+            flow_evidence=ResourcePermissionLevel.READ
+        ),
+    )
+    policy, run = _disclosure_policy(
+        service_user,
+        metadata_json=_sensitive_metadata(),
+        role="admin",
+    )
+
+    assert (
+        await policy.passage_disclosure_for_run(run, access_kind="evidence_view")
+        == "text_withheld_sensitive_flow"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("access_kind", "expected"),
+    [
+        ("evidence_view", "text_withheld_classified_space"),
+        ("evidence_export_redacted", "text_withheld_classified_space"),
+        ("evidence_export_raw", "text_disclosed"),
+    ],
+)
+async def test_tenant_admin_still_withholds_text_in_a_classified_space(
+    user, access_kind: FlowRunAccessKind, expected: str
+) -> None:
+    """A tenant admin bypasses authorization, never the data's classification."""
+    policy, run = _disclosure_policy(_tenant_admin(user), security_level=3)
+
+    assert (
+        await policy.passage_disclosure_for_run(run, access_kind=access_kind)
+        == expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_tenant_admin_still_withholds_text_for_a_sensitive_flow(user) -> None:
+    policy, run = _disclosure_policy(
+        _tenant_admin(user), metadata_json=_sensitive_metadata()
+    )
+
+    assert (
+        await policy.passage_disclosure_for_run(run, access_kind="evidence_view")
+        == "text_withheld_sensitive_flow"
+    )
+
+
+@pytest.mark.asyncio
+async def test_disclosure_never_reads_the_space_through_the_membership_check(
+    user,
+) -> None:
+    """The decision must not add an authorization side effect of its own."""
+    policy, run = _disclosure_policy(_tenant_admin(user), security_level=3)
+    space_service = policy.space_service
+    assert space_service is not None
+
+    await policy.passage_disclosure_for_run(run, access_kind="evidence_view")
+
+    cast(AsyncMock, space_service).get_space.assert_not_awaited()
+    cast(AsyncMock, policy.flow_repo).get.assert_not_awaited()

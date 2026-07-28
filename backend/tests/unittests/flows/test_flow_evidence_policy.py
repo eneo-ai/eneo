@@ -12,6 +12,8 @@ from eneo.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
     FlowEvidencePolicy,
     apply_flow_evidence_policy_patch,
+    flow_metadata_marks_sensitive,
+    flow_metadata_marks_sensitive_or_unreadable,
     resolve_flow_evidence_policy,
     resolve_service_key_evidence_capability,
     validate_flow_evidence_policy_object,
@@ -190,3 +192,22 @@ def test_apply_flow_evidence_policy_patch_preserves_unrelated_settings() -> None
         FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY: FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
         "classification_3": {"allow_run_owner_raw_export": True},
     }
+
+
+def test_unreadable_flow_metadata_is_treated_as_sensitive() -> None:
+    """Metadata we cannot parse cannot be shown to be non-sensitive."""
+    unreadable = {"form_schema": {"fields": [{"name": "case_id", "type": "nope"}]}}
+
+    with pytest.raises(BadRequestException):
+        flow_metadata_marks_sensitive(unreadable)
+    assert flow_metadata_marks_sensitive_or_unreadable(unreadable) is True
+
+
+def test_readable_flow_metadata_keeps_its_declared_sensitivity() -> None:
+    assert (
+        flow_metadata_marks_sensitive_or_unreadable(
+            {"care_data_policy": {"sensitive": True}}
+        )
+        is True
+    )
+    assert flow_metadata_marks_sensitive_or_unreadable(None) is False

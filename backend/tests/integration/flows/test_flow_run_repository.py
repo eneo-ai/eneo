@@ -4078,3 +4078,287 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
             now=later_exhausted_at + timedelta(seconds=2),
         )
         assert converged is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provenance_measurement_and_bounded_attempt_read(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """The preflight measures exactly, and a narrowed read keeps every current attempt.
+
+    Seeds two steps with rerun history and RAG aggregates of known size, then
+    proves the aggregate query returns the exact recorded-passage total, that a
+    limited read always includes both current attempts, that history is
+    admitted newest-first, and that the byte budget excludes history a row
+    limit alone would admit.
+    """
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Flow provenance measure space", [model.id]
+        )
+        assistant = await assistant_factory(
+            session, "Flow provenance measure assistant", model.id, space_id=space.id
+        )
+        flow_repo = FlowRepository(session=session)
+        run_repo = FlowRunRepository(session=session)
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        await FlowVersionRepository(session=session).create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    },
+                    {
+                        "step_id": str(flow.steps[1].id),
+                        "assistant_id": str(flow.steps[1].assistant_id),
+                        "step_order": 2,
+                    },
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "provenance-measure"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                },
+                {
+                    "step_id": flow.steps[1].id,
+                    "assistant_id": flow.steps[1].assistant_id,
+                    "step_order": 2,
+                },
+            ],
+        )
+        tenant_id = run.tenant_id
+        step_one, step_two = flow.steps[0].id, flow.steps[1].id
+        assert step_one is not None and step_two is not None
+
+        # Step 1: three attempts (1, 2 historical; 3 current). Step 2: one.
+        predecessor = None
+        for attempt_no in (1, 2, 3):
+            attempt = await run_repo.create_or_get_attempt_started(
+                run_id=run.id,
+                flow_id=flow.id,
+                tenant_id=tenant_id,
+                step_id=step_one,
+                step_order=1,
+                attempt_no=attempt_no,
+                celery_task_id=f"measure-{attempt_no}",
+                predecessor_attempt_id=predecessor.id if predecessor else None,
+            )
+            predecessor = attempt
+        await run_repo.create_or_get_attempt_started(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=tenant_id,
+            step_id=step_two,
+            step_order=2,
+            attempt_no=1,
+            celery_task_id="measure-s2",
+        )
+        for step_id, step_order, current in ((step_one, 1, 3), (step_two, 2, 1)):
+            saved = await run_repo.save_step_result(
+                flow_run_id=run.id,
+                tenant_id=tenant_id,
+                attempt_no=current,
+                result_file_references=[],
+                result=FlowStepResult(
+                    flow_run_id=run.id,
+                    flow_id=flow.id,
+                    tenant_id=tenant_id,
+                    step_id=step_id,
+                    step_order=step_order,
+                    assistant_id=assistant.id,
+                    input_payload_json={"text": "in"},
+                    output_payload_json={"text": "out"},
+                    status=FlowStepResultStatus.COMPLETED,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                ),
+            )
+            assert saved is not None
+
+        # Seed RAG aggregates of known size directly: this test owns the
+        # repository's SQL semantics; the writer path has its own tests.
+        async def set_rag_bytes(step_id, attempt_no, passage_bytes):
+            await session.execute(
+                sa.update(FlowStepAttempts)
+                .where(FlowStepAttempts.flow_run_id == run.id)
+                .where(FlowStepAttempts.step_id == step_id)
+                .where(FlowStepAttempts.attempt_no == attempt_no)
+                .values(
+                    provenance_json={
+                        "schema_version": "flow-attempt-provenance.v1",
+                        "rag": {
+                            "status": "success",
+                            "recorded_passage_bytes": passage_bytes,
+                            "filler": "x" * 2048,
+                        },
+                    }
+                )
+            )
+
+        await set_rag_bytes(step_one, 1, 1000)
+        await set_rag_bytes(step_one, 2, 2000)
+        await set_rag_bytes(step_one, 3, 3000)
+        # step 2 attempt 1 keeps no RAG: absent aggregates count as zero.
+
+        size = await run_repo.measure_step_attempt_provenance(
+            run_id=run.id, tenant_id=tenant_id
+        )
+        assert size.attempt_count == 4
+        assert size.recorded_passage_bytes == 6000
+        # TOAST compresses the repetitive filler far below its logical size —
+        # the very reason stored bytes are a materialization floor and must
+        # never be reported as a passage count.
+        assert 0 < size.stored_provenance_bytes < 3 * 2048
+
+        # A narrowed read keeps both current attempts and admits the newest
+        # history first: limit 3 = 2 currents + history slot for (1, 2).
+        narrowed = await run_repo.list_step_attempts(
+            run_id=run.id,
+            tenant_id=tenant_id,
+            limit=3,
+            history_byte_budget=10 * 1024 * 1024,
+        )
+        assert [(a.step_order, a.attempt_no) for a in narrowed.attempts] == [
+            (1, 2),
+            (1, 3),
+            (2, 1),
+        ]
+        assert narrowed.total_count == 4
+        assert narrowed.current_total == 2
+        assert narrowed.current_admitted == 2
+
+        # Currents consume the byte budget first. A one-byte budget admits the
+        # provenance-free current attempt and excludes everything with stored
+        # provenance — visibly: the totals still report all four rows and the
+        # excluded current attempt.
+        tiny_budget = await run_repo.list_step_attempts(
+            run_id=run.id,
+            tenant_id=tenant_id,
+            limit=3,
+            history_byte_budget=1,
+        )
+        assert [(a.step_order, a.attempt_no) for a in tiny_budget.attempts] == [(2, 1)]
+        assert tiny_budget.total_count == 4
+        assert tiny_budget.current_total == 2
+        assert tiny_budget.current_admitted == 1
+
+        # Zero admission still reports every count from the same statement:
+        # a zero row limit admits nothing, and the totals do not fall back to
+        # a second query on a different snapshot.
+        nothing = await run_repo.list_step_attempts(
+            run_id=run.id,
+            tenant_id=tenant_id,
+            limit=0,
+            history_byte_budget=1,
+        )
+        assert nothing.attempts == []
+        assert nothing.total_count == 4
+        assert nothing.current_total == 2
+        assert nothing.current_admitted == 0
+
+        # The logical passage budget catches what compression hides: these
+        # aggregates say 6000 passage bytes while TOAST stores them far
+        # smaller, so a 2500-byte passage budget must exclude on the logical
+        # measure even though every stored-byte check would pass.
+        logical = await run_repo.list_step_attempts(
+            run_id=run.id,
+            tenant_id=tenant_id,
+            limit=10,
+            history_byte_budget=10 * 1024 * 1024,
+            passage_byte_budget=2500,
+        )
+        admitted_pairs = [(a.step_order, a.attempt_no) for a in logical.attempts]
+        # Admission order is currents first — (2,1): 0 bytes, (1,3): 3000 over
+        # budget, so only the passage-free current fits.
+        assert admitted_pairs == [(2, 1)]
+        assert logical.total_count == 4
+
+        # Unlimited read is unchanged: every attempt, oldest first.
+        # Corruption in the persisted aggregate must never crash a statement
+        # or slip under a size budget as zero. Seed one nonnumeric and one
+        # negative value, then prove both readers surface them.
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run.id)
+            .where(FlowStepAttempts.step_id == step_one)
+            .where(FlowStepAttempts.attempt_no == 1)
+            .values(
+                provenance_json={
+                    "schema_version": "flow-attempt-provenance.v1",
+                    "rag": {"status": "success", "recorded_passage_bytes": "12abc"},
+                }
+            )
+        )
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run.id)
+            .where(FlowStepAttempts.step_id == step_one)
+            .where(FlowStepAttempts.attempt_no == 2)
+            .values(
+                provenance_json={
+                    "schema_version": "flow-attempt-provenance.v1",
+                    "rag": {"status": "success", "recorded_passage_bytes": -500},
+                }
+            )
+        )
+        corrupt_size = await run_repo.measure_step_attempt_provenance(
+            run_id=run.id, tenant_id=tenant_id
+        )
+        assert corrupt_size.attempt_count == 4
+        # Only the intact attempt-3 aggregate still counts toward the total.
+        assert corrupt_size.recorded_passage_bytes == 3000
+        assert corrupt_size.corrupt_passage_aggregates == 2
+
+        # Under a passage budget, corrupt rows are excluded rather than
+        # admitted at a fictitious zero size — and the page says so.
+        guarded = await run_repo.list_step_attempts(
+            run_id=run.id,
+            tenant_id=tenant_id,
+            limit=10,
+            passage_byte_budget=10 * 1024 * 1024,
+        )
+        guarded_pairs = [(a.step_order, a.attempt_no) for a in guarded.attempts]
+        assert (1, 1) not in guarded_pairs
+        assert (1, 2) not in guarded_pairs
+        assert guarded.corrupt_passage_aggregates == 2
+        assert guarded.total_count == 4
+
+        everything = await run_repo.list_step_attempts(
+            run_id=run.id, tenant_id=tenant_id
+        )
+        assert [(a.step_order, a.attempt_no) for a in everything.attempts] == [
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (2, 1),
+        ]
+        assert everything.total_count == 4
