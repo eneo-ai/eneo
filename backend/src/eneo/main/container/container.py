@@ -1029,12 +1029,6 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
     )
-    organization_skill_service = providers.Factory(
-        OrganizationSkillService,
-        user=user,
-        repo=skill_repo,
-        space_service=space_service,
-    )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,
         space_service=space_service,
@@ -1280,6 +1274,13 @@ class Container(containers.DeclarativeContainer):
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
         skill_service=skill_service,
+    )
+    organization_skill_service = providers.Factory(
+        OrganizationSkillService,
+        user=user,
+        repo=skill_repo,
+        space_service=space_service,
+        assistant_service=assistant_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,

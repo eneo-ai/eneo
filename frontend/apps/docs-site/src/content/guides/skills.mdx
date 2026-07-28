@@ -143,6 +143,23 @@ On an organisation Skill's detail page, the adoption view shows:
 Configured resources load 25 at a time. The count shows how many are visible,
 and **Show more resources** loads the next page.
 
+### Moving Personal Chat to the published version
+
+When Personal Chat pins an older version of a Skill, a tenant admin can move
+that single binding to the currently published version without editing the rest
+of the Personal Chat policy. The move:
+
+- changes only which version the existing binding pins — its order, activation
+  mode, and every other bound Skill stay untouched;
+- never overwrites a concurrent edit: the binding moves only if it still
+  matches what the administrator reviewed, and concurrent policy edits are
+  serialized with the move;
+- re-runs the same validation that guards every Personal Chat policy save, so
+  it can never admit a configuration a normal save would reject;
+- is refused while the Skill is unpublished or blocked;
+- is recorded in the audit log when it changes anything, and repeating it is a
+  clean no-op.
+
 These are structural configuration facts:
 
 | Evidence   | Meaning                                                           |

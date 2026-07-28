@@ -6333,6 +6333,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/skills/organization/{skill_id}/personal-chat/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance Personal Chat Binding
+     * @description Move the Personal Chat binding of this Skill to its currently published revision. Guarded by the pinned revision the administrator reviewed, so a concurrent binding change is refused instead of overwritten.
+     */
+    post: operations["advance_personal_chat_binding_api_v1_skills_organization__skill_id__personal_chat_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/skills/organization/{skill_id}/unpublish/": {
     parameters: {
       query?: never;
@@ -8004,6 +8024,7 @@ export interface components {
       | "skill_status_changed"
       | "skill_published"
       | "skill_unpublished"
+      | "skill_bindings_advanced"
       | "skill_deleted"
       | "session_started"
       | "session_ended"
@@ -11862,7 +11883,9 @@ export interface components {
       | 9049
       | 9050
       | 9051
-      | 9052;
+      | 9052
+      | 9053
+      | 9054;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -15261,6 +15284,33 @@ export interface components {
       name: components["schemas"]["Permission"];
       /** Description */
       description: string;
+    };
+    /** PersonalChatPinAdvancePublic */
+    PersonalChatPinAdvancePublic: {
+      /**
+       * Outcome
+       * @enum {string}
+       */
+      outcome: "advanced" | "already_current";
+      /** From Revision Number */
+      from_revision_number: number;
+      /** To Revision Number */
+      to_revision_number: number;
+    };
+    /** PersonalChatPinAdvanceRequest */
+    PersonalChatPinAdvanceRequest: {
+      /**
+       * Expected Pinned Revision Id
+       * Format: uuid
+       * @description The revision the Personal Chat binding was pinned to when the administrator reviewed the move.
+       */
+      expected_pinned_revision_id: string;
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       * @description The published revision the administrator reviewed as the target. A publish that lands after the review is refused as a conflict instead of silently applied.
+       */
+      expected_published_revision_id: string;
     };
     /** PlatformAdminGrantRequest */
     PlatformAdminGrantRequest: {
@@ -41826,6 +41876,77 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_personal_chat_binding_api_v1_skills_organization__skill_id__personal_chat_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PersonalChatPinAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PersonalChatPinAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

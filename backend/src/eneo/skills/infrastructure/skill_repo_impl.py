@@ -1,12 +1,14 @@
+from dataclasses import replace
 from typing import TypeVar
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
+from eneo.assistants.assistant_repo import AssistantRepository
 from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
@@ -26,6 +28,11 @@ from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     SKILL_RUNTIME_POLICY_DEFAULTS,
+    PersonalChatPinAdvance,
+    PersonalChatPinAdvanceOutcome,
+    PersonalChatPinAdvanceStage,
+    PersonalChatPinConfirmOutcome,
+    PersonalDefaultsSnapshot,
     PublishedSkill,
     PublishedSkillDeactivationError,
     PublishedSkillDeletionError,
@@ -84,6 +91,47 @@ def _escape_like_literal(value: str) -> str:
 
 _CurrentSkillRevision = aliased(SkillRevisions, name="current_skill_revision")
 _PublishedSkillRevision = aliased(SkillRevisions, name="published_skill_revision")
+
+
+_LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
+# Reserved two-int advisory-lock class for personal-default fit serialization.
+_PERSONAL_DEFAULT_FIT_LOCK_CLASS = 0x50444654
+
+
+def _is_lock_not_available(error: DBAPIError) -> bool:
+    orig = error.orig
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return sqlstate == _LOCK_NOT_AVAILABLE_SQLSTATE or (
+        _LOCK_NOT_AVAILABLE_SQLSTATE in str(orig)
+    )
+
+
+async def acquire_personal_default_fit_lock(
+    *,
+    session: AsyncSession,
+    tenant_id: UUID,
+    shared: bool,
+) -> None:
+    lock_function = (
+        "pg_advisory_xact_lock_shared" if shared else "pg_advisory_xact_lock"
+    )
+    await session.execute(
+        sa.text(
+            f"""
+            SELECT {lock_function}(
+                :lock_class,
+                CAST(
+                    hashtextextended(CAST(:tenant_id AS text), 0) % 2147483647
+                    AS integer
+                )
+            )
+            """
+        ),
+        {
+            "lock_class": _PERSONAL_DEFAULT_FIT_LOCK_CLASS,
+            "tenant_id": str(tenant_id),
+        },
+    )
 
 
 class SkillRepoImpl:
@@ -1139,6 +1187,287 @@ class SkillRepoImpl:
             )
             .with_for_update(of=Skills)
         )
+
+    _POLICY_ROW_VERSION = sa.cast(
+        sa.literal_column("governance_policies.xmin"), sa.Text
+    ).label("policy_version")
+    _RUNTIME_POLICY_ROW_VERSION = sa.cast(
+        sa.literal_column("skill_runtime_policies.xmin"), sa.Text
+    ).label("runtime_policy_version")
+
+    async def _runtime_policy_version(
+        self, *, tenant_id: UUID, shared_lock: bool
+    ) -> str | None:
+        query = (
+            sa.select(self._RUNTIME_POLICY_ROW_VERSION)
+            .select_from(SkillRuntimePolicies)
+            .where(SkillRuntimePolicies.tenant_id == tenant_id)
+        )
+        if shared_lock:
+            query = query.with_for_update(read=True, of=SkillRuntimePolicies)
+        return await self.session.scalar(query)
+
+    async def stage_personal_chat_skill_pin_advance(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_pinned_revision_id: UUID,
+        expected_published_revision_id: UUID,
+    ) -> PersonalChatPinAdvanceStage | None:
+        """Read the Personal Chat pin candidate without locks or writes.
+
+        Confirm rechecks policy, publication, block, personal-default, and
+        binding state under the short apply's locks. A reviewed pin or
+        published revision mismatch raises SkillRevisionConflictError.
+        """
+        policy = (
+            await self.session.execute(
+                sa.select(GovernancePolicies.id, self._POLICY_ROW_VERSION).where(
+                    GovernancePolicies.tenant_id == tenant_id,
+                    GovernancePolicies.scope
+                    == PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
+                )
+            )
+        ).one_or_none()
+        skill_row = await self.session.scalar(
+            sa.select(Skills)
+            .join(Spaces, Spaces.id == Skills.space_id)
+            .where(
+                Skills.id == skill_id,
+                *self._organization_scope(tenant_id),
+            )
+        )
+        if skill_row is None:
+            return None
+        if skill_row.published_revision_number is None:
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.NOT_PUBLISHED
+                )
+            )
+        active_block = await self.get_active_execution_block(
+            tenant_id=tenant_id, skill_id=skill_id
+        )
+        if active_block is not None:
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.BLOCKED
+                )
+            )
+
+        published = (
+            await self.session.execute(
+                sa.select(SkillRevisions.id, SkillRevisions.revision_number).where(
+                    SkillRevisions.skill_id == skill_id,
+                    SkillRevisions.revision_number
+                    == skill_row.published_revision_number,
+                )
+            )
+        ).one()
+        # The move may only reach the exact revision the administrator
+        # previewed. A publish that lands between review and this call makes
+        # the live published revision a target the administrator never saw.
+        if published.id != expected_published_revision_id:
+            raise SkillRevisionConflictError
+
+        if policy is None:
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.NOT_BOUND
+                )
+            )
+        binding = (
+            await self.session.execute(
+                sa.select(
+                    GovernancePolicySkillBindings.policy_id,
+                    GovernancePolicySkillBindings.skill_revision_id,
+                    SkillRevisions.revision_number,
+                )
+                .join(
+                    SkillRevisions,
+                    SkillRevisions.id
+                    == GovernancePolicySkillBindings.skill_revision_id,
+                )
+                .where(
+                    GovernancePolicySkillBindings.policy_id == policy.id,
+                    GovernancePolicySkillBindings.skill_id == skill_id,
+                )
+            )
+        ).one_or_none()
+        if binding is None:
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.NOT_BOUND
+                )
+            )
+        if binding.skill_revision_id == published.id:
+            return PersonalChatPinAdvanceStage(
+                advance=PersonalChatPinAdvance(
+                    outcome=PersonalChatPinAdvanceOutcome.ALREADY_CURRENT,
+                    from_revision_id=published.id,
+                    from_revision_number=published.revision_number,
+                    to_revision_id=published.id,
+                    to_revision_number=published.revision_number,
+                )
+            )
+        if binding.skill_revision_id != expected_pinned_revision_id:
+            raise SkillRevisionConflictError
+
+        personal_defaults_snapshot = (
+            await AssistantRepository.get_personal_defaults_snapshot(
+                session=self.session,
+                tenant_id=tenant_id,
+            )
+        )
+        personal_defaults_snapshot = replace(
+            personal_defaults_snapshot,
+            runtime_policy_version=await self._runtime_policy_version(
+                tenant_id=tenant_id,
+                shared_lock=False,
+            ),
+        )
+        return PersonalChatPinAdvanceStage(
+            advance=PersonalChatPinAdvance(
+                outcome=PersonalChatPinAdvanceOutcome.ADVANCED,
+                from_revision_id=binding.skill_revision_id,
+                from_revision_number=binding.revision_number,
+                to_revision_id=published.id,
+                to_revision_number=published.revision_number,
+            ),
+            policy_id=policy.id,
+            policy_version=policy.policy_version,
+            personal_defaults_snapshot=personal_defaults_snapshot,
+        )
+
+    async def confirm_personal_chat_skill_pin_advance(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        policy_id: UUID,
+        policy_version: str,
+        personal_defaults_snapshot: PersonalDefaultsSnapshot,
+        expected_pinned_revision_id: UUID,
+        expected_published_revision_id: UUID,
+    ) -> PersonalChatPinConfirmOutcome:
+        """Lock, recheck, and apply a validated Personal Chat pin candidate.
+
+        The personal-default snapshot covers saves of prompts, descriptions,
+        attachments, model selection, MCP server and tool selection, knowledge,
+        and Skill bindings because those paths all rewrite the Assistant row.
+        It also versions the tenant Skill runtime policy used by fit planning.
+        Tenant-level model and MCP catalogue changes are outside this snapshot;
+        their administrator flows own their validation.
+
+        The policy lock is NOWAIT so a concurrent policy save refuses this
+        apply instead of waiting. Publication and block state are rechecked
+        under the Skill lock. The exclusive tenant fit token then drains
+        in-flight Assistant saves before the snapshot recheck; later saves wait
+        until this transaction commits and validate against the new pin. The
+        runtime-policy row is then held FOR SHARE, draining an in-flight update
+        and making later updates wait until this short apply completes.
+
+        Waiting for the token cannot deadlock: an Assistant save holds only its
+        row and the shared token, never policy, Skill, or binding locks. A
+        governance save holds the policy row and never takes this token, so the
+        NOWAIT policy lock refuses before confirm can wait. Runtime-policy
+        updates hold only their own row FOR UPDATE; they take neither the token
+        nor policy, Skill, or binding locks, so our FOR SHARE wait cannot form a
+        cycle. The binding recheck, guarded write, and policy-row bump then
+        finish the short apply.
+        """
+        try:
+            async with self.session.begin_nested():
+                locked_version = (
+                    await self.session.execute(
+                        sa.select(self._POLICY_ROW_VERSION)
+                        .select_from(GovernancePolicies)
+                        .where(GovernancePolicies.id == policy_id)
+                        .with_for_update(nowait=True)
+                    )
+                ).scalar_one_or_none()
+        except DBAPIError as error:
+            if _is_lock_not_available(error):
+                return PersonalChatPinConfirmOutcome.POLICY_CHANGED
+            raise
+        if locked_version != policy_version:
+            return PersonalChatPinConfirmOutcome.POLICY_CHANGED
+
+        skill_row = await self._lock_organization_skill(
+            tenant_id=tenant_id, skill_id=skill_id
+        )
+        if skill_row is None or skill_row.published_revision_number is None:
+            return PersonalChatPinConfirmOutcome.PUBLICATION_CHANGED
+        published_id = await self.session.scalar(
+            sa.select(SkillRevisions.id).where(
+                SkillRevisions.skill_id == skill_id,
+                SkillRevisions.revision_number == skill_row.published_revision_number,
+            )
+        )
+        if published_id != expected_published_revision_id:
+            return PersonalChatPinConfirmOutcome.PUBLICATION_CHANGED
+        active_block = await self.get_active_execution_block(
+            tenant_id=tenant_id, skill_id=skill_id
+        )
+        if active_block is not None:
+            return PersonalChatPinConfirmOutcome.BLOCKED
+
+        await acquire_personal_default_fit_lock(
+            session=self.session,
+            tenant_id=tenant_id,
+            shared=False,
+        )
+        runtime_policy_version = await self._runtime_policy_version(
+            tenant_id=tenant_id,
+            shared_lock=True,
+        )
+        current_personal_defaults_snapshot = (
+            await AssistantRepository.get_personal_defaults_snapshot(
+                session=self.session,
+                tenant_id=tenant_id,
+            )
+        )
+        current_personal_defaults_snapshot = replace(
+            current_personal_defaults_snapshot,
+            runtime_policy_version=runtime_policy_version,
+        )
+        if current_personal_defaults_snapshot != personal_defaults_snapshot:
+            return PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+
+        binding_revision_id = await self.session.scalar(
+            sa.select(GovernancePolicySkillBindings.skill_revision_id)
+            .where(
+                GovernancePolicySkillBindings.policy_id == policy_id,
+                GovernancePolicySkillBindings.skill_id == skill_id,
+            )
+            .with_for_update(of=GovernancePolicySkillBindings)
+        )
+        if binding_revision_id != expected_pinned_revision_id:
+            return PersonalChatPinConfirmOutcome.POLICY_CHANGED
+
+        updated = await self.session.scalar(
+            sa.update(GovernancePolicySkillBindings)
+            .where(
+                GovernancePolicySkillBindings.policy_id == policy_id,
+                GovernancePolicySkillBindings.skill_id == skill_id,
+                GovernancePolicySkillBindings.skill_revision_id
+                == expected_pinned_revision_id,
+            )
+            .values(skill_revision_id=expected_published_revision_id)
+            .returning(GovernancePolicySkillBindings.skill_id)
+        )
+        if updated != skill_id:
+            return PersonalChatPinConfirmOutcome.POLICY_CHANGED
+
+        bumped = await self.session.execute(
+            sa.update(GovernancePolicies)
+            .where(GovernancePolicies.id == policy_id)
+            .values(updated_at=sa.func.now())
+            .returning(GovernancePolicies.id)
+        )
+        assert bumped.scalar_one() == policy_id
+        return PersonalChatPinConfirmOutcome.CONFIRMED
 
     async def publish_organization(
         self,
