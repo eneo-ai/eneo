@@ -249,7 +249,7 @@
         await data.eneo.skills.organization.unpublish({ skillId: skill.id });
       }
     } catch (error) {
-      publicationError = getErrorMessage(error) || m.organization_skills_publication_error();
+      publicationError = getErrorMessage(error, m.organization_skills_publication_error());
       publicationSaving = false;
       return;
     }

@@ -19,6 +19,7 @@
  */
 
 import { invalidate } from "$app/navigation";
+import { getErrorMessage } from "$lib/core/errors";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { AssistantSkillBindingInput, AssistantSkillBindingSummary, Eneo } from "@eneo/eneo-js";
@@ -545,9 +546,8 @@ export class PolicyDraft {
       await invalidate("admin:governance-policy");
       this.pendingConfirm = null;
       this.saveAnnouncement = m.governance_save_success();
-    } catch (e) {
-      const err = e as { message?: string };
-      this.saveError = err.message ?? m.governance_save_error();
+    } catch (error) {
+      this.saveError = getErrorMessage(error, m.governance_save_error());
       this.saveAnnouncement = m.governance_save_failure();
     } finally {
       this.saving = false;
