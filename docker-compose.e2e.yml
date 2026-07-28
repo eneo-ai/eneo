@@ -99,7 +99,7 @@ services:
         python /workspace/e2e/seed.py  # seed mock completion model
         exec gunicorn src.eneo.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
-          --bind 0.0.0.0:8000
+          --keep-alive 75 --bind 0.0.0.0:8000
     ports:
       - "8124:8000"
     volumes:
