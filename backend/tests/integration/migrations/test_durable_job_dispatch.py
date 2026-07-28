@@ -72,6 +72,16 @@ def _job_schema(database_url: str) -> tuple[set[str], set[str]]:
         engine.dispose()
 
 
+def _prepared_type(value: object) -> str:
+    if isinstance(value, datetime):
+        return "timestamptz"
+    if isinstance(value, str):
+        return "text"
+    if isinstance(value, int):
+        return "integer"
+    raise TypeError(f"Unsupported prepared query value: {type(value).__name__}")
+
+
 def test_durable_dispatch_migration_round_trip_and_query_plan(
     migration_database: tuple[str, Config],
 ) -> None:
@@ -86,12 +96,25 @@ def test_durable_dispatch_migration_round_trip_and_query_plan(
     try:
         with connection.cursor() as cursor:
             cursor.execute("SET enable_seqscan = off")
+            cursor.execute("SET plan_cache_mode = force_generic_plan")
             production_query = stale_dispatch_statement(datetime.now(timezone.utc))
             compiled_query = production_query.compile(
-                dialect=postgresql.dialect(),
-                compile_kwargs={"literal_binds": True},
+                dialect=postgresql.dialect(paramstyle="numeric_dollar"),
+                compile_kwargs={"render_postcompile": True},
             )
-            cursor.execute(f"EXPLAIN {compiled_query}")
+            assert compiled_query.positiontup is not None
+            values = [
+                compiled_query.params[name] for name in compiled_query.positiontup
+            ]
+            prepared_types = ", ".join(_prepared_type(value) for value in values)
+            cursor.execute(
+                f"PREPARE durable_dispatch_plan ({prepared_types}) AS {compiled_query}"
+            )
+            execute_params = ", ".join(["%s"] * len(values))
+            cursor.execute(
+                f"EXPLAIN EXECUTE durable_dispatch_plan ({execute_params})",
+                values,
+            )
             plan = "\n".join(str(row[0]) for row in cursor.fetchall())
         assert _INDEX in plan
     finally:

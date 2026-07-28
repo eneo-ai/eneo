@@ -163,6 +163,43 @@ async def test_savepoint_then_outer_commit_dispatches_once(monkeypatch) -> None:
     enqueue.assert_awaited_once_with(Task.UPLOAD_FILE, job_id, params)
 
 
+async def test_durable_queue_rejects_creation_inside_savepoint() -> None:
+    session = Session()
+    repo = _repo(session, uuid4())
+
+    with session.begin():
+        with session.begin_nested():
+            with pytest.raises(ValueError, match="nested transaction"):
+                await JobService(TEST_USER, repo).queue_durable_knowledge_job(
+                    Task.UPLOAD_FILE,
+                    name="document.txt",
+                    task_params=_params(),
+                )
+
+    repo.add_durable_knowledge_job.assert_not_awaited()
+
+
+async def test_immediate_session_reuse_dispatches_exactly_once(monkeypatch) -> None:
+    session = Session()
+    job_id = uuid4()
+    repo = _repo(session, job_id)
+    enqueue = AsyncMock()
+    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", enqueue)
+
+    with session.begin():
+        await JobService(TEST_USER, repo).queue_durable_knowledge_job(
+            Task.UPLOAD_FILE,
+            name="document.txt",
+            task_params=_params(),
+            job_id=job_id,
+        )
+    with session.begin():
+        pass
+
+    await asyncio.sleep(0)
+    assert enqueue.await_count == 1
+
+
 async def test_durable_queue_rejects_mismatched_user_before_persisting() -> None:
     session = Session()
     repo = _repo(session, uuid4())

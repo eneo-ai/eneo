@@ -19,7 +19,8 @@ def _remove_file(filepath: Path):
 
 
 def _job_file_path(job_id: UUID, params: UploadInfoBlob | Transcription) -> Path:
-    # Remove after the next release once the ARQ queue TTL and rollback window pass.
+    # Remove only when the minimum upgrade source includes this release, pre-bridge
+    # ARQ backlog has drained (TTL ~24h), and no rollback window remains.
     legacy_path = getattr(params, "filepath", None)
     if isinstance(legacy_path, str) and legacy_path.strip():
         return Path(legacy_path)

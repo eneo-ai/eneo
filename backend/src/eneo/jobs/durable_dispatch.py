@@ -24,7 +24,12 @@ logger = get_logger(__name__)
 
 DISPATCH_PAGE_SIZE = 50
 DISPATCH_STALE_AFTER = timedelta(minutes=5)
-_DURABLE_TASKS = (Task.UPLOAD_FILE.value, Task.TRANSCRIPTION.value)
+# Prepared plans must see the fixed predicate used by the partial index.
+_QUEUED_SQL = sa.literal_column("'queued'", type_=sa.String())
+_DURABLE_TASKS_SQL = (
+    sa.literal_column("'upload_info_blob'", type_=sa.String()),
+    sa.literal_column("'transcription'", type_=sa.String()),
+)
 Enqueue = Callable[[Task, UUID, TaskParams], Awaitable[ArqJob | None]]
 
 
@@ -39,7 +44,8 @@ def build_knowledge_dispatch_params(
     params: UploadInfoBlob | Transcription, job_id: UUID
 ) -> UploadInfoBlob | Transcription:
     payload = params.model_copy()
-    # Remove after the next release once the ARQ queue TTL and rollback window pass.
+    # Remove only when the minimum upgrade source includes this release, pre-bridge
+    # ARQ backlog has drained (TTL ~24h), and no rollback window remains.
     object.__setattr__(payload, "filepath", str(job_staging_path(job_id)))
     return payload
 
@@ -50,9 +56,9 @@ def stale_dispatch_statement(
     stale_before = attempted_at - DISPATCH_STALE_AFTER
     return (
         sa.select(Jobs)
-        .where(Jobs.status == Status.QUEUED.value)
+        .where(Jobs.status == _QUEUED_SQL)
         .where(Jobs.dispatch_envelope.is_not(None))
-        .where(Jobs.task.in_(_DURABLE_TASKS))
+        .where(Jobs.task.in_(_DURABLE_TASKS_SQL))
         .where(Jobs.created_at <= stale_before)
         .where(
             sa.or_(

@@ -51,6 +51,11 @@ class JobService:
         task_params: UploadInfoBlob | Transcription,
         job_id: UUID | None = None,
     ) -> JobInDb:
+        session = self.job_repo.delegate.session.sync_session
+        if session.in_nested_transaction():
+            raise ValueError(
+                "Durable knowledge jobs cannot be created in a nested transaction"
+            )
         if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):
             raise ValueError(f"Task {task.value} does not support durable dispatch")
         if task_params.user_id != self.user.id:
@@ -76,7 +81,6 @@ class JobService:
                     extra={"job_id": str(job_in_db.id), "task": task.value},
                 )
 
-        session = self.job_repo.delegate.session.sync_session
         outer_committed = False
         active = True
 
@@ -93,7 +97,7 @@ class JobService:
 
         def after_transaction_end(_session: object, transaction: object) -> None:
             nonlocal active
-            if getattr(transaction, "parent", None) is not None:
+            if not active or getattr(transaction, "parent", None) is not None:
                 return
 
             active = False
