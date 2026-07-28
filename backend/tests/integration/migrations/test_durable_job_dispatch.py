@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic, sleep
 from uuid import uuid4
 
 import psycopg2
@@ -81,6 +83,27 @@ def _prepared_type(value: object) -> str:
     if isinstance(value, int):
         return "integer"
     raise TypeError(f"Unsupported prepared query value: {type(value).__name__}")
+
+
+def _wait_for_downgrade_barrier(connection: psycopg2.extensions.connection) -> None:
+    deadline = monotonic() + 10
+    while monotonic() < deadline:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_stat_activity
+                    WHERE wait_event_type = 'Lock'
+                      AND wait_event = 'advisory'
+                      AND query LIKE 'DROP INDEX%ix_jobs_durable_dispatch%'
+                )
+                """
+            )
+            if cursor.fetchone() == (True,):
+                return
+        sleep(0.05)
+    raise AssertionError("Downgrade did not reach the index-drop barrier")
 
 
 def test_durable_dispatch_migration_round_trip_and_query_plan(
@@ -184,3 +207,103 @@ def test_durable_dispatch_migration_round_trip_and_query_plan(
     columns, indexes = _job_schema(database_url)
     assert {"dispatch_envelope", "dispatch_attempted_at"} <= columns
     assert _INDEX in indexes
+
+
+def test_downgrade_excludes_a_concurrent_durable_insert(
+    migration_database: tuple[str, Config],
+) -> None:
+    database_url, config = migration_database
+    sync_database_url = database_url.replace("+psycopg2", "")
+    command.upgrade(config, "head")
+    writer_job_id = uuid4()
+    barrier_key = 2_026_072_816
+
+    barrier = psycopg2.connect(sync_database_url)
+    barrier.autocommit = True
+    try:
+        with barrier.cursor() as cursor:
+            cursor.execute("ALTER TABLE jobs DISABLE TRIGGER ALL")
+            cursor.execute("SELECT pg_advisory_lock(%s)", (barrier_key,))
+            cursor.execute(
+                f"""
+                CREATE FUNCTION durable_dispatch_downgrade_barrier()
+                RETURNS event_trigger
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    IF tg_tag = 'DROP INDEX' THEN
+                        PERFORM pg_advisory_lock({barrier_key});
+                        PERFORM pg_advisory_unlock({barrier_key});
+                    END IF;
+                END
+                $$;
+                CREATE EVENT TRIGGER durable_dispatch_downgrade_barrier
+                ON ddl_command_start
+                EXECUTE FUNCTION durable_dispatch_downgrade_barrier();
+                """
+            )
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            downgrade = executor.submit(
+                command.downgrade,
+                config,
+                _PREVIOUS_REVISION,
+            )
+            try:
+                _wait_for_downgrade_barrier(barrier)
+
+                writer_error: Exception | None = None
+                writer = psycopg2.connect(sync_database_url)
+                try:
+                    with writer:
+                        with writer.cursor() as cursor:
+                            cursor.execute("SET LOCAL lock_timeout = '1s'")
+                            cursor.execute(
+                                """
+                                INSERT INTO jobs (
+                                    id, user_id, task, status, dispatch_envelope
+                                )
+                                VALUES (%s::uuid, %s::uuid, %s, %s, %s::jsonb)
+                                """,
+                                (
+                                    str(writer_job_id),
+                                    str(uuid4()),
+                                    "upload_info_blob",
+                                    "queued",
+                                    '{"version": 1}',
+                                ),
+                            )
+                except Exception as exc:
+                    writer_error = exc
+                finally:
+                    writer.close()
+            finally:
+                with barrier.cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_unlock(%s)", (barrier_key,))
+            downgrade_error = downgrade.exception(timeout=10)
+    finally:
+        with barrier.cursor() as cursor:
+            cursor.execute(
+                "DROP EVENT TRIGGER IF EXISTS durable_dispatch_downgrade_barrier"
+            )
+            cursor.execute(
+                "DROP FUNCTION IF EXISTS durable_dispatch_downgrade_barrier()"
+            )
+            cursor.execute("ALTER TABLE jobs ENABLE TRIGGER ALL")
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (barrier_key,))
+        barrier.close()
+
+    command.upgrade(config, "head")
+    assert downgrade_error is None
+    assert isinstance(writer_error, psycopg2.errors.LockNotAvailable)
+
+    connection = psycopg2.connect(sync_database_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM jobs WHERE id = %s::uuid",
+                (str(writer_job_id),),
+            )
+            assert cursor.fetchone() == (0,)
+    finally:
+        connection.close()

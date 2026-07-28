@@ -7,6 +7,8 @@ Create Date: 2026-07-28 16:00:00.000000
 The partial index is built concurrently so upgrades do not block job writes.
 If a build fails, rerun the migration: column creation is idempotent and the
 explicit concurrent drop removes any invalid index before retrying.
+Downgrade intentionally blocks job writers so its envelope guard and destructive
+DDL run atomically.
 """
 
 from collections.abc import Sequence
@@ -53,6 +55,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("LOCK TABLE jobs IN ACCESS EXCLUSIVE MODE")
     pending_count = int(
         op.get_bind()
         .execute(
@@ -75,7 +78,6 @@ def downgrade() -> None:
             "Drain them or explicitly fail them before retrying."
         )
 
-    with op.get_context().autocommit_block():
-        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {_INDEX}")
+    op.execute(f"DROP INDEX IF EXISTS {_INDEX}")
     op.drop_column("jobs", "dispatch_attempted_at")
     op.drop_column("jobs", "dispatch_envelope")
