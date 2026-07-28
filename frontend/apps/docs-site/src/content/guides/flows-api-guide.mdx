@@ -1260,8 +1260,8 @@ provider-request capability evidence to all provider-call lifecycle rows in the
 hashed bundle. This intentionally changes content hashes compared with version 12.
 A synchronous export supports at most `10,000` provider-call rows. Larger runs
 return `413` with code `flow_evidence_export_too_large`; consume the
-paginated `provider-calls/` endpoint or request an offline administrative export
-instead.
+paginated `provider-calls/` endpoint instead. There is no offline or asynchronous
+export surface.
 
 The manifest's required
 `actor` identifies the caller that performed the export, not the run owner.

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tracemalloc
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ from eneo.files.file_repo import FileRepository
 from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_evidence_service import (
     EMBEDDED_PROVIDER_CALL_LIMIT,
+    FlowRunEvidenceService,
 )
 from eneo.flows.application.flow_run_service import (
     FlowRunPageWithResultFilesAndTokenUsage,
@@ -82,6 +84,13 @@ ATTEMPT_COUNT = EVIDENCE_STEP_COUNT * ATTEMPTS_PER_STEP
 PROVIDER_CALL_COUNT = ATTEMPT_COUNT
 INPUT_FILE_COUNT = 2
 RESULT_FILE_COUNT = 1
+# A heavier history for sizing the evidence view as it exists today. Steps,
+# attempts, and provider calls all grow together here, so the probe shows what a
+# larger run costs but does not isolate any single section's contribution.
+HEAVY_STEP_COUNT = 20
+HEAVY_ATTEMPTS_PER_STEP = 5
+HEAVY_ATTEMPT_COUNT = HEAVY_STEP_COUNT * HEAVY_ATTEMPTS_PER_STEP
+HEAVY_PROBE_RUNS = 1
 PAGE_LIMIT = 50
 DEEP_OFFSET = 250
 # Run page, result-file hydration, token aggregation, and final-output versions.
@@ -97,6 +106,7 @@ class _SeededWorkload:
     measured_tenant_id: UUID
     measured_flow_ids: tuple[UUID, UUID]
     representative_run_id: UUID
+    heavy_run_id: UUID
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,15 +301,17 @@ async def _write_representative_evidence(
     assistant_id: UUID,
     step_ids: tuple[UUID, ...],
     result_file_id: UUID,
+    attempts_per_step: int = ATTEMPTS_PER_STEP,
 ) -> None:
     provider_repo = FlowProviderCallRepository(session=session)
     result_file_reference = FlowStepResultFileReference(
         file_id=result_file_id,
         source="generated_output",
     )
+    final_step_order = len(step_ids)
     for step_order, step_id in enumerate(step_ids, start=1):
         predecessor_attempt_id: UUID | None = None
-        for attempt_no in range(1, ATTEMPTS_PER_STEP + 1):
+        for attempt_no in range(1, attempts_per_step + 1):
             attempt = await run_repo.create_or_get_attempt_started(
                 run_id=run_id,
                 flow_id=flow_id,
@@ -371,9 +383,9 @@ async def _write_representative_evidence(
         saved = await run_repo.save_step_result(
             flow_run_id=run_id,
             tenant_id=tenant_id,
-            attempt_no=ATTEMPTS_PER_STEP,
+            attempt_no=attempts_per_step,
             result_file_references=(
-                [result_file_reference] if step_order == EVIDENCE_STEP_COUNT else []
+                [result_file_reference] if step_order == final_step_order else []
             ),
             result=FlowStepResult(
                 flow_run_id=run_id,
@@ -499,6 +511,53 @@ async def _seed_workload(
     )
     assert completed_run is not None
 
+    heavy_flow = await _create_flow(
+        flow_repo,
+        version_repo,
+        tenant_id=admin_user.tenant_id,
+        space_id=measured_space.id,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        name="Flow evidence heavy history",
+        step_count=HEAVY_STEP_COUNT,
+    )
+    heavy_step_ids = tuple(cast(UUID, step.id) for step in heavy_flow.steps)
+    heavy_run = await run_repo.create(
+        flow_id=heavy_flow.id,
+        flow_version=1,
+        principal_type="user",
+        principal_user_id=admin_user.id,
+        tenant_id=admin_user.tenant_id,
+        input_payload_json={"api_key": SECRET_SENTINEL},
+        preseed_steps=[
+            {
+                "step_id": step_id,
+                "step_order": step_order,
+                "assistant_id": assistant.id,
+            }
+            for step_order, step_id in enumerate(heavy_step_ids, start=1)
+        ],
+        step_input_files=[],
+    )
+    await _write_representative_evidence(
+        session=session,
+        run_repo=run_repo,
+        run_id=heavy_run.id,
+        flow_id=heavy_flow.id,
+        tenant_id=admin_user.tenant_id,
+        assistant_id=assistant.id,
+        step_ids=heavy_step_ids,
+        result_file_id=result_file_id,
+        attempts_per_step=HEAVY_ATTEMPTS_PER_STEP,
+    )
+    completed_heavy_run = await run_repo.terminalize_run_status(
+        run_id=heavy_run.id,
+        tenant_id=admin_user.tenant_id,
+        target_status=FlowRunStatus.COMPLETED,
+        output_payload_json={"text": "Heavy evidence result"},
+    )
+    assert completed_heavy_run is not None
+
     measured_flow_ids = (evidence_flow.id, second_flow.id)
     measured_rows = [
         _completed_run_row(
@@ -518,6 +577,7 @@ async def _seed_workload(
         measured_tenant_id=admin_user.tenant_id,
         measured_flow_ids=measured_flow_ids,
         representative_run_id=representative_run.id,
+        heavy_run_id=heavy_run.id,
     )
 
 
@@ -584,6 +644,49 @@ async def _measure_run_listing_page(
     return page, statement_reports
 
 
+async def _measure_evidence_assembly(
+    *,
+    session: AsyncSession,
+    evidence_service: FlowRunEvidenceService,
+    run_id: UUID,
+) -> dict[str, object]:
+    """Record what one redacted evidence response costs end to end.
+
+    Peak traced bytes are Python allocations observed across assembly,
+    redaction, projection, and serialization. This measures allocation, not
+    object lifetime, so it says nothing about which representations are alive
+    at the same moment.
+    """
+    bind = session.sync_session.bind
+    assert bind is not None
+    tracemalloc.start()
+    try:
+        with _capture_queries(bind) as queries:
+            bundle = await evidence_service.get_redacted_evidence_bundle(run_id=run_id)
+        serialized = json.dumps(
+            bundle.to_dict(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    return {
+        "query_count": len(queries),
+        "serialized_bytes": len(serialized),
+        "peak_traced_bytes": peak_bytes,
+        "section_counts": {
+            "step_results": len(bundle.step_results),
+            "step_attempts": len(bundle.step_attempts),
+            "result_files": len(bundle.result_files),
+            "review_checkpoints": len(bundle.review_checkpoints),
+            "provider_calls": bundle.provider_calls.count,
+            "provider_calls_total": bundle.provider_calls.total_count,
+        },
+    }
+
+
 async def _run_count(
     session: AsyncSession,
     *,
@@ -634,7 +737,9 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
                 )
             )
         measured_flow_counts = tuple(measured_flow_count_values)
-        assert measured_count == MEASURED_TENANT_RUNS
+        # The heavy probe lives on its own Flow, so it adds to the tenant total
+        # while leaving the two listed Flows at their measured page depth.
+        assert measured_count == MEASURED_TENANT_RUNS + HEAVY_PROBE_RUNS
         assert measured_flow_counts == (RUNS_PER_FLOW, RUNS_PER_FLOW)
 
         await session.execute(sa.text("ANALYZE flow_runs"))
@@ -721,6 +826,21 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
         }
         assert expected_masked_paths <= set(evidence_bundle.masked_paths)
 
+        evidence_service = container.flow_run_evidence_service()
+        representative_cost = await _measure_evidence_assembly(
+            session=session,
+            evidence_service=evidence_service,
+            run_id=workload.representative_run_id,
+        )
+        heavy_cost = await _measure_evidence_assembly(
+            session=session,
+            evidence_service=evidence_service,
+            run_id=workload.heavy_run_id,
+        )
+        heavy_sections = cast(dict[str, object], heavy_cost["section_counts"])
+        assert heavy_sections["step_attempts"] == HEAVY_ATTEMPT_COUNT
+        assert heavy_sections["provider_calls_total"] == HEAVY_ATTEMPT_COUNT
+
         report: dict[str, object] = {
             "schema_version": REPORT_SCHEMA_VERSION,
             "workload": {
@@ -757,6 +877,24 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
                 "redaction_proof": {
                     "secret_absent": SECRET_SENTINEL not in serialized_text,
                     "masked_paths": list(evidence_bundle.masked_paths),
+                },
+            },
+            "evidence_assembly_cost": {
+                "note": (
+                    "Two observations of the evidence view as it exists today. "
+                    "Peak traced bytes are Python allocations during assembly, "
+                    "redaction, projection, and serialization. Steps, attempts, "
+                    "and provider calls vary together, so no single section's "
+                    "contribution is isolated, and this says nothing about "
+                    "latency, concurrent requests, or any section the evidence "
+                    "path does not yet read."
+                ),
+                "representative": representative_cost,
+                "heavy": heavy_cost,
+                "heavy_workload": {
+                    "steps": HEAVY_STEP_COUNT,
+                    "attempts_per_step": HEAVY_ATTEMPTS_PER_STEP,
+                    "attempts": HEAVY_ATTEMPT_COUNT,
                 },
             },
             "production_constants": {

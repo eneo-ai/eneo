@@ -243,6 +243,7 @@ erDiagram
     varchar provider "nullable"
     varchar response_format "required"
     array requested_capabilities "required"
+    array resolved_input_edge_indexes "required"
     varchar call_reason "required"
     varchar mapped_execution_mode "nullable"
     integer mapped_item_index "nullable"
@@ -477,6 +478,7 @@ erDiagram
   users {
     string boundary "external owner"
   }
+  flow_provider_calls }o--|| flow_step_attempt_resolved_inputs : "flow_step_attempt_id ondelete=NO ACTION"
   flow_provider_calls }o--|| flow_step_attempts : "flow_step_attempt_id ondelete=CASCADE"
   flow_run_audit_outbox }o--o| api_keys_v2 : "actor_api_key_id ondelete=SET NULL"
   flow_run_audit_outbox }o--o| flow_run_review_checkpoints : "review_checkpoint_id ondelete=RESTRICT"

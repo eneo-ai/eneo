@@ -3795,6 +3795,8 @@ def test_flow_api_guide_documents_provider_call_export_boundary() -> None:
     assert "`413`" in evidence_export
     assert "`flow_evidence_export_too_large`" in evidence_export
     assert "paginated `provider-calls/` endpoint" in evidence_export
+    # The guide must not resurrect the offline export it once promised.
+    assert "no offline or asynchronous" in evidence_export.lower()
 
 
 def test_flow_api_guide_documents_step_output_text_overflow() -> None:

@@ -599,10 +599,9 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         surfaced_through="API error response",
         cause="The run has more provider-call events than one synchronous export may contain.",
         consumer_action=(
-            "Use the paginated provider-calls endpoint or contact an administrator "
-            "for an offline export."
+            "Page this run's provider-call events through the provider-calls endpoint."
         ),
-        user_action="Use the paginated evidence view or contact support.",
+        user_action="Open the run's provider-call list instead of exporting it.",
     ),
     FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(
         category="Typed input/output",

@@ -155,7 +155,7 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
     EndpointSequence(
         slug="evidence",
         title="Evidence and provider usage",
-        summary="Inspect bounded run evidence, page every provider-call lifecycle row, and export a verified evidence bundle.",
+        summary="Inspect run evidence, page every provider-call lifecycle row, and export a verified evidence bundle.",
         steps=(
             "Call `runtime_paths.evidence_template` for the redacted run trace and its first bounded `provider_calls` page.",
             "Call `runtime_paths.provider_calls_template` with `after_event_id` until `has_more` is false when the UI needs every provider call.",
@@ -460,7 +460,7 @@ UNSUPPORTED_CALLOUTS: tuple[UnsupportedCallout, ...] = (
 ENDPOINT_SEQUENCE_INTROS: dict[str, str] = {
     "quickstart": "Start with the smallest complete run path. It proves the contract, idempotency, polling, and step-result loop.",
     "files": "When the contract names file inputs, handle uploads before you create the run.",
-    "evidence": "When a product needs explainability or cost visibility, read the bounded evidence view and page provider calls without losing lifecycle state.",
+    "evidence": "When a product needs explainability or cost visibility, read the evidence view and page provider calls without losing lifecycle state.",
     "human-in-the-loop": "After inputs are bound, plan how the UI behaves when a review-marked step pauses the run.",
     "mid-run-files": "If a user asks for files during execution, route the product design through review or rerun instead of inventing an unsupported upload path.",
     "results": "Once review is resolved, drive the result screen from the run's typed final result and open step details only when needed.",

@@ -371,7 +371,7 @@ class FlowRunEvidenceService:
                 "max_provider_call_events": PROVIDER_CALL_EXPORT_MAX_EVENTS,
             },
             docs_hint=(
-                "Use the paginated provider-calls endpoint or request an offline "
-                "administrative export."
+                "Page this run's provider-call events through the provider-calls "
+                "endpoint."
             ),
         )

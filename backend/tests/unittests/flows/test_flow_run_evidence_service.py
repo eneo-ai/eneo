@@ -256,6 +256,12 @@ async def test_export_rejects_more_than_provider_call_safety_boundary(user):
         "provider_call_count": PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
         "max_provider_call_events": PROVIDER_CALL_EXPORT_MAX_EVENTS,
     }
+    # The hint may only name recovery paths that exist. There is no offline or
+    # asynchronous export surface to send a caller to.
+    docs_hint = exc_info.value.docs_hint or ""
+    assert "provider-calls" in docs_hint
+    assert "offline" not in docs_hint.lower()
+    assert "administrator" not in docs_hint.lower()
 
 
 @pytest.mark.asyncio
