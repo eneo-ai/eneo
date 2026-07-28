@@ -24,7 +24,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import SkillAdoptionProjection from "$lib/features/skills/SkillAdoptionProjection.svelte";
   import { Info, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-svelte";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
 
   type PublicationAction = "publish" | "unpublish";
   type ExecutionAction = "block" | "unblock";
@@ -44,6 +44,7 @@
   let refreshWarning = $state(false);
   let restoreAnnouncement = $state("");
   let advancePinned = $state<{
+    skillId: string;
     revisionId: string;
     revisionNumber: number;
     publishedRevisionId: string;
@@ -270,9 +271,22 @@
     if (data.published === null) return;
     advancePinned = {
       ...pinned,
+      skillId: data.skill.id,
       publishedRevisionId: data.published.revision_id
     };
   }
+
+  // SvelteKit reuses this component across skillId navigations; everything the
+  // administrator reviewed belongs to the previous Skill and must not survive.
+  let advanceObservedSkillId = untrack(() => data.skill.id);
+  $effect(() => {
+    const nextSkillId = data.skill.id;
+    if (nextSkillId === advanceObservedSkillId) return;
+    advanceObservedSkillId = nextSkillId;
+    advancePinned = null;
+    advanceError = null;
+    advanceAnnouncement = "";
+  });
 
   const onAdvancePersonalChat = $derived(
     data.published !== null && executionBlock.block === null ? openAdvanceDialog : undefined
@@ -293,18 +307,20 @@
     let movedToVersion: number;
     try {
       const advance = await data.eneo.skills.organization.advancePersonalChat({
-        skillId: data.skill.id,
+        skillId: pinned.skillId,
         expected_pinned_revision_id: pinned.revisionId,
         expected_published_revision_id: pinned.publishedRevisionId
       });
       movedToVersion = advance.to_revision_number;
     } catch (error) {
-      advanceError = getErrorMessage(error, m.organization_skills_advance_error());
       advanceSaving = false;
+      if (data.skill.id !== pinned.skillId) return;
+      advanceError = getErrorMessage(error, m.organization_skills_advance_error());
       return;
     }
-    advancePinned = null;
     advanceSaving = false;
+    if (data.skill.id !== pinned.skillId) return;
+    advancePinned = null;
     advanceAnnouncement = "";
     await tick();
     advanceAnnouncement = m.organization_skills_advance_announcement({
