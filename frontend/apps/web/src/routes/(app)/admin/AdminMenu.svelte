@@ -73,6 +73,11 @@
           ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
           : []),
         navItem("/admin/flow-input-limits", SlidersHorizontal, m.flow_input_limits_title()),
+        navItem(
+          "/admin/flow-knowledge-evidence",
+          SlidersHorizontal,
+          m.flow_knowledge_evidence_title()
+        ),
         navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
         navItem("/admin/integrations", Cloud, m.integrations())

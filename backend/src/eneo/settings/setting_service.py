@@ -23,6 +23,10 @@ from eneo.flows.domain.mapped_execution_policy import (
     apply_flow_mapped_execution_policy_patch,
     resolve_flow_mapped_execution_policy,
 )
+from eneo.flows.domain.rag_evidence_policy import (
+    apply_flow_rag_evidence_policy_patch,
+    resolve_flow_rag_evidence_policy,
+)
 from eneo.flows.flow_document_limits import (
     apply_flow_document_render_limits_patch,
     resolve_flow_document_render_limits,
@@ -60,6 +64,8 @@ from eneo.settings.settings import (
     FlowInputLimitsUpdate,
     FlowMappedExecutionPolicyPublic,
     FlowMappedExecutionPolicyUpdate,
+    FlowRagEvidencePolicyPublic,
+    FlowRagEvidencePolicyUpdate,
     FlowRetentionEffectiveStatePublic,
     FlowRetentionImpactPreviewPublic,
     FlowRetentionOrganizationPreviewRequest,
@@ -446,6 +452,64 @@ class SettingService:
             description="Updated mapped execution policy",
             metadata={
                 "setting": "mapped_execution_policy",
+                "changes": {
+                    key: {"old": getattr(previous, key), "new": getattr(updated, key)}
+                    for key in patch
+                },
+            },
+        )
+        return updated
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_rag_evidence_policy(self) -> FlowRagEvidencePolicyPublic:
+        tenant = await self._get_tenant_for_flow_settings()
+        policy = resolve_flow_rag_evidence_policy(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None))
+        )
+        return FlowRagEvidencePolicyPublic(
+            version=policy.version,
+            max_sources_with_recorded_passages=(
+                policy.max_sources_with_recorded_passages
+            ),
+            max_recorded_passages_per_source=policy.max_recorded_passages_per_source,
+            max_recorded_passage_bytes=policy.max_recorded_passage_bytes,
+            max_recorded_passage_bytes_per_step=(
+                policy.max_recorded_passage_bytes_per_step
+            ),
+            max_recorded_passage_bytes_per_run_view=(
+                policy.max_recorded_passage_bytes_per_run_view
+            ),
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_rag_evidence_policy(
+        self,
+        payload: FlowRagEvidencePolicyUpdate,
+    ) -> FlowRagEvidencePolicyPublic:
+        patch = payload.model_dump(exclude_unset=True)
+        if not patch:
+            raise BadRequestException(
+                "At least one knowledge evidence policy field must be provided.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+            )
+        previous = await self.get_rag_evidence_policy()
+        tenant = await self._get_tenant_for_flow_settings()
+        next_flow_settings = apply_flow_rag_evidence_policy_patch(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
+            remove_keys={key for key, value in patch.items() if value is None},
+            **{key: value for key, value in patch.items() if value is not None},
+        )
+        await self._persist_flow_settings(next_flow_settings)
+        updated = await self.get_rag_evidence_policy()
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated knowledge evidence policy",
+            metadata={
+                "setting": "flow_rag_evidence_policy",
                 "changes": {
                     key: {"old": getattr(previous, key), "new": getattr(updated, key)}
                     for key in patch

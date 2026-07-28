@@ -39,6 +39,8 @@ from eneo.settings.settings import (
     FlowInputLimitsUpdate,
     FlowMappedExecutionPolicyPublic,
     FlowMappedExecutionPolicyUpdate,
+    FlowRagEvidencePolicyPublic,
+    FlowRagEvidencePolicyUpdate,
     FlowRetentionImpactPreviewPublic,
     FlowRetentionOrganizationPreviewRequest,
     FlowRetentionPolicyPublic,
@@ -75,6 +77,10 @@ class _FlowSettingsServiceProtocol(Protocol):
     async def update_mapped_execution_policy(
         self, payload: FlowMappedExecutionPolicyUpdate
     ) -> FlowMappedExecutionPolicyPublic: ...
+    async def get_rag_evidence_policy(self) -> FlowRagEvidencePolicyPublic: ...
+    async def update_rag_evidence_policy(
+        self, payload: FlowRagEvidencePolicyUpdate
+    ) -> FlowRagEvidencePolicyPublic: ...
     async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic: ...
     async def update_flow_evidence_policy(
         self, payload: FlowEvidencePolicyUpdate
@@ -448,6 +454,53 @@ async def update_mapped_execution_policy(
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_mapped_execution_policy(payload)
+
+
+@settings_admin_router.get(
+    "/flow-rag-evidence-policy",
+    response_model=FlowRagEvidencePolicyPublic,
+    operation_id="get_rag_evidence_policy",
+    summary="Get knowledge evidence policy",
+    description=(
+        "Return how much retrieved passage text a Flow step records. Every source "
+        "a step retrieved is always listed with its identity and match counts; "
+        "these ceilings bound only the verbatim passage text kept alongside it."
+    ),
+    responses={403: _flow_settings_admin_forbidden_response()},
+)
+async def get_rag_evidence_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRagEvidencePolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_rag_evidence_policy()
+
+
+@settings_admin_router.patch(
+    "/flow-rag-evidence-policy",
+    response_model=FlowRagEvidencePolicyPublic,
+    operation_id="update_rag_evidence_policy",
+    summary="Update knowledge evidence policy",
+    description=(
+        "Change how much retrieved passage text new step attempts record. Omit a "
+        "field to preserve it or send null to restore its default. Recorded "
+        "passages hold verbatim source text, so each ceiling has a fixed maximum."
+    ),
+    responses={
+        400: _flow_settings_invalid_payload_response(
+            "Invalid knowledge evidence policy payload.",
+            "At least one knowledge evidence policy field must be provided.",
+        ),
+        403: _flow_settings_admin_forbidden_response(),
+    },
+)
+async def update_rag_evidence_policy(
+    payload: FlowRagEvidencePolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRagEvidencePolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_rag_evidence_policy(payload)
 
 
 @settings_admin_router.get(

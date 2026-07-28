@@ -14,6 +14,14 @@ from eneo.flows.domain.flow import (
     FlowRunRetentionActivationSource,
     FlowRunRetentionBarrierSource,
 )
+from eneo.flows.domain.rag_evidence_policy import (
+    RAG_EVIDENCE_CEILINGS,
+    RAG_EVIDENCE_MAX_PASSAGE_BYTES_KEY,
+    RAG_EVIDENCE_MAX_PASSAGES_PER_SOURCE_KEY,
+    RAG_EVIDENCE_MAX_RUN_VIEW_PASSAGE_BYTES_KEY,
+    RAG_EVIDENCE_MAX_SOURCES_KEY,
+    RAG_EVIDENCE_MAX_STEP_PASSAGE_BYTES_KEY,
+)
 from eneo.flows.flow_document_limits import FLOW_DOCUMENT_RENDER_HARD_LIMITS
 from eneo.flows.flow_input_limits import (
     FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
@@ -121,6 +129,20 @@ FLOW_MAPPED_EXECUTION_POLICY_EXAMPLE: JsonDict = {
 FLOW_MAPPED_EXECUTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
     "max_provider_calls_per_mapped_step": 20,
     "max_estimated_input_tokens_per_mapped_step": None,
+}
+
+FLOW_RAG_EVIDENCE_POLICY_EXAMPLE: JsonDict = {
+    "version": 1,
+    "max_sources_with_recorded_passages": 25,
+    "max_recorded_passages_per_source": 5,
+    "max_recorded_passage_bytes": 4096,
+    "max_recorded_passage_bytes_per_step": 131072,
+    "max_recorded_passage_bytes_per_run_view": 2097152,
+}
+
+FLOW_RAG_EVIDENCE_POLICY_UPDATE_EXAMPLE: JsonDict = {
+    "max_sources_with_recorded_passages": 50,
+    "max_recorded_passage_bytes": 8192,
 }
 
 FLOW_EVIDENCE_POLICY_EXAMPLE: JsonDict = {
@@ -484,6 +506,91 @@ class FlowMappedExecutionPolicyUpdate(BaseModel):
             "Set a positive aggregate estimated-input-token ceiling, or send null to "
             "remove it."
         ),
+    )
+
+
+class FlowRagEvidencePolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RAG_EVIDENCE_POLICY_EXAMPLE}
+    )
+
+    version: Literal[1] = Field(
+        default=1,
+        description="Knowledge evidence policy schema version.",
+    )
+    max_sources_with_recorded_passages: int = Field(
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_SOURCES_KEY],
+        description=(
+            "How many retrieved sources record passage text. Every retrieved "
+            "source is always listed with its identity; only passage detail is "
+            "bounded."
+        ),
+    )
+    max_recorded_passages_per_source: int = Field(
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_PASSAGES_PER_SOURCE_KEY],
+        description="How many passages one source records, highest score first.",
+    )
+    max_recorded_passage_bytes: int = Field(
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_PASSAGE_BYTES_KEY],
+        description=(
+            "Byte ceiling for one recorded passage. A longer passage keeps its "
+            "leading bytes and reports the dropped tail."
+        ),
+    )
+    max_recorded_passage_bytes_per_step: int = Field(
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_STEP_PASSAGE_BYTES_KEY],
+        description="Total recorded passage bytes one step attempt may hold.",
+    )
+    max_recorded_passage_bytes_per_run_view: int = Field(
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_RUN_VIEW_PASSAGE_BYTES_KEY],
+        description=(
+            "Total recorded passage bytes one interactive run view may show. A "
+            "run has no attempt limit, so this bounds what reading a heavily "
+            "rerun run materialises. Sources and counts are never released."
+        ),
+    )
+
+
+class FlowRagEvidencePolicyUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RAG_EVIDENCE_POLICY_UPDATE_EXAMPLE},
+    )
+
+    max_sources_with_recorded_passages: int | None = Field(
+        default=None,
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_SOURCES_KEY],
+        description="Set the source ceiling, or send null to restore the default.",
+    )
+    max_recorded_passages_per_source: int | None = Field(
+        default=None,
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_PASSAGES_PER_SOURCE_KEY],
+        description="Set the per-source ceiling, or send null to restore the default.",
+    )
+    max_recorded_passage_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_PASSAGE_BYTES_KEY],
+        description="Set the per-passage ceiling, or send null to restore the default.",
+    )
+    max_recorded_passage_bytes_per_step: int | None = Field(
+        default=None,
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_STEP_PASSAGE_BYTES_KEY],
+        description="Set the per-step ceiling, or send null to restore the default.",
+    )
+    max_recorded_passage_bytes_per_run_view: int | None = Field(
+        default=None,
+        ge=1,
+        le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_RUN_VIEW_PASSAGE_BYTES_KEY],
+        description="Set the per-run-view ceiling, or send null to restore the default.",
     )
 
 
