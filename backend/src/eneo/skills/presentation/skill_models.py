@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -8,6 +9,7 @@ from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
     MAX_SKILL_SLUG_LENGTH,
+    PersonalChatPinAdvanceOutcome,
     SkillActivationFallbackReason,
     SkillActivationMode,
     SkillAdoptionDrift,
@@ -35,6 +37,24 @@ class SkillRevisionCreateRequest(SkillContentInput):
 
 class SkillPublishRequest(BaseModel):
     expected_revision_id: UUID
+
+
+class PersonalChatPinAdvanceRequest(BaseModel):
+    expected_pinned_revision_id: UUID = Field(
+        description=(
+            "The revision the Personal Chat binding was pinned to when the "
+            "administrator reviewed the move — not the published target."
+        )
+    )
+
+
+class PersonalChatPinAdvancePublic(BaseModel):
+    outcome: Literal[
+        PersonalChatPinAdvanceOutcome.ADVANCED,
+        PersonalChatPinAdvanceOutcome.ALREADY_CURRENT,
+    ]
+    from_revision_number: int
+    to_revision_number: int
 
 
 class SkillRevisionRestoreRequest(BaseModel):

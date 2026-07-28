@@ -26,6 +26,8 @@ from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     SKILL_RUNTIME_POLICY_DEFAULTS,
+    PersonalChatPinAdvance,
+    PersonalChatPinAdvanceOutcome,
     PublishedSkill,
     PublishedSkillDeactivationError,
     PublishedSkillDeletionError,
@@ -1138,6 +1140,124 @@ class SkillRepoImpl:
                 *self._organization_scope(tenant_id),
             )
             .with_for_update(of=Skills)
+        )
+
+    async def advance_personal_chat_skill_pin(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_pinned_revision_id: UUID,
+    ) -> PersonalChatPinAdvance | None:
+        """Move the tenant's Personal Chat pin for one Skill to its published
+        revision, and change nothing else.
+
+        Lock order is policy → Skill → binding. The fit validation that runs
+        after this write judges the whole Personal Chat baseline, so the
+        policy row — the same lock every policy save takes — must serialize
+        concurrent advances and policy edits; without it, two advances to
+        different Skills could each validate a partial state and jointly
+        commit an over-budget configuration. Publish and unpublish take only
+        the Skill lock, so this order cannot deadlock with them.
+
+        The write itself is guarded by the pinned revision the administrator
+        reviewed: a concurrent change to the binding raises
+        SkillRevisionConflictError and writes nothing, rather than
+        overwriting a pin someone else moved.
+        """
+        policy_id = (
+            await self.session.execute(
+                sa.select(GovernancePolicies.id)
+                .where(
+                    GovernancePolicies.tenant_id == tenant_id,
+                    GovernancePolicies.scope
+                    == PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        skill_row = await self._lock_organization_skill(
+            tenant_id=tenant_id, skill_id=skill_id
+        )
+        if skill_row is None:
+            return None
+        if skill_row.published_revision_number is None:
+            return PersonalChatPinAdvance(
+                outcome=PersonalChatPinAdvanceOutcome.NOT_PUBLISHED
+            )
+        active_block = await self.get_active_execution_block(
+            tenant_id=tenant_id, skill_id=skill_id
+        )
+        if active_block is not None:
+            return PersonalChatPinAdvance(outcome=PersonalChatPinAdvanceOutcome.BLOCKED)
+
+        published = (
+            await self.session.execute(
+                sa.select(SkillRevisions.id, SkillRevisions.revision_number).where(
+                    SkillRevisions.skill_id == skill_id,
+                    SkillRevisions.revision_number
+                    == skill_row.published_revision_number,
+                )
+            )
+        ).one()
+
+        if policy_id is None:
+            return PersonalChatPinAdvance(
+                outcome=PersonalChatPinAdvanceOutcome.NOT_BOUND
+            )
+        binding = (
+            await self.session.execute(
+                sa.select(
+                    GovernancePolicySkillBindings.policy_id,
+                    GovernancePolicySkillBindings.skill_revision_id,
+                    SkillRevisions.revision_number,
+                )
+                .join(
+                    SkillRevisions,
+                    SkillRevisions.id
+                    == GovernancePolicySkillBindings.skill_revision_id,
+                )
+                .where(
+                    GovernancePolicySkillBindings.policy_id == policy_id,
+                    GovernancePolicySkillBindings.skill_id == skill_id,
+                )
+                .with_for_update(of=GovernancePolicySkillBindings)
+            )
+        ).one_or_none()
+        if binding is None:
+            return PersonalChatPinAdvance(
+                outcome=PersonalChatPinAdvanceOutcome.NOT_BOUND
+            )
+        if binding.skill_revision_id == published.id:
+            return PersonalChatPinAdvance(
+                outcome=PersonalChatPinAdvanceOutcome.ALREADY_CURRENT,
+                from_revision_id=published.id,
+                from_revision_number=published.revision_number,
+                to_revision_id=published.id,
+                to_revision_number=published.revision_number,
+            )
+        if binding.skill_revision_id != expected_pinned_revision_id:
+            raise SkillRevisionConflictError
+
+        updated = await self.session.execute(
+            sa.update(GovernancePolicySkillBindings)
+            .where(
+                GovernancePolicySkillBindings.policy_id == binding.policy_id,
+                GovernancePolicySkillBindings.skill_id == skill_id,
+                GovernancePolicySkillBindings.skill_revision_id
+                == expected_pinned_revision_id,
+            )
+            .values(skill_revision_id=published.id)
+            .returning(GovernancePolicySkillBindings.skill_id)
+        )
+        # The row lock above guarantees exactly this row; scalar_one enforces it.
+        updated.scalar_one()
+        return PersonalChatPinAdvance(
+            outcome=PersonalChatPinAdvanceOutcome.ADVANCED,
+            from_revision_id=binding.skill_revision_id,
+            from_revision_number=binding.revision_number,
+            to_revision_id=published.id,
+            to_revision_number=published.revision_number,
         )
 
     async def publish_organization(

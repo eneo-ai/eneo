@@ -14,6 +14,7 @@ from eneo.server.protocol import responses
 from eneo.skills.domain.skill import (
     DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
     MAX_SKILL_ADOPTION_PAGE_LIMIT,
+    PersonalChatPinAdvanceOutcome,
 )
 from eneo.skills.presentation.skill_audit import (
     audit_skill_created,
@@ -22,6 +23,8 @@ from eneo.skills.presentation.skill_audit import (
 from eneo.skills.presentation.skill_models import (
     OrganizationSkillPublic,
     OrganizationSkillSummaryPagePublic,
+    PersonalChatPinAdvancePublic,
+    PersonalChatPinAdvanceRequest,
     PublishedSkillPublic,
     PublishedSkillSummaryPagePublic,
     SkillAdoptionProjectionPagePublic,
@@ -405,6 +408,68 @@ async def publish_organization_skill(
         )
     )
     return container.skill_assembler().organization_to_public(projection)
+
+
+@router.post(
+    "/organization/{skill_id}/personal-chat/advance/",
+    response_model=PersonalChatPinAdvancePublic,
+    description=(
+        "Move the Personal Chat binding of this Skill to its currently "
+        "published revision. Guarded by the pinned revision the "
+        "administrator reviewed, so a concurrent binding change is refused "
+        "instead of overwritten."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def advance_personal_chat_binding(
+    skill_id: UUID,
+    payload: PersonalChatPinAdvanceRequest,
+    container: _ContainerWithUser,
+) -> PersonalChatPinAdvancePublic:
+    service = container.organization_skill_service()
+    advance = await service.advance_personal_chat_binding(
+        skill_id=skill_id,
+        expected_pinned_revision_id=payload.expected_pinned_revision_id,
+    )
+    # The service raises for every refusal outcome; only these two can
+    # return, and both always carry the revision numbers.
+    assert advance.outcome in (
+        PersonalChatPinAdvanceOutcome.ADVANCED,
+        PersonalChatPinAdvanceOutcome.ALREADY_CURRENT,
+    )
+    assert advance.from_revision_number is not None
+    assert advance.to_revision_number is not None
+    if advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED:
+        skill = await service.get_organization_skill(skill_id=skill_id)
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.SKILL_BINDINGS_ADVANCED,
+            entity_type=EntityType.SKILL,
+            entity_id=skill.id,
+            description=(
+                f"Moved the Personal Chat binding of Skill "
+                f"'{skill.current_revision.display_name}' to published "
+                f"revision {advance.to_revision_number}"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=skill,
+                changes={
+                    "personal_chat_revision_number": {
+                        "old": advance.from_revision_number,
+                        "new": advance.to_revision_number,
+                    },
+                },
+                extra={**skill_audit_extra(skill), "surface": "personal_chat"},
+            ),
+        )
+    return PersonalChatPinAdvancePublic(
+        outcome=advance.outcome,
+        from_revision_number=advance.from_revision_number,
+        to_revision_number=advance.to_revision_number,
+    )
 
 
 @router.post(

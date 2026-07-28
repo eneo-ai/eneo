@@ -16,6 +16,8 @@ from eneo.skills.application.organization_skill_service import (
     OrganizationSkillService,
 )
 from eneo.skills.domain.skill import (
+    PersonalChatPinAdvance,
+    PersonalChatPinAdvanceOutcome,
     PublishedSkillDeletionError,
     SkillAdoptionCursor,
     SkillAdoptionDrift,
@@ -71,6 +73,8 @@ def _service(*, organization, permissions, repo=None):
         user=user,
         repo=repo,
         space_service=space_service,
+        # unsafe: the real method name starts with assert_, which mock guards.
+        assistant_service=AsyncMock(unsafe=True),
     )
 
 
@@ -777,3 +781,133 @@ async def test_adoption_projection_rejects_malformed_cursors(cursor: str):
         )
 
     repo.get_organization_adoption_projection_page.assert_not_awaited()
+
+
+def _advance(outcome, *, to_number=2):
+    return PersonalChatPinAdvance(
+        outcome=outcome,
+        from_revision_id=uuid4(),
+        from_revision_number=1,
+        to_revision_id=uuid4(),
+        to_revision_number=to_number,
+    )
+
+
+async def test_pin_advance_requires_the_tenant_administrator():
+    organization = _organization()
+    repo = AsyncMock()
+    service = _service(
+        organization=organization, permissions={Permission.SKILLS}, repo=repo
+    )
+
+    with pytest.raises(UnauthorizedException):
+        await service.advance_personal_chat_binding(
+            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        )
+    repo.advance_personal_chat_skill_pin.assert_not_awaited()
+
+
+async def test_pin_advance_validates_the_governed_fit_only_when_it_wrote():
+    organization = _organization()
+    repo = AsyncMock()
+    repo.advance_personal_chat_skill_pin.return_value = _advance(
+        PersonalChatPinAdvanceOutcome.ADVANCED
+    )
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    advanced = await service.advance_personal_chat_binding(
+        skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+    )
+    assert advanced.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+    fit = service.assistant_service.assert_personal_default_governance_context_fit
+    fit.assert_awaited_once()
+
+    repo.advance_personal_chat_skill_pin.return_value = _advance(
+        PersonalChatPinAdvanceOutcome.ALREADY_CURRENT
+    )
+    unchanged = await service.advance_personal_chat_binding(
+        skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+    )
+    assert unchanged.outcome is PersonalChatPinAdvanceOutcome.ALREADY_CURRENT
+    # Nothing changed, so nothing new to validate.
+    fit.assert_awaited_once()
+
+
+async def test_pin_advance_maps_each_refusal_to_its_established_response():
+    organization = _organization()
+    repo = AsyncMock()
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    repo.advance_personal_chat_skill_pin.return_value = None
+    with pytest.raises(NotFoundException):
+        await service.advance_personal_chat_binding(
+            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        )
+
+    repo.advance_personal_chat_skill_pin.return_value = _advance(
+        PersonalChatPinAdvanceOutcome.NOT_BOUND
+    )
+    with pytest.raises(NotFoundException):
+        await service.advance_personal_chat_binding(
+            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        )
+
+    repo.advance_personal_chat_skill_pin.return_value = _advance(
+        PersonalChatPinAdvanceOutcome.NOT_PUBLISHED
+    )
+    with pytest.raises(
+        BadRequestException, match="published organisation Skill versions"
+    ):
+        await service.advance_personal_chat_binding(
+            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        )
+
+    repo.advance_personal_chat_skill_pin.return_value = _advance(
+        PersonalChatPinAdvanceOutcome.BLOCKED
+    )
+    with pytest.raises(BadRequestException, match="Blocked organisation Skills"):
+        await service.advance_personal_chat_binding(
+            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        )
+
+    fit = service.assistant_service.assert_personal_default_governance_context_fit
+    fit.assert_not_awaited()
+
+
+async def test_pin_advance_conflict_keeps_the_reviewed_revision_contract():
+    organization = _organization()
+    repo = AsyncMock()
+    repo.advance_personal_chat_skill_pin.side_effect = SkillRevisionConflictError
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+
+    with pytest.raises(
+        SkillRevisionConflictException, match="changed after you reviewed"
+    ):
+        await service.advance_personal_chat_binding(
+            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        )
+
+
+async def test_pin_advance_rejection_from_the_fit_owner_propagates():
+    organization = _organization()
+    repo = AsyncMock()
+    repo.advance_personal_chat_skill_pin.return_value = _advance(
+        PersonalChatPinAdvanceOutcome.ADVANCED
+    )
+    service = _service(
+        organization=organization, permissions={Permission.ADMIN}, repo=repo
+    )
+    service.assistant_service.assert_personal_default_governance_context_fit.side_effect = BadRequestException(
+        "does not fit"
+    )
+
+    with pytest.raises(BadRequestException, match="does not fit"):
+        await service.advance_personal_chat_binding(
+            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        )

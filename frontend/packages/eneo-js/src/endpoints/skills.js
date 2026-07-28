@@ -9,6 +9,7 @@
 /** @typedef {import('../types/resources').OrganizationSkillSummaryPagePublic} OrganizationSkillSummaryPagePublic */
 /** @typedef {import('../types/resources').SkillAdoptionProjectionPagePublic} SkillAdoptionProjectionPagePublic */
 /** @typedef {import('../types/resources').PublishedSkillPublic} PublishedSkillPublic */
+/** @typedef {import('../types/resources').PersonalChatPinAdvancePublic} PersonalChatPinAdvancePublic */
 /** @typedef {import('../types/resources').PublishedSkillSummaryPagePublic} PublishedSkillSummaryPagePublic */
 
 /**
@@ -325,6 +326,22 @@ export function initSkills(client) {
        */
       publish: async ({ skillId, ...request }) => {
         return await client.fetch("/api/v1/skills/organization/{skill_id}/publish/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": request }
+        });
+      },
+
+      /**
+       * Move the Personal Chat binding of this Skill to its currently
+       * published revision, guarded by the pinned revision the
+       * administrator reviewed.
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/personal-chat/advance/">} params
+       * @returns {Promise<PersonalChatPinAdvancePublic>}
+       * @throws {EneoError}
+       */
+      advancePersonalChat: async ({ skillId, ...request }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/personal-chat/advance/", {
           method: "post",
           params: { path: { skill_id: skillId } },
           requestBody: { "application/json": request }

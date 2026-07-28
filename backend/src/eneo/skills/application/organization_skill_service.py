@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.main.exceptions import (
+    BadRequestException,
     NotFoundException,
     SkillRevisionConflictException,
     UnauthorizedException,
@@ -12,6 +13,8 @@ from eneo.skills.domain.skill import (
     OrganizationSkillProjection,
     OrganizationSkillSummaryProjection,
     OrganizationSkillSummaryProjectionPage,
+    PersonalChatPinAdvance,
+    PersonalChatPinAdvanceOutcome,
     PublishedSkillProjection,
     PublishedSkillSummaryPage,
     PublishedSkillSummaryProjection,
@@ -31,6 +34,7 @@ from eneo.skills.domain.skill_repo import SkillRepo
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
+    from eneo.assistants.assistant_service import AssistantService
     from eneo.spaces.space_service import SpaceService
 
 
@@ -41,10 +45,15 @@ class OrganizationSkillService:
         user: UserInDB,
         repo: SkillRepo,
         space_service: "SpaceService",
+        assistant_service: "AssistantService",
     ) -> None:
         self.user = user
         self.repo = repo
         self.space_service = space_service
+        # The one fit/activatability owner. Injected rather than imported so
+        # this module keeps no dependency on the assistants package at import
+        # time; only the pin-advance operation needs it.
+        self.assistant_service = assistant_service
 
     def _require_catalogue_read(self) -> None:
         if (
@@ -377,6 +386,50 @@ class OrganizationSkillService:
         if change is None:
             raise NotFoundException()
         return change
+
+    async def advance_personal_chat_binding(
+        self,
+        *,
+        skill_id: UUID,
+        expected_pinned_revision_id: UUID,
+    ) -> PersonalChatPinAdvance:
+        """Move the Personal Chat pin for one Skill to its published revision.
+
+        Admin-only. The repo guards the write with the pinned revision the
+        administrator reviewed; after an actual change, the same governance
+        fit validation that guards every policy save runs against the new
+        pin, so an advance can never admit a configuration the next save
+        would reject. A failed validation raises and rolls the advance back.
+        """
+        self._require_admin()
+        try:
+            advance = await self.repo.advance_personal_chat_skill_pin(
+                tenant_id=self.user.tenant_id,
+                skill_id=skill_id,
+                expected_pinned_revision_id=expected_pinned_revision_id,
+            )
+        except SkillRevisionConflictError as error:
+            raise SkillRevisionConflictException(
+                "The Personal Chat binding changed after you reviewed it. "
+                "Reload the Skill and review again."
+            ) from error
+        if advance is None:
+            raise NotFoundException()
+        if advance.outcome is PersonalChatPinAdvanceOutcome.NOT_BOUND:
+            raise NotFoundException("Personal Chat has no binding for this Skill")
+        if advance.outcome is PersonalChatPinAdvanceOutcome.NOT_PUBLISHED:
+            raise BadRequestException(
+                "Personal Chat can only use published organisation Skill versions"
+            )
+        if advance.outcome is PersonalChatPinAdvanceOutcome.BLOCKED:
+            raise BadRequestException(
+                "Blocked organisation Skills cannot receive new or changed bindings"
+            )
+        if advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED:
+            await (
+                self.assistant_service.assert_personal_default_governance_context_fit()
+            )
+        return advance
 
     async def delete(self, *, skill_id: UUID) -> Skill:
         self._require_admin()

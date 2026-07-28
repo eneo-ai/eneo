@@ -2,6 +2,7 @@ from typing import Protocol
 from uuid import UUID
 
 from eneo.skills.domain.skill import (
+    PersonalChatPinAdvance,
     PublishedSkill,
     PublishedSkillSummary,
     ResolvedSkillBinding,
@@ -172,6 +173,14 @@ class SkillRepo(Protocol):
         blocked_by_user_id: UUID,
         reason: str,
     ) -> SkillExecutionBlockChange | None: ...
+
+    async def advance_personal_chat_skill_pin(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_pinned_revision_id: UUID,
+    ) -> PersonalChatPinAdvance | None: ...
 
     async def unblock_organization_skill(
         self,

@@ -239,6 +239,40 @@ test("organisation publication sends the reviewed revision", async () => {
   ]);
 });
 
+test("personal chat advance sends the reviewed pinned revision", async () => {
+  const calls = [];
+  const response = {
+    outcome: "advanced",
+    from_revision_number: 1,
+    to_revision_number: 2
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.advancePersonalChat({
+    skillId: "skill-1",
+    expected_pinned_revision_id: "revision-1"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
+      request: {
+        method: "post",
+        params: { path: { skill_id: "skill-1" } },
+        requestBody: {
+          "application/json": { expected_pinned_revision_id: "revision-1" }
+        }
+      }
+    }
+  ]);
+});
+
 test("organisation revision summaries use the shared cursor contract", async () => {
   const page = {
     items: [],

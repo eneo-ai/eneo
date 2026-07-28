@@ -458,6 +458,30 @@ class SkillPublicationChange:
     previous_is_active: bool
 
 
+class PersonalChatPinAdvanceOutcome(str, Enum):
+    """What advancing the Personal Chat pin to the published revision did.
+
+    Everything except ADVANCED is a refusal or a no-op; the caller maps each
+    to its own response. A stale reviewed revision is not an outcome — it
+    raises SkillRevisionConflictError, because it must never write.
+    """
+
+    ADVANCED = "advanced"
+    ALREADY_CURRENT = "already_current"
+    NOT_BOUND = "not_bound"
+    NOT_PUBLISHED = "not_published"
+    BLOCKED = "blocked"
+
+
+@dataclass(frozen=True)
+class PersonalChatPinAdvance:
+    outcome: PersonalChatPinAdvanceOutcome
+    from_revision_id: UUID | None = None
+    from_revision_number: int | None = None
+    to_revision_id: UUID | None = None
+    to_revision_number: int | None = None
+
+
 class SkillHasBindingsError(Exception):
     pass
 

@@ -3991,6 +3991,8 @@
   "audit_action_skill_published_description": "Logs when an exact Skill revision is approved for the organisation",
   "audit_action_skill_unpublished": "Skill Unpublished",
   "audit_action_skill_unpublished_description": "Logs when a Skill is removed from new organisation use",
+  "audit_action_skill_bindings_advanced": "Skill Binding Updated",
+  "audit_action_skill_bindings_advanced_description": "Logs when an administrator moves an existing Skill binding to the published revision",
   "audit_action_skill_deleted": "Skill Deleted",
   "audit_action_skill_deleted_description": "Logs when an unbound Skill is removed",
   "audit_category_admin_actions_description": "User management, role changes, API keys, tenant settings",
