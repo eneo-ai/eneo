@@ -18,6 +18,7 @@
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { IconKey } from "@eneo/icons/key";
   import {
+    BookOpenCheck,
     BookText,
     ChartPie,
     LayoutTemplate,
@@ -70,6 +71,7 @@
         ...(settings?.using_templates
           ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
           : []),
+        navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
         navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
         navItem("/admin/integrations", Cloud, m.integrations()),

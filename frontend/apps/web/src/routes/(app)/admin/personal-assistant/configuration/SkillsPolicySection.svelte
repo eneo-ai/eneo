@@ -10,7 +10,7 @@
     SkillBindingCatalogPage
   } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
-  import PolicySection from "./PolicySection.svelte";
+  import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type Props = {
     skillBindings: AssistantSkillBindingInput[];
