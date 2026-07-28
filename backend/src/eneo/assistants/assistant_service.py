@@ -70,6 +70,7 @@ from eneo.services.service_repo import ServiceRepository
 from eneo.skills.domain.skill import (
     AssistantSkillConfigurationProjection,
     AssistantSkillRuntimeProjection,
+    PersonalChatPinOverride,
     SkillActivationEvidenceV1,
     SkillActivationFallbackReason,
     SkillActivationMode,
@@ -760,7 +761,11 @@ class AssistantService:
             )
         return resolved_model
 
-    async def assert_personal_default_governance_context_fit(self) -> None:
+    async def assert_personal_default_governance_context_fit(
+        self,
+        *,
+        personal_chat_pin_override: PersonalChatPinOverride | None = None,
+    ) -> None:
         """Reject a candidate governance baseline that existing chats cannot run.
 
         Policy and Skill writes are staged in the request transaction before
@@ -778,6 +783,10 @@ class AssistantService:
             )
         effective_config = (
             await self.effective_config_service.resolve_personal_default()
+            if personal_chat_pin_override is None
+            else await self.effective_config_service.resolve_personal_default(
+                personal_chat_pin_override=personal_chat_pin_override
+            )
         )
         policy_plan = await self.skill_service.create_turn_plan(
             base_instructions=effective_config.enforced_prompt_text or "",

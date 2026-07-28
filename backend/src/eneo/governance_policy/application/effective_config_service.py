@@ -11,7 +11,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     resolve,
     resolve_personal_default,
 )
-from eneo.skills.domain.skill import SkillRuntimeResolution
+from eneo.skills.domain.skill import PersonalChatPinOverride, SkillRuntimeResolution
 
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
@@ -76,7 +76,11 @@ class EffectiveConfigService:
 
         return await self.resolve_personal_default()
 
-    async def resolve_personal_default(self) -> EffectiveConfig:
+    async def resolve_personal_default(
+        self,
+        *,
+        personal_chat_pin_override: PersonalChatPinOverride | None = None,
+    ) -> EffectiveConfig:
         """Resolve the current personal-default policy without an Assistant."""
 
         # A personal default assistant maps to exactly one scope today. When
@@ -124,8 +128,13 @@ class EffectiveConfigService:
         async def _load_governance_skills() -> SkillRuntimeResolution:
             if policy.id is None:
                 return SkillRuntimeResolution(eligible=(), blocked=())
+            if personal_chat_pin_override is None:
+                return await self.skill_service.resolve_governance_bindings_for_runtime(
+                    policy_id=policy.id
+                )
             return await self.skill_service.resolve_governance_bindings_for_runtime(
-                policy_id=policy.id
+                policy_id=policy.id,
+                personal_chat_pin_override=personal_chat_pin_override,
             )
 
         tenant_models = await _load_models()

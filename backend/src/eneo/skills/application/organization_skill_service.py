@@ -16,6 +16,7 @@ from eneo.skills.domain.skill import (
     PersonalChatPinAdvance,
     PersonalChatPinAdvanceOutcome,
     PersonalChatPinConfirmOutcome,
+    PersonalChatPinOverride,
     PublishedSkillProjection,
     PublishedSkillSummaryPage,
     PublishedSkillSummaryProjection,
@@ -397,12 +398,10 @@ class OrganizationSkillService:
     ) -> PersonalChatPinAdvance:
         """Move the Personal Chat pin for one Skill to its published revision.
 
-        Admin-only, in three steps sharing one transaction: the repo stages
-        the guarded write holding only the binding's own row lock, the same
-        governance fit validation as every policy save then runs with no
-        policy or Skill write locks held, and a short confirm relocks and
-        rechecks everything the validation depended on. Any refusal raises,
-        which rolls the staged write back.
+        Admin-only, in three steps sharing one transaction: the repo reads the
+        candidate and fit-input snapshot without locks, the governance fit
+        owner validates with that candidate pin, and a short confirm locks,
+        rechecks, and writes. Any refusal raises.
         """
         self._require_admin()
         try:
@@ -432,8 +431,17 @@ class OrganizationSkillService:
                 "Blocked organisation Skills cannot receive new or changed bindings"
             )
         if advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED:
-            await (
-                self.assistant_service.assert_personal_default_governance_context_fit()
+            assert (
+                advance.from_revision_id is not None
+                and advance.to_revision_id is not None
+                and stage.personal_defaults_snapshot is not None
+            )
+            await self.assistant_service.assert_personal_default_governance_context_fit(
+                personal_chat_pin_override=PersonalChatPinOverride(
+                    skill_id=skill_id,
+                    from_revision_id=advance.from_revision_id,
+                    to_revision_id=advance.to_revision_id,
+                )
             )
             assert stage.policy_id is not None and stage.policy_version is not None
             confirm = await self.repo.confirm_personal_chat_skill_pin_advance(
@@ -441,6 +449,8 @@ class OrganizationSkillService:
                 skill_id=skill_id,
                 policy_id=stage.policy_id,
                 policy_version=stage.policy_version,
+                personal_defaults_snapshot=stage.personal_defaults_snapshot,
+                expected_pinned_revision_id=expected_pinned_revision_id,
                 expected_published_revision_id=expected_published_revision_id,
             )
             if confirm is PersonalChatPinConfirmOutcome.BLOCKED:

@@ -7,6 +7,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
+from eneo.assistants.assistant_repo import AssistantRepository
 from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
@@ -30,6 +31,7 @@ from eneo.skills.domain.skill import (
     PersonalChatPinAdvanceOutcome,
     PersonalChatPinAdvanceStage,
     PersonalChatPinConfirmOutcome,
+    PersonalDefaultsSnapshot,
     PublishedSkill,
     PublishedSkillDeactivationError,
     PublishedSkillDeletionError,
@@ -1167,27 +1169,11 @@ class SkillRepoImpl:
         expected_pinned_revision_id: UUID,
         expected_published_revision_id: UUID,
     ) -> PersonalChatPinAdvanceStage | None:
-        """Stage the Personal Chat pin move while holding only the binding's
-        own row lock.
+        """Read the Personal Chat pin candidate without locks or writes.
 
-        The fit validation that follows judges the whole Personal Chat
-        baseline and can take long on a large tenant, so this phase takes no
-        policy or Skill write locks: governance saves, publication changes,
-        and emergency blocks stay unblocked while the scan runs. What keeps
-        that honest:
-
-        - the staged UPDATE's row lock serializes every binding change of
-          the policy (a binding replacement deletes this row, so it waits);
-        - the policy row version captured here is rechecked under lock by
-          ``confirm_personal_chat_skill_pin_advance``, and every policy save
-          rewrites the policy row, so an edit that commits mid-scan refuses
-          the apply instead of merging with a stale validation;
-        - publication and block state are unlocked reads here and are
-          rechecked under the Skill lock at confirm time.
-
-        The write is guarded by what the administrator reviewed: a pin or
-        published revision that no longer matches raises
-        SkillRevisionConflictError and writes nothing.
+        Confirm rechecks policy, publication, block, personal-default, and
+        binding state under the short apply's locks. A reviewed pin or
+        published revision mismatch raises SkillRevisionConflictError.
         """
         policy = (
             await self.session.execute(
@@ -1261,7 +1247,6 @@ class SkillRepoImpl:
                     GovernancePolicySkillBindings.policy_id == policy.id,
                     GovernancePolicySkillBindings.skill_id == skill_id,
                 )
-                .with_for_update(of=GovernancePolicySkillBindings)
             )
         ).one_or_none()
         if binding is None:
@@ -1283,19 +1268,12 @@ class SkillRepoImpl:
         if binding.skill_revision_id != expected_pinned_revision_id:
             raise SkillRevisionConflictError
 
-        updated = await self.session.execute(
-            sa.update(GovernancePolicySkillBindings)
-            .where(
-                GovernancePolicySkillBindings.policy_id == binding.policy_id,
-                GovernancePolicySkillBindings.skill_id == skill_id,
-                GovernancePolicySkillBindings.skill_revision_id
-                == expected_pinned_revision_id,
+        personal_defaults_snapshot = (
+            await AssistantRepository.get_personal_defaults_snapshot(
+                session=self.session,
+                tenant_id=tenant_id,
             )
-            .values(skill_revision_id=published.id)
-            .returning(GovernancePolicySkillBindings.skill_id)
         )
-        # The row lock above guarantees exactly this row; scalar_one enforces it.
-        updated.scalar_one()
         return PersonalChatPinAdvanceStage(
             advance=PersonalChatPinAdvance(
                 outcome=PersonalChatPinAdvanceOutcome.ADVANCED,
@@ -1306,6 +1284,7 @@ class SkillRepoImpl:
             ),
             policy_id=policy.id,
             policy_version=policy.policy_version,
+            personal_defaults_snapshot=personal_defaults_snapshot,
         )
 
     async def confirm_personal_chat_skill_pin_advance(
@@ -1315,19 +1294,23 @@ class SkillRepoImpl:
         skill_id: UUID,
         policy_id: UUID,
         policy_version: str,
+        personal_defaults_snapshot: PersonalDefaultsSnapshot,
+        expected_pinned_revision_id: UUID,
         expected_published_revision_id: UUID,
     ) -> PersonalChatPinConfirmOutcome:
-        """Short apply after a validated staged move: lock, recheck, bump.
+        """Lock, recheck, and apply a validated Personal Chat pin candidate.
 
-        The policy lock is taken NOWAIT because this transaction already
-        holds the binding row lock that a policy save's binding replacement
-        waits on; waiting here could deadlock, while failing fast maps to
-        the same reviewed-state conflict and a clean retry. A version
-        mismatch means a policy edit committed during the fit scan, so the
-        validation no longer describes the state being changed. Publication
-        and block state are rechecked under the Skill lock. Finally the
-        policy row is rewritten so any concurrently staged advance sees the
-        version move and refuses its own apply instead of write-skewing.
+        The personal-default snapshot covers saves of prompts, descriptions,
+        attachments, model selection, MCP server and tool selection, knowledge,
+        and Skill bindings because those paths all rewrite the Assistant row.
+        Tenant-level model and MCP catalogue changes are outside this snapshot;
+        their administrator flows own their validation.
+
+        The policy lock is NOWAIT so a concurrent policy save refuses this
+        apply instead of waiting. Publication and block state are rechecked
+        under the Skill lock, then the personal-default fleet and binding are
+        rechecked before the guarded write. The policy-row bump serializes
+        concurrent pin advances.
         """
         try:
             async with self.session.begin_nested():
@@ -1364,6 +1347,40 @@ class SkillRepoImpl:
         )
         if active_block is not None:
             return PersonalChatPinConfirmOutcome.BLOCKED
+
+        current_personal_defaults_snapshot = (
+            await AssistantRepository.get_personal_defaults_snapshot(
+                session=self.session,
+                tenant_id=tenant_id,
+            )
+        )
+        if current_personal_defaults_snapshot != personal_defaults_snapshot:
+            return PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+
+        binding_revision_id = await self.session.scalar(
+            sa.select(GovernancePolicySkillBindings.skill_revision_id)
+            .where(
+                GovernancePolicySkillBindings.policy_id == policy_id,
+                GovernancePolicySkillBindings.skill_id == skill_id,
+            )
+            .with_for_update(of=GovernancePolicySkillBindings)
+        )
+        if binding_revision_id != expected_pinned_revision_id:
+            return PersonalChatPinConfirmOutcome.POLICY_CHANGED
+
+        updated = await self.session.scalar(
+            sa.update(GovernancePolicySkillBindings)
+            .where(
+                GovernancePolicySkillBindings.policy_id == policy_id,
+                GovernancePolicySkillBindings.skill_id == skill_id,
+                GovernancePolicySkillBindings.skill_revision_id
+                == expected_pinned_revision_id,
+            )
+            .values(skill_revision_id=expected_published_revision_id)
+            .returning(GovernancePolicySkillBindings.skill_id)
+        )
+        if updated != skill_id:
+            return PersonalChatPinConfirmOutcome.POLICY_CHANGED
 
         bumped = await self.session.execute(
             sa.update(GovernancePolicies)

@@ -4,6 +4,7 @@ from uuid import UUID
 from eneo.skills.domain.skill import (
     PersonalChatPinAdvanceStage,
     PersonalChatPinConfirmOutcome,
+    PersonalDefaultsSnapshot,
     PublishedSkill,
     PublishedSkillSummary,
     ResolvedSkillBinding,
@@ -191,6 +192,8 @@ class SkillRepo(Protocol):
         skill_id: UUID,
         policy_id: UUID,
         policy_version: str,
+        personal_defaults_snapshot: PersonalDefaultsSnapshot,
+        expected_pinned_revision_id: UUID,
         expected_published_revision_id: UUID,
     ) -> PersonalChatPinConfirmOutcome: ...
 

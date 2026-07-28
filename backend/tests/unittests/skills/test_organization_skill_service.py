@@ -20,6 +20,8 @@ from eneo.skills.domain.skill import (
     PersonalChatPinAdvanceOutcome,
     PersonalChatPinAdvanceStage,
     PersonalChatPinConfirmOutcome,
+    PersonalChatPinOverride,
+    PersonalDefaultsSnapshot,
     PublishedSkillDeletionError,
     SkillAdoptionCursor,
     SkillAdoptionDrift,
@@ -800,6 +802,10 @@ def _stage(outcome, *, to_number=2):
         advance=_advance(outcome, to_number=to_number),
         policy_id=uuid4(),
         policy_version="1234",
+        personal_defaults_snapshot=PersonalDefaultsSnapshot(
+            assistant_count=1,
+            latest_change_at=None,
+        ),
     )
 
 
@@ -822,9 +828,8 @@ async def test_pin_advance_requires_the_tenant_administrator():
 async def test_pin_advance_validates_the_governed_fit_only_when_it_wrote():
     organization = _organization()
     repo = AsyncMock()
-    repo.stage_personal_chat_skill_pin_advance.return_value = _stage(
-        PersonalChatPinAdvanceOutcome.ADVANCED
-    )
+    stage = _stage(PersonalChatPinAdvanceOutcome.ADVANCED)
+    repo.stage_personal_chat_skill_pin_advance.return_value = stage
     repo.confirm_personal_chat_skill_pin_advance.return_value = (
         PersonalChatPinConfirmOutcome.CONFIRMED
     )
@@ -832,15 +837,32 @@ async def test_pin_advance_validates_the_governed_fit_only_when_it_wrote():
         organization=organization, permissions={Permission.ADMIN}, repo=repo
     )
 
+    skill_id = uuid4()
+    expected_pinned_revision_id = uuid4()
+    expected_published_revision_id = uuid4()
     advanced = await service.advance_personal_chat_binding(
-        skill_id=uuid4(),
-        expected_pinned_revision_id=uuid4(),
-        expected_published_revision_id=uuid4(),
+        skill_id=skill_id,
+        expected_pinned_revision_id=expected_pinned_revision_id,
+        expected_published_revision_id=expected_published_revision_id,
     )
     assert advanced.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
     fit = service.assistant_service.assert_personal_default_governance_context_fit
-    fit.assert_awaited_once()
-    repo.confirm_personal_chat_skill_pin_advance.assert_awaited_once()
+    fit.assert_awaited_once_with(
+        personal_chat_pin_override=PersonalChatPinOverride(
+            skill_id=skill_id,
+            from_revision_id=stage.advance.from_revision_id,
+            to_revision_id=stage.advance.to_revision_id,
+        )
+    )
+    repo.confirm_personal_chat_skill_pin_advance.assert_awaited_once_with(
+        tenant_id=service.user.tenant_id,
+        skill_id=skill_id,
+        policy_id=stage.policy_id,
+        policy_version=stage.policy_version,
+        personal_defaults_snapshot=stage.personal_defaults_snapshot,
+        expected_pinned_revision_id=expected_pinned_revision_id,
+        expected_published_revision_id=expected_published_revision_id,
+    )
 
     repo.stage_personal_chat_skill_pin_advance.return_value = _stage(
         PersonalChatPinAdvanceOutcome.ALREADY_CURRENT
@@ -869,6 +891,7 @@ async def test_pin_advance_refused_confirm_maps_to_the_conflict_contract():
     for refused in (
         PersonalChatPinConfirmOutcome.POLICY_CHANGED,
         PersonalChatPinConfirmOutcome.PUBLICATION_CHANGED,
+        PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED,
     ):
         repo.confirm_personal_chat_skill_pin_advance.return_value = refused
         with pytest.raises(

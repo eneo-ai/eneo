@@ -45,6 +45,7 @@ from eneo.files.file_models import File, FileMetadata
 from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt import Prompt
+from eneo.skills.domain.skill import PersonalDefaultsSnapshot
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
@@ -166,6 +167,32 @@ class AssistantRepository:
         self.file_content_loader = file_content_loader
         self.completion_model_repo = completion_model_repo
         self.user = user
+
+    @staticmethod
+    async def get_personal_defaults_snapshot(
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+    ) -> PersonalDefaultsSnapshot:
+        assistant_count, latest_change_at = (
+            await session.execute(
+                sa.select(
+                    sa.func.count(Assistants.id),
+                    sa.func.max(Assistants.updated_at),
+                )
+                .select_from(Assistants)
+                .join(Spaces, Assistants.space_id == Spaces.id)
+                .where(
+                    Spaces.tenant_id == tenant_id,
+                    Spaces.user_id.is_not(None),
+                    Assistants.is_default == sa.true(),
+                )
+            )
+        ).one()
+        return PersonalDefaultsSnapshot(
+            assistant_count=assistant_count,
+            latest_change_at=latest_change_at,
+        )
 
     async def _load_attachments(
         self,
