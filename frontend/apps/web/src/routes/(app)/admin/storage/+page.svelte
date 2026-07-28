@@ -112,6 +112,7 @@
       return false;
 
     deploymentPolicy = next;
+    if (currentRevision === undefined) moveTarget = next.policy.new_write_storage_target;
     if (!preserveDraft) {
       storageTarget = next.policy.new_write_storage_target;
       sessionFileLimitBytes = next.policy.session_file_limit_bytes;
@@ -277,7 +278,7 @@
   async function queueContentMoves() {
     if (
       !canEdit ||
-      objectStoreUnavailable ||
+      (moveTarget === "object_store" && objectStoreUnavailable) ||
       !validMoveLimit ||
       moveStatus !== "idle" ||
       moveActionPending !== null
@@ -947,7 +948,7 @@
               <div class="flex flex-wrap gap-3">
                 <Button
                   type="button"
-                  disabled={objectStoreUnavailable ||
+                  disabled={(moveTarget === "object_store" && objectStoreUnavailable) ||
                     !validMoveLimit ||
                     moveStatus !== "idle" ||
                     moveActionPending !== null}

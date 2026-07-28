@@ -214,7 +214,7 @@
   "storage_moves_status_paused": "Pausad",
   "storage_moves_status_running": "I gång",
   "storage_moves_store_unavailable": "Objektlagringen är inte tillgänglig",
-  "storage_moves_store_unavailable_description": "PostgreSQL har fortsatt fullt stöd. Konfigurera en kompatibel objektlagring och vänta tills den är tillgänglig innan du köar nya flyttar. Flyttar som redan har köats ligger kvar.",
+  "storage_moves_store_unavailable_description": "PostgreSQL har fortsatt fullt stöd, och flyttar till PostgreSQL kan fortfarande köas. Konfigurera en kompatibel objektlagring och vänta tills den är tillgänglig innan du köar flyttar till den. Flyttar som redan har köats ligger kvar.",
   "storage_moves_stale_title": "Flyttinställningarna ändrades i en annan session",
   "storage_moves_stale_description": "Läs in de senaste lagringsinställningarna innan du pausar eller återupptar igen.",
   "storage_moves_action_error_title": "Flyttkommandot kunde inte slutföras",
