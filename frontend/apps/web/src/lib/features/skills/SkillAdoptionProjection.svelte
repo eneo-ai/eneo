@@ -171,7 +171,7 @@
     <h2 id="organization-skill-adoption-heading" class="text-foreground text-lg font-semibold">
       {m.organization_skills_adoption_heading()}
     </h2>
-    <p class="text-muted-foreground mt-1 max-w-[70ch] text-sm leading-6">
+    <p class="text-muted-foreground mt-1 max-w-[65ch] text-sm leading-6">
       {m.organization_skills_adoption_description()}
     </p>
   </header>
@@ -205,9 +205,9 @@
       </Alert.Action>
     </Alert.Root>
   {:else if summary !== null}
-    <dl class="grid grid-cols-2 gap-x-4 gap-y-5 border-y py-4 sm:grid-cols-4">
+    <dl class="grid grid-cols-2 gap-x-6 gap-y-5 border-y py-5 sm:grid-cols-4">
       <div>
-        <dt class="text-muted-foreground text-xs font-medium">
+        <dt class="text-muted-foreground text-sm">
           {m.organization_skills_adoption_assistants_label()}
         </dt>
         <dd class="mt-1 text-xl font-semibold tabular-nums">
@@ -215,13 +215,13 @@
         </dd>
       </div>
       <div>
-        <dt class="text-muted-foreground text-xs font-medium">
+        <dt class="text-muted-foreground text-sm">
           {m.organization_skills_adoption_apps_label()}
         </dt>
         <dd class="mt-1 text-xl font-semibold tabular-nums">{summary.app_count}</dd>
       </div>
       <div>
-        <dt class="text-muted-foreground text-xs font-medium">
+        <dt class="text-muted-foreground text-sm">
           {m.organization_skills_adoption_spaces_label()}
         </dt>
         <dd class="mt-1 text-xl font-semibold tabular-nums">
@@ -229,10 +229,15 @@
         </dd>
       </div>
       <div>
-        <dt class="text-muted-foreground text-xs font-medium">
+        <dt class="text-muted-foreground text-sm">
           {m.organization_skills_adoption_behind_label()}
         </dt>
-        <dd class="mt-1 text-xl font-semibold tabular-nums">
+        <dd
+          class={[
+            "mt-1 text-xl font-semibold tabular-nums",
+            summary.behind_published_count > 0 && "text-primary"
+          ]}
+        >
           {summary.behind_published_count}
         </dd>
       </div>
@@ -256,17 +261,21 @@
           >
             {m.organization_skills_adoption_personal_chat_heading()}
           </h3>
-          <div class="mt-3 flex min-h-10 flex-wrap items-center gap-2 border-y py-3">
+          <div
+            class="mt-3 flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-y py-3"
+          >
             {#if summary.personal_chat}
               {@const personalChat = summary.personal_chat}
-              <span class="text-sm">
-                {m.organization_skills_adoption_personal_chat_pinned({
-                  version: String(personalChat.revision_number)
-                })}
-              </span>
-              <Badge variant={driftVariant(personalChat.drift)}>
-                {driftLabel(personalChat.drift)}
-              </Badge>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-sm">
+                  {m.organization_skills_adoption_personal_chat_pinned({
+                    version: String(personalChat.revision_number)
+                  })}
+                </span>
+                <Badge variant={driftVariant(personalChat.drift)}>
+                  {driftLabel(personalChat.drift)}
+                </Badge>
+              </div>
               {#if onAdvancePersonalChat !== undefined && personalChat.drift === "behind"}
                 <Button
                   variant="outline"
@@ -295,11 +304,11 @@
           >
             {m.organization_skills_adoption_revision_breakdown_heading()}
           </h3>
-          <p class="text-muted-foreground mt-1 text-xs leading-5">
+          <p class="text-muted-foreground mt-1 text-sm leading-6">
             {m.organization_skills_adoption_revision_breakdown_description()}
           </p>
-          <div class="border-border @container mt-3 border-y">
-            <Table.Root class="w-full table-fixed">
+          <div class="border-border @container mt-4 border-y">
+            <Table.Root class="w-full table-fixed [&_td]:py-3">
               <Table.Header>
                 <Table.Row>
                   <Table.Head class="w-auto">
@@ -365,7 +374,7 @@
           </p>
         {:else}
           <div class="border-border @container mt-4 border-y">
-            <Table.Root class="w-full table-fixed">
+            <Table.Root class="w-full table-fixed [&_td]:py-3">
               <Table.Header>
                 <Table.Row>
                   <Table.Head class="w-auto @4xl:w-[28%]">

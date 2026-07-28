@@ -43,7 +43,11 @@
   let executionError = $state<string | null>(null);
   let refreshWarning = $state(false);
   let restoreAnnouncement = $state("");
-  let advancePinned = $state<{ revisionId: string; revisionNumber: number } | null>(null);
+  let advancePinned = $state<{
+    revisionId: string;
+    revisionNumber: number;
+    publishedRevisionId: string;
+  } | null>(null);
   let advanceSaving = $state(false);
   let advanceError = $state<string | null>(null);
   let advanceAnnouncement = $state("");
@@ -278,7 +282,8 @@
     try {
       const advance = await data.eneo.skills.organization.advancePersonalChat({
         skillId: data.skill.id,
-        expected_pinned_revision_id: pinned.revisionId
+        expected_pinned_revision_id: pinned.revisionId,
+        expected_published_revision_id: pinned.publishedRevisionId
       });
       movedToVersion = advance.to_revision_number;
     } catch (error) {
@@ -563,9 +568,14 @@
           skillId={data.skill.id}
           initialPage={adoptionPage}
           {getOrganizationSkillAdoption}
-          onAdvancePersonalChat={data.skill.published_revision_number !== null &&
-          executionBlock.block === null
-            ? (pinned) => (advancePinned = pinned)
+          onAdvancePersonalChat={data.published !== null && executionBlock.block === null
+            ? (pinned) => {
+                if (data.published === null) return;
+                advancePinned = {
+                  ...pinned,
+                  publishedRevisionId: data.published.revision_id
+                };
+              }
             : undefined}
         />
         <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>

@@ -183,6 +183,11 @@ describe("organisation Skill detail page", () => {
       published_revision_number: 2,
       publication_state: "published" as const
     };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
     const behindAdoption = {
       ...adoptionPage(),
       summary: {
@@ -197,7 +202,7 @@ describe("organisation Skill detail page", () => {
     render(OrganizationSkillDetailPage, {
       data: {
         skill,
-        published: publishedSkill(),
+        published,
         revisionPage: {
           items: [],
           count: 0,
@@ -244,7 +249,8 @@ describe("organisation Skill detail page", () => {
     await vi.waitFor(() =>
       expect(advancePersonalChat).toHaveBeenCalledWith({
         skillId: "skill-1",
-        expected_pinned_revision_id: "revision-1"
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
       })
     );
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
@@ -265,6 +271,11 @@ describe("organisation Skill detail page", () => {
       published_revision_number: 2,
       publication_state: "published" as const
     };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
     const behindAdoption = {
       ...adoptionPage(),
       summary: {
@@ -279,7 +290,7 @@ describe("organisation Skill detail page", () => {
     render(OrganizationSkillDetailPage, {
       data: {
         skill,
-        published: publishedSkill(),
+        published,
         revisionPage: {
           items: [],
           count: 0,
