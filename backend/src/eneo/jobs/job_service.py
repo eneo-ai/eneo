@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import event
 
+from eneo.jobs.durable_dispatch import build_knowledge_dispatch_params
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Job, JobInDb, JobUpdate, Task
 from eneo.jobs.job_repo import JobRepository
@@ -42,7 +43,7 @@ class JobService:
 
         return job_in_db
 
-    async def queue_restart_safe_job(
+    async def queue_durable_knowledge_job(
         self,
         task: Task,
         *,
@@ -52,10 +53,12 @@ class JobService:
     ) -> JobInDb:
         if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):
             raise ValueError(f"Task {task.value} does not support durable dispatch")
+        if task_params.user_id != self.user.id:
+            raise ValueError("Durable knowledge job user does not match service user")
 
         envelope = build_dispatch_envelope(task, task_params)
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
-        job_in_db = await self.job_repo.add_restart_safe_job(
+        job_in_db = await self.job_repo.add_durable_knowledge_job(
             job,
             job_id=job_id or uuid4(),
             dispatch_envelope=envelope,
@@ -63,22 +66,44 @@ class JobService:
 
         async def dispatch_after_commit() -> None:
             try:
-                await job_manager.enqueue(task, job_in_db.id, task_params)
+                dispatch_params = build_knowledge_dispatch_params(
+                    task_params, job_in_db.id
+                )
+                await job_manager.enqueue(task, job_in_db.id, dispatch_params)
             except Exception:
                 logger.exception(
                     "Immediate durable job dispatch failed",
                     extra={"job_id": str(job_in_db.id), "task": task.value},
                 )
 
-        def schedule_dispatch(_session: object) -> None:
-            asyncio.get_running_loop().create_task(dispatch_after_commit())
+        session = self.job_repo.delegate.session.sync_session
+        outer_committed = False
+        active = True
 
-        event.listen(
-            self.job_repo.delegate.session.sync_session,
-            "after_commit",
-            schedule_dispatch,
-            once=True,
-        )
+        def after_commit(committed_session: object) -> None:
+            nonlocal outer_committed
+            if active and not session.in_nested_transaction():
+                outer_committed = True
+
+        def remove_listeners() -> None:
+            if event.contains(session, "after_commit", after_commit):
+                event.remove(session, "after_commit", after_commit)
+            if event.contains(session, "after_transaction_end", after_transaction_end):
+                event.remove(session, "after_transaction_end", after_transaction_end)
+
+        def after_transaction_end(_session: object, transaction: object) -> None:
+            nonlocal active
+            if getattr(transaction, "parent", None) is not None:
+                return
+
+            active = False
+            loop = asyncio.get_running_loop()
+            if outer_committed:
+                loop.create_task(dispatch_after_commit())
+            loop.call_soon(remove_listeners)
+
+        event.listen(session, "after_commit", after_commit)
+        event.listen(session, "after_transaction_end", after_transaction_end)
         return job_in_db
 
     async def set_status(self, job_id: UUID, status: Status):

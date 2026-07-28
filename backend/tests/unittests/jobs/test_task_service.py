@@ -121,7 +121,7 @@ async def test_validate_file_size_rejects_policy_maximum_plus_one(
 async def test_queue_upload_file_cleans_up_on_queue_failure(
     task_service, job_service, tmp_upload_dir
 ):
-    job_service.queue_restart_safe_job.side_effect = RuntimeError("queue down")
+    job_service.queue_durable_knowledge_job.side_effect = RuntimeError("queue down")
 
     with pytest.raises(RuntimeError, match="queue down"):
         await task_service.queue_upload_file(
@@ -139,7 +139,7 @@ async def test_queue_upload_file_cleans_up_on_queue_failure(
 async def test_queue_upload_file_preserves_file_on_success(
     task_service, job_service, tmp_upload_dir
 ):
-    job_service.queue_restart_safe_job.return_value = MagicMock()
+    job_service.queue_durable_knowledge_job.return_value = MagicMock()
 
     await task_service.queue_upload_file(
         group_id=uuid4(),
@@ -152,7 +152,7 @@ async def test_queue_upload_file_preserves_file_on_success(
     remaining = [path for path in tmp_upload_dir.rglob("*") if path.is_file()]
     assert len(remaining) == 1
     assert remaining[0].read_bytes() == b"test data"
-    call = job_service.queue_restart_safe_job.await_args
+    call = job_service.queue_durable_knowledge_job.await_args
     assert call is not None
     params = call.kwargs["task_params"]
     assert "filepath" not in params.model_dump()

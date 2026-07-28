@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from arq.jobs import Job as ArqJob
 from arq.jobs import JobStatus
 
 from eneo.database.database import sessionmanager
@@ -26,6 +27,7 @@ from eneo.jobs.task_models import (
     Transcription,
     UploadInfoBlob,
     build_dispatch_envelope,
+    validate_dispatch_envelope,
 )
 from eneo.main.models import Status
 
@@ -52,9 +54,10 @@ async def _insert_stale_job(
     status: Status = Status.QUEUED,
     attempted_at: datetime | None = None,
     job_id: UUID | None = None,
+    params: UploadInfoBlob | Transcription | None = None,
 ) -> UUID:
     job_id = job_id or uuid4()
-    params = _params(task, user_id)
+    params = params or _params(task, user_id)
     values = {
         "id": job_id,
         "user_id": user_id,
@@ -71,7 +74,7 @@ async def _insert_stale_job(
     return job_id
 
 
-async def test_restart_safe_enqueue_waits_for_commit(admin_user) -> None:
+async def test_durable_enqueue_waits_for_commit(admin_user) -> None:
     params = _params(Task.UPLOAD_FILE, admin_user.id)
     await job_manager.init()
 
@@ -79,7 +82,7 @@ async def test_restart_safe_enqueue_waits_for_commit(admin_user) -> None:
         async with sessionmanager.session() as session:
             async with session.begin():
                 service = JobService(admin_user, JobRepository(session))
-                job = await service.queue_restart_safe_job(
+                job = await service.queue_durable_knowledge_job(
                     Task.UPLOAD_FILE,
                     name=params.filename,
                     task_params=params,
@@ -95,22 +98,74 @@ async def test_restart_safe_enqueue_waits_for_commit(admin_user) -> None:
         await job_manager.close()
 
 
-async def test_redispatch_recovers_lost_delivery_and_advances_attempt(
-    async_session, admin_user
+@pytest.mark.parametrize("task", [Task.UPLOAD_FILE, Task.TRANSCRIPTION])
+async def test_redispatch_recovers_lost_delivery_with_real_redis(
+    async_session, admin_user, task: Task
 ) -> None:
+    params = _params(task, admin_user.id)
     job_id = await _insert_stale_job(
-        async_session, task=Task.UPLOAD_FILE, user_id=admin_user.id
+        async_session,
+        task=task,
+        user_id=admin_user.id,
+        params=params,
     )
-    enqueue = AsyncMock(return_value=None)
+    await job_manager.init()
+    assert await job_manager.get_job_status(job_id) == JobStatus.not_found
 
-    result = await redispatch_stale_jobs(async_session, enqueue=enqueue)
+    assert job_manager._redis is not None
+    arq_job = ArqJob(str(job_id), redis=job_manager._redis)
+    try:
+        result = await redispatch_stale_jobs(async_session, enqueue=job_manager.enqueue)
+        assert await arq_job.status() == JobStatus.queued
+        info = await arq_job.info()
+        assert info is not None
+        assert info.function == task.value
+        assert arq_job.job_id == str(job_id)
+        assert len(info.args) == 1
+        dispatched_params = info.args[0]
+        persisted = await async_session.scalar(
+            sa.select(Jobs.dispatch_envelope).where(Jobs.id == job_id)
+        )
+        envelope = validate_dispatch_envelope(persisted)
+        assert envelope.task == task
+        assert isinstance(dispatched_params, (UploadInfoBlob, Transcription))
+        assert type(dispatched_params) is type(params)
+        assert dispatched_params.model_dump() == envelope.params.model_dump()
+        assert getattr(dispatched_params, "filepath") == str(job_staging_path(job_id))
+    finally:
+        await job_manager.close()
 
     assert result.claimed == 1
-    enqueue.assert_awaited_once()
+    assert result.enqueued == 1
     attempted_at = await async_session.scalar(
         sa.select(Jobs.dispatch_attempted_at).where(Jobs.id == job_id)
     )
     assert attempted_at is not None
+
+
+async def test_redispatch_rejects_envelope_user_mismatch(
+    async_session, admin_user
+) -> None:
+    mismatched_params = _params(Task.UPLOAD_FILE, uuid4())
+    job_id = await _insert_stale_job(
+        async_session,
+        task=Task.UPLOAD_FILE,
+        user_id=admin_user.id,
+        envelope=build_dispatch_envelope(
+            Task.UPLOAD_FILE, mismatched_params
+        ).model_dump(mode="json"),
+    )
+    enqueue = AsyncMock()
+
+    result = await redispatch_stale_jobs(async_session, enqueue=enqueue)
+
+    assert result.failed == 1
+    enqueue.assert_not_awaited()
+    reason = await async_session.scalar(
+        sa.select(Jobs.result_location).where(Jobs.id == job_id)
+    )
+    assert reason is not None
+    assert "user does not match" in reason
 
 
 async def test_redispatch_page_progress_and_cross_task_fairness(

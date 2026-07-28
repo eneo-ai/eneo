@@ -39,7 +39,7 @@ class JobManager:
         await self._redis.aclose()
         self._redis = None
 
-    async def enqueue(self, task: Task, job_id: UUID, params: TaskParams):
+    async def enqueue(self, task: Task, job_id: UUID, params: TaskParams) -> Job | None:
         if self._redis is None:
             raise NotReadyException("Job manager is not initialized!")
 

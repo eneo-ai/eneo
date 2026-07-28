@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg2
 import pytest
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.dialects import postgresql
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
+from eneo.jobs.durable_dispatch import stale_dispatch_statement
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -83,24 +86,12 @@ def test_durable_dispatch_migration_round_trip_and_query_plan(
     try:
         with connection.cursor() as cursor:
             cursor.execute("SET enable_seqscan = off")
-            cursor.execute(
-                """
-                EXPLAIN
-                SELECT id
-                FROM jobs
-                WHERE status = 'queued'
-                  AND dispatch_envelope IS NOT NULL
-                  AND task IN ('upload_info_blob', 'transcription')
-                  AND created_at <= now() - interval '5 minutes'
-                  AND (
-                    dispatch_attempted_at IS NULL
-                    OR dispatch_attempted_at <= now() - interval '5 minutes'
-                  )
-                ORDER BY dispatch_attempted_at ASC NULLS FIRST, id ASC
-                LIMIT 50
-                FOR UPDATE SKIP LOCKED
-                """
+            production_query = stale_dispatch_statement(datetime.now(timezone.utc))
+            compiled_query = production_query.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
             )
+            cursor.execute(f"EXPLAIN {compiled_query}")
             plan = "\n".join(str(row[0]) for row in cursor.fetchall())
         assert _INDEX in plan
     finally:

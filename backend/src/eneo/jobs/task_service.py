@@ -121,7 +121,7 @@ class TaskService:
                 )
 
             # Set name of the job to the filename being processed
-            job = await self.job_service.queue_restart_safe_job(
+            job = await self.job_service.queue_durable_knowledge_job(
                 task_type,
                 name=filename,
                 task_params=params,

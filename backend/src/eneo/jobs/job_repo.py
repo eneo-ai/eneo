@@ -25,7 +25,7 @@ class JobRepository:
     async def add_job(self, job: Job):
         return await self.delegate.add(job)
 
-    async def add_restart_safe_job(
+    async def add_durable_knowledge_job(
         self,
         job: Job,
         *,

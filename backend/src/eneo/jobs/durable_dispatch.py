@@ -4,12 +4,19 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import sqlalchemy as sa
+from arq.jobs import Job as ArqJob
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.job_table import Jobs
 from eneo.jobs.job_models import Task
-from eneo.jobs.task_models import TaskParams, validate_dispatch_envelope
+from eneo.jobs.job_staging import job_staging_path
+from eneo.jobs.task_models import (
+    TaskParams,
+    Transcription,
+    UploadInfoBlob,
+    validate_dispatch_envelope,
+)
 from eneo.main.logging import get_logger
 from eneo.main.models import Status
 
@@ -18,7 +25,7 @@ logger = get_logger(__name__)
 DISPATCH_PAGE_SIZE = 50
 DISPATCH_STALE_AFTER = timedelta(minutes=5)
 _DURABLE_TASKS = (Task.UPLOAD_FILE.value, Task.TRANSCRIPTION.value)
-Enqueue = Callable[[Task, UUID, TaskParams], Awaitable[object]]
+Enqueue = Callable[[Task, UUID, TaskParams], Awaitable[ArqJob | None]]
 
 
 @dataclass(frozen=True)
@@ -28,15 +35,20 @@ class RedispatchResult:
     failed: int
 
 
-async def redispatch_stale_jobs(
-    session: AsyncSession,
-    *,
-    enqueue: Enqueue,
-    now: datetime | None = None,
-) -> RedispatchResult:
-    attempted_at = now or datetime.now(timezone.utc)
+def build_knowledge_dispatch_params(
+    params: UploadInfoBlob | Transcription, job_id: UUID
+) -> UploadInfoBlob | Transcription:
+    payload = params.model_copy()
+    # Remove after the next release once the ARQ queue TTL and rollback window pass.
+    object.__setattr__(payload, "filepath", str(job_staging_path(job_id)))
+    return payload
+
+
+def stale_dispatch_statement(
+    attempted_at: datetime,
+) -> sa.Select[tuple[Jobs]]:
     stale_before = attempted_at - DISPATCH_STALE_AFTER
-    statement = (
+    return (
         sa.select(Jobs)
         .where(Jobs.status == Status.QUEUED.value)
         .where(Jobs.dispatch_envelope.is_not(None))
@@ -52,6 +64,16 @@ async def redispatch_stale_jobs(
         .limit(DISPATCH_PAGE_SIZE)
         .with_for_update(skip_locked=True)
     )
+
+
+async def redispatch_stale_jobs(
+    session: AsyncSession,
+    *,
+    enqueue: Enqueue,
+    now: datetime | None = None,
+) -> RedispatchResult:
+    attempted_at = now or datetime.now(timezone.utc)
+    statement = stale_dispatch_statement(attempted_at)
     jobs = list((await session.scalars(statement)).all())
     for job in jobs:
         job.dispatch_attempted_at = attempted_at
@@ -79,7 +101,8 @@ async def redispatch_stale_jobs(
             )
             continue
 
-        result = await enqueue(task, job.id, envelope.params)
+        dispatch_params = build_knowledge_dispatch_params(envelope.params, job.id)
+        result = await enqueue(task, job.id, dispatch_params)
         if result is not None:
             enqueued += 1
 

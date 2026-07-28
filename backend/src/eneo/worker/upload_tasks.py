@@ -18,6 +18,14 @@ def _remove_file(filepath: Path):
         os.remove(filepath)
 
 
+def _job_file_path(job_id: UUID, params: UploadInfoBlob | Transcription) -> Path:
+    # Remove after the next release once the ARQ queue TTL and rollback window pass.
+    legacy_path = getattr(params, "filepath", None)
+    if isinstance(legacy_path, str) and legacy_path.strip():
+        return Path(legacy_path)
+    return job_staging_path(job_id)
+
+
 async def transcription_task(
     *,
     job_id: UUID,
@@ -26,7 +34,7 @@ async def transcription_task(
 ):
     task_manager = container.task_manager(job_id=job_id)
     async with task_manager.set_status_on_exception():
-        filepath = job_staging_path(job_id)
+        filepath = _job_file_path(job_id, params)
 
         # Define cleanup function
         task_manager.cleanup_func = lambda: _remove_file(filepath)
@@ -78,7 +86,7 @@ async def upload_info_blob_task(
 ):
     task_manager = container.task_manager(job_id=job_id)
     async with task_manager.set_status_on_exception():
-        filepath = job_staging_path(job_id)
+        filepath = _job_file_path(job_id, params)
 
         # Define cleanup function
         task_manager.cleanup_func = lambda: _remove_file(filepath)
