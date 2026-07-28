@@ -3455,7 +3455,7 @@
   "organization_skills_slug_label": "Identifierare",
   "organization_skills_published_at_label": "Först publicerad",
   "organization_skills_publication_heading": "Publicering",
-  "organization_skills_publication_description": "Pågående arbete och godkänt innehåll hanteras separat så att ogranskade ändringar inte når användare obemärkt.",
+  "organization_skills_publication_description": "Pågående arbete och godkänt innehåll hanteras separat så att ogranskade ändringar aldrig når användare av misstag.",
   "organization_skills_current_revision_label": "Aktuell version",
   "organization_skills_approved_revision_label": "Godkänd version",
   "organization_skills_not_published": "Inte publicerad",
