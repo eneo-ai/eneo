@@ -14,6 +14,8 @@
   type AdoptionResource = SkillAdoptionProjectionPagePublic["items"][number];
   type AdoptionDrift = AdoptionResource["drift"];
 
+  type PersonalChatPin = { revisionId: string; revisionNumber: number };
+
   type Props = {
     skillId: string;
     initialPage: SkillAdoptionProjectionPagePublic | null;
@@ -23,6 +25,7 @@
       skillId: string,
       options: { limit: number; cursor: string | null }
     ) => Promise<SkillAdoptionProjectionPagePublic>;
+    onAdvancePersonalChat?: (pinned: PersonalChatPin) => void;
   };
 
   let {
@@ -30,7 +33,8 @@
     initialPage,
     initialLoading = false,
     initialError = false,
-    getOrganizationSkillAdoption
+    getOrganizationSkillAdoption,
+    onAdvancePersonalChat
   }: Props = $props();
 
   let observedSkillId = untrack(() => skillId);
@@ -254,14 +258,28 @@
           </h3>
           <div class="mt-3 flex min-h-10 flex-wrap items-center gap-2 border-y py-3">
             {#if summary.personal_chat}
+              {@const personalChat = summary.personal_chat}
               <span class="text-sm">
                 {m.organization_skills_adoption_personal_chat_pinned({
-                  version: String(summary.personal_chat.revision_number)
+                  version: String(personalChat.revision_number)
                 })}
               </span>
-              <Badge variant={driftVariant(summary.personal_chat.drift)}>
-                {driftLabel(summary.personal_chat.drift)}
+              <Badge variant={driftVariant(personalChat.drift)}>
+                {driftLabel(personalChat.drift)}
               </Badge>
+              {#if onAdvancePersonalChat !== undefined && personalChat.drift === "behind"}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() =>
+                    onAdvancePersonalChat({
+                      revisionId: personalChat.revision_id,
+                      revisionNumber: personalChat.revision_number
+                    })}
+                >
+                  {m.organization_skills_adoption_personal_chat_advance_action()}
+                </Button>
+              {/if}
             {:else}
               <span class="text-muted-foreground text-sm">
                 {m.organization_skills_adoption_personal_chat_not_pinned()}
