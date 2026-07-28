@@ -9,8 +9,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from eneo.skills.presentation.skill_models import (
-    SkillBindingReferenceInput,
-    SkillBindingSummary,
+    AssistantSkillBindingInput,
+    AssistantSkillBindingSummary,
 )
 
 
@@ -49,8 +49,8 @@ class PromptEnforcementInput(BaseModel):
 
 
 class SkillsPolicyInput(BaseModel):
-    bindings: list[SkillBindingReferenceInput] = Field(
-        default_factory=lambda: list[SkillBindingReferenceInput]()
+    bindings: list[AssistantSkillBindingInput] = Field(
+        default_factory=lambda: list[AssistantSkillBindingInput]()
     )
 
 
@@ -94,7 +94,7 @@ class PromptEnforcementPublic(BaseModel):
 
 
 class SkillsPolicyPublic(BaseModel):
-    bindings: list[SkillBindingSummary]
+    bindings: list[AssistantSkillBindingSummary]
 
 
 class GovernancePolicyPublic(BaseModel):

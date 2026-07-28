@@ -7,6 +7,7 @@
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
+  import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { Info } from "lucide-svelte";
   import { tick } from "svelte";
@@ -99,8 +100,7 @@
       await invalidate("space:skills");
     } catch (error) {
       availabilityChecked = previousValue;
-      const failure = error as { message?: string };
-      statusError = failure.message ?? m.skills_library_status_error();
+      statusError = getErrorMessage(error, m.skills_library_status_error());
     } finally {
       statusSaving = false;
     }

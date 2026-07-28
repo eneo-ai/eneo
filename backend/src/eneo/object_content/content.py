@@ -24,6 +24,21 @@ class StorageKind(StrEnum):
     OBJECT_STORE = "object_store"
 
 
+class ContentMoveState(StrEnum):
+    PENDING = "pending"
+    TARGET_VERIFIED = "target_verified"
+    FAILED = "failed"
+
+
+class ContentMoveFailureCode(StrEnum):
+    STORE_UNAVAILABLE = "store_unavailable"
+    TARGET_TOO_LARGE = "target_too_large"
+    SOURCE_MISSING = "source_missing"
+    SOURCE_CORRUPT = "source_corrupt"
+    TARGET_CORRUPT = "target_corrupt"
+    CONTENT_INELIGIBLE = "content_ineligible"
+
+
 class ContentAccessClass(StrEnum):
     PRIVATE_RESOURCE = "private_resource"
     PUBLIC_IMMUTABLE = "public_immutable"

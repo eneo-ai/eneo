@@ -18,6 +18,7 @@ from eneo.sessions.session import SessionInDB
 
 
 def test_non_streaming_conversation_response_includes_mcp_references():
+    question_id = uuid4()
     reference = McpToolReference(
         id=uuid4(),
         tool_call_id="call_1",
@@ -36,10 +37,12 @@ def test_non_streaming_conversation_response_includes_mcp_references():
         answer="Answer",
         info_blobs=[],
         tools=UseTools(assistants=[]),
+        question_id=question_id,
         mcp_tool_references=[reference],
     )
 
     assert len(response.mcp_tool_references) == 1
+    assert response.id == question_id
     assert response.mcp_tool_references[0].id == reference.id
     assert response.mcp_tool_references[0].content == "resource content"
 

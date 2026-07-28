@@ -4,7 +4,6 @@ from uuid import UUID
 
 from eneo.main.exceptions import (
     BadRequestException,
-    NameCollisionException,
     NotFoundException,
     SkillRevisionConflictException,
     UnauthorizedException,
@@ -16,7 +15,6 @@ from eneo.skills.domain.skill import (
     AssistantSkillBindingReplacement,
     NormalizedSkillContent,
     PublishedSkillDeactivationError,
-    PublishedSkillDeletionError,
     ResolvedSkillBinding,
     Skill,
     SkillActivationMode,
@@ -28,15 +26,12 @@ from eneo.skills.domain.skill import (
     SkillExecutionBlock,
     SkillExecutionBlockedException,
     SkillExecutionReference,
-    SkillHasActiveAppRunsError,
-    SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
     SkillRuntimeResolution,
-    SkillSlugConflictError,
     SkillStatusChange,
     SkillTurnPlan,
     compose_skill_instructions,
@@ -190,20 +185,15 @@ class SkillService:
             description=description,
             instructions=instructions,
         )
-        try:
-            return await self.repo.create(
-                space_id=space_id,
-                slug=normalized_slug,
-                display_name=content.display_name,
-                description=content.description,
-                instructions=content.instructions,
-                content_digest=content.content_digest,
-                created_by_user_id=self.user.id,
-            )
-        except SkillSlugConflictError as error:
-            raise NameCollisionException(
-                f"A Skill with slug '{normalized_slug}' already exists in this Space"
-            ) from error
+        return await self.repo.create(
+            space_id=space_id,
+            slug=normalized_slug,
+            display_name=content.display_name,
+            description=content.description,
+            instructions=content.instructions,
+            content_digest=content.content_digest,
+            created_by_user_id=self.user.id,
+        )
 
     async def create_revision(
         self,
@@ -376,22 +366,7 @@ class SkillService:
             raise UnauthorizedException(
                 "You do not have permission to delete this Skill"
             )
-        try:
-            deleted = await self.repo.delete(skill_id=skill.id)
-        except PublishedSkillDeletionError as error:
-            raise NameCollisionException(
-                "Previously published Skills are retained for audit history "
-                "and cannot be deleted."
-            ) from error
-        except SkillHasActiveAppRunsError as error:
-            raise NameCollisionException(
-                "This Skill is required by a queued or running App run. "
-                "Wait for it to finish before deleting the Skill."
-            ) from error
-        except SkillHasBindingsError as error:
-            raise NameCollisionException(
-                "This Skill is still attached. Remove every binding before deleting it."
-            ) from error
+        deleted = await self.repo.delete(skill_id=skill.id)
         if deleted is None:
             raise NotFoundException()
         return deleted
@@ -516,6 +491,25 @@ class SkillService:
             for position, reference in enumerate(references)
         ]
 
+    @classmethod
+    def _mode_changed_retained_references(
+        cls,
+        *,
+        retained_by_reference: dict[SkillBindingReference, ResolvedSkillBinding],
+        existing: list[ResolvedSkillBinding],
+        requested_modes: dict[UUID, SkillActivationMode],
+    ) -> list[SkillBindingReference]:
+        existing_by_reference = {
+            cls._binding_reference(binding): binding for binding in existing
+        }
+        return [
+            reference
+            for reference in retained_by_reference
+            if reference.skill_id in requested_modes
+            and requested_modes[reference.skill_id]
+            is not existing_by_reference[reference].activation_mode
+        ]
+
     async def _resolve_resource_references(
         self,
         *,
@@ -559,17 +553,12 @@ class SkillService:
         )
         # Resolution holds the Skill rows FOR SHARE, so this read observes a
         # concurrent execution block that acquired FOR UPDATE first.
-        existing_by_reference = {
-            self._binding_reference(binding): binding for binding in existing
-        }
         requested_modes = requested_modes or {}
-        mode_changed_retained_references = [
-            reference
-            for reference in retained_by_reference
-            if reference.skill_id in requested_modes
-            and requested_modes[reference.skill_id]
-            is not existing_by_reference[reference].activation_mode
-        ]
+        mode_changed_retained_references = self._mode_changed_retained_references(
+            retained_by_reference=retained_by_reference,
+            existing=existing,
+            requested_modes=requested_modes,
+        )
         await self._reject_blocked_references(
             tenant_id=tenant_id,
             references=[*new_references, *mode_changed_retained_references],
@@ -594,6 +583,7 @@ class SkillService:
         organization_space_id: UUID,
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
+        requested_modes: dict[UUID, SkillActivationMode] | None = None,
     ) -> list[ResolvedSkillBinding]:
         await self._validate_reference_count(
             tenant_id=self.user.tenant_id, references=references
@@ -614,14 +604,21 @@ class SkillService:
         )
         # Resolution holds the Skill rows FOR SHARE, so this read observes a
         # concurrent execution block that acquired FOR UPDATE first.
+        requested_modes = requested_modes or {}
+        mode_changed_retained_references = self._mode_changed_retained_references(
+            retained_by_reference=retained_by_reference,
+            existing=existing,
+            requested_modes=requested_modes,
+        )
         await self._reject_blocked_references(
             tenant_id=self.user.tenant_id,
-            references=new_references,
+            references=[*new_references, *mode_changed_retained_references],
         )
         return self._order_resolved_bindings(
             references=references,
             resolved_groups=(list(retained_by_reference.values()), published),
             existing=existing,
+            requested_modes=requested_modes,
             missing_error=BadRequestException(
                 "Personal Chat can only use published organisation Skill versions"
             ),
@@ -805,7 +802,7 @@ class SkillService:
         *,
         policy_id: UUID,
         organization_space_id: UUID,
-        references: list[SkillBindingReference],
+        intents: list[SkillBindingIntent],
     ) -> list[ResolvedSkillBinding]:
         if self.user.active_api_key is not None:
             raise UnauthorizedException("Skill policy changes require a session token")
@@ -816,10 +813,17 @@ class SkillService:
                 "Governance Skills must belong to this tenant's organisation Space"
             )
         existing = await self.repo.list_policy_bindings(policy_id=policy_id)
+        references = [intent.reference for intent in intents]
+        requested_modes = {
+            intent.reference.skill_id: intent.activation_mode
+            for intent in intents
+            if intent.activation_mode is not None
+        }
         resolved = await self._resolve_governance_references(
             organization_space_id=organization_space_id,
             references=references,
             existing=existing,
+            requested_modes=requested_modes,
         )
         await self.repo.replace_policy_bindings(
             policy_id=policy_id,

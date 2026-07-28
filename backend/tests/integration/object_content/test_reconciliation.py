@@ -13,6 +13,7 @@ from botocore.config import Config
 from botocore.session import get_session
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.sql.base import Executable
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.files_table import Files
@@ -1147,6 +1148,104 @@ async def test_publication_reservation_is_not_an_inventory_observation(
             reservation.object_key,
         )
 
+        assert completed is True
+        assert candidate is not None
+        assert candidate.completed_observations == 0
+
+
+@pytest.mark.asyncio
+async def test_known_orphan_waits_for_a_cycle_started_after_registration(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    object_key = f"v1/known-former/{uuid4().hex}"
+    size_bytes = 19
+
+    async with (
+        object_content_database.session() as registration_session,
+        registration_session.begin(),
+    ):
+        transaction_started_at = await registration_session.scalar(select(func.now()))
+        assert transaction_started_at is not None
+
+        registration_boundary = asyncio.Event()
+        allow_registration = asyncio.Event()
+        original_scalar = registration_session.scalar
+        original_execute = registration_session.execute
+
+        async def scalar_after_boundary(statement: Executable):
+            result = await original_scalar(statement)
+            if "clock_timestamp" in str(statement):
+                registration_boundary.set()
+                await allow_registration.wait()
+            return result
+
+        async def execute_after_boundary(statement: Executable):
+            if "INSERT INTO object_content_orphan_candidates" in str(statement):
+                registration_boundary.set()
+                await allow_registration.wait()
+            return await original_execute(statement)
+
+        monkeypatch.setattr(registration_session, "scalar", scalar_after_boundary)
+        monkeypatch.setattr(registration_session, "execute", execute_after_boundary)
+
+        registration_repository = ObjectContentReconciliationRepository(
+            registration_session
+        )
+        registration = asyncio.create_task(
+            registration_repository.register_known_orphan(
+                object_key=object_key,
+                size_bytes=size_bytes,
+                orphan_grace_seconds=1,
+            )
+        )
+        await registration_boundary.wait()
+
+        async with object_content_database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            previous_cursor = await repository.object_inventory_cursor()
+            completed = await repository.record_object_page(
+                cursor=previous_cursor,
+                objects=(),
+                next_token=None,
+                orphan_grace_seconds=1,
+            )
+            assert completed is True
+
+        async with object_content_database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            cursor = await repository.object_inventory_cursor()
+            completed = await repository.record_object_page(
+                cursor=cursor,
+                objects=(),
+                next_token="after-known-former-key",
+                orphan_grace_seconds=1,
+            )
+            assert completed is False
+
+        allow_registration.set()
+        await registration
+        candidate = await registration_session.get(
+            ObjectContentOrphanCandidates,
+            object_key,
+            with_for_update=True,
+        )
+        assert candidate is not None
+        assert candidate.last_observed_at > cursor.cycle_started_at
+        candidate.eligible_after = transaction_started_at - timedelta(seconds=1)
+        candidate.lease_until = transaction_started_at - timedelta(seconds=1)
+
+    async with object_content_database.session() as session, session.begin():
+        repository = ObjectContentReconciliationRepository(session)
+        cursor = await repository.object_inventory_cursor()
+        assert cursor.continuation_token == "after-known-former-key"
+        completed = await repository.record_object_page(
+            cursor=cursor,
+            objects=(),
+            next_token=None,
+            orphan_grace_seconds=1,
+        )
+        candidate = await session.get(ObjectContentOrphanCandidates, object_key)
         assert completed is True
         assert candidate is not None
         assert candidate.completed_observations == 0

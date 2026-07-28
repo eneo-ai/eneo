@@ -14,6 +14,7 @@ Scope enforcement defaults to True (env flag + feature flag fail-closed).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from io import BytesIO
 from uuid import UUID, uuid4
 
@@ -176,6 +177,7 @@ async def _seed_info_blob(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 group_id=UUID(group_id),
+                content_hash=sha256(text.encode("utf-8")).digest(),
             )
         )
     return str(blob.id)

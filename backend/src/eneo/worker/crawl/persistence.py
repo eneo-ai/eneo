@@ -13,15 +13,24 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from typing import TYPE_CHECKING, Any, cast
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from dependency_injector import providers
 from typing_extensions import TypedDict
 
+from eneo.admin.quota_service import ensure_quota_capacity
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import (
+    InfoBlobs,
+    InfoBlobVersionState,
+    active_info_blob_version,
+)
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 from eneo.embedding_models.domain.chunking import build_text_splitter
 from eneo.info_blobs.info_blob import InfoBlobChunk
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.worker.crawl_context import (
@@ -79,6 +88,7 @@ async def persist_batch(
     ctx: CrawlContext,
     embedding_model: EmbeddingModelSpec | None,
     container: "Container",
+    existing_publications: dict[str, tuple[bytes, UUID]] | None = None,
 ) -> tuple[int, int, list[str], dict[str, list[str]]]:
     """
     Persist a batch of pages using the TWO-PHASE pattern.
@@ -96,9 +106,9 @@ async def persist_batch(
     PHASE 2 (Short-lived Session - ~50-300ms):
         - Open fresh session from pool
         - For each prepared page:
-            - Create savepoint for atomic delete+insert
-            - Delete existing by (title, website_id) for deduplication
-            - Insert InfoBlob
+            - Lock the page identity
+            - Supersede the previous active version
+            - Insert the replacement InfoBlob
             - Bulk insert InfoBlobChunks with embeddings
             - Commit savepoint
         - Return connection to pool immediately
@@ -113,12 +123,12 @@ async def persist_batch(
         Tuple of (success_count, failed_count, successful_urls, failures_by_reason)
         - success_count: Number of pages successfully persisted
         - failed_count: Number of pages that failed to persist
-        - successful_urls: List of URLs that were ACTUALLY persisted (for accurate tracking)
+        - successful_urls: List of URLs persisted or confirmed unchanged
         - failures_by_reason: Dict mapping FailureReason codes to lists of failed URLs
 
     Note:
-        - Deduplication uses delete-then-insert pattern (not idempotent across workers)
-        - For true idempotency, add UNIQUE constraint on (tenant_id, website_id, title)
+        - Publication serializes concurrent updates for the same website page.
+        - A failed replacement rolls back to the previous active version.
         - CRITICAL: Only URLs in successful_urls should be marked as crawled
         - CRITICAL: URLs in failures_by_reason should NOT be deleted as stale
     """
@@ -223,6 +233,13 @@ async def persist_batch(
             try:
                 # 1. Compute content hash (local operation)
                 content_hash = hashlib.sha256(content.encode("utf-8")).digest()
+                if (existing_publications or {}).get(url) == (
+                    content_hash,
+                    embedding_model.id,
+                ):
+                    success_count += 1
+                    successful_urls.append(url)
+                    continue
 
                 # 2. Chunk the text (local operation)
                 raw_chunks = splitter.split_text(content)
@@ -342,12 +359,18 @@ async def persist_batch(
         # This returns the connection to the pool before Phase 2 starts
         await embedding_session.close()
 
+    confirmed_unchanged_urls = successful_urls.copy()
     if not prepared_pages:
-        logger.warning(
-            "No pages prepared after Phase 1",
-            extra={"website_id": str(ctx.website_id), "failed_count": failed_count},
+        log = logger.debug if successful_urls else logger.warning
+        log(
+            "No pages require publication after Phase 1",
+            extra={
+                "website_id": str(ctx.website_id),
+                "unchanged_count": len(successful_urls),
+                "failed_count": failed_count,
+            },
         )
-        return success_count, failed_count, [], failures_by_reason
+        return success_count, failed_count, successful_urls, failures_by_reason
 
     # PHASE 2: Persist to DB (SHORT-LIVED SESSION)
     # This is the only part that holds a database connection.
@@ -364,26 +387,111 @@ async def persist_batch(
     try:
         async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
             async with sessionmanager.session() as session, session.begin():
+                tenant_limit, user_limit = (
+                    await session.execute(
+                        sa.select(Tenants.quota_limit, Users.quota_limit)
+                        .select_from(Users)
+                        .join(Tenants, Tenants.id == Users.tenant_id)
+                        .where(
+                            Users.id == ctx.user_id,
+                            Tenants.id == ctx.tenant_id,
+                        )
+                    )
+                ).one()
+                quota_repo = InfoBlobRepository(session)
+                tenant_usage = await quota_repo.get_retained_size_of_tenant(
+                    ctx.tenant_id
+                )
+                user_usage = (
+                    await quota_repo.get_retained_size_of_user(ctx.user_id)
+                    if user_limit is not None
+                    else 0
+                )
+
                 for prepared in prepared_pages:
-                    # Per-page savepoint for atomic delete+insert
+                    # Per-page savepoint keeps the previous complete version visible
+                    # unless the replacement and all of its chunks are ready together.
                     savepoint = await session.begin_nested()
                     try:
-                        # 1. DEDUPLICATION: Delete existing by (title, website_id)
-                        # This matches the existing _delete_if_same_title() pattern
-                        delete_stmt = sa.delete(InfoBlobs).where(
-                            sa.and_(
-                                InfoBlobs.title == prepared.title,
-                                InfoBlobs.website_id == prepared.website_id,
-                            )
+                        await session.execute(
+                            sa.text(
+                                "SELECT pg_advisory_xact_lock("
+                                "hashtextextended(:identity, 0))"
+                            ),
+                            {
+                                "identity": (
+                                    f"website:{prepared.website_id}:"
+                                    f"title:{prepared.title}"
+                                )
+                            },
                         )
-                        await session.execute(delete_stmt)
 
-                        # 2. Insert new InfoBlob
+                        existing = (
+                            await session.execute(
+                                sa.select(
+                                    InfoBlobs.id,
+                                    InfoBlobs.source_id,
+                                    InfoBlobs.content_hash,
+                                    InfoBlobs.embedding_model_id,
+                                )
+                                .where(
+                                    InfoBlobs.title == prepared.title,
+                                    InfoBlobs.website_id == prepared.website_id,
+                                    active_info_blob_version(),
+                                )
+                                .with_for_update()
+                            )
+                        ).one_or_none()
+                        if (
+                            existing is not None
+                            and existing.content_hash == prepared.content_hash
+                            and existing.embedding_model_id
+                            == prepared.embedding_model_id
+                        ):
+                            await savepoint.commit()
+                            success_count += 1
+                            successful_urls.append(prepared.url)
+                            continue
+
+                        chunk_sizes = [
+                            len(chunk_text.encode("utf-8")) + len(embedding) * 4
+                            for chunk_text, embedding in zip(
+                                prepared.chunks,
+                                prepared.embeddings,
+                            )
+                        ]
+                        stored_size = len(prepared.content.encode("utf-8")) + sum(
+                            chunk_sizes
+                        )
+                        ensure_quota_capacity(
+                            tenant_usage=tenant_usage,
+                            tenant_limit=tenant_limit,
+                            user_usage=user_usage,
+                            user_limit=user_limit,
+                            size_in_bytes=stored_size,
+                        )
+                        source_id = (
+                            existing.source_id if existing is not None else uuid4()
+                        )
+                        if existing is not None:
+                            await session.execute(
+                                sa.update(InfoBlobs)
+                                .where(
+                                    InfoBlobs.id == existing.id,
+                                    active_info_blob_version(),
+                                )
+                                .values(
+                                    version_state=(
+                                        InfoBlobVersionState.SUPERSEDED.value
+                                    )
+                                )
+                            )
+
                         info_blob_values = {
                             "text": prepared.content,
                             "title": prepared.title,
                             "url": prepared.url,
-                            "size": len(prepared.content.encode("utf-8")),
+                            "size": stored_size,
                             "content_hash": prepared.content_hash,
                             "user_id": prepared.user_id,
                             "tenant_id": prepared.tenant_id,
@@ -391,6 +499,8 @@ async def persist_batch(
                             "embedding_model_id": prepared.embedding_model_id,
                             "group_id": None,  # Website crawls don't have group_id
                             "integration_knowledge_id": None,
+                            "source_id": source_id,
+                            "version_state": InfoBlobVersionState.ACTIVE.value,
                         }
 
                         insert_blob_stmt = (
@@ -401,28 +511,36 @@ async def persist_batch(
                         result = await session.execute(insert_blob_stmt)
                         info_blob_id = result.scalar_one()
 
-                        # 3. Bulk insert chunks with embeddings
                         chunk_values = [
                             {
                                 "text": chunk_text,
                                 "chunk_no": i,
-                                "size": len(chunk_text.encode("utf-8")),
+                                "size": chunk_size,
                                 "embedding": embedding,
                                 "info_blob_id": info_blob_id,
                                 "tenant_id": prepared.tenant_id,
                             }
-                            for i, (chunk_text, embedding) in enumerate(
-                                zip(prepared.chunks, prepared.embeddings)
+                            for i, (chunk_text, embedding, chunk_size) in enumerate(
+                                zip(
+                                    prepared.chunks,
+                                    prepared.embeddings,
+                                    chunk_sizes,
+                                )
                             )
                         ]
 
-                        if chunk_values:
-                            insert_chunks_stmt = sa.insert(InfoBlobChunks).values(
-                                chunk_values
+                        if not chunk_values:
+                            raise ValueError(
+                                f"Crawled page {prepared.url} has no searchable chunks"
                             )
-                            await session.execute(insert_chunks_stmt)
+                        insert_chunks_stmt = sa.insert(InfoBlobChunks).values(
+                            chunk_values
+                        )
+                        await session.execute(insert_chunks_stmt)
 
                         await savepoint.commit()
+                        tenant_usage += stored_size
+                        user_usage += stored_size
                         success_count += 1
                         successful_urls.append(
                             prepared.url
@@ -461,10 +579,11 @@ async def persist_batch(
             },
         )
         # Mark all unpersisted pages as failed with DB_ERROR
-        for p in prepared_pages:
-            if p.url not in successful_urls:
-                add_failure(FailureReason.DB_ERROR, p.url)
-        failed_count += len(prepared_pages) - success_count
+        successful_urls = confirmed_unchanged_urls
+        success_count = len(confirmed_unchanged_urls)
+        for page in prepared_pages:
+            add_failure(FailureReason.DB_ERROR, page.url)
+        failed_count += len(prepared_pages)
 
     except Exception as e:
         logger.error(
@@ -475,9 +594,10 @@ async def persist_batch(
             },
         )
         # Mark all unpersisted pages as failed with DB_ERROR
-        for p in prepared_pages:
-            if p.url not in successful_urls:
-                add_failure(FailureReason.DB_ERROR, p.url)
-        failed_count += len(prepared_pages) - success_count
+        successful_urls = confirmed_unchanged_urls
+        success_count = len(confirmed_unchanged_urls)
+        for page in prepared_pages:
+            add_failure(FailureReason.DB_ERROR, page.url)
+        failed_count += len(prepared_pages)
 
     return success_count, failed_count, successful_urls, failures_by_reason

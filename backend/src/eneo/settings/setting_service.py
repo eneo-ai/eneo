@@ -12,7 +12,6 @@ from eneo.main.config import get_settings as get_app_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
-    SkillRevisionConflictException,
 )
 from eneo.main.logging import get_logger
 from eneo.object_content.runtime import ObjectContentRuntime, object_content_runtime
@@ -33,7 +32,6 @@ from eneo.skills.domain.skill import (
     SKILL_RUNTIME_POLICY_DEFAULTS,
     Skill,
     SkillExecutionBlock,
-    SkillExecutionBlockConflictError,
     SkillRuntimePolicy,
     SkillRuntimePolicyChange,
     normalize_skill_execution_block_reason,
@@ -167,19 +165,13 @@ class SettingService:
     ) -> SkillExecutionBlockState:
         await self._require_organization_skill(skill_id=skill_id)
         normalized_reason = normalize_skill_execution_block_reason(reason)
-        try:
-            change = await self.skill_repo.unblock_organization_skill(
-                tenant_id=self.user.tenant_id,
-                skill_id=skill_id,
-                expected_block_id=expected_block_id,
-                unblocked_by_user_id=self.user.id,
-                reason=normalized_reason,
-            )
-        except SkillExecutionBlockConflictError as error:
-            raise SkillRevisionConflictException(
-                "This execution block changed after you reviewed it. Reload the "
-                "Skill before unblocking."
-            ) from error
+        change = await self.skill_repo.unblock_organization_skill(
+            tenant_id=self.user.tenant_id,
+            skill_id=skill_id,
+            expected_block_id=expected_block_id,
+            unblocked_by_user_id=self.user.id,
+            reason=normalized_reason,
+        )
         if change is None:
             raise NotFoundException()
         if change.block.unblocked_at is None:

@@ -390,6 +390,7 @@ class Settings(BaseSettings):
     using_access_management: bool = True
     using_iam: bool = False
     using_image_generation: bool = False
+    show_chat_debug_panel: bool = False
 
     # Max concurrent embedding API calls across all crawls (module-level semaphore)
     # Controls parallelism during page batch persistence to avoid overwhelming embedding APIs

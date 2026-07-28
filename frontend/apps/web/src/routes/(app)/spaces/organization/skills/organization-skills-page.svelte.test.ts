@@ -1,8 +1,11 @@
-import type { OrganizationSkillSummaryPublic } from "@eneo/eneo-js";
+import { EneoError, type OrganizationSkillSummaryPublic } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
+
+/** ErrorCodes.SKILL_STILL_ATTACHED — the Skill is bound to a resource or policy. */
+const SKILL_STILL_ATTACHED = 9051;
 
 const invalidate = vi.hoisted(() => vi.fn(async () => {}));
 
@@ -138,6 +141,48 @@ describe("organisation Skill catalogue page", () => {
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
     await expect.element(page.getByText(draft.display_name)).not.toBeInTheDocument();
     await expect.element(page.getByText(unpublished.display_name)).toBeVisible();
+  });
+
+  test("names the attachment that blocks a delete instead of a model name clash", async () => {
+    const draft = skill("draft", "draft");
+    const deleteSkill = vi
+      .fn()
+      .mockRejectedValue(
+        new EneoError(
+          "This Skill is still attached. Remove every binding before deleting it.",
+          "RESPONSE",
+          409,
+          SKILL_STILL_ATTACHED,
+          {},
+          { endpoint: "DELETE@/api/v1/skills/organization/" }
+        )
+      );
+
+    render(OrganizationSkillsPage, {
+      data: {
+        search: "",
+        page: { items: [draft], count: 1, limit: 25, next_cursor: null },
+        eneo: {
+          skills: {
+            organization: { delete: deleteSkill, list: vi.fn() },
+            catalogue: { list: vi.fn() }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.skills_library_delete_aria({ name: draft.display_name })
+      })
+      .click();
+    await page.getByRole("button", { name: m.delete(), exact: true }).click();
+
+    await expect.element(page.getByText(m.eneo_error_9051())).toBeVisible();
+    // The shared collision code this conflict used to travel under is generic,
+    // but its localized copy is about AI model display names.
+    await expect.element(page.getByText(m.eneo_error_9017())).not.toBeInTheDocument();
+    await expect.element(page.getByRole("link", { name: draft.display_name })).toBeVisible();
   });
 
   test("shows execution blocking as the dominant operational status", async () => {

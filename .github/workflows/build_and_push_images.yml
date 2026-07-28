@@ -179,6 +179,13 @@ jobs:
           push-to-registry: true
 
       # Frontend build and push
+      - name: Add swap for frontend image build
+        run: |
+          sudo fallocate --length 4G /mnt/eneo-frontend.swap
+          sudo chmod 600 /mnt/eneo-frontend.swap
+          sudo mkswap /mnt/eneo-frontend.swap
+          sudo swapon /mnt/eneo-frontend.swap
+
       - name: Extract frontend metadata
         id: meta-frontend
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5

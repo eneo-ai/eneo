@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
+from uuid import UUID
 
 import redis.asyncio as aioredis
 
@@ -160,6 +162,7 @@ class CompletionService:
         prompt_files: list[File],
         mcp_servers: list["MCPServer"],
         skill_runtime: SkillActivationRuntime,
+        adapter: "CompletionModelAdapter | None" = None,
     ) -> ProviderInput:
         """Build a deterministic upper bound for save-time activation checks.
 
@@ -167,7 +170,8 @@ class CompletionService:
         discovery or a network connection. Runtime still performs the final
         per-user check after live tool narrowing.
         """
-        adapter = await self._get_adapter(model)
+        if adapter is None:
+            adapter = await self._get_adapter(model)
         enabled_servers = [server for server in mcp_servers if server.is_enabled]
         mcp_proxy: MCPProxySession | None = None
         if enabled_servers and model.supports_tool_calling:
@@ -202,6 +206,17 @@ class CompletionService:
         finally:
             if mcp_proxy is not None:
                 await mcp_proxy.close()
+
+    async def load_skill_activation_preflight_adapters(
+        self,
+        models: Sequence[CompletionModel],
+    ) -> dict[UUID, "CompletionModelAdapter"]:
+        """Load each distinct model adapter once for one save-time preflight."""
+        adapters: dict[UUID, CompletionModelAdapter] = {}
+        for model in models:
+            if model.id not in adapters:
+                adapters[model.id] = await self._get_adapter(model)
+        return adapters
 
     @staticmethod
     def is_valid_arguments(arguments: str):

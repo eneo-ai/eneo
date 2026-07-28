@@ -2,7 +2,6 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.main.exceptions import (
-    NameCollisionException,
     NotFoundException,
     SkillRevisionConflictException,
     UnauthorizedException,
@@ -13,22 +12,18 @@ from eneo.skills.domain.skill import (
     OrganizationSkillProjection,
     OrganizationSkillSummaryProjection,
     OrganizationSkillSummaryProjectionPage,
-    PublishedSkillDeletionError,
     PublishedSkillProjection,
     PublishedSkillSummaryPage,
     PublishedSkillSummaryProjection,
     Skill,
     SkillAdoptionCursor,
     SkillAdoptionProjectionPage,
-    SkillHasActiveAppRunsError,
-    SkillHasBindingsError,
     SkillPublicationChange,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
-    SkillSlugConflictError,
     parse_skill_revision_cursor,
     validate_skill_slug,
 )
@@ -238,22 +233,16 @@ class OrganizationSkillService:
             description=description,
             instructions=instructions,
         )
-        try:
-            return await self.repo.create(
-                space_id=organization.id,
-                slug=normalized_slug,
-                display_name=content.display_name,
-                description=content.description,
-                instructions=content.instructions,
-                content_digest=content.content_digest,
-                created_by_user_id=self.user.id,
-                is_active=False,
-            )
-        except SkillSlugConflictError as error:
-            raise NameCollisionException(
-                f"A Skill with slug '{normalized_slug}' already exists "
-                "in the organisation catalogue"
-            ) from error
+        return await self.repo.create(
+            space_id=organization.id,
+            slug=normalized_slug,
+            display_name=content.display_name,
+            description=content.description,
+            instructions=content.instructions,
+            content_digest=content.content_digest,
+            created_by_user_id=self.user.id,
+            is_active=False,
+        )
 
     async def create_revision(
         self,
@@ -391,25 +380,10 @@ class OrganizationSkillService:
 
     async def delete(self, *, skill_id: UUID) -> Skill:
         self._require_admin()
-        try:
-            deleted = await self.repo.delete_organization(
-                tenant_id=self.user.tenant_id,
-                skill_id=skill_id,
-            )
-        except PublishedSkillDeletionError as error:
-            raise NameCollisionException(
-                "Previously published Skills are retained for audit history "
-                "and cannot be deleted."
-            ) from error
-        except SkillHasActiveAppRunsError as error:
-            raise NameCollisionException(
-                "This Skill is required by a queued or running App run. "
-                "Wait for it to finish before deleting the Skill."
-            ) from error
-        except SkillHasBindingsError as error:
-            raise NameCollisionException(
-                "This Skill is still attached. Remove every binding before deleting it."
-            ) from error
+        deleted = await self.repo.delete_organization(
+            tenant_id=self.user.tenant_id,
+            skill_id=skill_id,
+        )
         if deleted is None:
             raise NotFoundException()
         return deleted

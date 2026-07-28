@@ -9,6 +9,9 @@ test("createEneo exposes the object content policy resource", () => {
 
   assert.equal(typeof eneo.objectContentPolicy.get, "function");
   assert.equal(typeof eneo.objectContentPolicy.getInventory, "function");
+  assert.equal(typeof eneo.objectContentPolicy.getMoves, "function");
+  assert.equal(typeof eneo.objectContentPolicy.queueMoves, "function");
+  assert.equal(typeof eneo.objectContentPolicy.setMovesPaused, "function");
   assert.equal(typeof eneo.objectContentPolicy.replace, "function");
 });
 
@@ -31,6 +34,9 @@ test("object content policy uses the deployment-wide GET and replacement PUT con
 
   await objectContentPolicy.get();
   await objectContentPolicy.getInventory();
+  await objectContentPolicy.getMoves();
+  await objectContentPolicy.queueMoves({ target: "object_store", limit: 25 });
+  await objectContentPolicy.setMovesPaused({ expected_revision: 4, moves_paused: true });
   await objectContentPolicy.replace(replacement);
 
   assert.deepEqual(calls, [
@@ -41,6 +47,26 @@ test("object content policy uses the deployment-wide GET and replacement PUT con
     {
       endpoint: "/api/v1/admin/object-content-inventory",
       request: { method: "get" }
+    },
+    {
+      endpoint: "/api/v1/admin/object-content-moves",
+      request: { method: "get" }
+    },
+    {
+      endpoint: "/api/v1/admin/object-content-moves",
+      request: {
+        method: "post",
+        requestBody: { "application/json": { target: "object_store", limit: 25 } }
+      }
+    },
+    {
+      endpoint: "/api/v1/admin/object-content-moves/pause",
+      request: {
+        method: "put",
+        requestBody: {
+          "application/json": { expected_revision: 4, moves_paused: true }
+        }
+      }
     },
     {
       endpoint: "/api/v1/admin/object-content-policy",

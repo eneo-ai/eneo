@@ -17,7 +17,7 @@ from eneo.governance_policy.domain.governance_policy_repo import (
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.roles.permissions import Permission, validate_permission
-from eneo.skills.domain.skill import SkillBindingReference
+from eneo.skills.domain.skill import SkillBindingIntent
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -113,7 +113,7 @@ class GovernancePolicyService:
         ) = None,
         mcp_restriction: (tuple[bool, list[PolicyMcpServer], list[UUID]] | None) = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
-        skill_references: list[SkillBindingReference] | None = None,
+        skill_intents: list[SkillBindingIntent] | None = None,
     ) -> GovernancePolicy:
         policy = await self.get_policy_for_update()
 
@@ -146,14 +146,14 @@ class GovernancePolicyService:
 
         saved = await self.repo.save(policy, updated_by_user_id=self.user.id)
 
-        if skill_references is not None:
+        if skill_intents is not None:
             assert saved.id is not None
             organization_space = await self.space_service.get_or_create_tenant_space()
             assert organization_space.id is not None
             await self.skill_service.replace_governance_bindings(
                 policy_id=saved.id,
                 organization_space_id=organization_space.id,
-                references=skill_references,
+                intents=skill_intents,
             )
 
         return saved

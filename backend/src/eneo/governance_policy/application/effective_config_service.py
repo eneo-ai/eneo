@@ -9,6 +9,7 @@ from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
+    resolve_personal_default,
 )
 from eneo.skills.domain.skill import SkillRuntimeResolution
 
@@ -73,15 +74,18 @@ class EffectiveConfigService:
                 library_prompt_text=None,
             )
 
+        return await self.resolve_personal_default()
+
+    async def resolve_personal_default(self) -> EffectiveConfig:
+        """Resolve the current personal-default policy without an Assistant."""
+
         # A personal default assistant maps to exactly one scope today. When
-        # finer scopes are added, derive it from (assistant, space) here.
+        # finer scopes are added, derive the scope in this service.
         policy = await self.policy_repo.get_by_tenant(
             self.user.tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
         )
         if policy is None:
-            return resolve(
-                assistant=assistant,
-                space_is_personal=space_is_personal,
+            return resolve_personal_default(
                 policy=None,
                 tenant_completion_models=[],
                 tenant_mcp_servers=[],
@@ -129,9 +133,7 @@ class EffectiveConfigService:
         library_prompt_text = await _load_prompt_text()
         governance_skill_resolution = await _load_governance_skills()
 
-        return resolve(
-            assistant=assistant,
-            space_is_personal=space_is_personal,
+        return resolve_personal_default(
             policy=policy,
             tenant_completion_models=tenant_models,
             tenant_mcp_servers=tenant_mcp_servers,

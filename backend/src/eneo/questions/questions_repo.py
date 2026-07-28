@@ -43,6 +43,11 @@ if TYPE_CHECKING:
 
 
 _SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
+_SKILL_ACTIVATION_ADAPTER = TypeAdapter(SkillActivationEvidenceV1)
+
+
+class StoredSkillActivation(NamedTuple):
+    evidence: SkillActivationEvidenceV1 | None
 
 
 class QuestionSessionPartner(NamedTuple):
@@ -249,6 +254,33 @@ class QuestionRepository:
         if question is None:
             return None
         return (await self._hydrate_questions([question]))[0]
+
+    async def get_skill_activation_evidence(
+        self,
+        *,
+        id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+    ) -> StoredSkillActivation | None:
+        """Read one turn's typed evidence without hydrating message bodies."""
+        stmt = (
+            sa.select(Questions.skill_activation_data)
+            .where(Questions.id == id)
+            .where(Questions.session_id == session_id)
+            .where(Questions.tenant_id == tenant_id)
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+
+        raw_evidence = row.skill_activation_data
+        return StoredSkillActivation(
+            evidence=(
+                _SKILL_ACTIVATION_ADAPTER.validate_python(raw_evidence)
+                if raw_evidence is not None
+                else None
+            )
+        )
 
     async def update_with_answer(
         self,

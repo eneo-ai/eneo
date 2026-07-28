@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 from uuid import UUID
 
@@ -25,7 +26,7 @@ from eneo.database.tables.group_chats_table import (
     GroupChatsTable,
 )
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.info_blobs_table import InfoBlobs as InfoBlobsTable
 from eneo.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
@@ -84,6 +85,13 @@ from eneo.spaces.space_factory import SpaceFactory
 from eneo.user_groups.user_group import UserGroupState
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class AssistantMCPServerProjection:
+    space_id: UUID
+    assistant_id: UUID
+    mcp_servers: "tuple[MCPServer, ...]"
 
 
 class _HasId(Protocol):
@@ -253,7 +261,7 @@ class SpaceRepository:
 
         ib_count_sq = (
             sa.select(sa.func.count(sa.distinct(ib.id)))
-            .where(ib.group_id == c.id)
+            .where(ib.group_id == c.id, active_info_blob_version())
             .correlate(c)
             .scalar_subquery()
         )
@@ -645,7 +653,10 @@ class SpaceRepository:
         def _set_size_subquery(collection: "Collection"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                .where(InfoBlobsTable.group_id == collection.id)
+                .where(
+                    InfoBlobsTable.group_id == collection.id,
+                    active_info_blob_version(),
+                )
                 .scalar_subquery()
             )
 
@@ -727,7 +738,10 @@ class SpaceRepository:
         def _set_size_subquery(website: "Website"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                .where(InfoBlobsTable.website_id == website.id)
+                .where(
+                    InfoBlobsTable.website_id == website.id,
+                    active_info_blob_version(),
+                )
                 .scalar_subquery()
             )
 
@@ -907,7 +921,24 @@ class SpaceRepository:
                 for override in assistant_overrides_db
             }
 
-        # Group tools by server
+        return self._project_assistant_mcp_server_tools(
+            mcp_servers=mcp_servers,
+            tools_db=tools_db,
+            tenant_tool_settings=tenant_tool_settings,
+            space_tool_overrides=space_tool_overrides,
+            assistant_tool_overrides=assistant_tool_overrides,
+        )
+
+    @staticmethod
+    def _project_assistant_mcp_server_tools(
+        *,
+        mcp_servers: list["MCPServer"],
+        tools_db: Sequence[MCPServerToolsTable],
+        tenant_tool_settings: dict[UUID, bool],
+        space_tool_overrides: dict[UUID, bool],
+        assistant_tool_overrides: dict[UUID, bool],
+    ) -> list["MCPServer"]:
+        """Apply the canonical tenant, Space and Assistant tool hierarchy."""
         from collections import defaultdict
 
         from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
@@ -962,6 +993,80 @@ class SpaceRepository:
             server.tools = tools_by_server.get(server.id, [])
 
         return mcp_servers
+
+    async def project_assistants_mcp_servers(
+        self,
+        projections: Sequence[AssistantMCPServerProjection],
+    ) -> dict[UUID, list["MCPServer"]]:
+        """Project several Assistants with one bounded set of policy reads."""
+        from eneo.database.tables.assistant_table import AssistantMCPServerTools
+
+        if not projections:
+            return {}
+
+        server_ids = {
+            server.id for projection in projections for server in projection.mcp_servers
+        }
+        if not server_ids:
+            return {projection.assistant_id: [] for projection in projections}
+
+        tools_result = await self.session.execute(
+            sa.select(MCPServerToolsTable)
+            .where(MCPServerToolsTable.mcp_server_id.in_(server_ids))
+            .order_by(MCPServerToolsTable.name)
+        )
+        tools_db: list[MCPServerToolsTable] = list(tools_result.scalars().all())
+        tool_ids = {tool.id for tool in tools_db}
+
+        tenant_settings_result = await self.session.execute(
+            sa.select(MCPServerToolSettingsTable).where(
+                MCPServerToolSettingsTable.tenant_id == self.user.tenant_id,
+                MCPServerToolSettingsTable.mcp_server_tool_id.in_(tool_ids),
+            )
+        )
+        tenant_tool_settings = {
+            setting.mcp_server_tool_id: setting.is_enabled
+            for setting in tenant_settings_result.scalars().all()
+        }
+
+        space_ids = {projection.space_id for projection in projections}
+        space_overrides_result = await self.session.execute(
+            sa.select(SpacesMCPServerTools).where(
+                SpacesMCPServerTools.space_id.in_(space_ids),
+                SpacesMCPServerTools.mcp_server_tool_id.in_(tool_ids),
+            )
+        )
+        space_tool_overrides: dict[UUID, dict[UUID, bool]] = {}
+        for override in space_overrides_result.scalars().all():
+            space_tool_overrides.setdefault(override.space_id, {})[
+                override.mcp_server_tool_id
+            ] = override.is_enabled
+
+        assistant_ids = {projection.assistant_id for projection in projections}
+        assistant_overrides_result = await self.session.execute(
+            sa.select(AssistantMCPServerTools).where(
+                AssistantMCPServerTools.assistant_id.in_(assistant_ids),
+                AssistantMCPServerTools.mcp_server_tool_id.in_(tool_ids),
+            )
+        )
+        assistant_tool_overrides: dict[UUID, dict[UUID, bool]] = {}
+        for override in assistant_overrides_result.scalars().all():
+            assistant_tool_overrides.setdefault(override.assistant_id, {})[
+                override.mcp_server_tool_id
+            ] = override.is_enabled
+
+        return {
+            projection.assistant_id: self._project_assistant_mcp_server_tools(
+                mcp_servers=deepcopy(list(projection.mcp_servers)),
+                tools_db=tools_db,
+                tenant_tool_settings=tenant_tool_settings,
+                space_tool_overrides=space_tool_overrides.get(projection.space_id, {}),
+                assistant_tool_overrides=assistant_tool_overrides.get(
+                    projection.assistant_id, {}
+                ),
+            )
+            for projection in projections
+        }
 
     async def project_assistant_mcp_servers(
         self,

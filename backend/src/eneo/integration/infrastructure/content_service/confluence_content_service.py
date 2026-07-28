@@ -3,7 +3,6 @@ from uuid import UUID
 
 import aiohttp
 
-from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.info_blobs.info_blob import InfoBlobAdd
 from eneo.integration.domain.entities.oauth_token import ConfluenceToken, OauthToken
 from eneo.integration.infrastructure.clients.confluence_content_client import (
@@ -39,7 +38,6 @@ class ConfluenceContentService:
         oauth_token_repo: "OauthTokenRepository",
         user_integration_repo: "UserIntegrationRepository",
         user: "UserInDB",
-        datastore: "Datastore",
         info_blob_service: "InfoBlobService",
         integration_knowledge_repo: "IntegrationKnowledgeRepository",
         oauth_token_service: "OauthTokenService",
@@ -49,7 +47,6 @@ class ConfluenceContentService:
         self.oauth_token_repo = oauth_token_repo
         self.user_integration_repo = user_integration_repo
         self.user = user
-        self.datastore = datastore
         self.info_blob_service = info_blob_service
         self.integration_knowledge_repo = integration_knowledge_repo
         self.oauth_token_service = oauth_token_service
@@ -118,7 +115,6 @@ class ConfluenceContentService:
         integration_knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
-        integration_knowledge_size = integration_knowledge.size
         for item in results:
             body = item.get("body")
             body_dict: dict[str, object] = (
@@ -144,19 +140,18 @@ class ConfluenceContentService:
                 integration_knowledge_id=integration_knowledge_id,
             )
 
-            info_blob = await self.info_blob_service.add_info_blob_without_validation(
-                info_blob_add
-            )
-            await self.datastore.add(
-                info_blob=info_blob,
+            await self.info_blob_service.publish_info_blob_without_validation(
+                info_blob_add,
                 embedding_model=integration_knowledge.embedding_model,
                 chunk_size=integration_knowledge.chunk_size,
                 chunk_overlap=integration_knowledge.chunk_overlap,
             )
 
-            integration_knowledge_size += info_blob.size
-
-        integration_knowledge.size = integration_knowledge_size
+        integration_knowledge.size = (
+            await self.info_blob_service.repo.get_total_size_of_integration_knowledge(
+                integration_knowledge_id
+            )
+        )
         await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
     @staticmethod

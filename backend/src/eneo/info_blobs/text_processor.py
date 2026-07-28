@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.files.text import TextExtractor
 from eneo.info_blobs.info_blob import InfoBlobAdd
 from eneo.info_blobs.info_blob_service import InfoBlobService
@@ -17,13 +16,11 @@ class TextProcessor:
         self,
         user: UserInDB,
         extractor: TextExtractor,
-        datastore: Datastore,
         info_blob_service: InfoBlobService,
     ):
         super().__init__()
         self.user = user
         self.extractor = extractor
-        self.datastore = datastore
         self.info_blob_service = info_blob_service
 
     async def process_file(
@@ -76,17 +73,9 @@ class TextProcessor:
             content_hash=content_hash,  # Used by files for hash checking
         )
 
-        info_blob = await self.info_blob_service.add_info_blob_without_validation(
-            info_blob_add
-        )
-        await self.datastore.add(
-            info_blob=info_blob,
+        return await self.info_blob_service.publish_info_blob_without_validation(
+            info_blob_add,
             embedding_model=embedding_model,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
-        info_blob_updated = await self.info_blob_service.update_info_blob_size(
-            info_blob.id
-        )
-
-        return info_blob_updated

@@ -158,10 +158,10 @@ The Assistant API accepts **always** or **on demand** for each binding:
 - **On demand** advertises a compact descriptor and loads the exact pinned
   instructions only when a tool-capable model requests them.
 
-The Assistant builder exposes this choice for each attached Skill. Apps and
-Personal Chat remain eager: their attached Skills enter every request in the
-configured order. Runtime evidence, rather than the adoption view, shows which
-Assistant Skills were eligible, requested, blocked, or included.
+The Assistant builder and Personal Chat administration expose this choice for
+each attached Skill. Apps remain eager: their attached Skills enter every run in
+the configured order. Runtime evidence, rather than the adoption view, shows
+which Skills were eligible, requested, blocked, or included.
 
 Tenant admins manage the stored runtime limits in Admin settings. The API owns
 the editable ranges; the selected model window and fixed platform safety bounds
@@ -219,7 +219,15 @@ grant access to organisation authoring.
 Tenant admins select and order published organisation Skill versions in the
 existing Personal Chat administration page. The organisation catalogue owns
 content and publication. Personal Chat settings own which approved versions
-apply to Personal Chat.
+apply to Personal Chat and whether each is **Always** or **On demand**.
+
+**On demand** is available only when the policy selects a finite list of models
+that all support tool calling. Selecting an entire provider or leaving model
+access unrestricted keeps **Always** available but disables **On demand**,
+because Eneo cannot safely validate current and future models as one bounded
+set. Saving rechecks the selected models, prompt, MCP configuration, and every
+existing Personal Chat baseline. If any candidate cannot fit, the save is
+rejected and the previous policy remains active.
 
 ### Default roles
 
@@ -287,6 +295,27 @@ Review the adoption view and update or remove unsafe versions before unblocking.
   execution** to stop those existing pins at runtime.
 </Callout>
 
+## When a change is blocked
+
+Eneo refuses a Skill change rather than silently overwriting someone else's work
+or breaking a resource that is in use. The message names the exact blocker and
+the next safe action.
+
+| Blocker                             | What happened                                                                                                                                                                 | What to do                                                                     |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Identifier already taken            | Another Skill in the same Space, or in the organisation catalogue, already uses that identifier                                                                               | Choose a different identifier                                                  |
+| Skill changed while you reviewed it | Someone saved a new version, or published a different one, between the moment the page loaded and the moment you saved; this covers restoring an older version and publishing | Reload the Skill, compare the latest version, then repeat the action           |
+| Published Skill cannot be deleted   | A Skill that has ever been published is kept for audit history and can never be deleted                                                                                       | Unpublish it to stop new attachments; existing ones keep working until removed |
+| Skill is still attached             | The Skill is attached to an Assistant, an App, or the organisation Personal Chat policy                                                                                       | Remove every attachment, then delete                                           |
+| App run in progress                 | A queued or running App run needs the Skill                                                                                                                                   | Wait for the run to finish, then delete                                        |
+| Execution block changed             | The block you reviewed was released or replaced before your unblock was applied                                                                                               | The page reloads the live block state; review it and try again                 |
+
+The Skill editor keeps unsaved edits when a save is refused, so nothing has to
+be retyped. A separate refusal applies at save time when the selected models or
+the organisation runtime policy cannot support **On demand**; that is a
+configuration limit rather than a conflict, described in
+[Versions and adoption](#versions-and-adoption).
+
 ## Current boundaries
 
 - Skills contain instructions and metadata. They do not execute scripts or
@@ -298,13 +327,25 @@ Review the adoption view and update or remove unsafe versions before unblocking.
   automatically.
 - This release has no external Skill marketplace or package installation flow.
 
+## Inspect Skill activation
+
+Deployments can expose an opt-in **Debug** panel in Assistant and Personal Chat
+with `SHOW_CHAT_DEBUG_PANEL=true` in both backend and frontend configuration.
+Only owners and users with the Assistant debug permission see it. Select a
+persisted turn to inspect which exact Skill revisions were available, entered
+the model context, were blocked, or were rejected, along with token
+measurement, activation rounds, and selection time.
+
+The panel is for development and support diagnostics. It does not expose Skill
+instructions, model reasoning, credentials, or an administrator's incident
+reason. Group chats and API keys cannot use it. Opening or closing the panel
+does not change what the Assistant records or affect separately configured
+Assistant logging.
+
 ## Planned next steps
 
-The next runtime work will make the existing activation evidence easier to
-inspect in the opt-in chat debug panel, including whether each Skill was always
-included or requested on demand and why a candidate was not loaded. Apps will
-remain eager until their execution contracts can preserve the same frozen-plan
-and audit guarantees.
+Apps remain eager until their execution contracts can preserve the same
+frozen-plan and audit guarantees.
 
 Editable Space copies with explicit source updates come later. External
 Marketplace distribution remains a separate final phase.

@@ -10,7 +10,7 @@ from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.jobs.job_models import Task
-from eneo.main.exceptions import NameCollisionException, NotFoundException
+from eneo.main.exceptions import NotFoundException
 from eneo.main.models import Status
 from eneo.skills import compose_skill_instructions
 from eneo.skills.domain.skill import (
@@ -431,7 +431,7 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
             app_id=app.id,
             references=[],
         )
-        with pytest.raises(NameCollisionException, match="retained for audit history"):
+        with pytest.raises(PublishedSkillDeletionError):
             await container.organization_skill_service().delete(skill_id=published.id)
         retained_revision = await repo.get_revision(
             skill_id=published.id,

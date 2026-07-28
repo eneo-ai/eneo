@@ -14,6 +14,7 @@ import {
   type Paginated,
   type UploadedFile,
   type ConversationMessage,
+  type ChatTurnDiagnostics,
   EneoError,
   type ConversationTools,
   type SSE
@@ -44,6 +45,16 @@ export class ChatService {
   loadedConversations = $state<ConversationSparse[]>([]);
   hasMoreConversations = $derived(this.loadedConversations.length < this.totalConversations);
   #nextCursor = $state<string | null>(null);
+
+  debugPanelOpen = $state(false);
+  #pendingDiagnosticsMessageIds = $state<string[]>([]);
+  #failedDiagnosticsRefreshSessionId = $state<string | null>(null);
+  #activeDiagnosticsStreamGeneration: number | null = null;
+  pendingDiagnosticsMessageIds = $derived([...this.#pendingDiagnosticsMessageIds]);
+  pendingDiagnosticsRefreshFailed = $derived(
+    this.#failedDiagnosticsRefreshSessionId === this.currentConversation.id &&
+      this.#pendingDiagnosticsMessageIds.length > 0
+  );
 
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
@@ -217,11 +228,13 @@ export class ChatService {
     waitFor(data.initialConversation, {
       onLoaded: (initialConversation) => {
         this.currentConversation = initialConversation;
+        this.#resetDiagnosticsMetadata();
         this.#seedLockedFromHistory();
         this.#clearPreflight();
       },
       onNull: () => {
         this.currentConversation = emptyConversation();
+        this.#resetDiagnosticsMetadata();
         this.#resetLocked();
         this.#clearPreflight();
       }
@@ -230,8 +243,24 @@ export class ChatService {
 
   newConversation() {
     this.currentConversation = emptyConversation();
+    this.#resetDiagnosticsMetadata();
     this.#resetLocked();
     this.#clearPreflight();
+  }
+
+  setDebugPanelOpen(open: boolean) {
+    this.debugPanelOpen = open;
+    if (open && !this.askQuestion.isLoading) {
+      void this.#confirmPendingDiagnosticsMessages();
+    }
+  }
+
+  async getTurnDiagnostics(sessionId: string, messageId: string): Promise<ChatTurnDiagnostics> {
+    return await this.#eneo.conversations.getTurnDiagnostics({ sessionId, messageId });
+  }
+
+  async retryPendingDiagnosticsMetadata() {
+    await this.#confirmPendingDiagnosticsMessages();
   }
 
   async getToolCallResult(toolCallId: string): Promise<string | null> {
@@ -492,6 +521,7 @@ export class ChatService {
     try {
       const loaded = await this.#eneo.conversations.get(conversation);
       this.currentConversation = loaded;
+      this.#resetDiagnosticsMetadata();
       this.#seedLockedFromHistory();
       this.#clearPreflight();
       return loaded;
@@ -539,6 +569,7 @@ export class ChatService {
       // End any previous stream loop/buffer
       this.#finalizeStream();
       const streamGen = ++this.#streamGen;
+      this.#activeDiagnosticsStreamGeneration = streamGen;
       let inrefBuffer = "";
       let ref: ReturnType<typeof emptyMessage> | undefined;
       const isStale = () => this.#streamGen !== streamGen;
@@ -571,6 +602,7 @@ export class ChatService {
               ref =
                 this.currentConversation.messages[this.currentConversation.messages?.length - 1];
               Object.assign(ref, chunk);
+              this.#markDiagnosticsPending(ref.id);
               this.currentConversation.id = chunk.session_id;
               this.currentConversation.name = question;
             },
@@ -827,6 +859,7 @@ export class ChatService {
         } else if (error instanceof EneoError && !ref.answer) {
           // If streaming started but no content arrived yet, remove the empty message
           this.currentConversation.messages.pop();
+          this.#clearDiagnosticsPending(ref.id);
           console.error(error);
           throw error;
         } else {
@@ -851,6 +884,10 @@ export class ChatService {
 
           // Flush any remaining buffered content after stream completes
           this.#finalizeStream();
+          this.#activeDiagnosticsStreamGeneration = null;
+          if (this.debugPanelOpen) {
+            void this.#confirmPendingDiagnosticsMessages();
+          }
         }
       }
 
@@ -861,6 +898,51 @@ export class ChatService {
       // The $effect in constructor now handles automatic token calculation
     }
   );
+
+  #markDiagnosticsPending(messageId: string | null | undefined) {
+    if (!messageId || this.#pendingDiagnosticsMessageIds.includes(messageId)) return;
+    this.#pendingDiagnosticsMessageIds = [...this.#pendingDiagnosticsMessageIds, messageId];
+  }
+
+  #clearDiagnosticsPending(messageId: string | null | undefined) {
+    if (!messageId) return;
+    this.#pendingDiagnosticsMessageIds = this.#pendingDiagnosticsMessageIds.filter(
+      (pendingMessageId) => pendingMessageId !== messageId
+    );
+  }
+
+  #resetDiagnosticsMetadata() {
+    this.#pendingDiagnosticsMessageIds = [];
+    this.#failedDiagnosticsRefreshSessionId = null;
+  }
+
+  async #confirmPendingDiagnosticsMessages() {
+    // A manual retry must never replace or otherwise reconcile the live message
+    // while SSE callbacks still own it. The existing pending queue is drained by
+    // the terminal stream path above.
+    if (this.#activeDiagnosticsStreamGeneration !== null) return;
+
+    const sessionId = this.currentConversation.id;
+    const pendingMessageIds = [...this.#pendingDiagnosticsMessageIds];
+    if (!sessionId || pendingMessageIds.length === 0) return;
+
+    this.#failedDiagnosticsRefreshSessionId = null;
+    for (const messageId of pendingMessageIds) {
+      try {
+        await this.getTurnDiagnostics(sessionId, messageId);
+        if (this.currentConversation.id !== sessionId) return;
+        this.#clearDiagnosticsPending(messageId);
+      } catch (error) {
+        if (
+          this.currentConversation.id === sessionId &&
+          this.#pendingDiagnosticsMessageIds.includes(messageId)
+        ) {
+          this.#failedDiagnosticsRefreshSessionId = sessionId;
+        }
+        console.error("Could not confirm persisted turn metadata for diagnostics", error);
+      }
+    }
+  }
 
   // Fetch prompt tokens and effective limit from backend.
   // When loading an existing conversation, approximate history tokens from message text.
