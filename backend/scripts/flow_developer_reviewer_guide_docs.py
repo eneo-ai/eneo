@@ -560,7 +560,7 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
             ),
             ProcedureStep(
                 "Register the typed owner",
-                "Add the typed owner in `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py` with version, corruption behavior, and relational-candidate rationale.",
+                "Add the typed owner in `backend/src/eneo/flows/infrastructure/flow_jsonb_ownership.py` with version, corruption behavior, and rationale.",
             ),
             ProcedureStep(
                 "Validate at the boundary",
