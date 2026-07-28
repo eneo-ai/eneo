@@ -479,7 +479,7 @@
                       !row.executionBlocked &&
                       !canChooseOnDemand &&
                       activationMode(row) === "always"
-                        ? runtimeStatus()
+                        ? m.skills_activation_mode_locked_tooltip()
                         : undefined}
                     >
                       <Select.Root
