@@ -43,7 +43,6 @@ class FlowJsonbColumnOwner:
     storage_category: FlowJsonbStorageCategory
     schema_version_policy: str
     corruption_behavior: str
-    relational_candidate: bool
     rationale: str
 
     @property
@@ -76,7 +75,6 @@ def _owner(
     schema_version_policy: str,
     corruption_behavior: str,
     rationale: str,
-    relational_candidate: bool = False,
 ) -> FlowJsonbColumnOwner:
     return FlowJsonbColumnOwner(
         table_name=table_name,
@@ -87,7 +85,6 @@ def _owner(
         storage_category=storage_category,
         schema_version_policy=schema_version_policy,
         corruption_behavior=corruption_behavior,
-        relational_candidate=relational_candidate,
         rationale=rationale,
     )
 

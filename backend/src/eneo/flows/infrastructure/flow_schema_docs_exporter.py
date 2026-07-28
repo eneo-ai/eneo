@@ -713,7 +713,6 @@ def _render_jsonb_policy() -> str:
                 f"`{owner.storage_category.value}`",
                 _markdown_cell(str(owner.schema_version_policy)),
                 _markdown_cell(str(owner.corruption_behavior)),
-                "yes" if owner.relational_candidate else "no",
                 _markdown_cell(owner.rationale),
             )
         )
@@ -726,7 +725,6 @@ def _render_jsonb_policy() -> str:
             "Category",
             "Version behavior",
             "Invalid-payload behavior",
-            "Relational candidate",
             "Rationale",
         ),
         rows,
