@@ -1,10 +1,10 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import type { ChatTurnDiagnostics, ConversationMessage, Eneo, components } from "@eneo/eneo-js";
 import { ChatService, type ChatPartner } from "../../ChatService.svelte";
-import ChatDebugPanel from "./ChatDebugPanel.svelte";
+import ChatDebugPanelFixture from "./ChatDebugPanelFixture.svelte";
 
 type SkillActivationEvidence = components["schemas"]["SkillActivationEvidenceV1"];
 
@@ -110,12 +110,53 @@ function evidence(count: number): SkillActivationEvidence {
 }
 
 describe("ChatDebugPanel", () => {
+  beforeEach(async () => {
+    // Desktop by default: the panel renders as an inline resizable sidebar.
+    await page.viewport(1280, 800);
+    localStorage.clear();
+  });
+
   test("stays hidden when diagnostics are unavailable", async () => {
     const chat = createChat(vi.fn());
-    render(ChatDebugPanel, { chat, available: false });
+    render(ChatDebugPanelFixture, { chat, available: false });
 
     await expect
-      .element(page.getByRole("button", { name: m.chat_debug_open() }))
+      .element(page.getByRole("button", { name: m.chat_debug_open(), exact: true }))
+      .not.toBeInTheDocument();
+  });
+
+  test("opens as an inline resizable sidebar next to the conversation", async () => {
+    const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-1", evidence(1)));
+    const chat = createChat(getTurnDiagnostics);
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    const trigger = page.getByRole("button", { name: m.chat_debug_open(), exact: true });
+    await expect.element(trigger).toHaveAttribute("aria-expanded", "false");
+    await trigger.click();
+
+    const sidebar = page.getByRole("complementary", { name: m.chat_debug_title() });
+    await expect.element(sidebar).toBeVisible();
+    await expect.element(trigger).toHaveAttribute("aria-expanded", "true");
+    // The conversation stays visible beside the panel instead of being covered.
+    await expect.element(page.getByText("conversation")).toBeVisible();
+    // Presence only: component tests run without the app stylesheet, so the
+    // 4px-wide handle fails visibility heuristics despite rendering.
+    await expect
+      .element(page.getByRole("separator", { name: m.chat_debug_resize_handle() }))
+      .toBeInTheDocument();
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  test("falls back to a sheet below the desktop breakpoint", async () => {
+    await page.viewport(800, 900);
+    const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-1", evidence(1)));
+    const chat = createChat(getTurnDiagnostics);
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
+    await expect.element(page.getByRole("dialog")).toBeVisible();
+    await expect
+      .element(page.getByRole("separator", { name: m.chat_debug_resize_handle() }))
       .not.toBeInTheDocument();
   });
 
@@ -126,11 +167,9 @@ describe("ChatDebugPanel", () => {
       message("message-1", "First question"),
       message("message-2", "Latest question")
     ]);
-    render(ChatDebugPanel, { chat, available: true });
+    render(ChatDebugPanelFixture, { chat, available: true });
 
-    const trigger = page.getByRole("button", { name: m.chat_debug_open() });
-    await expect.element(trigger).toHaveAttribute("aria-haspopup", "dialog");
-    await trigger.click();
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
     await vi.waitFor(() =>
       expect(getTurnDiagnostics).toHaveBeenCalledWith({
         sessionId: "session-1",
@@ -139,7 +178,9 @@ describe("ChatDebugPanel", () => {
     );
 
     chat.changeChatPartner({ ...chat.partner, id: "assistant-2" } as ChatPartner);
-    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .not.toBeInTheDocument();
 
     firstRequest.resolve(diagnostics("message-2", evidence(1)));
     await expect.element(page.getByText("skill-0-" + "x".repeat(72))).not.toBeInTheDocument();
@@ -171,9 +212,9 @@ describe("ChatDebugPanel", () => {
         ]
       })
     ]);
-    render(ChatDebugPanel, { chat, available: true });
+    render(ChatDebugPanelFixture, { chat, available: true });
 
-    const trigger = page.getByRole("button", { name: m.chat_debug_open() });
+    const trigger = page.getByRole("button", { name: m.chat_debug_open(), exact: true });
     await trigger.click();
     await expect
       .element(page.getByRole("alert").getByText(m.chat_debug_unavailable_title()))
@@ -181,12 +222,15 @@ describe("ChatDebugPanel", () => {
     await page.getByRole("button", { name: m.chat_debug_retry() }).click();
 
     await expect.element(page.getByText("list_events")).toBeVisible();
-    await expect.element(page.getByText(/: MCP$/)).toBeVisible();
+    await expect.element(page.getByText(/· MCP$/)).toBeVisible();
     expect(document.body.textContent).not.toMatch(
       /SENSITIVE_(QUESTION|ANSWER|REASONING|ARGUMENT|RESULT|CONTENT|INCIDENT|TITLE|URI)/
     );
 
     await userEvent.keyboard("{Escape}");
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .not.toBeInTheDocument();
     await expect.element(trigger).toHaveFocus();
   });
 
@@ -220,9 +264,9 @@ describe("ChatDebugPanel", () => {
       ask,
       get
     });
-    render(ChatDebugPanel, { chat, available: true });
+    render(ChatDebugPanelFixture, { chat, available: true });
 
-    await page.getByRole("button", { name: m.chat_debug_open() }).click();
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
     const request = chat.askQuestion("Latest question");
     await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-2"]));
     finishStream();
@@ -243,6 +287,32 @@ describe("ChatDebugPanel", () => {
       .not.toBeInTheDocument();
   });
 
+  test("steps between persisted turns with the previous and next buttons", async () => {
+    const getTurnDiagnostics = vi.fn(({ messageId }: { messageId: string }) =>
+      Promise.resolve(diagnostics(messageId, evidence(1)))
+    );
+    const chat = createChat(getTurnDiagnostics, [
+      message("message-1", "First question"),
+      message("message-2", "Latest question")
+    ]);
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
+    const previous = page.getByRole("button", { name: m.chat_debug_previous_turn() });
+    const next = page.getByRole("button", { name: m.chat_debug_next_turn() });
+    await expect.element(next).toBeDisabled();
+
+    await previous.click();
+    await vi.waitFor(() =>
+      expect(getTurnDiagnostics).toHaveBeenCalledWith({
+        sessionId: "session-1",
+        messageId: "message-1"
+      })
+    );
+    await expect.element(previous).toBeDisabled();
+    await expect.element(next).not.toBeDisabled();
+  });
+
   test("distinguishes legacy evidence from zero candidates and reveals large lists in chunks", async () => {
     const getTurnDiagnostics = vi
       .fn()
@@ -250,9 +320,9 @@ describe("ChatDebugPanel", () => {
       .mockResolvedValueOnce(diagnostics("message-1", evidence(0)))
       .mockResolvedValueOnce(diagnostics("message-1", evidence(1_000)));
     const chat = createChat(getTurnDiagnostics);
-    render(ChatDebugPanel, { chat, available: true });
+    render(ChatDebugPanelFixture, { chat, available: true });
 
-    await page.getByRole("button", { name: m.chat_debug_open() }).click();
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
     await expect.element(page.getByText(m.chat_debug_legacy_skills_title())).toBeVisible();
     await page.getByRole("button", { name: m.chat_debug_refresh() }).click();
     await expect.element(page.getByText(m.chat_debug_zero_skills_title())).toBeVisible();

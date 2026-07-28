@@ -2,7 +2,6 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Separator } from "$lib/components/ui/separator/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -14,6 +13,7 @@
     type SkillActivationEvidence,
     type SkillActivationRejection
   } from "../../skillActivationDebug";
+  import ChatDebugSection from "./ChatDebugSection.svelte";
   import CopyableDebugValue from "./CopyableDebugValue.svelte";
 
   const PAGE_SIZE = 50;
@@ -74,14 +74,13 @@
   }
 </script>
 
-<Separator />
-
-<section class="flex flex-col gap-5 px-5 py-5" aria-labelledby="chat-debug-skill-activation">
+<ChatDebugSection
+  id="chat-debug-section-skills"
+  title={m.chat_debug_skill_activation()}
+  count={rows.length}
+>
   <div class="flex flex-col gap-2">
     <div class="flex flex-wrap items-center gap-2">
-      <h2 id="chat-debug-skill-activation" class="text-sm font-semibold">
-        {m.chat_debug_skill_activation()}
-      </h2>
       <Badge variant="outline">{modeLabel(evidence.effective_mode)}</Badge>
     </div>
     <p class="text-muted-foreground max-w-[68ch] text-sm leading-5">
@@ -97,14 +96,14 @@
     </Alert.Root>
   {/if}
 
-  <dl class="border-border grid grid-cols-2 border-y sm:grid-cols-4">
+  <dl class="border-border grid grid-cols-2 border-y @xl:grid-cols-4">
     {@render Count(m.chat_debug_available(), summary.available)}
     {@render Count(m.chat_debug_entered_context(), summary.enteredContext)}
     {@render Count(m.chat_debug_blocked(), summary.blocked)}
     {@render Count(m.chat_debug_rejected(), summary.rejected)}
   </dl>
 
-  <dl class="grid grid-cols-2 gap-x-5 gap-y-4 text-sm">
+  <dl class="grid grid-cols-1 gap-x-5 gap-y-4 text-sm @md:grid-cols-2">
     <CopyableDebugValue label={m.chat_debug_model_route()} value={evidence.selected_model_route} />
     <CopyableDebugValue label={m.chat_debug_model_id()} value={evidence.selected_model_id} />
     <div>
@@ -144,11 +143,11 @@
         <p class="text-muted-foreground text-sm">{m.chat_debug_zero_skills_description()}</p>
       </div>
     {:else}
-      <ol class="border-border border-t">
+      <ol class="flex flex-col gap-2">
         {#each visibleRows as row (row.skill_revision_id)}
-          <li class="border-border flex flex-col gap-3 border-b py-4">
+          <li class="border-border flex flex-col gap-3 rounded-lg border px-4 py-3.5">
             <div class="flex min-w-0 items-start justify-between gap-3">
-              <p class="break-all text-sm font-semibold">{row.skill_id}</p>
+              <p class="text-sm font-semibold break-all">{row.skill_id}</p>
               <span class="text-muted-foreground shrink-0 text-xs tabular-nums">
                 {m.chat_debug_candidate_position({ position: String(row.position + 1) })}
               </span>
@@ -191,14 +190,14 @@
               </ul>
             {/if}
 
-            <dl class="grid gap-x-5 gap-y-3 sm:grid-cols-2">
+            <dl class="grid grid-cols-1 gap-x-5 gap-y-3 @md:grid-cols-2">
               <CopyableDebugValue
                 label={m.chat_debug_skill_revision_id()}
                 value={row.skill_revision_id}
               />
               <div>
                 <dt class="text-muted-foreground text-xs">{m.chat_debug_revision_and_source()}</dt>
-                <dd class="mt-0.5 break-words text-xs font-medium">
+                <dd class="mt-0.5 text-xs font-medium break-words">
                   {m.chat_debug_revision({ number: String(row.revision_number) })},
                   {row.source === "space"
                     ? m.chat_debug_source_space()
@@ -235,7 +234,7 @@
       </Alert.Description>
     </Alert.Root>
   {/if}
-</section>
+</ChatDebugSection>
 
 {#snippet Count(label: string, value: number)}
   <div class="border-border px-3 py-2.5 not-last:border-r">
