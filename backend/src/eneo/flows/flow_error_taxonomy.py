@@ -597,11 +597,20 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE: _entry(
         category="Evidence and artifacts",
         surfaced_through="API error response",
-        cause="The run has more provider-call events than one synchronous export may contain.",
-        consumer_action=(
-            "Page this run's provider-call events through the provider-calls endpoint."
+        cause=(
+            "The run exceeds an export limit named in the error context — "
+            "provider-call events, recorded passage bytes, stored provenance "
+            "size, or unreadable passage-size evidence."
         ),
-        user_action="Open the run's provider-call list instead of exporting it.",
+        consumer_action=(
+            "Page provider-call events through the provider-calls endpoint or "
+            "inspect recorded passages in the run view — an export never "
+            "returns a partial document."
+        ),
+        user_action=(
+            "Open the run's evidence view instead of exporting it; the view "
+            "shows what fits and says exactly what it left out."
+        ),
     ),
     FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(
         category="Typed input/output",

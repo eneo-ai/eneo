@@ -369,15 +369,24 @@ async def list_flow_run_provider_calls(
         ),
         413: error_response(
             description=(
-                "The synchronous evidence export exceeds the provider-call event "
-                "safety boundary."
+                "The run holds more evidence than one synchronous export may "
+                "contain. context.limit names the exceeded boundary: "
+                "provider_call_events, recorded_passage_bytes, "
+                "stored_provenance_bytes, or corrupt_passage_evidence. An "
+                "export never returns a partial document; context.hint names "
+                "the recovery path."
             ),
             message="Flow evidence export contains too many provider-call events.",
             eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
             code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE,
             context={
+                "limit": "provider_call_events",
                 "provider_call_count": 10_001,
                 "max_provider_call_events": 10_000,
+                "hint": (
+                    "Page this run's provider-call events through the "
+                    "provider-calls endpoint."
+                ),
             },
         ),
         403: error_response(
