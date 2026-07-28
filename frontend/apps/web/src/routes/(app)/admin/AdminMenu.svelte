@@ -5,27 +5,26 @@
 -->
 
 <script lang="ts">
-  import type { Icon } from "@eneo/icons";
   import type { ComponentType } from "svelte";
-  import { IconAssistant } from "@eneo/icons/assistant";
-  import { IconAssistants } from "@eneo/icons/assistants";
-  import { IconThumb } from "@eneo/icons/thumb";
-  import { IconLibrary } from "@eneo/icons/library";
-  import { IconCPU } from "@eneo/icons/CPU";
-  import { IconBulb } from "@eneo/icons/bulb";
-  import { IconHistory } from "@eneo/icons/history";
-  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
-  import { IconSparkles } from "@eneo/icons/sparkles";
-  import { IconKey } from "@eneo/icons/key";
   import {
     BookOpenCheck,
     BookText,
     ChartPie,
-    LayoutTemplate,
     Cloud,
+    Cpu,
+    Fingerprint,
     HardDrive,
+    History,
+    KeyRound,
+    Landmark,
+    LayoutTemplate,
+    Lightbulb,
+    MessageSquareText,
     Plug,
-    ShieldCheck
+    ShieldCheck,
+    Sparkles,
+    UserRound,
+    UsersRound
   } from "lucide-svelte";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
@@ -44,22 +43,22 @@
     return normalizedRoute === normalizedUrl || normalizedRoute.startsWith(`${normalizedUrl}/`);
   }
 
-  type NavItem = { route: string; href: string; icon: Icon | ComponentType; label: string };
+  type NavItem = { route: string; href: string; icon: ComponentType; label: string };
   type NavGroup = { label: string; items: NavItem[] };
 
-  function navItem(route: string, icon: Icon | ComponentType, label: string): NavItem {
+  function navItem(route: string, icon: ComponentType, label: string): NavItem {
     return { route, href: localizeHref(route), icon, label };
   }
 
   const groups = $derived<NavGroup[]>([
     {
       label: m.admin_section_overview(),
-      items: [navItem("/admin", IconLibrary, m.overview())]
+      items: [navItem("/admin", Landmark, m.overview())]
     },
     {
       label: m.admin_section_governance(),
       items: [
-        navItem("/admin/personal-assistant", IconSpeechBubble, m.governance_title()),
+        navItem("/admin/personal-assistant", MessageSquareText, m.governance_title()),
         navItem("/admin/prompt-library", BookText, m.governance_tab_prompts()),
         navItem("/admin/security-classifications", ShieldCheck, m.security_classifications())
       ]
@@ -67,12 +66,12 @@
     {
       label: m.admin_section_configuration(),
       items: [
-        navItem("/admin/models", IconCPU, m.models()),
+        navItem("/admin/models", Cpu, m.models()),
         ...(settings?.using_templates
           ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
           : []),
         navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
-        navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
+        navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
         navItem("/admin/integrations", Cloud, m.integrations()),
         navItem("/admin/storage", HardDrive, m.storage_settings_nav())
@@ -82,17 +81,17 @@
       label: m.admin_section_analytics_logs(),
       items: [
         navItem("/admin/usage", ChartPie, m.usage()),
-        navItem("/admin/insights", IconBulb, m.insights()),
-        navItem("/admin/audit-logs", IconHistory, m.audit_logs())
+        navItem("/admin/insights", Lightbulb, m.insights()),
+        navItem("/admin/audit-logs", History, m.audit_logs())
       ]
     },
     {
       label: m.admin_section_access(),
       items: [
-        navItem("/admin/users", IconAssistant, m.users()),
-        navItem("/admin/legacy/user-groups", IconAssistants, m.user_groups()),
-        navItem("/admin/legacy/roles", IconThumb, m.roles()),
-        navItem("/admin/api-keys", IconKey, m.api_keys())
+        navItem("/admin/users", UserRound, m.users()),
+        navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
+        navItem("/admin/legacy/roles", Fingerprint, m.roles()),
+        navItem("/admin/api-keys", KeyRound, m.api_keys())
       ]
     }
   ]);
