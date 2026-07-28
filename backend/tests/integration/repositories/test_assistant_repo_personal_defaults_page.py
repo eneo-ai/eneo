@@ -195,3 +195,37 @@ async def test_identical_created_at_rows_page_deterministically(
         # created_at ties break on id, so single-row pages must walk the ids
         # in ascending order — never skipping or repeating a row.
         assert collected == sorted(seeded)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_page_ordering_is_served_by_the_partial_index(db_container, admin_user):
+    """The cursor order must come from ``ix_assistants_default_created_at_id``.
+
+    Without it, every page re-sorts the tenant's remaining rows, and the walk
+    does superlinear work exactly on the fleet-sized tenants it exists for.
+    Planner toggles make the assertion independent of table size: with
+    sequential scans and sorts penalised, the plan can only be cheap if the
+    partial index provides the (created_at, id) order itself.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    from eneo.assistants.assistant_repo import personal_defaults_page_query
+
+    async with db_container() as container:
+        session = container.session()
+        seeded = datetime(2026, 7, 2, 8, 0, 0, tzinfo=timezone.utc)
+        query = personal_defaults_page_query(
+            tenant_id=admin_user.tenant_id, limit=100, after=(seeded, uuid4())
+        )
+        compiled = query.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+
+        await session.execute(sa.text("SET LOCAL enable_seqscan = off"))
+        await session.execute(sa.text("SET LOCAL enable_sort = off"))
+        plan_rows = await session.execute(sa.text(f"EXPLAIN {compiled}"))
+        plan = "\n".join(row[0] for row in plan_rows)
+
+        assert "ix_assistants_default_created_at_id" in plan, plan
+        assert "Sort" not in plan, plan

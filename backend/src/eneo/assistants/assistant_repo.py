@@ -66,6 +66,60 @@ class PersonalDefaultValidationInput:
     has_knowledge: bool
 
 
+def personal_defaults_page_query(
+    *,
+    tenant_id: UUID,
+    limit: int,
+    after: tuple[datetime, UUID] | None = None,
+) -> Select[tuple[Assistants, bool]]:
+    """One keyset page of personal-default candidates, ordered (created_at, id).
+
+    Module-level so the plan test can EXPLAIN exactly the statement production
+    executes: the ordering must be served by
+    ``ix_assistants_default_created_at_id``, not by re-sorting the tenant's
+    remaining rows on every page.
+    """
+    has_knowledge = sa.or_(
+        sa.exists(
+            sa.select(sa.literal(1)).where(
+                AssistantsGroups.assistant_id == Assistants.id
+            )
+        ),
+        sa.exists(
+            sa.select(sa.literal(1)).where(
+                AssistantsWebsites.assistant_id == Assistants.id
+            )
+        ),
+        sa.exists(
+            sa.select(sa.literal(1)).where(
+                AssistantIntegrationKnowledge.assistant_id == Assistants.id
+            )
+        ),
+    ).label("has_knowledge")
+    query = (
+        sa.select(Assistants, has_knowledge)
+        .join(Spaces, Assistants.space_id == Spaces.id)
+        .where(
+            Spaces.tenant_id == tenant_id,
+            Spaces.user_id.is_not(None),
+            # `== true`, not `.is_(True)`: the partial index predicate is
+            # `is_default = true`, and the planner only proves implication
+            # when the query uses the same form. `IS TRUE` is a different
+            # node and disqualifies the index.
+            Assistants.is_default == sa.true(),
+        )
+        .order_by(Assistants.created_at, Assistants.id)
+        .limit(limit + 1)
+    )
+    if after is not None:
+        after_created_at, after_id = after
+        query = query.where(
+            sa.tuple_(Assistants.created_at, Assistants.id)
+            > sa.tuple_(sa.literal(after_created_at), sa.literal(after_id, sa.Uuid()))
+        )
+    return query
+
+
 @dataclass(frozen=True)
 class PersonalDefaultValidationPage:
     items: list[PersonalDefaultValidationInput]
@@ -581,51 +635,17 @@ class AssistantRepository:
         The cursor is ``(created_at, id)`` — ``created_at`` alone is not unique,
         and a non-deterministic order would let rows slip between pages.
         """
-        has_knowledge = sa.or_(
-            sa.exists(
-                sa.select(sa.literal(1)).where(
-                    AssistantsGroups.assistant_id == Assistants.id
-                )
+        query = personal_defaults_page_query(
+            tenant_id=tenant_id, limit=limit, after=after
+        ).options(
+            selectinload(Assistants.user).selectinload(Users.tenant),
+            selectinload(Assistants.user).selectinload(Users.roles),
+            selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
+            selectinload(Assistants.template).selectinload(
+                AssistantTemplates.completion_model
             ),
-            sa.exists(
-                sa.select(sa.literal(1)).where(
-                    AssistantsWebsites.assistant_id == Assistants.id
-                )
-            ),
-            sa.exists(
-                sa.select(sa.literal(1)).where(
-                    AssistantIntegrationKnowledge.assistant_id == Assistants.id
-                )
-            ),
-        ).label("has_knowledge")
-        query = (
-            sa.select(Assistants, has_knowledge)
-            .join(Spaces, Assistants.space_id == Spaces.id)
-            .where(
-                Spaces.tenant_id == tenant_id,
-                Spaces.user_id.is_not(None),
-                Assistants.is_default.is_(True),
-            )
-            .options(
-                selectinload(Assistants.user).selectinload(Users.tenant),
-                selectinload(Assistants.user).selectinload(Users.roles),
-                selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
-                selectinload(Assistants.template).selectinload(
-                    AssistantTemplates.completion_model
-                ),
-                selectinload(Assistants.mcp_servers),
-            )
-            .order_by(Assistants.created_at, Assistants.id)
-            .limit(limit + 1)
+            selectinload(Assistants.mcp_servers),
         )
-        if after is not None:
-            after_created_at, after_id = after
-            query = query.where(
-                sa.tuple_(Assistants.created_at, Assistants.id)
-                > sa.tuple_(
-                    sa.literal(after_created_at), sa.literal(after_id, sa.Uuid())
-                )
-            )
         rows = list((await self.session.execute(query)).all())
         has_more = len(rows) > limit
         rows = rows[:limit]
