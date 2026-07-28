@@ -180,6 +180,7 @@ class SkillRepo(Protocol):
         tenant_id: UUID,
         skill_id: UUID,
         expected_pinned_revision_id: UUID,
+        expected_published_revision_id: UUID,
     ) -> PersonalChatPinAdvance | None: ...
 
     async def unblock_organization_skill(

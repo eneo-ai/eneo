@@ -43,7 +43,14 @@ class PersonalChatPinAdvanceRequest(BaseModel):
     expected_pinned_revision_id: UUID = Field(
         description=(
             "The revision the Personal Chat binding was pinned to when the "
-            "administrator reviewed the move — not the published target."
+            "administrator reviewed the move."
+        )
+    )
+    expected_published_revision_id: UUID = Field(
+        description=(
+            "The published revision the administrator reviewed as the "
+            "target. A publish that lands after the review is refused as a "
+            "conflict instead of silently applied."
         )
     )
 

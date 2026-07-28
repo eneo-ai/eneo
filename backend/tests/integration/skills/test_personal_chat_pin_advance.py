@@ -171,6 +171,7 @@ async def test_advances_only_the_reviewed_pin_and_preserves_everything_else(
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
         )
 
         assert advance is not None
@@ -222,6 +223,7 @@ async def test_repeating_the_advance_is_a_typed_no_op(db_container, admin_user):
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
         )
         assert first is not None
         assert first.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
@@ -232,6 +234,7 @@ async def test_repeating_the_advance_is_a_typed_no_op(db_container, admin_user):
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_pinned_revision_id=published.id,
+            expected_published_revision_id=published.id,
         )
         assert second is not None
         assert second.outcome is PersonalChatPinAdvanceOutcome.ALREADY_CURRENT
@@ -244,6 +247,7 @@ async def test_repeating_the_advance_is_a_typed_no_op(db_container, admin_user):
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_pinned_revision_id=uuid4(),
+            expected_published_revision_id=published.id,
         )
         assert retried is not None
         assert retried.outcome is PersonalChatPinAdvanceOutcome.ALREADY_CURRENT
@@ -274,7 +278,7 @@ async def test_a_stale_reviewed_revision_loses_instead_of_overwriting(
                 )
             ],
         )
-        await _publish_second_revision(
+        published = await _publish_second_revision(
             repo,
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
@@ -286,6 +290,17 @@ async def test_a_stale_reviewed_revision_loses_instead_of_overwriting(
                 tenant_id=admin_user.tenant_id,
                 skill_id=skill.id,
                 expected_pinned_revision_id=uuid4(),  # reviewed some other state
+                expected_published_revision_id=published.id,
+            )
+
+        # The reviewed target must also be the live published revision: a
+        # publish that lands after the review may not be applied silently.
+        with pytest.raises(SkillRevisionConflictError):
+            await repo.advance_personal_chat_skill_pin(
+                tenant_id=admin_user.tenant_id,
+                skill_id=skill.id,
+                expected_pinned_revision_id=old_revision.id,
+                expected_published_revision_id=old_revision.id,  # stale target
             )
 
         row = await _binding_row(session, policy_id=policy_id, skill_id=skill.id)
@@ -309,6 +324,7 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
             tenant_id=admin_user.tenant_id,
             skill_id=unbound.id,
             expected_pinned_revision_id=unbound.current_revision.id,
+            expected_published_revision_id=unbound.current_revision.id,
         )
         assert not_bound is not None
         assert not_bound.outcome is PersonalChatPinAdvanceOutcome.NOT_BOUND
@@ -342,6 +358,7 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
             tenant_id=admin_user.tenant_id,
             skill_id=bound.id,
             expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=old_revision.id,
         )
         assert unpublished is not None
         assert unpublished.outcome is PersonalChatPinAdvanceOutcome.NOT_PUBLISHED
@@ -366,6 +383,7 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
             tenant_id=admin_user.tenant_id,
             skill_id=bound.id,
             expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=old_revision.id,
         )
         assert stopped is not None
         assert stopped.outcome is PersonalChatPinAdvanceOutcome.BLOCKED
@@ -377,6 +395,7 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
                 tenant_id=uuid4(),  # no such tenant
                 skill_id=bound.id,
                 expected_pinned_revision_id=old_revision.id,
+                expected_published_revision_id=old_revision.id,
             )
             is None
         )
@@ -470,8 +489,9 @@ async def test_advances_to_different_skills_serialize_on_the_policy_row(
                 ),
             ],
         )
+        published_by_skill = {}
         for skill in (first, second):
-            await _publish_second_revision(
+            published_by_skill[skill.id] = await _publish_second_revision(
                 repo,
                 tenant_id=admin_user.tenant_id,
                 skill_id=skill.id,
@@ -488,6 +508,7 @@ async def test_advances_to_different_skills_serialize_on_the_policy_row(
                 tenant_id=admin_user.tenant_id,
                 skill_id=first.id,
                 expected_pinned_revision_id=first_old.id,
+                expected_published_revision_id=published_by_skill[first.id].id,
             )
             first_finished.set()
             await release_first.wait()
@@ -500,6 +521,7 @@ async def test_advances_to_different_skills_serialize_on_the_policy_row(
                 tenant_id=admin_user.tenant_id,
                 skill_id=second.id,
                 expected_pinned_revision_id=second_old.id,
+                expected_published_revision_id=published_by_skill[second.id].id,
             )
 
     first_task = asyncio.create_task(first_writer())

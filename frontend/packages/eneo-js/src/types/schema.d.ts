@@ -15300,9 +15300,15 @@ export interface components {
       /**
        * Expected Pinned Revision Id
        * Format: uuid
-       * @description The revision the Personal Chat binding was pinned to when the administrator reviewed the move — not the published target.
+       * @description The revision the Personal Chat binding was pinned to when the administrator reviewed the move.
        */
       expected_pinned_revision_id: string;
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       * @description The published revision the administrator reviewed as the target. A publish that lands after the review is refused as a conflict instead of silently applied.
+       */
+      expected_published_revision_id: string;
     };
     /** PlatformAdminGrantRequest */
     PlatformAdminGrantRequest: {

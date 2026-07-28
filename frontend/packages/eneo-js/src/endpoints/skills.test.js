@@ -255,7 +255,8 @@ test("personal chat advance sends the reviewed pinned revision", async () => {
 
   const result = await skills.organization.advancePersonalChat({
     skillId: "skill-1",
-    expected_pinned_revision_id: "revision-1"
+    expected_pinned_revision_id: "revision-1",
+    expected_published_revision_id: "revision-2"
   });
 
   assert.equal(result, response);
@@ -266,7 +267,10 @@ test("personal chat advance sends the reviewed pinned revision", async () => {
         method: "post",
         params: { path: { skill_id: "skill-1" } },
         requestBody: {
-          "application/json": { expected_pinned_revision_id: "revision-1" }
+          "application/json": {
+            expected_pinned_revision_id: "revision-1",
+            expected_published_revision_id: "revision-2"
+          }
         }
       }
     }

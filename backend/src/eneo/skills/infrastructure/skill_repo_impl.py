@@ -1148,6 +1148,7 @@ class SkillRepoImpl:
         tenant_id: UUID,
         skill_id: UUID,
         expected_pinned_revision_id: UUID,
+        expected_published_revision_id: UUID,
     ) -> PersonalChatPinAdvance | None:
         """Move the tenant's Personal Chat pin for one Skill to its published
         revision, and change nothing else.
@@ -1200,6 +1201,11 @@ class SkillRepoImpl:
                 )
             )
         ).one()
+        # The move may only reach the exact revision the administrator
+        # previewed. A publish that lands between review and this lock makes
+        # the live published revision a target the administrator never saw.
+        if published.id != expected_published_revision_id:
+            raise SkillRevisionConflictError
 
         if policy_id is None:
             return PersonalChatPinAdvance(
