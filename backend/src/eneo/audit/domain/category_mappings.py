@@ -46,7 +46,7 @@ CATEGORY_MAPPINGS = {
     ActionType.SCIM_GROUP_DELETED.value: "admin_actions",
     ActionType.SCIM_TOKEN_CREATED.value: "admin_actions",
     ActionType.SCIM_TOKEN_REVOKED.value: "admin_actions",
-    # User Actions (44 actions)
+    # User Actions (45 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",

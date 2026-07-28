@@ -95,7 +95,10 @@ async def test_advance_moves_the_pin_audits_once_and_repeats_cleanly(
         # match the pin is a conflict, and nothing may change or be audited.
         stale = await client.post(
             f"/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
-            json={"expected_pinned_revision_id": str(uuid4())},
+            json={
+                "expected_pinned_revision_id": str(uuid4()),
+                "expected_published_revision_id": second_revision_id,
+            },
             headers=headers,
         )
         assert stale.status_code == 409, stale.text
@@ -103,7 +106,10 @@ async def test_advance_moves_the_pin_audits_once_and_repeats_cleanly(
 
         advanced = await client.post(
             f"/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
-            json={"expected_pinned_revision_id": first_revision_id},
+            json={
+                "expected_pinned_revision_id": first_revision_id,
+                "expected_published_revision_id": second_revision_id,
+            },
             headers=headers,
         )
         assert advanced.status_code == 200, advanced.text
@@ -127,7 +133,10 @@ async def test_advance_moves_the_pin_audits_once_and_repeats_cleanly(
 
         repeated = await client.post(
             f"/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
-            json={"expected_pinned_revision_id": second_revision_id},
+            json={
+                "expected_pinned_revision_id": second_revision_id,
+                "expected_published_revision_id": second_revision_id,
+            },
             headers=headers,
         )
         assert repeated.status_code == 200, repeated.text
@@ -203,9 +212,10 @@ async def test_a_move_the_governance_fit_rejects_rolls_back_unaudited(
         headers=headers,
     )
     assert revision_response.status_code == 201, revision_response.text
+    second_revision_id = revision_response.json()["id"]
     republish_response = await client.post(
         f"/api/v1/skills/organization/{skill_id}/publish/",
-        json={"expected_revision_id": revision_response.json()["id"]},
+        json={"expected_revision_id": second_revision_id},
         headers=headers,
     )
     assert republish_response.status_code == 200, republish_response.text
@@ -216,11 +226,104 @@ async def test_a_move_the_governance_fit_rejects_rolls_back_unaudited(
     ) as enqueue_audit:
         refused = await client.post(
             f"/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
-            json={"expected_pinned_revision_id": first_revision_id},
+            json={
+                "expected_pinned_revision_id": first_revision_id,
+                "expected_published_revision_id": second_revision_id,
+            },
             headers=headers,
         )
     assert refused.status_code == 400, refused.text
     assert "context window" in refused.json()["message"]
+    assert enqueue_audit.await_count == 0
+
+    policy_response = await client.get(
+        "/api/v1/admin/governance-policy/",
+        headers=headers,
+    )
+    assert policy_response.status_code == 200, policy_response.text
+    bindings = policy_response.json()["skills"]["bindings"]
+    assert [b["skill_revision_id"] for b in bindings] == [first_revision_id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_publish_after_the_review_is_refused_not_silently_applied(
+    client, admin_token, db_container
+):
+    """The administrator reviewed a move to version 2; version 3 was published
+    before the call. The advance must refuse rather than move the tenant's
+    Personal Chat to a revision nobody previewed."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    async with db_container() as container:
+        await container.space_init_service().get_personal_space()
+
+    create_response = await client.post(
+        "/api/v1/skills/organization/",
+        json={
+            "slug": f"pin-advance-target-{uuid4().hex[:8]}",
+            "display_name": "Pin advance target",
+            "description": "Approved guidance.",
+            "instructions": "Follow the approved instructions.",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201, create_response.text
+    skill_id = create_response.json()["id"]
+    first_revision_id = create_response.json()["current_revision"]["id"]
+    assert (
+        await client.post(
+            f"/api/v1/skills/organization/{skill_id}/publish/",
+            json={"expected_revision_id": first_revision_id},
+            headers=headers,
+        )
+    ).status_code == 200
+    bind_response = await client.put(
+        "/api/v1/admin/governance-policy/",
+        json={
+            "skills": {
+                "bindings": [
+                    {"skill_id": skill_id, "skill_revision_id": first_revision_id}
+                ]
+            }
+        },
+        headers=headers,
+    )
+    assert bind_response.status_code == 200, bind_response.text
+
+    reviewed_target = None
+    for iteration in (2, 3):
+        revision_response = await client.post(
+            f"/api/v1/skills/organization/{skill_id}/revisions/",
+            json={
+                "display_name": "Pin advance target",
+                "description": f"Approved guidance, revision {iteration}.",
+                "instructions": f"Follow approved revision {iteration}.",
+            },
+            headers=headers,
+        )
+        assert revision_response.status_code == 201, revision_response.text
+        publish_response = await client.post(
+            f"/api/v1/skills/organization/{skill_id}/publish/",
+            json={"expected_revision_id": revision_response.json()["id"]},
+            headers=headers,
+        )
+        assert publish_response.status_code == 200, publish_response.text
+        if iteration == 2:
+            reviewed_target = revision_response.json()["id"]
+
+    with patch(
+        "eneo.audit.application.audit_service.job_manager.enqueue",
+        new_callable=AsyncMock,
+    ) as enqueue_audit:
+        refused = await client.post(
+            f"/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
+            json={
+                "expected_pinned_revision_id": first_revision_id,
+                "expected_published_revision_id": reviewed_target,
+            },
+            headers=headers,
+        )
+    assert refused.status_code == 409, refused.text
     assert enqueue_audit.await_count == 0
 
     policy_response = await client.get(

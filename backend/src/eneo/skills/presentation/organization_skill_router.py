@@ -430,6 +430,7 @@ async def advance_personal_chat_binding(
     advance = await service.advance_personal_chat_binding(
         skill_id=skill_id,
         expected_pinned_revision_id=payload.expected_pinned_revision_id,
+        expected_published_revision_id=payload.expected_published_revision_id,
     )
     # The service raises for every refusal outcome; only these two can
     # return, and both always carry the revision numbers.

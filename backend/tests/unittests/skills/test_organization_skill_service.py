@@ -802,7 +802,9 @@ async def test_pin_advance_requires_the_tenant_administrator():
 
     with pytest.raises(UnauthorizedException):
         await service.advance_personal_chat_binding(
-            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+            skill_id=uuid4(),
+            expected_pinned_revision_id=uuid4(),
+            expected_published_revision_id=uuid4(),
         )
     repo.advance_personal_chat_skill_pin.assert_not_awaited()
 
@@ -818,7 +820,9 @@ async def test_pin_advance_validates_the_governed_fit_only_when_it_wrote():
     )
 
     advanced = await service.advance_personal_chat_binding(
-        skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        skill_id=uuid4(),
+        expected_pinned_revision_id=uuid4(),
+        expected_published_revision_id=uuid4(),
     )
     assert advanced.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
     fit = service.assistant_service.assert_personal_default_governance_context_fit
@@ -828,7 +832,9 @@ async def test_pin_advance_validates_the_governed_fit_only_when_it_wrote():
         PersonalChatPinAdvanceOutcome.ALREADY_CURRENT
     )
     unchanged = await service.advance_personal_chat_binding(
-        skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+        skill_id=uuid4(),
+        expected_pinned_revision_id=uuid4(),
+        expected_published_revision_id=uuid4(),
     )
     assert unchanged.outcome is PersonalChatPinAdvanceOutcome.ALREADY_CURRENT
     # Nothing changed, so nothing new to validate.
@@ -845,7 +851,9 @@ async def test_pin_advance_maps_each_refusal_to_its_established_response():
     repo.advance_personal_chat_skill_pin.return_value = None
     with pytest.raises(NotFoundException):
         await service.advance_personal_chat_binding(
-            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+            skill_id=uuid4(),
+            expected_pinned_revision_id=uuid4(),
+            expected_published_revision_id=uuid4(),
         )
 
     repo.advance_personal_chat_skill_pin.return_value = _advance(
@@ -853,7 +861,9 @@ async def test_pin_advance_maps_each_refusal_to_its_established_response():
     )
     with pytest.raises(NotFoundException):
         await service.advance_personal_chat_binding(
-            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+            skill_id=uuid4(),
+            expected_pinned_revision_id=uuid4(),
+            expected_published_revision_id=uuid4(),
         )
 
     repo.advance_personal_chat_skill_pin.return_value = _advance(
@@ -863,7 +873,9 @@ async def test_pin_advance_maps_each_refusal_to_its_established_response():
         BadRequestException, match="published organisation Skill versions"
     ):
         await service.advance_personal_chat_binding(
-            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+            skill_id=uuid4(),
+            expected_pinned_revision_id=uuid4(),
+            expected_published_revision_id=uuid4(),
         )
 
     repo.advance_personal_chat_skill_pin.return_value = _advance(
@@ -871,7 +883,9 @@ async def test_pin_advance_maps_each_refusal_to_its_established_response():
     )
     with pytest.raises(BadRequestException, match="Blocked organisation Skills"):
         await service.advance_personal_chat_binding(
-            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+            skill_id=uuid4(),
+            expected_pinned_revision_id=uuid4(),
+            expected_published_revision_id=uuid4(),
         )
 
     fit = service.assistant_service.assert_personal_default_governance_context_fit
@@ -890,7 +904,9 @@ async def test_pin_advance_conflict_keeps_the_reviewed_revision_contract():
         SkillRevisionConflictException, match="changed after you reviewed"
     ):
         await service.advance_personal_chat_binding(
-            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+            skill_id=uuid4(),
+            expected_pinned_revision_id=uuid4(),
+            expected_published_revision_id=uuid4(),
         )
 
 
@@ -909,5 +925,7 @@ async def test_pin_advance_rejection_from_the_fit_owner_propagates():
 
     with pytest.raises(BadRequestException, match="does not fit"):
         await service.advance_personal_chat_binding(
-            skill_id=uuid4(), expected_pinned_revision_id=uuid4()
+            skill_id=uuid4(),
+            expected_pinned_revision_id=uuid4(),
+            expected_published_revision_id=uuid4(),
         )

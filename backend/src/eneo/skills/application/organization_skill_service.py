@@ -392,6 +392,7 @@ class OrganizationSkillService:
         *,
         skill_id: UUID,
         expected_pinned_revision_id: UUID,
+        expected_published_revision_id: UUID,
     ) -> PersonalChatPinAdvance:
         """Move the Personal Chat pin for one Skill to its published revision.
 
@@ -407,11 +408,13 @@ class OrganizationSkillService:
                 tenant_id=self.user.tenant_id,
                 skill_id=skill_id,
                 expected_pinned_revision_id=expected_pinned_revision_id,
+                expected_published_revision_id=expected_published_revision_id,
             )
         except SkillRevisionConflictError as error:
             raise SkillRevisionConflictException(
-                "The Personal Chat binding changed after you reviewed it. "
-                "Reload the Skill and review again."
+                "The Skill's published version or its Personal Chat binding "
+                "changed after you reviewed it. Reload the Skill and review "
+                "again."
             ) from error
         if advance is None:
             raise NotFoundException()
