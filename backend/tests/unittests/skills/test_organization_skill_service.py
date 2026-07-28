@@ -7,7 +7,6 @@ import pytest
 
 from eneo.main.exceptions import (
     BadRequestException,
-    NameCollisionException,
     NotFoundException,
     SkillRevisionConflictException,
     UnauthorizedException,
@@ -278,7 +277,7 @@ async def test_organisation_slug_collision_has_a_stable_application_error():
         repo=repo,
     )
 
-    with pytest.raises(NameCollisionException, match="slug 'payroll'"):
+    with pytest.raises(SkillSlugConflictError):
         await service.create_organization_skill(
             slug="payroll",
             display_name="Payroll",
@@ -561,7 +560,7 @@ async def test_previously_published_skill_cannot_be_deleted():
         repo=repo,
     )
 
-    with pytest.raises(NameCollisionException, match="retained for audit history"):
+    with pytest.raises(PublishedSkillDeletionError):
         await service.delete(skill_id=uuid4())
 
 

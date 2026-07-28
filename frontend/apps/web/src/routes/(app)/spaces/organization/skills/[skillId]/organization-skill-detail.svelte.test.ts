@@ -8,6 +8,7 @@ import {
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { SKILL_EXECUTION_BLOCK_CONFLICT } from "$lib/core/errors";
 import { m } from "$lib/paraglide/messages";
 
 const invalidate = vi.hoisted(() => vi.fn(async () => {}));
@@ -513,6 +514,78 @@ describe("organisation Skill detail page", () => {
       .toBeVisible();
   });
 
+  test("does not claim the block state is current when the reread fails", async () => {
+    const initialBlock: SkillExecutionBlockState = {
+      skill_id: "skill-1",
+      block: {
+        id: "block-1",
+        skill_id: "skill-1",
+        blocked_by_user_id: "admin-1",
+        reason: "Initial incident",
+        blocked_at: "2026-07-23T17:30:00Z"
+      }
+    };
+    const unblockSkillExecution = vi
+      .fn()
+      .mockRejectedValue(
+        new EneoError(
+          "Concurrent change",
+          "RESPONSE",
+          409,
+          SKILL_EXECUTION_BLOCK_CONFLICT,
+          {},
+          { endpoint: "POST@execution-block/unblock" }
+        )
+      );
+    const getSkillExecutionBlock = vi.fn().mockRejectedValue(new Error("Unavailable"));
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: { items: [], count: 0, limit: 25, next_cursor: null },
+        adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: initialBlock,
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock,
+            unblockSkillExecution
+          },
+          skills: {
+            organization: {
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_unblock_action() })
+      .click();
+    const reason = page.getByLabelText(m.organization_skills_execution_reason_label());
+    await reason.fill("Reviewed and remediated");
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_unblock_confirm() })
+      .last()
+      .click();
+
+    // The conflict copy points at the state shown below. When that state could
+    // not be refreshed, saying so is the only honest option.
+    await expect
+      .element(page.getByText(m.organization_skills_execution_refresh_error()))
+      .toBeVisible();
+    await expect.element(page.getByText(m.eneo_error_9052())).not.toBeInTheDocument();
+    await expect.element(reason).toHaveValue("Reviewed and remediated");
+  });
+
   test("reloads a concurrent block change without losing the entered reason", async () => {
     const initialBlock: SkillExecutionBlockState = {
       skill_id: "skill-1",
@@ -534,18 +607,18 @@ describe("organisation Skill detail page", () => {
         blocked_at: "2026-07-23T17:45:00Z"
       }
     };
-    const unblockSkillExecution = vi
-      .fn()
-      .mockRejectedValue(
-        new EneoError(
-          "Concurrent change",
-          "RESPONSE",
-          409,
-          9043,
-          {},
-          { endpoint: "POST@execution-block/unblock" }
-        )
-      );
+    const unblockSkillExecution = vi.fn().mockRejectedValue(
+      new EneoError(
+        "Concurrent change",
+        "RESPONSE",
+        409,
+        // The execution block has its own reason code; it no longer borrows
+        // the revision conflict, which carries a different recovery.
+        SKILL_EXECUTION_BLOCK_CONFLICT,
+        {},
+        { endpoint: "POST@execution-block/unblock" }
+      )
+    );
     const getSkillExecutionBlock = vi.fn().mockResolvedValue(replacementBlock);
 
     render(OrganizationSkillDetailPage, {
@@ -591,9 +664,7 @@ describe("organisation Skill detail page", () => {
       .last()
       .click();
 
-    await expect
-      .element(page.getByText(m.organization_skills_execution_stale_error()))
-      .toBeVisible();
+    await expect.element(page.getByText(m.eneo_error_9052())).toBeVisible();
     await expect
       .element(page.getByRole("alertdialog").getByText("Expanded incident review"))
       .toBeVisible();

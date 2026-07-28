@@ -4,7 +4,6 @@ from uuid import UUID
 
 from eneo.main.exceptions import (
     BadRequestException,
-    NameCollisionException,
     NotFoundException,
     SkillRevisionConflictException,
     UnauthorizedException,
@@ -16,7 +15,6 @@ from eneo.skills.domain.skill import (
     AssistantSkillBindingReplacement,
     NormalizedSkillContent,
     PublishedSkillDeactivationError,
-    PublishedSkillDeletionError,
     ResolvedSkillBinding,
     Skill,
     SkillActivationMode,
@@ -28,15 +26,12 @@ from eneo.skills.domain.skill import (
     SkillExecutionBlock,
     SkillExecutionBlockedException,
     SkillExecutionReference,
-    SkillHasActiveAppRunsError,
-    SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
     SkillRuntimeResolution,
-    SkillSlugConflictError,
     SkillStatusChange,
     SkillTurnPlan,
     compose_skill_instructions,
@@ -190,20 +185,15 @@ class SkillService:
             description=description,
             instructions=instructions,
         )
-        try:
-            return await self.repo.create(
-                space_id=space_id,
-                slug=normalized_slug,
-                display_name=content.display_name,
-                description=content.description,
-                instructions=content.instructions,
-                content_digest=content.content_digest,
-                created_by_user_id=self.user.id,
-            )
-        except SkillSlugConflictError as error:
-            raise NameCollisionException(
-                f"A Skill with slug '{normalized_slug}' already exists in this Space"
-            ) from error
+        return await self.repo.create(
+            space_id=space_id,
+            slug=normalized_slug,
+            display_name=content.display_name,
+            description=content.description,
+            instructions=content.instructions,
+            content_digest=content.content_digest,
+            created_by_user_id=self.user.id,
+        )
 
     async def create_revision(
         self,
@@ -376,22 +366,7 @@ class SkillService:
             raise UnauthorizedException(
                 "You do not have permission to delete this Skill"
             )
-        try:
-            deleted = await self.repo.delete(skill_id=skill.id)
-        except PublishedSkillDeletionError as error:
-            raise NameCollisionException(
-                "Previously published Skills are retained for audit history "
-                "and cannot be deleted."
-            ) from error
-        except SkillHasActiveAppRunsError as error:
-            raise NameCollisionException(
-                "This Skill is required by a queued or running App run. "
-                "Wait for it to finish before deleting the Skill."
-            ) from error
-        except SkillHasBindingsError as error:
-            raise NameCollisionException(
-                "This Skill is still attached. Remove every binding before deleting it."
-            ) from error
+        deleted = await self.repo.delete(skill_id=skill.id)
         if deleted is None:
             raise NotFoundException()
         return deleted

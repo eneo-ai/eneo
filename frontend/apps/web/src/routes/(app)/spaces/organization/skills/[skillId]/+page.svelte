@@ -19,7 +19,7 @@
   import SkillPreview from "$lib/features/skills/SkillPreview.svelte";
   import { publishedSkillPreview } from "$lib/features/skills/skillBindingCatalog";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
-  import { getErrorMessage } from "$lib/core/errors";
+  import { getErrorMessage, SKILL_EXECUTION_BLOCK_CONFLICT } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import SkillAdoptionProjection from "$lib/features/skills/SkillAdoptionProjection.svelte";
@@ -214,15 +214,15 @@
         setExecutionBlockOverride(block);
       }
     } catch (error) {
-      if (error instanceof EneoError && error.status === 409) {
+      executionError = getErrorMessage(error);
+      if (error instanceof EneoError && error.code === SKILL_EXECUTION_BLOCK_CONFLICT) {
         try {
           await reloadExecutionBlock();
         } catch {
-          // Keep the last known state when the follow-up read is unavailable.
+          // The conflict message points at the state shown below, so say so
+          // plainly when that state could not be refreshed.
+          executionError = m.organization_skills_execution_refresh_error();
         }
-        executionError = m.organization_skills_execution_stale_error();
-      } else {
-        executionError = getErrorMessage(error);
       }
       executionSaving = false;
       return;

@@ -35,7 +35,7 @@ continuity:
   last_handoff_at: null
   last_verified_revision: "7abc3fcef4789949a8434a0faf6b19dbfedbd7ea"
 
-active_task: T019
+active_task: T008
 
 tasks:
   - id: T001
@@ -1271,7 +1271,7 @@ tasks:
   - id: T019
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Complete Task #553 slice 5 for Personal Chat with Governance Policy mode saves and model-set fit validation through T016A's shared owner."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
@@ -1309,14 +1309,40 @@ tasks:
     stop_if:
       - "The implementation requires a second fit calculation, a tenant-wide model scan, or speculative caching/job infrastructure."
       - "Apps would gain on-demand behavior."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Personal Chat Governance Policy now saves always/on_demand Skill bindings through T016A's shared fit owner, and the picker refuses On demand unless the tenant runtime policy and the explicit model set both allow it."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+      merged_pr: 616
+      source_head: "e8894db2a3739ec68cb46ba9198832bc70d9da31"
+      merge_commit: "aed3acfabfa3c44e840f9acce4af4f6c277f3fd3"
+      merged_at: "2026-07-27T20:07:20Z"
+      github_checks: "All required checks passed, including Backend tests, Frontend, Frontend E2E, CI, schema drift, dependency review, and Docker builds."
+      final_review: "Review 4 recorded no in-scope findings and confirmed F2 resolved."
+      review_url: "https://github.com/eneo-ai/eneo/pull/616#issuecomment-5095874600"
+      changed_files:
+        - "backend/src/eneo/assistants/"
+        - "backend/src/eneo/governance_policy/"
+        - "backend/tests/"
+        - "frontend/apps/web/src/lib/features/skills/"
+        - "frontend/apps/web/src/routes/(app)/admin/personal-assistant/configuration/"
+        - "frontend/apps/web/messages/"
+        - "frontend/packages/eneo-js/"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      commands:
+        - "Focused Personal Chat governance and Skill bindings frontend suites: 36 tests passed."
+        - "svelte-check: 0 errors, 0 warnings; Prettier and ESLint clean on the changed paths."
+      verification:
+        - "A bounded tool-capable model set no longer exposes On demand while the tenant disables selective activation; the editor names the disabled runtime instead of the model rules."
+        - "Mutation check confirmed the three added tests fail without the fix."
 
   - id: T008
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Consolidate Skill lifecycle and revision conflicts into the existing typed API conflict contract after Task #553 owners are stable."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/618"
     inputs:
       - "Completed T016 and T019 receipts"
       - "Current publish, revision, restore, delete, and binding-mode conflict outcomes"

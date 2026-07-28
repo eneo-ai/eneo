@@ -15,7 +15,6 @@ from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.jobs.job_models import Task
 from eneo.main.exceptions import (
     BadRequestException,
-    NameCollisionException,
     NotFoundException,
 )
 from eneo.main.models import Status
@@ -23,6 +22,8 @@ from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     SkillBindingIntent,
     SkillBindingReference,
+    SkillHasActiveAppRunsError,
+    SkillHasBindingsError,
     SkillRuntimePolicy,
 )
 
@@ -486,7 +487,7 @@ async def test_new_binding_serializes_before_delete_validation(
     async def delete():
         async with db_container() as container:
             delete_pid.set_result(await _backend_pid(container))
-            with pytest.raises(NameCollisionException, match="still attached"):
+            with pytest.raises(SkillHasBindingsError):
                 await container.skill_service().delete_skill(
                     skill_id=resources.first_skill_id
                 )
@@ -731,9 +732,7 @@ async def test_queued_app_run_snapshot_blocks_concurrent_skill_deletion_until_te
     async def delete():
         async with db_container() as container:
             delete_pid.set_result(await _backend_pid(container))
-            with pytest.raises(
-                NameCollisionException, match="queued or running App run"
-            ):
+            with pytest.raises(SkillHasActiveAppRunsError):
                 await container.skill_service().delete_skill(
                     skill_id=resources.first_skill_id
                 )
