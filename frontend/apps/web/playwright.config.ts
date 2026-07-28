@@ -29,16 +29,6 @@ export default defineConfig({
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never" }], ["github"]]
     : [["list"], ["html", { open: "never" }]],
-  // Playwright's 5s default assumes a fast local app. These specs drive
-  // authenticated SSR against a containerised backend on a shared 2-core
-  // runner, where the personal chat workspace measured 5.6s against that 5s
-  // budget — while the same page renders in 0.55s on a developer machine and
-  // still passes with the budget cut to 400ms. The margin therefore decides
-  // pass/fail by hardware speed, not by correctness, and with retries
-  // deliberately off (see below) every run is a coin flip. 15s keeps ~3x
-  // headroom over the slowest observed CI render while still failing a
-  // genuinely broken assertion promptly.
-  expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${PORT}`,
     // There are no automatic E2E retries. Retain the original failure trace so
