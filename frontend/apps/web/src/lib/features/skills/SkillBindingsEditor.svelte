@@ -15,6 +15,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import SkillForm from "./SkillForm.svelte";
   import SkillPreview from "./SkillPreview.svelte";
@@ -473,51 +474,57 @@
                 </div>
                 {#if supportsActivationModes}
                   <div class="mt-3 w-full sm:max-w-56">
-                    <Select.Root
-                      type="single"
-                      value={activationMode(row)}
-                      disabled={!canEditBindings ||
-                        row.executionBlocked ||
-                        (!canChooseOnDemand && activationMode(row) === "always")}
-                      onValueChange={(value) => updateActivationMode(row, value)}
+                    <Tooltip
+                      text={canEditBindings &&
+                      !row.executionBlocked &&
+                      !canChooseOnDemand &&
+                      activationMode(row) === "always"
+                        ? runtimeStatus()
+                        : undefined}
                     >
-                      <Select.Trigger
-                        class="w-full"
-                        aria-label={m.skills_activation_mode_label({ name: rowName(row) })}
-                        aria-describedby={`${runtimeStatusId} ${runtimeHintId}`}
-                        title={!canChooseOnDemand && activationMode(row) === "always"
-                          ? runtimeStatus()
-                          : undefined}
+                      <Select.Root
+                        type="single"
+                        value={activationMode(row)}
+                        disabled={!canEditBindings ||
+                          row.executionBlocked ||
+                          (!canChooseOnDemand && activationMode(row) === "always")}
+                        onValueChange={(value) => updateActivationMode(row, value)}
                       >
-                        <span data-slot="select-value">
-                          {activationModeLabel(activationMode(row))}
-                        </span>
-                      </Select.Trigger>
-                      <Select.Content class="w-(--bits-select-anchor-width) min-w-56">
-                        <Select.Group>
-                          <Select.Item value="always" label={activationModeLabel("always")}>
-                            <span class="flex flex-col items-start gap-0.5 text-left">
-                              <span>{activationModeLabel("always")}</span>
-                              <span class="text-muted-foreground text-xs font-normal">
-                                {m.skills_activation_mode_always_description()}
+                        <Select.Trigger
+                          class="w-full"
+                          aria-label={m.skills_activation_mode_label({ name: rowName(row) })}
+                          aria-describedby={`${runtimeStatusId} ${runtimeHintId}`}
+                        >
+                          <span data-slot="select-value">
+                            {activationModeLabel(activationMode(row))}
+                          </span>
+                        </Select.Trigger>
+                        <Select.Content class="w-(--bits-select-anchor-width) min-w-56">
+                          <Select.Group>
+                            <Select.Item value="always" label={activationModeLabel("always")}>
+                              <span class="flex flex-col items-start gap-0.5 text-left">
+                                <span>{activationModeLabel("always")}</span>
+                                <span class="text-muted-foreground text-xs font-normal">
+                                  {m.skills_activation_mode_always_description()}
+                                </span>
                               </span>
-                            </span>
-                          </Select.Item>
-                          <Select.Item
-                            value="on_demand"
-                            label={activationModeLabel("on_demand")}
-                            disabled={!canChooseOnDemand}
-                          >
-                            <span class="flex flex-col items-start gap-0.5 text-left">
-                              <span>{activationModeLabel("on_demand")}</span>
-                              <span class="text-muted-foreground text-xs font-normal">
-                                {m.skills_activation_mode_on_demand_description()}
+                            </Select.Item>
+                            <Select.Item
+                              value="on_demand"
+                              label={activationModeLabel("on_demand")}
+                              disabled={!canChooseOnDemand}
+                            >
+                              <span class="flex flex-col items-start gap-0.5 text-left">
+                                <span>{activationModeLabel("on_demand")}</span>
+                                <span class="text-muted-foreground text-xs font-normal">
+                                  {m.skills_activation_mode_on_demand_description()}
+                                </span>
                               </span>
-                            </span>
-                          </Select.Item>
-                        </Select.Group>
-                      </Select.Content>
-                    </Select.Root>
+                            </Select.Item>
+                          </Select.Group>
+                        </Select.Content>
+                      </Select.Root>
+                    </Tooltip>
                   </div>
                 {/if}
               </div>

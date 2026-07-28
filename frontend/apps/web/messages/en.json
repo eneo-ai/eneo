@@ -3528,7 +3528,7 @@
   "skills_activation_runtime_eager": "All attached Skills are configured to load in every request.",
   "skills_activation_runtime_no_model": "Runtime status is unavailable until the Assistant has an effective model.",
   "skills_activation_runtime_policy_selective": "On-demand loading is available for the selected models.",
-  "skills_activation_runtime_policy_requirements": "On demand requires restricting Personal Chat to specific models that support tool calling — unrestricted access and whole providers cannot be validated safely. Until then, every Skill is locked to Always. Unlock it by enabling the model restriction and selecting specific models.",
+  "skills_activation_runtime_policy_requirements": "Skills can only load on demand when personal chat is restricted to selected models that support tool calling — unrestricted access and whole providers cannot be validated safely. Until then, every selected Skill is always included and the mode cannot be changed. Enable the model restriction and select specific models to unlock it.",
   "skills_activation_runtime_policy_validation_hint": "Token allowance and MCP configuration are checked when you save.",
   "skills_activation_runtime_model_lacks_tools": "The selected model does not support tool calling. Only Skills set to Always will load.",
   "skills_activation_runtime_catalog_budget": "The on-demand catalogue exceeds its context allowance. Only Skills set to Always will load.",
