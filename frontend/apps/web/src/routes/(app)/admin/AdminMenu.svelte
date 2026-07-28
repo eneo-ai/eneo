@@ -105,7 +105,7 @@
         {#each group.items as item (item.href)}
           {@const active = isSelected(item.route, currentRoute)}
           <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={active}>
+            <Sidebar.MenuButton isActive={active} class="[&_svg]:size-4.5">
               {#snippet child({ props })}
                 <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized hrefs built from typed route literals -->
                 <a href={item.href} {...props} aria-current={active ? "page" : undefined}>
