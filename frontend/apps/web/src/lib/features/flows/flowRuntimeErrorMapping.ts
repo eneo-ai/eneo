@@ -20,6 +20,10 @@ export type FlowApiErrorContext = {
   state?: string;
   expires_at?: string;
   expired_at?: string;
+  /** Which boundary an oversized evidence export exceeded. */
+  limit?: string;
+  /** Server-provided recovery guidance for the exceeded limit. */
+  hint?: string;
 };
 
 export type FlowApiErrorDescriptor = {
@@ -105,6 +109,12 @@ function extractFlowApiErrorContext(value: unknown): FlowApiErrorContext {
 
   const checkpointId = readOptionalString(value.checkpoint_id);
   if (checkpointId) context.checkpoint_id = checkpointId;
+
+  const limit = readOptionalString(value.limit);
+  if (limit) context.limit = limit;
+
+  const hint = readOptionalString(value.hint);
+  if (hint) context.hint = hint;
 
   const stepId = readOptionalString(value.step_id);
   if (stepId) context.step_id = stepId;

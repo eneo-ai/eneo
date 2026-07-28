@@ -46,7 +46,10 @@ describe("flowRunKnowledgePresentation helpers", () => {
         id_short: "source",
         title: "https://kunskap.example.se/beslut/underlag",
         source_display_name: "Beslut till underlag",
-        source_container_label: "Kunskapsbanken"
+        source_container_label: "Kunskapsbanken",
+        matched_chunk_count: 1,
+        recorded_passage_count: 0,
+        best_score: 0.8
       })
     ).toContain("kunskapsbanken");
   });

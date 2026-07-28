@@ -172,6 +172,30 @@ export function initSettings(client) {
     },
 
     /**
+     * Get knowledge evidence recording limits for the current tenant.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRagEvidencePolicy>}
+     */
+    getRagEvidencePolicy: async () => {
+      return await client.fetch("/api/v1/settings/flow-rag-evidence-policy", {
+        method: "get"
+      });
+    },
+
+    /**
+     * Update knowledge evidence recording limits for the current tenant.
+     * @param {import('../types/resources').FlowRagEvidencePolicyUpdate} patch
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRagEvidencePolicy>}
+     */
+    updateRagEvidencePolicy: async (patch) => {
+      return await client.fetch("/api/v1/settings/flow-rag-evidence-policy", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+    },
+
+    /**
      * Get flow evidence export policy for the current tenant.
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowEvidencePolicy>}

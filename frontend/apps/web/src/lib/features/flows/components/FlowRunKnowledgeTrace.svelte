@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowRunDebugRag, FlowRunDebugRagReference, Eneo } from "@eneo/eneo-js";
+  import type { FlowRunDebugRag, Eneo } from "@eneo/eneo-js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
@@ -7,7 +7,12 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import FlowRunKnowledgeSourceRow from "./FlowRunKnowledgeSourceRow.svelte";
-  import { getKnowledgeReferencePreviewReferences } from "./flowRunKnowledgeTrace";
+  import {
+    flattenKnowledgeTraceSources,
+    getKnowledgeReferencePreviewReferences,
+    getKnowledgeTraceSourceTotal,
+    isMappedFanOutIncomplete
+  } from "./flowRunKnowledgeTrace";
   import { getKnowledgeSourceSearchText } from "./flowRunKnowledgePresentation";
 
   const INLINE_REFERENCE_LIMIT = 4;
@@ -29,19 +34,43 @@
   let sourceQuery = $state("");
   let normalizedSourceQuery = $derived(sourceQuery.trim().toLowerCase());
 
-  let references = $derived(
-    ((rag?.references ?? []) as FlowRunDebugRagReference[]).filter(
-      (reference) => typeof reference?.id === "string" && reference.id.length > 0
-    )
-  );
+  // A mapped step records one payload per provider call, so sources are read
+  // through the shared flattener rather than the top level alone.
+  let traceSources = $derived(flattenKnowledgeTraceSources(rag));
+  let sourceTotal = $derived(getKnowledgeTraceSourceTotal(rag, traceSources.length));
+  // A fan-out that stopped early retrieved less than the step intended; saying
+  // nothing would present a partial trace as a complete one.
+  let mappedFanOutIncomplete = $derived(isMappedFanOutIncomplete(rag));
+  // Every retrieved source is listed; only passage detail is bounded, so the
+  // trace states the difference instead of claiming references were dropped.
+  let passageDetailSummary = $derived.by(() => {
+    const withheld = rag?.passages_withheld ?? 0;
+    if (withheld > 0) {
+      return m.flow_run_knowledge_passages_withheld({ count: String(withheld) });
+    }
+    const sourcesWithDetail = rag?.sources_with_recorded_passages;
+    const totalSources = traceSources.length;
+    if (
+      typeof sourcesWithDetail === "number" &&
+      totalSources > 0 &&
+      sourcesWithDetail < totalSources
+    ) {
+      return m.flow_run_knowledge_passage_detail_partial({
+        detailed: String(sourcesWithDetail),
+        total: String(totalSources)
+      });
+    }
+    return null;
+  });
+
   let referencePreview = $derived(
-    getKnowledgeReferencePreviewReferences(references, INLINE_REFERENCE_LIMIT)
+    getKnowledgeReferencePreviewReferences(traceSources, INLINE_REFERENCE_LIMIT)
   );
   let searchableReferences = $derived(
-    references.map((reference, index) => ({
-      reference,
+    traceSources.map((source, index) => ({
+      ...source,
       index,
-      searchText: getKnowledgeSourceSearchText(reference)
+      searchText: getKnowledgeSourceSearchText(source.reference)
     }))
   );
   let filteredReferenceMatches = $derived(
@@ -54,9 +83,9 @@
   );
 
   $effect(() => {
-    if (rag && references && !didInit) {
+    if (rag && traceSources && !didInit) {
       didInit = true;
-      expanded = rag.status === "success" && references.length > 0;
+      expanded = rag.status === "success" && traceSources.length > 0;
     }
   });
 
@@ -120,10 +149,7 @@
             </span>
           </div>
           <div class="text-muted flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-            <span
-              >{m.flow_run_knowledge_sources_label()}: {rag.unique_sources ??
-                references.length}</span
-            >
+            <span>{m.flow_run_knowledge_sources_label()}: {sourceTotal}</span>
             <span aria-hidden="true">&middot;</span>
             <span>{m.flow_run_knowledge_chunks_label()}: {rag.chunks_retrieved ?? 0}</span>
             <span aria-hidden="true">&middot;</span>
@@ -153,7 +179,7 @@
             </p>
           {/if}
 
-          {#if references.length === 0}
+          {#if traceSources.length === 0}
             <p class="text-muted rounded-md px-3 py-6 text-center text-sm">
               {m.flow_run_knowledge_no_sources()}
             </p>
@@ -161,8 +187,13 @@
             <ol
               class="border-default bg-primary divide-default divide-y overflow-hidden rounded-lg border"
             >
-              {#each referencePreview.references as reference, index (reference.id)}
-                <FlowRunKnowledgeSourceRow {eneo} {reference} {index} />
+              {#each referencePreview.references as source, index (source.key)}
+                <FlowRunKnowledgeSourceRow
+                  {eneo}
+                  reference={source.reference}
+                  callNumber={source.callNumber}
+                  {index}
+                />
               {/each}
             </ol>
 
@@ -173,20 +204,26 @@
                 <p class="text-muted text-xs">
                   {m.flow_run_knowledge_inline_sources_summary({
                     shown: String(referencePreview.references.length),
-                    total: String(references.length)
+                    total: String(traceSources.length)
                   })}
                 </p>
                 <Button variant="outline" size="sm" onclick={() => (showAllSources = true)}>
                   {m.flow_run_knowledge_show_all_sources({
-                    count: String(references.length)
+                    count: String(traceSources.length)
                   })}
                 </Button>
               </div>
             {/if}
           {/if}
 
-          {#if rag.references_truncated}
-            <p class="text-muted text-xs">{m.flow_run_knowledge_references_truncated()}</p>
+          {#if mappedFanOutIncomplete}
+            <p class="text-warning-stronger text-xs" data-testid="mapped-fan-out-incomplete">
+              {m.flow_run_knowledge_mapped_fan_out_incomplete()}
+            </p>
+          {/if}
+
+          {#if passageDetailSummary}
+            <p class="text-muted text-xs">{passageDetailSummary}</p>
           {/if}
         </div>
       </Collapsible.Content>
@@ -199,7 +236,7 @@
         <Dialog.Title>{m.flow_run_knowledge_all_sources_title()}</Dialog.Title>
         <Dialog.Description>
           {m.flow_run_knowledge_all_sources_description({
-            count: String(references.length)
+            count: String(traceSources.length)
           })}
         </Dialog.Description>
       </Dialog.Header>
@@ -227,8 +264,8 @@
           <ol
             class="border-default bg-primary divide-default divide-y overflow-hidden rounded-lg border"
           >
-            {#each visibleFilteredReferenceMatches as { reference, index } (reference.id)}
-              <FlowRunKnowledgeSourceRow {eneo} {reference} {index} />
+            {#each visibleFilteredReferenceMatches as { reference, callNumber, index, key } (key)}
+              <FlowRunKnowledgeSourceRow {eneo} {reference} {callNumber} {index} />
             {/each}
           </ol>
           {#if visibleFilteredReferenceMatches.length < filteredReferenceMatches.length}

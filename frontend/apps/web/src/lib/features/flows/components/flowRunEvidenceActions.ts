@@ -1,4 +1,5 @@
 import type { Eneo } from "@eneo/eneo-js";
+import { describeFlowApiError } from "$lib/features/flows/flowRuntimeErrorMapping";
 
 export function serializeEvidencePayload(payload: unknown): string {
   if (typeof payload === "string") {
@@ -61,4 +62,25 @@ export async function downloadEvidenceExport(
   });
   const triggerDownload = deps.triggerDownload ?? downloadJsonArtifact;
   triggerDownload(`flow-run-evidence-${params.runId}.json`, exportPayload);
+}
+
+export type ExportRecoveryKind = "evidence_view" | "provider_calls" | "generic" | null;
+
+export function classifyExportFailure(error: unknown): ExportRecoveryKind {
+  // An oversized-export refusal names the exceeded limit in its typed
+  // context; real client errors carry that context on the parsed response,
+  // which the canonical adapter reads. The kind maps to localized recovery
+  // copy at the call site — server-authored text is never echoed.
+  const descriptor = describeFlowApiError(error);
+  if (descriptor?.code !== "flow_evidence_export_too_large") return null;
+  switch (descriptor.context.limit) {
+    case "recorded_passage_bytes":
+    case "stored_provenance_bytes":
+    case "corrupt_passage_evidence":
+      return "evidence_view";
+    case "provider_call_events":
+      return "provider_calls";
+    default:
+      return "generic";
+  }
 }

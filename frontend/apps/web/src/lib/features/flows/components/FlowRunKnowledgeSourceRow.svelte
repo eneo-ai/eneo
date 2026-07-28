@@ -15,10 +15,13 @@
   let {
     reference,
     index,
+    callNumber = null,
     eneo
   }: {
     reference: FlowRunDebugRagReference;
     index: number;
+    /** Mapped call this source came from, or null for a direct retrieval. */
+    callNumber?: number | null;
     eneo: Eneo;
   } = $props();
 
@@ -47,7 +50,7 @@
   infoBlobId={reference.id}
   title={reference.title ?? null}
   sourceIdShort={reference.id_short ?? reference.id.slice(0, 8)}
-  chunks={reference.chunks ?? []}
+  passages={reference.passages ?? []}
   matchedChunkCount={counts.matchedCount}
 >
   {#snippet children({ showViewer })}
@@ -83,7 +86,7 @@
               <span class="text-muted text-xs">
                 {#if counts.truncated}
                   {m.flow_run_knowledge_chunks_displayed_of_matched({
-                    displayed: String(counts.displayedCount),
+                    displayed: String(counts.recordedCount),
                     matched: String(counts.matchedCount)
                   })}
                 {:else}
@@ -92,6 +95,16 @@
                   })}
                 {/if}
               </span>
+              {#if callNumber !== null}
+                <Badge variant="outline" class="rounded-full text-xs">
+                  {m.flow_run_knowledge_mapped_call_badge({ call: String(callNumber) })}
+                </Badge>
+              {/if}
+              {#if counts.withheldCount > 0}
+                <Badge variant="outline" class="rounded-full text-xs">
+                  {m.flow_run_knowledge_passages_withheld_badge()}
+                </Badge>
+              {/if}
             </div>
           </div>
         </div>

@@ -35,6 +35,7 @@
 
   let {
     result,
+    currentEvidenceNotLoaded = false,
     resultFiles = [],
     stepDef,
     duration,
@@ -59,6 +60,7 @@
     getCacheStatusLabel
   }: {
     result: FlowRunStep;
+    currentEvidenceNotLoaded?: boolean;
     resultFiles?: FlowRunResultFile[];
     stepDef: Record<string, unknown> | undefined;
     duration: string | null;
@@ -317,6 +319,11 @@
           </Card.Root>
         {/if}
 
+        {#if currentEvidenceNotLoaded}
+          <p class="text-secondary text-xs italic" data-testid="current-evidence-not-loaded">
+            {m.flow_run_step_current_evidence_not_loaded()}
+          </p>
+        {/if}
         {#if stepRag}
           <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {eneo} />
         {/if}

@@ -74,6 +74,10 @@ from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
     ProviderCallEvidencePage,
 )
+from eneo.flows.domain.rag_evidence import (
+    RecordedPassageContent,
+    RetrievedSource,
+)
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -1382,39 +1386,17 @@ class FlowRunDebugOutput(BaseModel):
     config: dict[str, Any] | None = None
 
 
-class FlowRunDebugRagReferenceChunk(BaseModel):
-    chunk_no: int = 0
-    score: float = 0.0
-    snippet: str = ""
+class FlowRunDebugRagReference(RetrievedSource):
+    """A retrieved source as served, with read-time display names added.
 
+    Inherits the recorded retrieval contract so the served shape cannot drift
+    from what the runtime writes.
+    """
 
-class FlowRunDebugRagReference(BaseModel):
-    id: str
-    id_short: str
-    title: str | None = None
-    source_title_raw: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
     display_title: str | None = None
-    source_display_name: str | None = None
-    source_url: str | None = None
-    source_kind: str | None = None
-    source_container_kind: str | None = None
-    source_container_name: str | None = None
-    source_container_name_raw: str | None = None
     source_container_display_name: str | None = None
-    source_container_label: str | None = None
-    source_container_id: str | None = None
-    usage_state: str | None = None
-    display_snippet: str | None = None
-    display_chunk_no: int | None = None
-    display_selection_reason: str | None = None
-    quality_flags: list[str] = Field(default_factory=list)
-    boilerplate_likelihood: float | None = None
-    snippet_quality: str | None = None
-    matched_chunk_count: int = 0
-    best_score: float = 0.0
-    chunks: list[FlowRunDebugRagReferenceChunk] = Field(
-        default_factory=lambda: cast(list[FlowRunDebugRagReferenceChunk], [])
-    )
 
 
 class FlowRunDebugRagTracking(BaseModel):
@@ -1456,6 +1438,13 @@ class FlowRunDebugRagPromptContext(BaseModel):
     summary: dict[str, Any] | None = None
 
 
+class FlowRunDebugRagEmbeddingModel(BaseModel):
+    """Embedding model retrieval ran against, absent when it cannot be named."""
+
+    id: str | None = None
+    name: str | None = None
+
+
 class FlowRunDebugRag(BaseModel):
     attempted: bool | None = None
     status: str | None = None
@@ -1472,7 +1461,55 @@ class FlowRunDebugRag(BaseModel):
     retrieval_duration_ms: int | None = None
     retrieval_error_type: str | None = None
     references: list[FlowRunDebugRagReference] | None = None
-    references_truncated: bool | None = None
+    knowledge_evidence_version: int | None = None
+    sources_with_recorded_passages: int | None = Field(
+        default=None,
+        description=(
+            "Retrieved sources that carry passage text. Compare with "
+            "unique_sources to state how many sources have recorded detail."
+        ),
+    )
+    passages_recorded: int | None = None
+    passages_truncated: int | None = None
+    passages_withheld: int | None = Field(
+        default=None,
+        description=(
+            "Recorded passages whose text this reader is not shown. The source "
+            "and its counts stay visible."
+        ),
+    )
+    recorded_passage_bytes: int | None = None
+    passages_released_to_step_budget: int | None = None
+    passage_bytes_released_to_step_budget: int | None = None
+    recorded_passage_content: RecordedPassageContent | None = Field(
+        default=None,
+        description=(
+            "Declares that recorded passages hold verbatim source-document text."
+        ),
+    )
+    embedding_model: FlowRunDebugRagEmbeddingModel | None = None
+    embedding_model_status: str | None = None
+    execution_mode: str | None = Field(
+        default=None,
+        description=(
+            "Present when the step fanned out; each provider call records its "
+            "own retrieval evidence under items or sources."
+        ),
+    )
+    mapped_calls_complete: bool | None = Field(
+        default=None,
+        description=(
+            "False when the fan-out failed partway: the calls below are the "
+            "ones that completed, not the full fan-out the step intended. Only "
+            "present on a mapped step."
+        ),
+    )
+    sources_total: int | None = Field(
+        default=None,
+        description="Retrieved sources across every call of a mapped step.",
+    )
+    items: list["FlowRunDebugRag"] | None = None
+    sources: list["FlowRunDebugRag"] | None = None
     source_names: list[str] | None = None
     source_display_names: list[str] | None = None
     has_named_sources: bool | None = None
@@ -1542,6 +1579,52 @@ class FlowRunDebugStep(BaseModel):
     )
 
 
+def _empty_int_list() -> list[int]:
+    return []
+
+
+class FlowRunDebugKnowledgeEvidenceView(BaseModel):
+    """Passage text this response left out to stay within the view budget.
+
+    The evidence is still retained: these counts describe this response only.
+    An evidence export is never trimmed this way.
+    """
+
+    byte_budget: int
+    returned_passage_bytes: int
+    passages_omitted: int
+    passage_bytes_omitted: int
+    attempts_with_omitted_passages: int
+    attempts_not_loaded: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Attempt rows this response did not load because the run's "
+            "attempt history exceeds what one interactive view may "
+            "materialize. Current attempts are loaded first; excluded "
+            "evidence remains retained and available for export when export "
+            "limits permit."
+        ),
+    )
+    current_attempts_not_loaded: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "How many of those unloaded rows are a step's CURRENT attempt. "
+            "Nonzero means some steps show no retrieval evidence in this "
+            "response even though evidence is retained for them."
+        ),
+    )
+    current_step_orders_not_loaded: list[int] = Field(
+        default_factory=_empty_int_list,
+        description=(
+            "The step_order of every step whose CURRENT attempt this response "
+            "did not load. An empty knowledge trace for these steps means "
+            "'not loaded here', never 'never retrieved'."
+        ),
+    )
+
+
 class FlowRunDebugRunSummary(BaseModel):
     steps_count: int
     completed_steps: int
@@ -1551,6 +1634,14 @@ class FlowRunDebugRunSummary(BaseModel):
     duration_ms: int | None = None
     models_used: list[str] = Field(default_factory=list)
     token_usage: FlowRunTokenUsagePublic | None = None
+    knowledge_evidence_view: FlowRunDebugKnowledgeEvidenceView | None = Field(
+        default=None,
+        description=(
+            "Present when the interactive view omitted recorded passage text to "
+            "stay within its budget. Absent on exports and on views that "
+            "returned every recorded passage."
+        ),
+    )
 
 
 class FlowRunDebugRun(BaseModel):
@@ -2216,7 +2307,15 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                 "attempted": True,
                                 "retrieval_duration_ms": 182,
                                 "unique_sources": 1,
-                                "references_truncated": False,
+                                "sources_with_recorded_passages": 1,
+                                "passages_recorded": 2,
+                                "passages_truncated": 0,
+                                "passages_withheld": 0,
+                                "embedding_model": {
+                                    "id": "6f1c1e1e-0000-0000-0000-000000000001",
+                                    "name": "text-embedding-3-large",
+                                },
+                                "embedding_model_status": "recorded",
                                 "reference_metadata_status": "success",
                                 "retrieval_error_type": None,
                                 "error_code": None,

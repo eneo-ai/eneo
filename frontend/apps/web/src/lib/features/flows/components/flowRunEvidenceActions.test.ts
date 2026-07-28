@@ -1,7 +1,8 @@
 import { expect, test, vi } from "vitest";
-import type { Eneo } from "@eneo/eneo-js";
+import { EneoError, type Eneo } from "@eneo/eneo-js";
 
 import {
+  classifyExportFailure,
   downloadEvidenceExport,
   downloadJsonArtifact,
   serializeEvidencePayload
@@ -83,4 +84,41 @@ test("downloadEvidenceExport fetches canonical evidence export before download",
     schema_version: "flow-evidence-export.v13",
     content_hash: "abc123"
   });
+});
+
+function exportTooLargeError(limit: string | undefined): EneoError {
+  // A real client error: the parsed body rides on EneoError.response, which
+  // is where the canonical adapter reads the typed code and context.
+  return new EneoError(
+    "Request failed",
+    "SERVER",
+    413,
+    0,
+    {
+      code: "flow_evidence_export_too_large",
+      context: limit ? { limit } : {}
+    },
+    { endpoint: "/export" }
+  );
+}
+
+test("classifyExportFailure routes passage and provenance limits to the evidence view", () => {
+  expect(classifyExportFailure(exportTooLargeError("recorded_passage_bytes"))).toBe(
+    "evidence_view"
+  );
+  expect(classifyExportFailure(exportTooLargeError("stored_provenance_bytes"))).toBe(
+    "evidence_view"
+  );
+  expect(classifyExportFailure(exportTooLargeError("corrupt_passage_evidence"))).toBe(
+    "evidence_view"
+  );
+});
+
+test("classifyExportFailure routes provider-call overflow to the paginated list", () => {
+  expect(classifyExportFailure(exportTooLargeError("provider_call_events"))).toBe("provider_calls");
+});
+
+test("classifyExportFailure falls back for unknown limits and foreign errors", () => {
+  expect(classifyExportFailure(exportTooLargeError(undefined))).toBe("generic");
+  expect(classifyExportFailure(new Error("network down"))).toBeNull();
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowRunDebugRagReferenceChunk, Eneo } from "@eneo/eneo-js";
+  import type { RetrievedPassage, Eneo } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -11,7 +11,8 @@
     type FlowDocumentHighlighter
   } from "$lib/features/flows/utils/document-highlighter";
   import {
-    getDisplayableKnowledgeChunks,
+    getDisclosedPassages,
+    getWithheldPassages,
     normalizeKnowledgeMatchedCount
   } from "./flowRunKnowledgeTrace";
   import {
@@ -25,7 +26,7 @@
     infoBlobId,
     title = null,
     sourceIdShort = null,
-    chunks = [],
+    passages = [],
     matchedChunkCount = null,
     children
   }: {
@@ -33,7 +34,7 @@
     infoBlobId: string;
     title?: string | null;
     sourceIdShort?: string | null;
-    chunks?: FlowRunDebugRagReferenceChunk[];
+    passages?: RetrievedPassage[];
     matchedChunkCount?: number | null;
     children?: Snippet<[{ showViewer: () => void }]>;
   } = $props();
@@ -47,14 +48,21 @@
   let highlighter: FlowDocumentHighlighter | null = $state(null);
   let activeChunkIndex: number | null = $state(null);
 
-  let chunkItems = $derived(
-    getDisplayableKnowledgeChunks(chunks).sort((a, b) => (a.chunk_no ?? 0) - (b.chunk_no ?? 0))
+  let recordedPassages = $derived(
+    [...passages].sort((a, b) => (a.chunk_no ?? 0) - (b.chunk_no ?? 0))
   );
-  let allSnippets = $derived(chunkItems.map((chunk) => chunk.snippet));
+  let chunkItems = $derived(getDisclosedPassages(recordedPassages));
+  let withheldPassages = $derived(getWithheldPassages(recordedPassages));
+  let allSnippets = $derived(chunkItems.map((passage) => passage.text));
   let totalMatchedChunkCount = $derived(
-    normalizeKnowledgeMatchedCount(matchedChunkCount, chunkItems.length)
+    normalizeKnowledgeMatchedCount(matchedChunkCount, recordedPassages.length)
   );
-  let hasHiddenMatchedChunks = $derived(totalMatchedChunkCount > chunkItems.length);
+  let hasHiddenMatchedChunks = $derived(totalMatchedChunkCount > recordedPassages.length);
+  // The recorded passage is evidence in its own right. When the source document
+  // is gone or unreachable, the passage is what the reader came for.
+  let showRecordedPassagesInstead = $derived(
+    (loadError || (!loadingDocument && !documentText)) && chunkItems.length > 0
+  );
 
   $effect(() => {
     if (isOpen && !loadingDocument && !documentText && !loadError) {
@@ -125,9 +133,9 @@
 
   function activateChunk(index: number) {
     activeChunkIndex = index;
-    const snippet = chunkItems[index]?.snippet;
-    if (!snippet || !highlighter) return;
-    highlighter.setActive(snippet);
+    const passageText = chunkItems[index]?.text;
+    if (!passageText || !highlighter) return;
+    highlighter.setActive(passageText);
   }
 
   function resetChunkHighlight() {
@@ -241,15 +249,29 @@
                 </button>
               {/if}
             </div>
+            {#if withheldPassages.length > 0}
+              <p
+                class="border-default bg-primary text-secondary rounded-md border p-2 text-xs"
+                data-testid="knowledge-passages-withheld"
+              >
+                {m.flow_run_knowledge_passages_withheld({
+                  count: String(withheldPassages.length)
+                })}
+              </p>
+            {/if}
             {#if chunkItems.length === 0}
               <p class="border-default bg-primary text-muted rounded-md border p-2 text-xs">
-                {m.flow_run_knowledge_no_snippets()}
+                {#if withheldPassages.length > 0}
+                  {m.flow_run_knowledge_passages_withheld_hint()}
+                {:else}
+                  {m.flow_run_knowledge_no_snippets()}
+                {/if}
               </p>
             {:else}
               <div
                 class="border-default divide-default flex max-h-[44vh] flex-col divide-y overflow-auto rounded-lg border"
               >
-                {#each chunkItems as chunk, index (`${chunk.chunk_no ?? 0}-${index}`)}
+                {#each chunkItems as passage, index (`${passage.chunk_no ?? 0}-${index}`)}
                   <button
                     type="button"
                     class="hover:bg-hover-default w-full px-2.5 py-2 text-left text-xs transition-colors"
@@ -258,7 +280,7 @@
                   >
                     <div class="flex items-center justify-between gap-2">
                       <span class="text-secondary font-semibold">
-                        {m.flow_run_knowledge_chunk_label({ chunk: String(chunk.chunk_no ?? 0) })}
+                        {m.flow_run_knowledge_chunk_label({ chunk: String(passage.chunk_no ?? 0) })}
                       </span>
                       <Tooltip.Provider delayDuration={150}>
                         <Tooltip.Root>
@@ -266,19 +288,24 @@
                             <span
                               class={[
                                 "rounded-full px-1.5 py-0.5 text-xs font-medium",
-                                getKnowledgeRelevanceBadgeClass(Number(chunk.score ?? 0))
+                                getKnowledgeRelevanceBadgeClass(Number(passage.score ?? 0))
                               ]}
                             >
-                              {scoreLabel(Number(chunk.score ?? 0))}
+                              {scoreLabel(Number(passage.score ?? 0))}
                             </span>
                           </Tooltip.Trigger>
-                          <Tooltip.Content>{Number(chunk.score ?? 0).toFixed(2)}</Tooltip.Content>
+                          <Tooltip.Content>{Number(passage.score ?? 0).toFixed(2)}</Tooltip.Content>
                         </Tooltip.Root>
                       </Tooltip.Provider>
                     </div>
                     <p class="text-muted mt-1 line-clamp-3 text-xs leading-relaxed">
-                      {chunk.snippet}
+                      {passage.text}
                     </p>
+                    {#if passage.recording === "tail_truncated"}
+                      <p class="text-muted mt-1 text-[11px] italic">
+                        {m.flow_run_knowledge_passage_truncated()}
+                      </p>
+                    {/if}
                   </button>
                 {/each}
               </div>
@@ -292,12 +319,47 @@
               <IconLoadingSpinner class="size-4 animate-spin" />
               {m.flow_run_knowledge_loading_document()}
             </div>
+          {:else if showRecordedPassagesInstead}
+            <div class="flex flex-col gap-3 p-4" data-testid="knowledge-recorded-passages">
+              <p class="text-secondary text-sm">
+                {loadError
+                  ? m.flow_run_knowledge_source_unavailable_showing_recorded()
+                  : m.flow_run_knowledge_source_empty_showing_recorded()}
+              </p>
+              <div class="border-default divide-default divide-y rounded-lg border">
+                {#each chunkItems as passage, index (`recorded-${passage.chunk_no ?? 0}-${index}`)}
+                  <article class="px-3 py-2.5">
+                    <h5 class="text-secondary text-xs font-semibold">
+                      {m.flow_run_knowledge_chunk_label({
+                        chunk: String(passage.chunk_no ?? 0)
+                      })}
+                    </h5>
+                    <p
+                      class="mt-1 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap"
+                    >
+                      {passage.text}
+                    </p>
+                    {#if passage.recording === "tail_truncated"}
+                      <p class="text-muted mt-1 text-xs italic">
+                        {m.flow_run_knowledge_passage_truncated()}
+                      </p>
+                    {/if}
+                  </article>
+                {/each}
+              </div>
+            </div>
           {:else if loadError}
             <p class="text-negative-default p-4 text-sm">
               {m.flow_run_knowledge_document_load_failed()}
             </p>
           {:else if !documentText}
-            <p class="text-muted p-4 text-sm">{m.empty()}</p>
+            <p class="text-muted p-4 text-sm">
+              {#if withheldPassages.length > 0}
+                {m.flow_run_knowledge_passages_withheld_hint()}
+              {:else}
+                {m.empty()}
+              {/if}
+            </p>
           {:else}
             <div
               bind:this={textContainer}

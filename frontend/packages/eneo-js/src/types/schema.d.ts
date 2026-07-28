@@ -987,6 +987,30 @@ export interface paths {
     patch: operations["update_mapped_execution_policy"];
     trace?: never;
   };
+  "/api/v1/settings/flow-rag-evidence-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get knowledge evidence policy
+     * @description Return how much retrieved passage text a Flow step records. Every source a step retrieved is always listed with its identity and match counts; these ceilings bound only the verbatim passage text kept alongside it.
+     */
+    get: operations["get_rag_evidence_policy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update knowledge evidence policy
+     * @description Change how much retrieved passage text new step attempts record. Omit a field to preserve it or send null to restore its default. Recorded passages hold verbatim source text, so each ceiling has a fixed maximum.
+     */
+    patch: operations["update_rag_evidence_policy"];
+    trace?: never;
+  };
   "/api/v1/settings/flow-evidence-policy": {
     parameters: {
       query?: never;
@@ -13347,7 +13371,12 @@ export interface components {
       attempted: components["schemas"]["JsonValue"];
       retrieval_duration_ms: components["schemas"]["JsonValue"];
       unique_sources: components["schemas"]["JsonValue"];
-      references_truncated: components["schemas"]["JsonValue"];
+      sources_with_recorded_passages: components["schemas"]["JsonValue"];
+      passages_recorded: components["schemas"]["JsonValue"];
+      passages_truncated: components["schemas"]["JsonValue"];
+      passages_withheld: components["schemas"]["JsonValue"];
+      embedding_model: components["schemas"]["JsonValue"];
+      embedding_model_status: components["schemas"]["JsonValue"];
       reference_metadata_status: components["schemas"]["JsonValue"];
       retrieval_error_type?: components["schemas"]["JsonValue"];
       error_code?: components["schemas"]["JsonValue"];
@@ -15261,6 +15290,85 @@ export interface components {
        */
       current_checksum: string;
     };
+    /**
+     * FlowRagEvidencePolicyPublic
+     * @example {
+     *       "max_recorded_passage_bytes": 4096,
+     *       "max_recorded_passage_bytes_per_run_view": 2097152,
+     *       "max_recorded_passage_bytes_per_step": 131072,
+     *       "max_recorded_passages_per_source": 5,
+     *       "max_sources_with_recorded_passages": 25,
+     *       "version": 1
+     *     }
+     */
+    FlowRagEvidencePolicyPublic: {
+      /**
+       * Version
+       * @description Knowledge evidence policy schema version.
+       * @default 1
+       * @constant
+       */
+      version?: 1;
+      /**
+       * Max Sources With Recorded Passages
+       * @description How many retrieved sources record passage text. Every retrieved source is always listed with its identity; only passage detail is bounded.
+       */
+      max_sources_with_recorded_passages: number;
+      /**
+       * Max Recorded Passages Per Source
+       * @description How many passages one source records, highest score first.
+       */
+      max_recorded_passages_per_source: number;
+      /**
+       * Max Recorded Passage Bytes
+       * @description Byte ceiling for one recorded passage. A longer passage keeps its leading bytes and reports the dropped tail.
+       */
+      max_recorded_passage_bytes: number;
+      /**
+       * Max Recorded Passage Bytes Per Step
+       * @description Total recorded passage bytes one step attempt may hold.
+       */
+      max_recorded_passage_bytes_per_step: number;
+      /**
+       * Max Recorded Passage Bytes Per Run View
+       * @description Total recorded passage bytes one interactive run view may show. A run has no attempt limit, so this bounds what reading a heavily rerun run materialises. Sources and counts are never released.
+       */
+      max_recorded_passage_bytes_per_run_view: number;
+    };
+    /**
+     * FlowRagEvidencePolicyUpdate
+     * @example {
+     *       "max_recorded_passage_bytes": 8192,
+     *       "max_sources_with_recorded_passages": 50
+     *     }
+     */
+    FlowRagEvidencePolicyUpdate: {
+      /**
+       * Max Sources With Recorded Passages
+       * @description Set the source ceiling, or send null to restore the default.
+       */
+      max_sources_with_recorded_passages?: number | null;
+      /**
+       * Max Recorded Passages Per Source
+       * @description Set the per-source ceiling, or send null to restore the default.
+       */
+      max_recorded_passages_per_source?: number | null;
+      /**
+       * Max Recorded Passage Bytes
+       * @description Set the per-passage ceiling, or send null to restore the default.
+       */
+      max_recorded_passage_bytes?: number | null;
+      /**
+       * Max Recorded Passage Bytes Per Step
+       * @description Set the per-step ceiling, or send null to restore the default.
+       */
+      max_recorded_passage_bytes_per_step?: number | null;
+      /**
+       * Max Recorded Passage Bytes Per Run View
+       * @description Set the per-run-view ceiling, or send null to restore the default.
+       */
+      max_recorded_passage_bytes_per_run_view?: number | null;
+    };
     /** FlowRetentionChangeConfirmationPublic */
     FlowRetentionChangeConfirmationPublic: {
       /** Expected Control Plane Version */
@@ -16021,6 +16129,42 @@ export interface components {
       /** Output */
       output?: string | null;
     };
+    /**
+     * FlowRunDebugKnowledgeEvidenceView
+     * @description Passage text this response left out to stay within the view budget.
+     *
+     *     The evidence is still retained: these counts describe this response only.
+     *     An evidence export is never trimmed this way.
+     */
+    FlowRunDebugKnowledgeEvidenceView: {
+      /** Byte Budget */
+      byte_budget: number;
+      /** Returned Passage Bytes */
+      returned_passage_bytes: number;
+      /** Passages Omitted */
+      passages_omitted: number;
+      /** Passage Bytes Omitted */
+      passage_bytes_omitted: number;
+      /** Attempts With Omitted Passages */
+      attempts_with_omitted_passages: number;
+      /**
+       * Attempts Not Loaded
+       * @description Attempt rows this response did not load because the run's attempt history exceeds what one interactive view may materialize. Current attempts are loaded first; excluded evidence remains retained and available for export when export limits permit.
+       * @default 0
+       */
+      attempts_not_loaded?: number;
+      /**
+       * Current Attempts Not Loaded
+       * @description How many of those unloaded rows are a step's CURRENT attempt. Nonzero means some steps show no retrieval evidence in this response even though evidence is retained for them.
+       * @default 0
+       */
+      current_attempts_not_loaded?: number;
+      /**
+       * Current Step Orders Not Loaded
+       * @description The step_order of every step whose CURRENT attempt this response did not load. An empty knowledge trace for these steps means 'not loaded here', never 'never retrieved'.
+       */
+      current_step_orders_not_loaded?: number[];
+    };
     /** FlowRunDebugOutput */
     FlowRunDebugOutput: {
       /** Mode */
@@ -16070,8 +16214,55 @@ export interface components {
       retrieval_error_type?: string | null;
       /** References */
       references?: components["schemas"]["FlowRunDebugRagReference"][] | null;
-      /** References Truncated */
-      references_truncated?: boolean | null;
+      /** Knowledge Evidence Version */
+      knowledge_evidence_version?: number | null;
+      /**
+       * Sources With Recorded Passages
+       * @description Retrieved sources that carry passage text. Compare with unique_sources to state how many sources have recorded detail.
+       */
+      sources_with_recorded_passages?: number | null;
+      /** Passages Recorded */
+      passages_recorded?: number | null;
+      /** Passages Truncated */
+      passages_truncated?: number | null;
+      /**
+       * Passages Withheld
+       * @description Recorded passages whose text this reader is not shown. The source and its counts stay visible.
+       */
+      passages_withheld?: number | null;
+      /** Recorded Passage Bytes */
+      recorded_passage_bytes?: number | null;
+      /** Passages Released To Step Budget */
+      passages_released_to_step_budget?: number | null;
+      /** Passage Bytes Released To Step Budget */
+      passage_bytes_released_to_step_budget?: number | null;
+      /**
+       * Recorded Passage Content
+       * @description Declares that recorded passages hold verbatim source-document text.
+       */
+      recorded_passage_content?: "source_text_verbatim" | null;
+      embedding_model?: components["schemas"]["FlowRunDebugRagEmbeddingModel"] | null;
+      /** Embedding Model Status */
+      embedding_model_status?: string | null;
+      /**
+       * Execution Mode
+       * @description Present when the step fanned out; each provider call records its own retrieval evidence under items or sources.
+       */
+      execution_mode?: string | null;
+      /**
+       * Mapped Calls Complete
+       * @description False when the fan-out failed partway: the calls below are the ones that completed, not the full fan-out the step intended. Only present on a mapped step.
+       */
+      mapped_calls_complete?: boolean | null;
+      /**
+       * Sources Total
+       * @description Retrieved sources across every call of a mapped step.
+       */
+      sources_total?: number | null;
+      /** Items */
+      items?: components["schemas"]["FlowRunDebugRag"][] | null;
+      /** Sources */
+      sources?: components["schemas"]["FlowRunDebugRag"][] | null;
       /** Source Names */
       source_names?: string[] | null;
       /** Source Display Names */
@@ -16080,6 +16271,16 @@ export interface components {
       has_named_sources?: boolean | null;
       tracking?: components["schemas"]["FlowRunDebugRagTracking"] | null;
       prompt_context?: components["schemas"]["FlowRunDebugRagPromptContext"] | null;
+    };
+    /**
+     * FlowRunDebugRagEmbeddingModel
+     * @description Embedding model retrieval ran against, absent when it cannot be named.
+     */
+    FlowRunDebugRagEmbeddingModel: {
+      /** Id */
+      id?: string | null;
+      /** Name */
+      name?: string | null;
     };
     /** FlowRunDebugRagPromptContext */
     FlowRunDebugRagPromptContext: {
@@ -16136,7 +16337,13 @@ export interface components {
       /** Relevance Score */
       relevance_score?: number | null;
     };
-    /** FlowRunDebugRagReference */
+    /**
+     * FlowRunDebugRagReference
+     * @description A retrieved source as served, with read-time display names added.
+     *
+     *     Inherits the recorded retrieval contract so the served shape cannot drift
+     *     from what the runtime writes.
+     */
     FlowRunDebugRagReference: {
       /** Id */
       id: string;
@@ -16144,10 +16351,10 @@ export interface components {
       id_short: string;
       /** Title */
       title?: string | null;
+      /** Source Title */
+      source_title?: string | null;
       /** Source Title Raw */
       source_title_raw?: string | null;
-      /** Display Title */
-      display_title?: string | null;
       /** Source Display Name */
       source_display_name?: string | null;
       /** Source Url */
@@ -16160,56 +16367,46 @@ export interface components {
       source_container_name?: string | null;
       /** Source Container Name Raw */
       source_container_name_raw?: string | null;
-      /** Source Container Display Name */
-      source_container_display_name?: string | null;
       /** Source Container Label */
       source_container_label?: string | null;
       /** Source Container Id */
       source_container_id?: string | null;
-      /** Usage State */
-      usage_state?: string | null;
+      /**
+       * Matched Chunk Count
+       * @description Passages the retriever returned from this source.
+       */
+      matched_chunk_count: number;
+      /**
+       * Recorded Passage Count
+       * @description Passages recorded below; never greater than the match count.
+       */
+      recorded_passage_count: number;
+      /** Best Score */
+      best_score: number;
+      /**
+       * Usage State
+       * @default retrieved_candidate
+       * @enum {string}
+       */
+      usage_state?: "retrieved_candidate" | "inserted_into_prompt";
+      /** Passages */
+      passages?: components["schemas"]["RetrievedPassage"][];
       /** Display Snippet */
       display_snippet?: string | null;
       /** Display Chunk No */
       display_chunk_no?: number | null;
       /** Display Selection Reason */
       display_selection_reason?: string | null;
+      /** Snippet Quality */
+      snippet_quality?: string | null;
       /** Quality Flags */
       quality_flags?: string[];
       /** Boilerplate Likelihood */
       boilerplate_likelihood?: number | null;
-      /** Snippet Quality */
-      snippet_quality?: string | null;
-      /**
-       * Matched Chunk Count
-       * @default 0
-       */
-      matched_chunk_count?: number;
-      /**
-       * Best Score
-       * @default 0
-       */
-      best_score?: number;
-      /** Chunks */
-      chunks?: components["schemas"]["FlowRunDebugRagReferenceChunk"][];
-    };
-    /** FlowRunDebugRagReferenceChunk */
-    FlowRunDebugRagReferenceChunk: {
-      /**
-       * Chunk No
-       * @default 0
-       */
-      chunk_no?: number;
-      /**
-       * Score
-       * @default 0
-       */
-      score?: number;
-      /**
-       * Snippet
-       * @default
-       */
-      snippet?: string;
+      /** Display Title */
+      display_title?: string | null;
+      /** Source Container Display Name */
+      source_container_display_name?: string | null;
     };
     /** FlowRunDebugRagTracking */
     FlowRunDebugRagTracking: {
@@ -16269,6 +16466,8 @@ export interface components {
       /** Models Used */
       models_used?: string[];
       token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
+      /** @description Present when the interactive view omitted recorded passage text to stay within its budget. Absent on exports and on views that returned every recorded passage. */
+      knowledge_evidence_view?: components["schemas"]["FlowRunDebugKnowledgeEvidenceView"] | null;
     };
     /** FlowRunDebugSecurity */
     FlowRunDebugSecurity: {
@@ -17186,6 +17385,14 @@ export interface components {
      *             },
      *             "knowledge_retrieval": {
      *               "attempted": true,
+     *               "embedding_model": {
+     *                 "id": "6f1c1e1e-0000-0000-0000-000000000001",
+     *                 "name": "text-embedding-3-large"
+     *               },
+     *               "embedding_model_status": "recorded",
+     *               "passages_recorded": 2,
+     *               "passages_truncated": 0,
+     *               "passages_withheld": 0,
      *               "prompt_context": {
      *                 "included_chunk_count": 2,
      *                 "included_source_count": 1,
@@ -17220,7 +17427,6 @@ export interface components {
      *                 "truncated_by_token_budget": false
      *               },
      *               "reference_metadata_status": "success",
-     *               "references_truncated": false,
      *               "retrieval_duration_ms": 182,
      *               "source_display_names": [
      *                 "Municipality policy guide"
@@ -17228,6 +17434,7 @@ export interface components {
      *               "source_names": [
      *                 "Municipality policy guide"
      *               ],
+     *               "sources_with_recorded_passages": 1,
      *               "status": "success",
      *               "unique_sources": 1
      *             },
@@ -24585,6 +24792,43 @@ export interface components {
        * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
        */
       retention_days: number;
+    };
+    /**
+     * RetrievedPassage
+     * @description One passage exactly as the retriever returned it, bounded in size.
+     */
+    RetrievedPassage: {
+      /** Chunk No */
+      chunk_no: number;
+      /** Score */
+      score: number;
+      /**
+       * Text
+       * @description The retrieved passage verbatim, or null when disclosure withholds it. When recording is 'tail_truncated' this is a leading prefix of the passage and the remaining bytes were dropped.
+       */
+      text?: string | null;
+      /**
+       * Recording
+       * @enum {string}
+       */
+      recording: "complete" | "tail_truncated";
+      /**
+       * Disclosure
+       * @default text_disclosed
+       * @enum {string}
+       */
+      disclosure?:
+        "text_disclosed" | "text_withheld_sensitive_flow" | "text_withheld_classified_space";
+      /**
+       * Passage Bytes
+       * @description UTF-8 byte length of the passage the retriever returned.
+       */
+      passage_bytes: number;
+      /**
+       * Recorded Bytes
+       * @description UTF-8 byte length of the recorded text. Stays populated when disclosure withholds the text, so a reader can tell that a passage of this size exists but is not shown to them.
+       */
+      recorded_bytes: number;
     };
     /**
      * RevisePlanRequest
@@ -32815,6 +33059,107 @@ export interface operations {
           /**
            * @example {
            *       "message": "At least one mapped execution policy field must be provided.",
+           *       "eneo_error_code": 9007,
+           *       "code": "flow_settings_invalid_payload"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_rag_evidence_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRagEvidencePolicyPublic"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_rag_evidence_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRagEvidencePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRagEvidencePolicyPublic"];
+        };
+      };
+      /** @description Invalid knowledge evidence policy payload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "At least one knowledge evidence policy field must be provided.",
            *       "eneo_error_code": 9007,
            *       "code": "flow_settings_invalid_payload"
            *     }
@@ -46976,7 +47321,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The synchronous evidence export exceeds the provider-call event safety boundary. */
+      /** @description The run holds more evidence than one synchronous export may contain. context.limit names the exceeded boundary: provider_call_events, recorded_passage_bytes, stored_provenance_bytes, or corrupt_passage_evidence. An export never returns a partial document; context.hint names the recovery path. */
       413: {
         headers: {
           [name: string]: unknown;
@@ -46988,8 +47333,10 @@ export interface operations {
            *       "eneo_error_code": 9015,
            *       "code": "flow_evidence_export_too_large",
            *       "context": {
+           *         "limit": "provider_call_events",
            *         "provider_call_count": 10001,
-           *         "max_provider_call_events": 10000
+           *         "max_provider_call_events": 10000,
+           *         "hint": "Page this run's provider-call events through the provider-calls endpoint."
            *       }
            *     }
            */

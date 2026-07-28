@@ -9,6 +9,7 @@
   import { onMount } from "svelte";
   import { toast } from "$lib/components/toast";
   import {
+    classifyExportFailure,
     downloadEvidenceExport,
     downloadJsonArtifact as triggerJsonDownload,
     serializeEvidencePayload
@@ -64,6 +65,11 @@
   let copiedKey: string | null = $state(null);
   let copiedTimer: ReturnType<typeof setTimeout> | null = $state(null);
   const mode = getFlowUserMode();
+  // The interactive view trims passage text to stay readable; the evidence is
+  // still retained, so the page says what this response left out.
+  let knowledgeEvidenceView = $derived.by(
+    () => evidence?.debug_export?.run?.summary?.knowledge_evidence_view ?? null
+  );
   let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = $derived.by(() =>
     groupStepAttemptsByOrder(evidence?.step_attempts ?? [])
   );
@@ -137,12 +143,30 @@
     }
   }
 
+  function exportRecoveryMessage(error: unknown): string | null {
+    switch (classifyExportFailure(error)) {
+      case "evidence_view":
+        return m.flow_run_export_recovery_evidence_view();
+      case "provider_calls":
+        return m.flow_run_export_recovery_provider_calls();
+      case "generic":
+        return m.flow_error_flow_evidence_export_too_large();
+      default:
+        return null;
+    }
+  }
+
   async function downloadCanonicalEvidenceExport() {
     try {
       await downloadEvidenceExport({ eneo: eneo, flowId, runId });
     } catch (error) {
       console.error("Could not download canonical evidence export", error);
-      toast.error(m.flow_run_download_evidence_export_failed());
+      const recovery = exportRecoveryMessage(error);
+      toast.error(
+        recovery
+          ? `${m.flow_run_download_evidence_export_failed()} ${recovery}`
+          : m.flow_run_download_evidence_export_failed()
+      );
     }
   }
 
@@ -311,12 +335,45 @@
       />
     {/if}
 
+    {#if knowledgeEvidenceView && (knowledgeEvidenceView.passages_omitted > 0 || (knowledgeEvidenceView.attempts_not_loaded ?? 0) > 0 || (knowledgeEvidenceView.current_attempts_not_loaded ?? 0) > 0)}
+      <div
+        class="border-default text-secondary flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs"
+        data-testid="knowledge-evidence-view-omission"
+      >
+        {#if knowledgeEvidenceView.passages_omitted > 0}
+          <p>
+            {m.flow_run_knowledge_view_omitted_passages({
+              omitted: String(knowledgeEvidenceView.passages_omitted)
+            })}
+          </p>
+        {/if}
+        {#if (knowledgeEvidenceView.attempts_not_loaded ?? 0) > 0}
+          <p>
+            {m.flow_run_knowledge_view_attempts_not_loaded({
+              count: String(knowledgeEvidenceView.attempts_not_loaded)
+            })}
+          </p>
+        {/if}
+        {#if (knowledgeEvidenceView.current_attempts_not_loaded ?? 0) > 0}
+          <p class="font-medium">
+            {m.flow_run_knowledge_view_current_attempts_not_loaded({
+              count: String(knowledgeEvidenceView.current_attempts_not_loaded),
+              steps: (knowledgeEvidenceView.current_step_orders_not_loaded ?? []).join(", ")
+            })}
+          </p>
+        {/if}
+      </div>
+    {/if}
+
     {#each evidence.step_results as result (result.id ?? result.step_order)}
       {@const stepDef = (
         (evidence.definition_snapshot?.steps ?? []) as Record<string, unknown>[]
       ).find((step) => step.step_order === result.step_order)}
       <FlowRunEvidenceStepCard
         {result}
+        currentEvidenceNotLoaded={(
+          knowledgeEvidenceView?.current_step_orders_not_loaded ?? []
+        ).includes(result.step_order)}
         resultFiles={getStepResultFiles(result)}
         {stepDef}
         duration={getStepDuration(result.step_order)}

@@ -48,7 +48,7 @@ import type {
   FlowRunDebugOutput,
   FlowRunDebugRag,
   FlowRunDebugRagReference,
-  FlowRunDebugRagReferenceChunk,
+  RetrievedPassage,
   FlowRunDebugStep,
   FlowRunError,
   FlowRunEvidence,
@@ -163,7 +163,7 @@ type PublicFlowLaunchAliasSmoke = {
   FlowRunDebugOutput: FlowRunDebugOutput;
   FlowRunDebugRag: FlowRunDebugRag;
   FlowRunDebugRagReference: FlowRunDebugRagReference;
-  FlowRunDebugRagReferenceChunk: FlowRunDebugRagReferenceChunk;
+  RetrievedPassage: RetrievedPassage;
   FlowRunDebugStep: FlowRunDebugStep;
   FlowRunError: FlowRunError;
   FlowRunEvidence: FlowRunEvidence;
