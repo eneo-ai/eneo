@@ -14,6 +14,7 @@ Real Postgres via testcontainers; seeds follow
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID, uuid4
 
 import pytest
@@ -30,6 +31,39 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillRevisionConflictError,
 )
+from eneo.skills.infrastructure.skill_repo_impl import (
+    acquire_personal_default_fit_lock,
+)
+
+
+async def _wait_until_advisory_lock(db_container, *, pid: int, task) -> None:
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        async with db_container() as observer:
+            is_waiting = await observer.session().scalar(
+                sa.text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_stat_activity AS activity
+                        JOIN pg_locks AS lock ON lock.pid = activity.pid
+                        WHERE activity.pid = :pid
+                          AND activity.wait_event_type = 'Lock'
+                          AND lock.locktype = 'advisory'
+                          AND NOT lock.granted
+                    )
+                    """
+                ),
+                {"pid": pid},
+            )
+        if is_waiting:
+            return
+        if task.done():
+            outcome = await task
+            raise AssertionError(
+                f"Confirm completed before waiting for the fit token: {outcome}"
+            )
+    raise AssertionError(f"Database session {pid} did not wait for the fit token")
 
 
 async def _org_space_id(session, *, tenant_id: UUID) -> UUID:
@@ -503,6 +537,11 @@ async def test_validation_holds_no_locks_at_all(db_container, admin_user):
                 .with_for_update(nowait=True)
             )
             assert locked_skill == skill.id
+            await acquire_personal_default_fit_lock(
+                session=probe,
+                tenant_id=admin_user.tenant_id,
+                shared=True,
+            )
             await probe.rollback()
 
         async with db_container() as editor:
@@ -618,6 +657,109 @@ async def test_personal_default_change_during_validation_refuses_the_apply(
         )
         assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
         await staging.session().rollback()
+
+    async with db_container() as verifier:
+        binding = await _binding_row(
+            verifier.session(),
+            policy_id=policy_id,
+            skill_id=skill.id,
+        )
+        assert binding.skill_revision_id == old_revision.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_an_in_flight_assistant_save_drains_before_the_apply(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        await container.space_init_service().get_personal_space()
+        session = container.session()
+        repo = container.skill_repo()
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        assistant_id = await session.scalar(
+            sa.select(Assistants.id)
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_not(None),
+                Assistants.is_default == sa.true(),
+            )
+            .limit(1)
+        )
+        assert assistant_id is not None
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        policy_id = await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+
+    async with db_container() as editor:
+        await acquire_personal_default_fit_lock(
+            session=editor.session(),
+            tenant_id=admin_user.tenant_id,
+            shared=True,
+        )
+        await editor.session().execute(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant_id)
+            .values(updated_at=sa.func.clock_timestamp())
+        )
+
+        async with db_container() as staging:
+            stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+                tenant_id=admin_user.tenant_id,
+                skill_id=skill.id,
+                expected_pinned_revision_id=old_revision.id,
+                expected_published_revision_id=published.id,
+            )
+            assert stage is not None
+            assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+            pid = await staging.session().scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(pid, int)
+
+            confirm_task = asyncio.create_task(
+                staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+                    tenant_id=admin_user.tenant_id,
+                    skill_id=skill.id,
+                    policy_id=stage.policy_id,
+                    policy_version=stage.policy_version,
+                    personal_defaults_snapshot=stage.personal_defaults_snapshot,
+                    expected_pinned_revision_id=old_revision.id,
+                    expected_published_revision_id=published.id,
+                )
+            )
+            try:
+                await _wait_until_advisory_lock(
+                    db_container,
+                    pid=pid,
+                    task=confirm_task,
+                )
+                await editor.session().commit()
+                confirm = await confirm_task
+            finally:
+                if not confirm_task.done():
+                    confirm_task.cancel()
+                    await asyncio.gather(confirm_task, return_exceptions=True)
+
+            assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+            await staging.session().rollback()
 
     async with db_container() as verifier:
         binding = await _binding_row(

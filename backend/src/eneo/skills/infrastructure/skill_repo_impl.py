@@ -93,6 +93,8 @@ _PublishedSkillRevision = aliased(SkillRevisions, name="published_skill_revision
 
 
 _LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
+# Reserved two-int advisory-lock class for personal-default fit serialization.
+_PERSONAL_DEFAULT_FIT_LOCK_CLASS = 0x50444654
 
 
 def _is_lock_not_available(error: DBAPIError) -> bool:
@@ -100,6 +102,34 @@ def _is_lock_not_available(error: DBAPIError) -> bool:
     sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
     return sqlstate == _LOCK_NOT_AVAILABLE_SQLSTATE or (
         _LOCK_NOT_AVAILABLE_SQLSTATE in str(orig)
+    )
+
+
+async def acquire_personal_default_fit_lock(
+    *,
+    session: AsyncSession,
+    tenant_id: UUID,
+    shared: bool,
+) -> None:
+    lock_function = (
+        "pg_advisory_xact_lock_shared" if shared else "pg_advisory_xact_lock"
+    )
+    await session.execute(
+        sa.text(
+            f"""
+            SELECT {lock_function}(
+                :lock_class,
+                CAST(
+                    hashtextextended(CAST(:tenant_id AS text), 0) % 2147483647
+                    AS integer
+                )
+            )
+            """
+        ),
+        {
+            "lock_class": _PERSONAL_DEFAULT_FIT_LOCK_CLASS,
+            "tenant_id": str(tenant_id),
+        },
     )
 
 
@@ -1308,9 +1338,15 @@ class SkillRepoImpl:
 
         The policy lock is NOWAIT so a concurrent policy save refuses this
         apply instead of waiting. Publication and block state are rechecked
-        under the Skill lock, then the personal-default fleet and binding are
-        rechecked before the guarded write. The policy-row bump serializes
-        concurrent pin advances.
+        under the Skill lock. The exclusive tenant fit token then drains
+        in-flight Assistant saves before the snapshot recheck; later saves wait
+        until this transaction commits and validate against the new pin.
+
+        Waiting for the token cannot deadlock: an Assistant save holds only its
+        row and the shared token, never policy, Skill, or binding locks. A
+        governance save holds the policy row and never takes this token, so the
+        NOWAIT policy lock refuses before confirm can wait. The binding recheck,
+        guarded write, and policy-row bump then finish the short apply.
         """
         try:
             async with self.session.begin_nested():
@@ -1348,6 +1384,11 @@ class SkillRepoImpl:
         if active_block is not None:
             return PersonalChatPinConfirmOutcome.BLOCKED
 
+        await acquire_personal_default_fit_lock(
+            session=self.session,
+            tenant_id=tenant_id,
+            shared=False,
+        )
         current_personal_defaults_snapshot = (
             await AssistantRepository.get_personal_defaults_snapshot(
                 session=self.session,

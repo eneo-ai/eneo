@@ -82,6 +82,9 @@ from eneo.skills.domain.skill import (
     SkillTurnEffectiveMode,
     SkillTurnPlan,
 )
+from eneo.skills.infrastructure.skill_repo_impl import (
+    acquire_personal_default_fit_lock,
+)
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space_repo import AssistantMCPServerProjection
 from eneo.spaces.space_service import SpaceService
@@ -691,6 +694,11 @@ class AssistantService:
         baseline, including the activation transcript and configured MCP schemas.
         Combinations and live per-user MCP narrowing remain turn-time decisions.
         Skipped only when no model is resolved."""
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=True,
+        )
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
         effective_config = await self._resolve_effective_config(
