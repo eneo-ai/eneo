@@ -77,6 +77,16 @@ function localizedCodes(): Set<number> {
 }
 
 describe("error code localization coverage", () => {
+  it("reads the reason codes from the generated schema", () => {
+    // Without this, a moved schema or a changed union shape would make every
+    // other assertion here vacuously true instead of failing.
+    const codes = backendErrorCodes();
+
+    expect(codes.length).toBeGreaterThan(40);
+    expect(codes).toContain(9048);
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+
   it("localizes every backend reason code that is not explicitly exempt", () => {
     const missing = backendErrorCodes().filter(
       (code) => !localizedCodes().has(code) && !UNLOCALIZED_BY_DESIGN.has(code)
