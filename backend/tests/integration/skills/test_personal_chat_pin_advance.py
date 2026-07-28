@@ -24,6 +24,7 @@ import sqlalchemy as sa
 
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.governance_policy_table import GovernancePolicies
+from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.skill_table import GovernancePolicySkillBindings
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
@@ -647,6 +648,99 @@ async def test_personal_default_change_during_validation_refuses_the_apply(
                 sa.update(Assistants)
                 .where(Assistants.id == assistant_id)
                 .values(updated_at=sa.func.clock_timestamp())
+            )
+
+        confirm = await staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            policy_id=stage.policy_id,
+            policy_version=stage.policy_version,
+            personal_defaults_snapshot=stage.personal_defaults_snapshot,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert confirm is PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED
+        await staging.session().rollback()
+
+    async with db_container() as verifier:
+        binding = await _binding_row(
+            verifier.session(),
+            policy_id=policy_id,
+            skill_id=skill.id,
+        )
+        assert binding.skill_revision_id == old_revision.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_adding_mcp_to_personal_default_during_validation_refuses_the_apply(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        await container.space_init_service().get_personal_space()
+        session = container.session()
+        assistant_id = await session.scalar(
+            sa.select(Assistants.id)
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_not(None),
+                Assistants.is_default == sa.true(),
+            )
+            .limit(1)
+        )
+        assert assistant_id is not None
+        mcp_server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"Pin advance MCP {uuid4().hex[:8]}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=False,
+        )
+        session.add(mcp_server)
+        await session.flush()
+
+        repo = container.skill_repo()
+        await repo.get_or_seed_runtime_policy(tenant_id=admin_user.tenant_id)
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        policy_id = await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+        mcp_server_id = mcp_server.id
+
+    async with db_container() as staging:
+        stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_pinned_revision_id=old_revision.id,
+            expected_published_revision_id=published.id,
+        )
+        assert stage is not None
+        assert stage.advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED
+
+        async with db_container() as editor:
+            await editor.assistant_service().add_mcp_to_assistant(
+                assistant_id=assistant_id,
+                mcp_server_id=mcp_server_id,
             )
 
         confirm = await staging.skill_repo().confirm_personal_chat_skill_pin_advance(

@@ -2715,6 +2715,12 @@ class AssistantService:
         assert assistant_in_db is not None
 
         await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
+        # Keep the fit snapshot's parent-row version coupled to this association write.
+        await self.repo.session.execute(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant_id)
+            .values(updated_at=sa.func.now())
+        )
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
