@@ -53,6 +53,28 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    pending_count = int(
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
+                SELECT count(*)
+                FROM jobs
+                WHERE dispatch_envelope IS NOT NULL
+                  AND status IN ('queued', 'in progress')
+                  AND task IN ('upload_info_blob', 'transcription')
+                """
+            )
+        )
+        .scalar_one()
+    )
+    if pending_count:
+        raise RuntimeError(
+            "Cannot downgrade durable job dispatch while "
+            f"{pending_count} queued or in-progress envelope jobs remain. "
+            "Drain them or explicitly fail them before retrying."
+        )
+
     with op.get_context().autocommit_block():
         op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {_INDEX}")
     op.drop_column("jobs", "dispatch_attempted_at")

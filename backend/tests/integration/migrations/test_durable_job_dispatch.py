@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg2
 import pytest
@@ -117,6 +118,59 @@ def test_durable_dispatch_migration_round_trip_and_query_plan(
             )
             plan = "\n".join(str(row[0]) for row in cursor.fetchall())
         assert _INDEX in plan
+    finally:
+        connection.close()
+
+    pending_job_id = uuid4()
+    connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute("ALTER TABLE jobs DISABLE TRIGGER ALL")
+                try:
+                    cursor.execute(
+                        """
+                        INSERT INTO jobs (
+                            id, user_id, task, status, dispatch_envelope
+                        )
+                        VALUES (%s::uuid, %s::uuid, %s, %s, %s::jsonb)
+                        """,
+                        (
+                            str(pending_job_id),
+                            str(uuid4()),
+                            "upload_info_blob",
+                            "queued",
+                            '{"version": 1}',
+                        ),
+                    )
+                finally:
+                    cursor.execute("ALTER TABLE jobs ENABLE TRIGGER ALL")
+    finally:
+        connection.close()
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"1.*[Dd]rain.*explicitly fail",
+    ):
+        command.downgrade(config, _PREVIOUS_REVISION)
+
+    columns, indexes = _job_schema(database_url)
+    assert "dispatch_envelope" in columns
+    assert _INDEX in indexes
+
+    connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT dispatch_envelope FROM jobs WHERE id = %s::uuid",
+                    (str(pending_job_id),),
+                )
+                assert cursor.fetchone() == ({"version": 1},)
+                cursor.execute(
+                    "UPDATE jobs SET status = 'failed' WHERE id = %s::uuid",
+                    (str(pending_job_id),),
+                )
     finally:
         connection.close()
 

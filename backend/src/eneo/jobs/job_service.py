@@ -8,6 +8,7 @@ from eneo.jobs.durable_dispatch import build_knowledge_dispatch_params
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Job, JobInDb, JobUpdate, Task
 from eneo.jobs.job_repo import JobRepository
+from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
     TaskParams,
     Transcription,
@@ -81,6 +82,15 @@ class JobService:
                     extra={"job_id": str(job_in_db.id), "task": task.value},
                 )
 
+        def cleanup_after_rollback() -> None:
+            try:
+                job_staging_path(job_in_db.id).unlink(missing_ok=True)
+            except Exception:
+                logger.exception(
+                    "Durable job staging cleanup after rollback failed",
+                    extra={"job_id": str(job_in_db.id), "task": task.value},
+                )
+
         outer_committed = False
         active = True
 
@@ -104,6 +114,8 @@ class JobService:
             loop = asyncio.get_running_loop()
             if outer_committed:
                 loop.create_task(dispatch_after_commit())
+            else:
+                cleanup_after_rollback()
             loop.call_soon(remove_listeners)
 
         event.listen(session, "after_commit", after_commit)

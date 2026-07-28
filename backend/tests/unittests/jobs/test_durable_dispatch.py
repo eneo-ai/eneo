@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -137,6 +138,73 @@ async def test_outer_rollback_then_unrelated_commit_never_dispatches(
     await asyncio.sleep(0)
 
     enqueue.assert_not_awaited()
+
+
+async def test_outer_rollback_removes_staged_file_and_never_dispatches(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from eneo.jobs import job_staging
+
+    monkeypatch.setattr(
+        job_staging,
+        "get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    session = Session()
+    job_id = uuid4()
+    repo = _repo(session, job_id)
+    enqueue = AsyncMock()
+    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", enqueue)
+    staged_file = job_staging.job_staging_path(job_id)
+    staged_file.parent.mkdir(parents=True)
+    staged_file.write_bytes(b"pending upload")
+
+    outer = session.begin()
+    await JobService(TEST_USER, repo).queue_durable_knowledge_job(
+        Task.UPLOAD_FILE,
+        name="document.txt",
+        task_params=_params(),
+        job_id=job_id,
+    )
+    outer.rollback()
+    await asyncio.sleep(0)
+
+    assert not staged_file.exists()
+    enqueue.assert_not_awaited()
+
+
+async def test_outer_commit_keeps_staged_file_for_worker_and_dispatches_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from eneo.jobs import job_staging
+
+    monkeypatch.setattr(
+        job_staging,
+        "get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    session = Session()
+    job_id = uuid4()
+    repo = _repo(session, job_id)
+    enqueue = AsyncMock()
+    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", enqueue)
+    staged_file = job_staging.job_staging_path(job_id)
+    staged_file.parent.mkdir(parents=True)
+    staged_file.write_bytes(b"pending upload")
+
+    with session.begin():
+        await JobService(TEST_USER, repo).queue_durable_knowledge_job(
+            Task.UPLOAD_FILE,
+            name="document.txt",
+            task_params=_params(),
+            job_id=job_id,
+        )
+    await asyncio.sleep(0)
+
+    assert staged_file.read_bytes() == b"pending upload"
+    assert enqueue.await_count == 1
 
 
 async def test_savepoint_then_outer_commit_dispatches_once(monkeypatch) -> None:
