@@ -320,7 +320,7 @@ describe("SkillRevisionHistory", () => {
     });
 
     await page.getByRole("button", { name: m.skills_library_load_older() }).click();
-    await expect.element(page.getByText(m.request_failed())).toBeVisible();
+    await expect.element(page.getByText(m.skills_library_load_older_error())).toBeVisible();
     await page.getByRole("button", { name: m.skills_library_load_older() }).click();
 
     await vi.waitFor(() => expect(onLoadMore).toHaveBeenCalledTimes(2));
@@ -423,7 +423,7 @@ describe("SkillRevisionHistory", () => {
       })
       .click();
 
-    await expect.element(page.getByText(m.request_failed())).toBeVisible();
+    await expect.element(page.getByText(m.skills_library_preview_error())).toBeVisible();
     await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
   });
 });

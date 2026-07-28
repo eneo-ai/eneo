@@ -149,7 +149,7 @@
       nextCursor = loadedPage.next_cursor ?? null;
     } catch (error) {
       if (!isCurrentProjection(generation, requestSkillId)) return;
-      loadMoreError = getErrorMessage(error) || m.organization_skills_adoption_load_more_error();
+      loadMoreError = getErrorMessage(error, m.organization_skills_adoption_load_more_error());
     } finally {
       if (isCurrentProjection(generation, requestSkillId)) {
         loadingMore = false;

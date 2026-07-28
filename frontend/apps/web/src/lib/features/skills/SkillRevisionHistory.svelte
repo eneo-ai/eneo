@@ -128,7 +128,7 @@
     try {
       viewedRevision = await onView(revision.id);
     } catch (error) {
-      previewError = getErrorMessage(error) || m.skills_library_preview_error();
+      previewError = getErrorMessage(error, m.skills_library_preview_error());
     } finally {
       viewingRevisionId = null;
     }
@@ -144,7 +144,7 @@
       revisions = [...revisions, ...page.items];
       nextCursor = page.next_cursor ?? null;
     } catch (error) {
-      loadError = getErrorMessage(error) || m.skills_library_load_older_error();
+      loadError = getErrorMessage(error, m.skills_library_load_older_error());
     } finally {
       loadingMore = false;
     }
@@ -159,7 +159,9 @@
     try {
       outcome = await onRestore(source.id, comparisonCurrentRevision.id);
     } catch (error) {
-      restoreError = getErrorMessage(error) || m.skills_library_restore_error();
+      // The alert title already says the restore failed, so this line
+      // carries the cause rather than repeating it.
+      restoreError = getErrorMessage(error);
       if (isConflict(error)) {
         try {
           const latest = await onLoadCurrent();
@@ -171,7 +173,7 @@
           restoreTarget = null;
           viewedRevision = source;
         } catch (refreshError) {
-          restoreError = getErrorMessage(refreshError) || m.skills_library_restore_refresh_error();
+          restoreError = getErrorMessage(refreshError, m.skills_library_restore_refresh_error());
         }
       }
       restoring = false;

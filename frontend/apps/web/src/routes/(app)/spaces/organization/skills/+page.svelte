@@ -91,7 +91,7 @@
       items = [...items, ...page.items];
       nextCursor = page.next_cursor ?? null;
     } catch (error) {
-      loadError = getErrorMessage(error) || m.organization_skills_load_more_error();
+      loadError = getErrorMessage(error, m.organization_skills_load_more_error());
     } finally {
       loadingMore = false;
     }
@@ -106,7 +106,7 @@
     try {
       await data.eneo.skills.organization.delete({ skillId: deletedSkillId });
     } catch (error) {
-      deleteError = getErrorMessage(error) || m.organization_skills_delete_error();
+      deleteError = getErrorMessage(error, m.organization_skills_delete_error());
       deleting = false;
       return;
     }
