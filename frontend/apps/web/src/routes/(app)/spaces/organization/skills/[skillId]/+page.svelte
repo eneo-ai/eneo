@@ -266,6 +266,18 @@
     await refreshOrganizationSkills();
   }
 
+  function openAdvanceDialog(pinned: { revisionId: string; revisionNumber: number }) {
+    if (data.published === null) return;
+    advancePinned = {
+      ...pinned,
+      publishedRevisionId: data.published.revision_id
+    };
+  }
+
+  const onAdvancePersonalChat = $derived(
+    data.published !== null && executionBlock.block === null ? openAdvanceDialog : undefined
+  );
+
   function setAdvanceDialogOpen(open: boolean) {
     if (open || advanceSaving) return;
     advancePinned = null;
@@ -562,21 +574,14 @@
           initialPage={null}
           initialLoading
           {getOrganizationSkillAdoption}
+          {onAdvancePersonalChat}
         />
       {:then adoptionPage}
         <SkillAdoptionProjection
           skillId={data.skill.id}
           initialPage={adoptionPage}
           {getOrganizationSkillAdoption}
-          onAdvancePersonalChat={data.published !== null && executionBlock.block === null
-            ? (pinned) => {
-                if (data.published === null) return;
-                advancePinned = {
-                  ...pinned,
-                  publishedRevisionId: data.published.revision_id
-                };
-              }
-            : undefined}
+          {onAdvancePersonalChat}
         />
         <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
       {:catch}
@@ -585,7 +590,9 @@
           initialPage={null}
           initialError
           {getOrganizationSkillAdoption}
+          {onAdvancePersonalChat}
         />
+        <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
       {/await}
 
       <section aria-labelledby="organization-skill-history-heading">

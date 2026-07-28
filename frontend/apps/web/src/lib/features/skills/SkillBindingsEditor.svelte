@@ -485,6 +485,9 @@
                         class="w-full"
                         aria-label={m.skills_activation_mode_label({ name: rowName(row) })}
                         aria-describedby={`${runtimeStatusId} ${runtimeHintId}`}
+                        title={!canChooseOnDemand && activationMode(row) === "always"
+                          ? runtimeStatus()
+                          : undefined}
                       >
                         <span data-slot="select-value">
                           {activationModeLabel(activationMode(row))}

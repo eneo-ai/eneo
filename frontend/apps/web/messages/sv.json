@@ -3561,7 +3561,7 @@
   "skills_activation_runtime_eager": "Alla kopplade Skills är inställda på att läsas in i varje förfrågan.",
   "skills_activation_runtime_no_model": "Körningsstatus kan inte visas förrän assistenten har en modell.",
   "skills_activation_runtime_policy_selective": "Inläsning vid behov är tillgänglig för de valda modellerna.",
-  "skills_activation_runtime_policy_requirements": "För läget Vid behov måste du välja specifika modeller med stöd för tool calling. Obegränsad åtkomst och hela modellleverantörer kan inte valideras säkert.",
+  "skills_activation_runtime_policy_requirements": "För läget Vid behov måste Personlig chatt begränsas till utvalda modeller med stöd för tool calling — obegränsad åtkomst och hela modellleverantörer kan inte valideras säkert. Tills dess är alla Skills låsta till Alltid. Lås upp genom att aktivera modellbegränsningen och välja specifika modeller.",
   "skills_activation_runtime_policy_validation_hint": "Tokenutrymme och MCP-konfiguration kontrolleras när du sparar.",
   "skills_activation_runtime_model_lacks_tools": "Den valda modellen saknar stöd för tool calling. Endast Skills med läget Alltid läses in.",
   "skills_activation_runtime_catalog_budget": "Katalogen för Skills vid behov överskrider sitt kontextutrymme. Endast Skills med läget Alltid läses in.",

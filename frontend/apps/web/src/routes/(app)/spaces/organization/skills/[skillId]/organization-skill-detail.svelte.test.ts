@@ -262,6 +262,89 @@ describe("organisation Skill detail page", () => {
       .toBeInTheDocument();
   });
 
+  test("a retried adoption load still offers the Personal Chat update", async () => {
+    const advancePersonalChat = vi.fn(async () => ({
+      outcome: "advanced" as const,
+      from_revision_number: 1,
+      to_revision_number: 2
+    }));
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    const getAdoption = vi.fn(async () => behindAdoption);
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.reject(new Error("Transient adoption failure")),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption,
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_adoption_error_title()))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.retry() }).click();
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+  });
+
   test("keeps the update dialog open with the error when the move is refused", async () => {
     const advancePersonalChat = vi.fn(async () => {
       throw new Error("Refused");
