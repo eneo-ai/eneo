@@ -77,11 +77,16 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
  * Resolution order:
  * 1. Eneo backend error with a mapped error code → localized i18n message
  * 2. Eneo backend error without mapping → backend's readable message (English fallback)
- * 3. Other errors → generic localized fallback ("Something went wrong")
+ * 3. Other errors → `fallback`, or the generic "Something went wrong"
+ *
+ * Pass `fallback` when the call site knows what failed — "The Skill could not be
+ * deleted" beats "Something went wrong" for a network error or a thrown string.
+ * Writing `getErrorMessage(error) || specific()` does not work: this never
+ * returns an empty string, so that branch is dead.
  *
  * Use toastError() to show the message directly as a toast notification.
  */
-export function getErrorMessage(error: unknown): string {
+export function getErrorMessage(error: unknown, fallback?: string): string {
   if (error instanceof EneoError) {
     const mapped = ERROR_CODE_MESSAGES[error.code];
     if (mapped) {
@@ -92,5 +97,5 @@ export function getErrorMessage(error: unknown): string {
       return readable;
     }
   }
-  return m.request_failed();
+  return fallback ?? m.request_failed();
 }
