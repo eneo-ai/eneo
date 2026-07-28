@@ -66,6 +66,13 @@ class PersonalDefaultValidationInput:
     has_knowledge: bool
 
 
+@dataclass(frozen=True)
+class PersonalDefaultValidationPage:
+    items: list[PersonalDefaultValidationInput]
+    # Keyset cursor (created_at, id) of the last row, or None on the last page.
+    next_after: tuple[datetime, UUID] | None
+
+
 # IMPORTANT: every list-returning method in this repo must apply this
 # filter. If you add a new list method, either call it here or document
 # the explicit exception in a comment on the new method. See PRD §4.
@@ -555,14 +562,24 @@ class AssistantRepository:
             for record in records
         ]
 
-    async def get_personal_defaults_for_tenant(
-        self, *, tenant_id: UUID
-    ) -> list[PersonalDefaultValidationInput]:
-        """Load the persisted baselines affected by personal-chat governance.
+    async def get_personal_defaults_page(
+        self,
+        *,
+        tenant_id: UUID,
+        limit: int,
+        after: tuple[datetime, UUID] | None = None,
+    ) -> PersonalDefaultValidationPage:
+        """Load one keyset page of the persisted baselines affected by
+        personal-chat governance.
 
         This deliberately does not apply the helper-assistant exclusion used by
         user-facing lists: governance must validate every personal default row,
         even if an unrelated role assignment has left one in an invalid state.
+
+        Paged because the caller walks entire tenants: one unbounded load with
+        five eager collections per row materialises the whole fleet in memory.
+        The cursor is ``(created_at, id)`` — ``created_at`` alone is not unique,
+        and a non-deterministic order would let rows slip between pages.
         """
         has_knowledge = sa.or_(
             sa.exists(
@@ -598,12 +615,23 @@ class AssistantRepository:
                 ),
                 selectinload(Assistants.mcp_servers),
             )
-            .order_by(Assistants.created_at)
+            .order_by(Assistants.created_at, Assistants.id)
+            .limit(limit + 1)
         )
+        if after is not None:
+            after_created_at, after_id = after
+            query = query.where(
+                sa.tuple_(Assistants.created_at, Assistants.id)
+                > sa.tuple_(
+                    sa.literal(after_created_at), sa.literal(after_id, sa.Uuid())
+                )
+            )
         rows = list((await self.session.execute(query)).all())
+        has_more = len(rows) > limit
+        rows = rows[:limit]
         records = [row[0] for row in rows]
         if not records:
-            return []
+            return PersonalDefaultValidationPage(items=[], next_after=None)
 
         prompt_rows = (
             await self.session.execute(
@@ -624,7 +652,7 @@ class AssistantRepository:
         completion_models = await self.completion_model_repo.all()
         attachments = await self._load_attachments(records)
 
-        return [
+        items = [
             PersonalDefaultValidationInput(
                 assistant=self.factory.create_assistant_from_db(
                     record,
@@ -639,6 +667,11 @@ class AssistantRepository:
             )
             for row, record in zip(rows, records, strict=True)
         ]
+        last = records[-1]
+        return PersonalDefaultValidationPage(
+            items=items,
+            next_after=(last.created_at, last.id) if has_more else None,
+        )
 
     async def update(
         self,

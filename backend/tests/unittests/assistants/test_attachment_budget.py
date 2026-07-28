@@ -1256,14 +1256,17 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
         ),
     )
     service = _service()
-    service.repo.get_personal_defaults_for_tenant.return_value = [
-        SimpleNamespace(
-            assistant=assistant,
-            configured_mcp_servers=(),
-            has_knowledge=False,
-        )
-        for assistant in assistants
-    ]
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            )
+            for assistant in assistants
+        ],
+        next_after=None,
+    )
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_personal_default.return_value = (
         effective_config
@@ -1316,13 +1319,16 @@ async def test_governance_preflight_projects_each_personal_assistants_mcp_tools(
         ),
     )
     service = _service()
-    service.repo.get_personal_defaults_for_tenant.return_value = [
-        SimpleNamespace(
-            assistant=assistant,
-            configured_mcp_servers=(configured_server,),
-            has_knowledge=False,
-        )
-    ]
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(configured_server,),
+                has_knowledge=False,
+            )
+        ],
+        next_after=None,
+    )
     service.space_repo.project_assistants_mcp_servers.return_value = {
         assistant.id: [projected_server]
     }
@@ -1349,6 +1355,83 @@ async def test_governance_preflight_projects_each_personal_assistants_mcp_tools(
 
 
 @pytest.mark.asyncio
+async def test_governance_preflight_walks_every_page_of_personal_defaults():
+    """A fleet larger than one page must be validated in full, page by page,
+    with the MCP projection scoped to each page rather than the tenant."""
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    first = _assistant_with_runtime_model()
+    second = _assistant_with_runtime_model()
+    effective_config = SimpleNamespace(
+        models_enforced=True,
+        available_models=[first.completion_model],
+        locked_model=None,
+        policy_default_model=first.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        models_bounded_for_on_demand=True,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    service = _service()
+    cursor = ("2026-07-01", first.id)
+    service.repo.get_personal_defaults_page.side_effect = [
+        SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    assistant=first,
+                    configured_mcp_servers=(MagicMock(),),
+                    has_knowledge=False,
+                )
+            ],
+            next_after=cursor,
+        ),
+        SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    assistant=second,
+                    configured_mcp_servers=(MagicMock(),),
+                    has_knowledge=False,
+                )
+            ],
+            next_after=None,
+        ),
+    ]
+    service.space_repo.project_assistants_mcp_servers.side_effect = [
+        {first.id: []},
+        {second.id: []},
+    ]
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    # Both pages were requested, the second with the first page's cursor.
+    page_calls = service.repo.get_personal_defaults_page.await_args_list
+    assert len(page_calls) == 2
+    assert page_calls[0].kwargs["after"] is None
+    assert page_calls[1].kwargs["after"] == cursor
+    # Both assistants were validated, and the projection ran once per page.
+    validated = {
+        call.kwargs["completion_prompt_files"] is not None
+        for call in service._validate_skill_activation_fit.await_args_list
+    }
+    assert len(service._validate_skill_activation_fit.await_args_list) >= 2
+    assert service.space_repo.project_assistants_mcp_servers.await_count == 2
+    assert validated == {True}
+
+
+@pytest.mark.asyncio
 async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
     on_demand = _resolved_skill(
         name="On demand",
@@ -1372,13 +1455,16 @@ async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
         ),
     )
     service = _service()
-    service.repo.get_personal_defaults_for_tenant.return_value = [
-        SimpleNamespace(
-            assistant=assistant,
-            configured_mcp_servers=(MagicMock(),),
-            has_knowledge=True,
-        )
-    ]
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(MagicMock(),),
+                has_knowledge=True,
+            )
+        ],
+        next_after=None,
+    )
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_personal_default.return_value = (
         effective_config
@@ -1449,7 +1535,9 @@ async def test_governance_preflight_validates_each_explicit_model_without_assist
         for name in ("first", "second")
     ]
     service = _service()
-    service.repo.get_personal_defaults_for_tenant.return_value = []
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[], next_after=None
+    )
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_personal_default.return_value = (
         SimpleNamespace(
