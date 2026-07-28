@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -11,6 +12,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import File, FileType
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -29,6 +31,33 @@ from eneo.flows.runtime.transcription_runtime import (
     resolve_transcribe_and_attach_audio_input,
 )
 from eneo.main.exceptions import TypedIOValidationException
+
+
+def _audio_file(
+    *,
+    name: str,
+    file_id: UUID | None = None,
+    transcription: str | None = None,
+    size: int = 1024,
+) -> File:
+    """Build a runtime audio upload as the real `File` model, fully validated.
+
+    Using the production model rather than a look-alike means a new required
+    field on `File` fails here at construction, instead of surfacing later as a
+    runtime error in whichever code first trusts it.
+    """
+    resolved_id = file_id if file_id is not None else uuid4()
+    return File(
+        id=resolved_id,
+        name=name,
+        checksum=sha256(resolved_id.bytes).hexdigest(),
+        size=size,
+        mimetype="audio/wav",
+        file_type=FileType.AUDIO,
+        tenant_id=uuid4(),
+        blob=b"audio-bytes",
+        transcription=transcription,
+    )
 
 
 class _SpaceStub:
@@ -161,12 +190,8 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_1 = SimpleNamespace(
-        id=file_id_1, name="a.wav", mimetype="audio/wav", transcription=None
-    )
-    file_2 = SimpleNamespace(
-        id=file_id_2, name="b.wav", mimetype="audio/wav", transcription=None
-    )
+    file_1 = _audio_file(file_id=file_id_1, name="a.wav")
+    file_2 = _audio_file(file_id=file_id_2, name="b.wav")
     file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1, file_2])
 
     model = SimpleNamespace(
@@ -233,9 +258,7 @@ async def test_audio_resolve_passes_no_language_for_auto(user):
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_1 = SimpleNamespace(
-        id=file_id, name="a.wav", mimetype="audio/wav", transcription=None
-    )
+    file_1 = _audio_file(file_id=file_id, name="a.wav")
     file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
 
     model = SimpleNamespace(
@@ -276,11 +299,8 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_1 = SimpleNamespace(
-        id=file_id,
-        name="cached.wav",
-        mimetype="audio/wav",
-        transcription="stale shared transcript",
+    file_1 = _audio_file(
+        file_id=file_id, name="cached.wav", transcription="stale shared transcript"
     )
     file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
 
@@ -341,9 +361,7 @@ async def test_audio_resolve_missing_wizard_model_fails_strictly(user):
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_1 = SimpleNamespace(
-        id=file_id, name="default.wav", mimetype="audio/wav", transcription=None
-    )
+    file_1 = _audio_file(file_id=file_id, name="default.wav")
     file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
 
     model = SimpleNamespace(
@@ -386,9 +404,7 @@ async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(u
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_1 = SimpleNamespace(
-        id=file_id, name="default.wav", mimetype="audio/wav", transcription=None
-    )
+    file_1 = _audio_file(file_id=file_id, name="default.wav")
     file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
 
     default_model = SimpleNamespace(
@@ -436,11 +452,7 @@ async def test_audio_resolve_overflow_raises_specific_typed_error(user):
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[
-            SimpleNamespace(
-                id=file_id, name="big.wav", mimetype="audio/wav", transcription=None
-            )
-        ]
+        return_value=[_audio_file(file_id=file_id, name="big.wav")]
     )
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
@@ -482,11 +494,7 @@ async def test_audio_resolve_near_cap_adds_warning_diagnostic(user):
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[
-            SimpleNamespace(
-                id=file_id, name="near.wav", mimetype="audio/wav", transcription=None
-            )
-        ]
+        return_value=[_audio_file(file_id=file_id, name="near.wav")]
     )
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
@@ -532,12 +540,8 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_1 = SimpleNamespace(
-        id=file_id_1, name="a.wav", mimetype="audio/wav", transcription=None
-    )
-    file_2 = SimpleNamespace(
-        id=file_id_2, name="b.wav", mimetype="audio/wav", transcription=None
-    )
+    file_1 = _audio_file(file_id=file_id_1, name="a.wav")
+    file_2 = _audio_file(file_id=file_id_2, name="b.wav")
     file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1, file_2])
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
@@ -602,12 +606,8 @@ async def test_audio_resolve_multifile_overflow_raises_typed_error(user):
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_1 = SimpleNamespace(
-        id=file_id_1, name="a.wav", mimetype="audio/wav", transcription=None
-    )
-    file_2 = SimpleNamespace(
-        id=file_id_2, name="b.wav", mimetype="audio/wav", transcription=None
-    )
+    file_1 = _audio_file(file_id=file_id_1, name="a.wav")
+    file_2 = _audio_file(file_id=file_id_2, name="b.wav")
     file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1, file_2])
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
@@ -651,11 +651,7 @@ async def test_audio_resolve_requires_space_transcription_model(user):
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[
-            SimpleNamespace(
-                id=file_id, name="a.wav", mimetype="audio/wav", transcription=None
-            )
-        ]
+        return_value=[_audio_file(file_id=file_id, name="a.wav")]
     )
     space_repo.get_space_by_assistant = AsyncMock(
         return_value=_SpaceStub(models=[], default_model=None)
