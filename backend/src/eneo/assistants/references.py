@@ -9,6 +9,7 @@ from eneo.services.service import DatastoreResult
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
+    from eneo.embedding_models.domain.embedding_model import EmbeddingModel
     from eneo.embedding_models.infrastructure.datastore import Datastore
     from eneo.files.file_models import File
     from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore, InfoBlobInDB
@@ -35,6 +36,26 @@ class ReferencesService:
         self.info_blobs_repo = info_blobs_repo
         self.datastore = datastore
 
+    @staticmethod
+    def select_embedding_model(
+        collections: list["Collection"],
+        websites: list["Website"],
+        integration_knowledge_list: Sequence["IntegrationKnowledge"],
+    ) -> Optional["EmbeddingModel"]:
+        """The single embedding model a retrieval over these sources runs against.
+
+        Retrieval embeds the query once, so the first non-empty knowledge kind
+        decides the model. Callers that record which model was used must read it
+        from here rather than repeating this precedence.
+        """
+        if collections:
+            return collections[0].embedding_model
+        if websites:
+            return websites[0].embedding_model
+        if integration_knowledge_list:
+            return integration_knowledge_list[0].embedding_model
+        return None
+
     async def _query_datastore_if_groups_or_websites(
         self,
         input_string: str,
@@ -43,7 +64,7 @@ class ReferencesService:
         integration_knowledge_list: Sequence["IntegrationKnowledge"] | None = None,
         num_chunks: Optional[int] = None,
         version: int = 1,
-    ) -> list["InfoBlobChunkInDBWithScore"]:
+    ) -> tuple[list["InfoBlobChunkInDBWithScore"], Optional["EmbeddingModel"]]:
         integration_knowledge_list = list(integration_knowledge_list or [])
         if (collections or websites or integration_knowledge_list) and input_string:
             if version == 1:
@@ -53,19 +74,14 @@ class ReferencesService:
             else:
                 raise ValueError(f"Unsupported retrieval version: {version}")
 
-            embedding_model = None
-            if collections:
-                embedding_model = collections[0].embedding_model
-            elif websites:
-                embedding_model = websites[0].embedding_model
-            elif integration_knowledge_list:
-                embedding_model = integration_knowledge_list[0].embedding_model
-
+            embedding_model = self.select_embedding_model(
+                collections, websites, integration_knowledge_list
+            )
             # At least one knowledge source is non-empty, so embedding_model is set.
             assert embedding_model is not None, (
                 "embedding_model must be set when knowledge sources are present"
             )
-            return await self.datastore.semantic_search(
+            chunks = await self.datastore.semantic_search(
                 input_string,
                 embedding_model=embedding_model,
                 collections=collections,
@@ -73,8 +89,9 @@ class ReferencesService:
                 integration_knowledge_list=integration_knowledge_list,
                 **search_params,
             )
+            return chunks, embedding_model
 
-        return []
+        return [], None
 
     async def _get_info_blobs_from_chunks(
         self, info_blob_chunks: list["InfoBlobChunkInDBWithScore"]
@@ -170,7 +187,7 @@ class ReferencesService:
             # EmbedMethod.LAST_QUESTION or any future variant
             input_string = question
 
-        chunks = await self._query_datastore_if_groups_or_websites(
+        chunks, embedding_model = await self._query_datastore_if_groups_or_websites(
             input_string,
             collections=collections,
             websites=websites,
@@ -189,6 +206,12 @@ class ReferencesService:
             chunks=chunks,
             no_duplicate_chunks=no_duplicate_chunks,
             info_blobs=info_blobs,
+            embedding_model_id=(
+                embedding_model.id if embedding_model is not None else None
+            ),
+            embedding_model_name=(
+                embedding_model.name if embedding_model is not None else None
+            ),
         )
 
     async def get_reference_metadata(

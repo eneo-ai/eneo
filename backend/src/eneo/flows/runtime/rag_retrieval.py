@@ -16,10 +16,12 @@ from typing import (
 )
 from uuid import UUID
 
+from eneo.flows.domain.rag_evidence import RetrievedKnowledgeEvidence
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.flow_run_provenance import default_rag_tracking
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
-from eneo.flows.runtime.rag_metadata import build_rag_references
+from eneo.flows.runtime.rag_metadata import build_retrieved_knowledge_evidence
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 
 if TYPE_CHECKING:
@@ -46,13 +48,33 @@ RAG_RETRIEVAL_FAIL_CLOSED_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
 )
 
 
+RagEmbeddingModelStatus: TypeAlias = Literal["recorded", "not_reported"]
+
+
 @dataclass(frozen=True)
 class RagRetrievalDeps:
     references_service: ReferencesService | None
     rag_retrieval_timeout_seconds: float
-    rag_max_reference_sources: int
-    rag_max_chunks_per_source: int
+    evidence_policy: FlowRagEvidencePolicy
     logger: logging.Logger
+
+
+def _embedding_model_evidence(
+    datastore_result: object,
+) -> tuple[dict[str, str | None] | None, RagEmbeddingModelStatus]:
+    """Read back the embedding model retrieval actually embedded the query with.
+
+    The retrieval service owns which model a query runs against; Flows records
+    what it reports rather than re-deriving it from the knowledge sources.
+    """
+    name = getattr(datastore_result, "embedding_model_name", None)
+    if not isinstance(name, str) or not name.strip():
+        return None, "not_reported"
+    model_id = getattr(datastore_result, "embedding_model_id", None)
+    return {
+        "id": str(model_id) if model_id is not None else None,
+        "name": name.strip(),
+    }, "recorded"
 
 
 async def retrieve_rag_chunks(
@@ -80,11 +102,13 @@ async def retrieve_rag_chunks(
         "error_code": None,
         "retrieval_duration_ms": None,
         "retrieval_error_type": None,
-        "references": [],
-        "references_truncated": False,
+        "embedding_model": None,
+        "embedding_model_status": "not_reported",
         "reference_metadata_status": "skipped_unavailable",
         "reference_metadata_error_type": None,
         "tracking": default_rag_tracking(),
+        **RetrievedKnowledgeEvidence().aggregate_payload(),
+        "references": [],
     }
     if deps.references_service is None:
         rag_metadata["status"] = "skipped_no_service"
@@ -163,12 +187,10 @@ async def retrieve_rag_chunks(
                             if isinstance(value, dict)
                         }
                     rag_metadata["reference_metadata_status"] = "success"
-        references, references_truncated = build_rag_references(
+        evidence = build_retrieved_knowledge_evidence(
             info_blob_chunks,
             source_metadata_by_id=source_metadata_by_id,
-            max_sources=deps.rag_max_reference_sources,
-            max_chunks_per_source=deps.rag_max_chunks_per_source,
-            snippet_chars=200,
+            policy=deps.evidence_policy,
         )
         rag_metadata["status"] = "success" if info_blob_chunks else "no_chunks"
         rag_metadata["retrieval_duration_ms"] = int(
@@ -180,8 +202,12 @@ async def retrieve_rag_chunks(
         rag_metadata["unique_sources"] = len(source_ids)
         rag_metadata["source_ids"] = source_ids
         rag_metadata["source_ids_short"] = [source_id[:8] for source_id in source_ids]
-        rag_metadata["references"] = references
-        rag_metadata["references_truncated"] = references_truncated
+        embedding_model, embedding_model_status = _embedding_model_evidence(
+            datastore_result
+        )
+        rag_metadata["embedding_model"] = embedding_model
+        rag_metadata["embedding_model_status"] = embedding_model_status
+        evidence.write_into(rag_metadata)
         if not info_blob_chunks:
             rag_diagnostics.append(
                 StepDiagnostic(

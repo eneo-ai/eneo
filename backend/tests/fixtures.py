@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
@@ -9,6 +9,7 @@ from eneo.ai_models.embedding_models.embedding_model import (
 from eneo.assistants.assistant import Assistant
 from eneo.authentication.auth_models import ApiKey
 from eneo.collections.domain.collection import Collection
+from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
 from eneo.tenants.tenant import TenantInDB
@@ -178,3 +179,27 @@ TEST_ASSISTANT = Assistant(
     attachments=[],
     published=False,
 )
+
+
+def retrieved_info_blob_chunk(
+    *,
+    info_blob_id: UUID,
+    chunk_no: int,
+    text: str,
+    score: float,
+    info_blob_title: str | None = None,
+) -> InfoBlobChunkInDBWithScore:
+    """A scored retrieval chunk built from the production model.
+
+    Validated construction, so a new required field on the model fails here
+    rather than silently leaving consumers with a partial double.
+    """
+    return InfoBlobChunkInDBWithScore(
+        id=uuid4(),
+        info_blob_id=info_blob_id,
+        info_blob_title=info_blob_title,
+        chunk_no=chunk_no,
+        text=text,
+        score=score,
+        tenant_id=TEST_TENANT.id,
+    )

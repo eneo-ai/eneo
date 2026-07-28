@@ -140,7 +140,12 @@ def test_build_completed_step_result_includes_optional_sections_and_hash():
 
     assert built.status == FlowStepResultStatus.COMPLETED
     assert built.input_payload_json["transcription"] == {"used_cache": False}
-    assert built.input_payload_json["rag"] == {"status": "success"}
+    # The step result keeps citation identity; passages live in provenance.
+    assert built.input_payload_json["rag"] == {
+        "status": "success",
+        "citation_sources": [],
+        "passage_evidence_location": "attempt_provenance",
+    }
     assert built.input_payload_json["contract_validation"] == {"parse_succeeded": True}
     assert built.input_payload_json["diagnostics"] == [
         {"code": "diag", "message": "detail", "severity": "info"}

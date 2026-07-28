@@ -4,6 +4,10 @@ from typing import Any
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.rag_evidence import (
+    RetrievedKnowledgeEvidence,
+    build_step_result_citation_state,
+)
 from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
 
 
@@ -48,7 +52,9 @@ def build_completed_step_input_payload(output: StepExecutionOutput) -> dict[str,
     if output.runtime_input_metadata is not None:
         payload["runtime_input"] = output.runtime_input_metadata
     if output.rag_metadata is not None:
-        payload["rag"] = output.rag_metadata
+        # Verbatim passages live only in attempt provenance; the step result
+        # keeps the source identity a later step needs to inherit citations.
+        payload["rag"] = build_step_result_citation_state(output.rag_metadata)
     if output.contract_validation is not None:
         payload["contract_validation"] = output.contract_validation
     if output.diagnostics:
@@ -113,6 +119,8 @@ def build_transcribe_only_rag_metadata(*, timeout_seconds: float) -> dict[str, A
         "error_code": None,
         "retrieval_duration_ms": None,
         "retrieval_error_type": None,
+        "embedding_model": None,
+        "embedding_model_status": "not_reported",
+        **RetrievedKnowledgeEvidence().aggregate_payload(),
         "references": [],
-        "references_truncated": False,
     }

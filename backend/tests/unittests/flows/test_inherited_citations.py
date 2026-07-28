@@ -42,7 +42,7 @@ def _completed_grounded_result(*, step_order: int) -> FlowStepResult:
                         }
                     ],
                 },
-                "references": [
+                "citation_sources": [
                     {
                         "id": source_id,
                         "id_short": "11111111",
@@ -51,6 +51,7 @@ def _completed_grounded_result(*, step_order: int) -> FlowStepResult:
                         "source_display_name": "Procurement memo",
                     }
                 ],
+                "passage_evidence_location": "attempt_provenance",
             }
         },
         effective_prompt=None,

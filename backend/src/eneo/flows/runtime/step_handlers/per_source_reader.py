@@ -13,6 +13,7 @@ from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     effective_mapped_cardinality,
 )
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -40,9 +41,10 @@ from eneo.flows.runtime.step_handlers.base import (
     PreviewAssistantStepFn,
 )
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
+    MappedCallEvidence,
+    carry_call_evidence,
     mapped_admission_payload,
     mapped_output_diagnostics,
-    mapped_rag_metadata,
 )
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.source_identity import without_runtime_source_identity_json_fields
@@ -89,6 +91,7 @@ async def execute_per_source_reader(
     activate_prepared_assistant_steps: ActivatePreparedAssistantStepsFn,
     list_step_input_file_ids: ListStepInputFileIdsFn,
     mapped_execution_policy: FlowMappedExecutionPolicy,
+    rag_evidence_policy: FlowRagEvidencePolicy,
 ) -> StepExecutionResult:
     runtime_input = build_runtime_input_config(step.input_config)
     file_ids = await list_step_input_file_ids(
@@ -190,11 +193,18 @@ async def execute_per_source_reader(
         )
         return StepExecutionResult(output=output)
 
+    mapped_evidence = MappedCallEvidence(
+        policy=rag_evidence_policy,
+        execution_mode="per_source",
+        collection_key="sources",
+    )
     per_source_calls: list[PerSourceReaderCall] = []
-    for source_number, (file_id, prepared_step) in enumerate(prepared_sources, start=1):
-        assert file_id is not None
-        per_source_calls.append(
-            await _execute_one_source(
+    try:
+        for source_number, (file_id, prepared_step) in enumerate(
+            prepared_sources, start=1
+        ):
+            assert file_id is not None
+            source_call = await _execute_one_source(
                 source_number=source_number,
                 file_id=file_id,
                 step=step,
@@ -203,15 +213,27 @@ async def execute_per_source_reader(
                 state=state,
                 prepared_step=prepared_step,
             )
+            # Bound this call before the next one runs, so the step never holds
+            # more passage text than its budget allows.
+            mapped_evidence.admit(source_call.output.rag_metadata)
+            per_source_calls.append(source_call)
+        per_source_calls = _with_deduped_source_labels(per_source_calls)
+        return StepExecutionResult(
+            output=await _assemble_per_source_output(
+                step=step,
+                run=run,
+                per_source_calls=per_source_calls,
+                mapped_rag_metadata=mapped_evidence.payload(),
+            )
         )
-    per_source_calls = _with_deduped_source_labels(per_source_calls)
-    return StepExecutionResult(
-        output=await _assemble_per_source_output(
-            step=step,
-            run=run,
-            per_source_calls=per_source_calls,
-        )
-    )
+    except Exception as exc:
+        # The calls that completed really did retrieve; publish them as a
+        # partial envelope so the failed attempt records what it read.
+        mapped_evidence.admit(getattr(exc, "rag_metadata", None))
+        partial = mapped_evidence.partial_payload()
+        if partial is not None:
+            setattr(exc, "rag_metadata", partial)
+        raise
 
 
 async def _execute_one_source(
@@ -240,11 +262,17 @@ async def _execute_one_source(
         ),
     )
     elapsed_ms = int((time.perf_counter() - started) * 1000)
-    _raise_if_per_source_output_is_not_object(
-        output=output,
-        step_order=step.step_order,
-        source_number=source_number,
-    )
+    try:
+        _raise_if_per_source_output_is_not_object(
+            output=output,
+            step_order=step.step_order,
+            source_number=source_number,
+        )
+    except Exception as exc:
+        # This call retrieved before it failed validation, so its evidence
+        # travels with the error rather than dying with the local output.
+        carry_call_evidence(exc, output.rag_metadata)
+        raise
     return PerSourceReaderCall(
         source_number=source_number,
         file_id=file_id,
@@ -260,6 +288,7 @@ async def _assemble_per_source_output(
     step: RuntimeStep,
     run: FlowRun,
     per_source_calls: list[PerSourceReaderCall],
+    mapped_rag_metadata: dict[str, Any] | None,
 ) -> StepExecutionOutput:
     if not per_source_calls:
         raise TypedIOValidationException(
@@ -348,7 +377,7 @@ async def _assemble_per_source_output(
         structured_output=final_structured_output,
         diagnostics=diagnostics,
         artifacts=typed_output.artifacts,
-        rag_metadata=_per_source_rag_metadata(per_source_calls),
+        rag_metadata=mapped_rag_metadata,
         transcription_metadata=None,
         runtime_input_metadata=runtime_metadata,
         raw_completion_text=None,
@@ -603,13 +632,3 @@ def _per_source_tool_metadata(
             for call in per_source_calls
         ],
     }
-
-
-def _per_source_rag_metadata(
-    per_source_calls: list[PerSourceReaderCall],
-) -> dict[str, Any] | None:
-    return mapped_rag_metadata(
-        execution_mode="per_source",
-        collection_key="sources",
-        outputs=(call.output for call in per_source_calls),
-    )

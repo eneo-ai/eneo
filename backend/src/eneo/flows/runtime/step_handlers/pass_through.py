@@ -7,6 +7,7 @@ from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     resolve_flow_mapped_execution_policy,
 )
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -40,6 +41,7 @@ class PassThroughStepHandler:
     mapped_execution_policy: FlowMappedExecutionPolicy = (
         resolve_flow_mapped_execution_policy(None)
     )
+    rag_evidence_policy: FlowRagEvidencePolicy = FlowRagEvidencePolicy()
     output_mode: FlowOutputMode = FlowOutputMode.PASS_THROUGH
 
     async def execute(
@@ -76,6 +78,7 @@ class PassThroughStepHandler:
                 ),
                 list_step_input_file_ids=self.list_step_input_file_ids,
                 mapped_execution_policy=self.mapped_execution_policy,
+                rag_evidence_policy=self.rag_evidence_policy,
             )
         if should_execute_per_item_map(step):
             if self.preview_assistant_step is None:
@@ -97,6 +100,7 @@ class PassThroughStepHandler:
                     self.activate_prepared_assistant_steps
                 ),
                 mapped_execution_policy=self.mapped_execution_policy,
+                rag_evidence_policy=self.rag_evidence_policy,
             )
         runtime_input = build_runtime_input_config(step.input_config)
         if runtime_input.execution_mode == "per_source":

@@ -135,6 +135,10 @@ class DatastoreResult(BaseModel):
     chunks: list[InfoBlobChunkInDBWithScore]
     no_duplicate_chunks: list[InfoBlobChunkInDBWithScore]
     info_blobs: list[InfoBlobInDBWithScore]
+    # Identifies the model the query was embedded with. Null when no semantic
+    # search ran, so a consumer recording retrieval evidence never has to guess.
+    embedding_model_id: Optional[UUID] = None
+    embedding_model_name: Optional[str] = None
 
 
 class RunnerResult(BaseModel):

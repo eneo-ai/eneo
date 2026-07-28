@@ -1923,7 +1923,7 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
                 "22222222-2222-2222-2222-222222222222",
             ],
         },
-        "references": [
+        "citation_sources": [
             {
                 "id": "11111111-1111-1111-1111-111111111111",
                 "id_short": "11111111",
@@ -1933,6 +1933,7 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
                 "id_short": "22222222",
             },
         ],
+        "passage_evidence_location": "attempt_provenance",
     }
     deps = StepExecutionRuntimeDeps(
         variable_resolver=FlowVariableResolver(),
@@ -2165,7 +2166,7 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
                         }
                     ],
                 },
-                "references": [
+                "citation_sources": [
                     {
                         "id": source_id,
                         "id_short": "11111111",
@@ -2173,6 +2174,7 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
                         "source_url": "https://example.org/sociologi",
                     }
                 ],
+                "passage_evidence_location": "attempt_provenance",
             }
         },
         effective_prompt=None,

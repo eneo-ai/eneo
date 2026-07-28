@@ -47,6 +47,7 @@ from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantErr
 from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunMultipleActiveOperationsError,
@@ -112,6 +113,7 @@ from eneo.main.exceptions import (
     ProviderRejectedRequestException,
     TypedIOValidationException,
 )
+from tests.fixtures import retrieved_info_blob_chunk
 
 _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
 _DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
@@ -725,8 +727,10 @@ def test_executor_accepts_grouped_config(user):
         http_max_timeout_seconds=22.0,
         http_allow_private_networks=True,
         rag_retrieval_timeout_seconds=44.0,
-        rag_max_reference_sources=12,
-        rag_max_chunks_per_source=6,
+        rag_evidence_policy=FlowRagEvidencePolicy(
+            max_sources_with_recorded_passages=12,
+            max_recorded_passages_per_source=6,
+        ),
         document_render_limits=DocumentRenderLimits(max_source_chars=123),
         runtime_policy=FlowRuntimePolicy(
             default_step_timeout_seconds=70,
@@ -762,8 +766,8 @@ def test_executor_accepts_grouped_config(user):
     assert executor.http_max_timeout_seconds == 22.0
     assert executor.http_allow_private_networks is True
     assert executor.rag_retrieval_timeout_seconds == 44.0
-    assert executor.rag_max_reference_sources == 12
-    assert executor.rag_max_chunks_per_source == 6
+    assert executor.rag_evidence_policy.max_sources_with_recorded_passages == 12
+    assert executor.rag_evidence_policy.max_recorded_passages_per_source == 6
     assert executor.document_render_service.limits.max_source_chars == 123
     assert executor.mapped_execution_policy.max_provider_calls_per_mapped_step == 4
     assert (
@@ -4770,14 +4774,14 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     executor._commit = AsyncMock()
     source_id = uuid4()
     chunks = [
-        SimpleNamespace(
+        retrieved_info_blob_chunk(
             info_blob_id=source_id,
             info_blob_title="Finance update",
             chunk_no=1,
             score=0.91,
             text="Sundsvalls kommun redovisar ett positivt resultat för 2025.",
         ),
-        SimpleNamespace(
+        retrieved_info_blob_chunk(
             info_blob_id=source_id,
             info_blob_title="Finance update",
             chunk_no=2,
@@ -4813,12 +4817,18 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     assert output.rag_metadata["attempted"] is True
     assert output.rag_metadata["retrieval_duration_ms"] is not None
     assert output.rag_metadata["retrieval_error_type"] is None
-    assert output.rag_metadata["references_truncated"] is False
+    assert output.rag_metadata["sources_with_recorded_passages"] == 1
+    assert output.rag_metadata["passages_recorded"] == 2
+    assert output.rag_metadata["passages_truncated"] == 0
     assert len(output.rag_metadata["references"]) == 1
-    assert output.rag_metadata["references"][0]["id"] == str(source_id)
-    assert output.rag_metadata["references"][0]["matched_chunk_count"] == 2
-    assert output.rag_metadata["references"][0]["best_score"] == pytest.approx(0.91)
-    assert len(output.rag_metadata["references"][0]["chunks"]) == 2
+    reference = output.rag_metadata["references"][0]
+    assert reference["id"] == str(source_id)
+    assert reference["matched_chunk_count"] == 2
+    assert reference["recorded_passage_count"] == 2
+    assert reference["best_score"] == pytest.approx(0.91)
+    assert [passage["text"] for passage in reference["passages"]] == [
+        chunk.text for chunk in chunks
+    ]
 
 
 @pytest.mark.asyncio
@@ -5291,7 +5301,9 @@ async def test_execute_step_skips_rag_when_input_is_whitespace(user):
 
 
 @pytest.mark.asyncio
-async def test_retrieve_rag_chunks_caps_sources_and_chunks(user):
+async def test_retrieve_rag_chunks_lists_every_source_and_bounds_passage_detail(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     assistant = _assistant_for_execute_step(has_knowledge=True)
     executor.references_service = AsyncMock()
@@ -5301,7 +5313,7 @@ async def test_retrieve_rag_chunks_caps_sources_and_chunks(user):
         source_id = uuid4()
         for chunk_index in range(7):
             chunks.append(
-                SimpleNamespace(
+                retrieved_info_blob_chunk(
                     info_blob_id=source_id,
                     info_blob_title=f"Source {source_index}",
                     chunk_no=chunk_index + 1,
@@ -5323,11 +5335,19 @@ async def test_retrieve_rag_chunks_caps_sources_and_chunks(user):
 
     assert diagnostics == []
     assert metadata["status"] == "success"
-    assert metadata["references_truncated"] is True
-    assert len(metadata["references"]) == 25
+    assert metadata["unique_sources"] == 27
+    assert len(metadata["references"]) == 27
+    assert metadata["sources_with_recorded_passages"] == 25
+    assert metadata["passages_recorded"] == 125
     assert metadata["raw_chunks_count"] == len(chunks)
     assert metadata["deduped_chunks_count"] == 27
-    assert all(len(reference["chunks"]) <= 5 for reference in metadata["references"])
+    assert all(len(reference["passages"]) <= 5 for reference in metadata["references"])
+    assert all(
+        reference["matched_chunk_count"] == 7 for reference in metadata["references"]
+    )
+    assert [
+        reference["recorded_passage_count"] for reference in metadata["references"][25:]
+    ] == [0, 0]
 
 
 # --- Prior results bootstrap ---

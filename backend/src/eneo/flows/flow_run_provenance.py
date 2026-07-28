@@ -20,6 +20,7 @@ from pydantic import (
 
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.rag_evidence import SourceUsageState
 from eneo.flows.flow_retention_tombstone import (
     FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
     FlowAttemptRetentionMarker,
@@ -1228,9 +1229,11 @@ def _normalize_rag_tracking(value: Any) -> dict[str, Any]:
     return normalized
 
 
-def _normalize_usage_state(value: Any) -> str:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+def _normalize_usage_state(value: Any) -> SourceUsageState:
+    # A stored state outside the closed family reads as a retrieval candidate,
+    # which never overstates what the evidence proves.
+    if value == "inserted_into_prompt":
+        return "inserted_into_prompt"
     return "retrieved_candidate"
 
 
@@ -1253,25 +1256,32 @@ def _normalize_reference_display_fields(reference: dict[str, Any]) -> None:
 
 
 def _normalize_reference_chunk_counts(reference: dict[str, Any]) -> None:
+    recorded_passage_count = _count_recorded_passages(reference.get("passages"))
     matched_chunk_count = _coerce_non_negative_int(reference.get("matched_chunk_count"))
     if matched_chunk_count is None:
-        matched_chunk_count = _count_displayable_reference_chunks(
-            reference.get("chunks")
-        )
+        matched_chunk_count = recorded_passage_count
+    stored_recorded_count = _coerce_non_negative_int(
+        reference.get("recorded_passage_count")
+    )
 
     reference["matched_chunk_count"] = matched_chunk_count
+    reference["recorded_passage_count"] = (
+        stored_recorded_count
+        if stored_recorded_count is not None
+        else recorded_passage_count
+    )
 
 
-def _count_displayable_reference_chunks(value: Any) -> int:
+def _count_recorded_passages(value: Any) -> int:
     if not isinstance(value, list):
         return 0
     count = 0
-    for chunk in cast(list[object], value):
-        if not isinstance(chunk, Mapping):
+    for passage in cast(list[object], value):
+        if not isinstance(passage, Mapping):
             continue
-        chunk_mapping = cast(Mapping[str, object], chunk)
-        snippet = chunk_mapping.get("snippet")
-        if isinstance(snippet, str) and snippet.strip():
+        passage_mapping = cast(Mapping[str, object], passage)
+        text = passage_mapping.get("text")
+        if isinstance(text, str) and text.strip():
             count += 1
     return count
 

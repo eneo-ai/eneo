@@ -12,6 +12,7 @@ from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     effective_mapped_cardinality,
 )
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -42,9 +43,10 @@ from eneo.flows.runtime.step_handlers.base import (
     PreviewAssistantStepFn,
 )
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
+    MappedCallEvidence,
+    carry_call_evidence,
     mapped_admission_payload,
     mapped_output_diagnostics,
-    mapped_rag_metadata,
 )
 from eneo.flows.source_identity import (
     runtime_source_identity_fields_for_array_items,
@@ -87,6 +89,7 @@ async def execute_per_item_map(
     preview_assistant_step: PreviewAssistantStepFn,
     activate_prepared_assistant_steps: ActivatePreparedAssistantStepsFn,
     mapped_execution_policy: FlowMappedExecutionPolicy,
+    rag_evidence_policy: FlowRagEvidencePolicy,
 ) -> StepExecutionResult:
     output_array_key = _single_output_array_key(step.output_contract)
     if output_array_key is None:
@@ -194,10 +197,15 @@ async def execute_per_item_map(
         )
     ]
 
+    mapped_evidence = MappedCallEvidence(
+        policy=rag_evidence_policy,
+        execution_mode="per_item",
+        collection_key="items",
+    )
     item_calls: list[PerItemMapCall] = []
-    for item_number, input_item, prepared_step in prepared_items:
-        item_calls.append(
-            await _execute_one_item(
+    try:
+        for item_number, input_item, prepared_step in prepared_items:
+            item_call = await _execute_one_item(
                 item_number=item_number,
                 input_array_key=input_array_key,
                 input_item=input_item,
@@ -206,17 +214,29 @@ async def execute_per_item_map(
                 state=state,
                 prepared_step=prepared_step,
             )
-        )
+            # Bound this call before the next one runs, so the step never holds
+            # more passage text than its budget allows.
+            mapped_evidence.admit(item_call.output.rag_metadata)
+            item_calls.append(item_call)
 
-    return StepExecutionResult(
-        output=await _assemble_per_item_output(
-            step=step,
-            run=run,
-            input_array_key=input_array_key,
-            output_array_key=output_array_key,
-            item_calls=item_calls,
+        return StepExecutionResult(
+            output=await _assemble_per_item_output(
+                step=step,
+                run=run,
+                input_array_key=input_array_key,
+                output_array_key=output_array_key,
+                item_calls=item_calls,
+                mapped_rag_metadata=mapped_evidence.payload(),
+            )
         )
-    )
+    except Exception as exc:
+        # The calls that completed really did retrieve; publish them as a
+        # partial envelope so the failed attempt records what it read.
+        mapped_evidence.admit(getattr(exc, "rag_metadata", None))
+        partial = mapped_evidence.partial_payload()
+        if partial is not None:
+            setattr(exc, "rag_metadata", partial)
+        raise
 
 
 async def _execute_one_item(
@@ -245,11 +265,17 @@ async def _execute_one_item(
         ),
     )
     elapsed_ms = int((time.perf_counter() - started) * 1000)
-    _raise_if_item_output_is_not_object(
-        output=output,
-        step_order=step.step_order,
-        item_number=item_number,
-    )
+    try:
+        _raise_if_item_output_is_not_object(
+            output=output,
+            step_order=step.step_order,
+            item_number=item_number,
+        )
+    except Exception as exc:
+        # This call retrieved before it failed validation, so its evidence
+        # travels with the error rather than dying with the local output.
+        carry_call_evidence(exc, output.rag_metadata)
+        raise
     return PerItemMapCall(
         item_number=item_number,
         input_array_key=input_array_key,
@@ -268,6 +294,7 @@ async def _assemble_per_item_output(
     input_array_key: str,
     output_array_key: str,
     item_calls: list[PerItemMapCall],
+    mapped_rag_metadata: dict[str, Any] | None,
 ) -> StepExecutionOutput:
     first_output = item_calls[0].output
     first_deps = item_calls[0].deps
@@ -364,7 +391,7 @@ async def _assemble_per_item_output(
         structured_output=final_structured_output,
         diagnostics=diagnostics,
         artifacts=typed_output.artifacts,
-        rag_metadata=_item_map_rag_metadata(item_calls),
+        rag_metadata=mapped_rag_metadata,
         runtime_input_metadata=item_map_metadata,
     )
 
@@ -602,16 +629,6 @@ def _item_map_tool_metadata(
             for call in item_calls
         ],
     }
-
-
-def _item_map_rag_metadata(
-    item_calls: list[PerItemMapCall],
-) -> dict[str, Any] | None:
-    return mapped_rag_metadata(
-        execution_mode="per_item",
-        collection_key="items",
-        outputs=(call.output for call in item_calls),
-    )
 
 
 def _optional_string(value: object) -> str | None:

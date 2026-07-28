@@ -5,7 +5,7 @@ import pytest
 
 from eneo.assistants.references import ReferencesService
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-from tests.fixtures import TEST_UUID
+from tests.fixtures import TEST_EMBEDDING_MODEL, TEST_UUID
 
 
 def _create_chunk_with_score(score: float, info_blob_id: str = TEST_UUID):
@@ -106,7 +106,9 @@ async def test_get_references_skips_info_blob_hydration_when_disabled():
     ]
     datastore.semantic_search.return_value = chunks
     collection = MagicMock()
-    collection.embedding_model = MagicMock()
+    # Retrieval now reports which embedding model it embedded the query with,
+    # so the double carries a real model rather than an untyped mock.
+    collection.embedding_model = TEST_EMBEDDING_MODEL
 
     result = await service.get_references(
         question="hello",
@@ -128,7 +130,9 @@ async def test_get_references_hydrates_info_blobs_by_default():
     chunk = _create_chunk_with_score(0.9, uuid4())
     datastore.semantic_search.return_value = [chunk]
     collection = MagicMock()
-    collection.embedding_model = MagicMock()
+    # Retrieval now reports which embedding model it embedded the query with,
+    # so the double carries a real model rather than an untyped mock.
+    collection.embedding_model = TEST_EMBEDDING_MODEL
     info_blob = MagicMock()
     info_blob.model_dump.return_value = {
         "id": chunk.info_blob_id,

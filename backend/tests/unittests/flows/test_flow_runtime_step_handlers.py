@@ -13,6 +13,7 @@ from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
 )
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -182,6 +183,7 @@ def test_executor_builds_expected_step_handler(
             _activate_resolved_input_edges=AsyncMock(),
             _activate_prepared_assistant_steps=AsyncMock(),
             mapped_execution_policy=resolve_flow_mapped_execution_policy(None),
+            rag_evidence_policy=FlowRagEvidencePolicy(),
         ),
     )
 
@@ -468,5 +470,17 @@ async def test_transcribe_only_handler_skips_llm_and_rag() -> None:
         "retrieval_duration_ms": None,
         "retrieval_error_type": None,
         "references": [],
-        "references_truncated": False,
+        "knowledge_evidence_version": 2,
+        "sources_with_recorded_passages": 0,
+        "passages_recorded": 0,
+        "passages_truncated": 0,
+        "passages_withheld": 0,
+        "recorded_passage_bytes": 0,
+        "passages_released_to_step_budget": 0,
+        "passage_bytes_released_to_step_budget": 0,
+        "passages_omitted_from_view": 0,
+        "passage_bytes_omitted_from_view": 0,
+        "recorded_passage_content": "source_text_verbatim",
+        "embedding_model": None,
+        "embedding_model_status": "not_reported",
     }

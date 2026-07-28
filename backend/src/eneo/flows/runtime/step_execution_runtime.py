@@ -31,6 +31,7 @@ from eneo.flows.citation_sidecar import (
     strip_inline_reference_tags,
 )
 from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.rag_evidence import build_step_result_citation_state
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -1236,6 +1237,41 @@ async def complete_step_execution(
     prepared: PreparedStepExecution,
     deps: StepExecutionRuntimeDeps,
 ) -> StepExecutionOutput:
+    """Run the step and, on failure, carry retrieval evidence out with the error.
+
+    Attempt provenance is the only owner of verbatim passages. A step that
+    retrieved and then failed must still record what it retrieved, so the
+    captured evidence rides on the exception to the attempt writer.
+    """
+    captured_rag: dict[str, Any] = {}
+    try:
+        return await _complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+            captured_rag=captured_rag,
+        )
+    except Exception as exc:
+        rag_metadata = captured_rag.get("rag")
+        if (
+            isinstance(rag_metadata, dict)
+            and getattr(exc, "rag_metadata", None) is None
+        ):
+            setattr(exc, "rag_metadata", rag_metadata)
+        raise
+
+
+async def _complete_step_execution(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+    captured_rag: dict[str, Any],
+) -> StepExecutionOutput:
     diagnostics = list(prepared.diagnostics)
     citation_mode = citation_mode_for_step(step)
     inherited_citation_context = (
@@ -1261,6 +1297,7 @@ async def complete_step_execution(
             rag_metadata["retrieval_policy"] = step.retrieval_policy.model_dump(
                 mode="json"
             )
+    captured_rag["rag"] = rag_metadata
     if (
         rag_query_derivation.input_truncated
         and isinstance(rag_metadata, dict)
@@ -1307,7 +1344,7 @@ async def complete_step_execution(
             )
         )
         failed_input_payload = dict(prepared.input_payload_for_result)
-        failed_input_payload["rag"] = rag_metadata
+        failed_input_payload["rag"] = build_step_result_citation_state(rag_metadata)
         failed_input_payload["diagnostics"] = [
             {
                 "code": diagnostic.code,
@@ -1464,6 +1501,7 @@ async def complete_step_execution(
         knowledge_trace=getattr(response, "knowledge_trace", None),
     )
     rag_metadata = apply_citation_tracking(rag_metadata, citation_mode=citation_mode)
+    captured_rag["rag"] = rag_metadata
     citation_sidecar = build_runtime_citation_sidecar(
         raw_completion_text=raw_full_text,
         rag_metadata=rag_metadata,

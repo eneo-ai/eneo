@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from eneo.flows.domain.rag_evidence import CITATION_SOURCES_KEY
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.flow_run_provenance import normalize_rag_payload
 from eneo.flows.input_binding_contract_rules import effective_question_binding
@@ -54,7 +55,9 @@ def collect_inherited_citation_context(
         if not isinstance(normalized_rag, dict):
             continue
         prompt_context = normalized_rag.get("prompt_context")
-        references_payload = normalized_rag.get("references")
+        # The step result keeps citation identity, not evidence: verbatim
+        # passages live only in attempt provenance.
+        references_payload = normalized_rag.get(CITATION_SOURCES_KEY)
         if not isinstance(prompt_context, dict) or not isinstance(
             references_payload, list
         ):

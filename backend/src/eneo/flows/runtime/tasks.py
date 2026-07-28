@@ -37,6 +37,7 @@ from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
 )
 from eneo.flows.domain.provider_call import ProviderCallUnknownReason
+from eneo.flows.domain.rag_evidence_policy import resolve_flow_rag_evidence_policy
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_document_limits import resolve_flow_document_render_limits
@@ -339,6 +340,7 @@ async def _execute_flow_run_async_traced(
             mapped_execution_policy = resolve_flow_mapped_execution_policy(
                 tenant.flow_settings
             )
+            rag_evidence_policy = resolve_flow_rag_evidence_policy(tenant.flow_settings)
 
             executor = FlowRunExecutor(
                 runtime_actor=run_actor,
@@ -365,6 +367,7 @@ async def _execute_flow_run_async_traced(
                     document_render_limits=document_render_limits,
                     runtime_policy=runtime_policy,
                     mapped_execution_policy=mapped_execution_policy,
+                    rag_evidence_policy=rag_evidence_policy,
                 ),
             )
             result = await executor.execute_claimed(

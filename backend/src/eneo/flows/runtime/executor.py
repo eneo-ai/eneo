@@ -42,6 +42,7 @@ from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     resolve_flow_mapped_execution_policy,
 )
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunMultipleActiveOperationsError,
@@ -81,6 +82,7 @@ from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdges,
     LlmProvenance,
     ModelParameterSnapshot,
+    RagProvenance,
     group_resolved_input_edges,
     normalize_json_preview,
     normalize_text_preview,
@@ -300,8 +302,9 @@ class FlowRunExecutorConfig:
         default_factory=lambda: resolve_flow_mapped_execution_policy(None)
     )
     rag_retrieval_timeout_seconds: float = 30.0
-    rag_max_reference_sources: int = 25
-    rag_max_chunks_per_source: int = 5
+    rag_evidence_policy: FlowRagEvidencePolicy = field(
+        default_factory=FlowRagEvidencePolicy
+    )
     document_render_limits: DocumentRenderLimits = field(
         default_factory=lambda: DEFAULT_DOCUMENT_RENDER_LIMITS
     )
@@ -316,6 +319,7 @@ class FlowRunExecutorConfig:
         document_render_limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
         runtime_policy: FlowRuntimePolicy | None = None,
         mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
+        rag_evidence_policy: FlowRagEvidencePolicy | None = None,
     ) -> "FlowRunExecutorConfig":
         settings = get_settings()
         resolved_runtime_policy = runtime_policy or default_flow_runtime_policy(
@@ -334,6 +338,7 @@ class FlowRunExecutorConfig:
             mapped_execution_policy=(
                 mapped_execution_policy or resolve_flow_mapped_execution_policy(None)
             ),
+            rag_evidence_policy=rag_evidence_policy or FlowRagEvidencePolicy(),
             document_render_limits=document_render_limits,
         )
 
@@ -420,11 +425,23 @@ def _build_incomplete_attempt_provenance(
     *,
     state: RunExecutionState | None,
     step: RuntimeStep,
+    rag_metadata: object = None,
 ) -> dict[str, Any] | None:
+    """Provenance for an attempt that failed before producing a step output.
+
+    Retrieval evidence captured before the failure is recorded here, because
+    attempt provenance is the only owner of verbatim passages: dropping it would
+    make a failed attempt look like a step that retrieved nothing.
+    """
     attempt_start = _attempt_start_for_step(state=state, step=step)
-    if attempt_start is None:
+    rag = (
+        RagProvenance.model_validate(rag_metadata)
+        if isinstance(rag_metadata, dict)
+        else None
+    )
+    if attempt_start is None and rag is None:
         return None
-    return FlowAttemptProvenance(attempt_start=attempt_start).to_payload()
+    return FlowAttemptProvenance(attempt_start=attempt_start, rag=rag).to_payload()
 
 
 def _build_attempt_provenance(
@@ -577,8 +594,7 @@ class FlowRunExecutor:
                 limits=resolved_config.document_render_limits
             )
         )
-        self.rag_max_reference_sources = resolved_config.rag_max_reference_sources
-        self.rag_max_chunks_per_source = resolved_config.rag_max_chunks_per_source
+        self.rag_evidence_policy = resolved_config.rag_evidence_policy
         self.max_audio_files = resolved_config.max_audio_files
         self.max_generic_files = resolved_config.max_generic_files
 
@@ -1279,6 +1295,7 @@ class FlowRunExecutor:
                         self._activate_prepared_assistant_steps
                     ),
                     mapped_execution_policy=self.mapped_execution_policy,
+                    rag_evidence_policy=self.rag_evidence_policy,
                 )
             case FlowOutputMode.COMPOSE_TEXT:
                 return ComposeTextStepHandler(
@@ -1294,6 +1311,7 @@ class FlowRunExecutor:
                             self._activate_prepared_assistant_steps
                         ),
                         mapped_execution_policy=self.mapped_execution_policy,
+                        rag_evidence_policy=self.rag_evidence_policy,
                     )
                 )
             case FlowOutputMode.TRANSCRIBE_ONLY:
@@ -1632,8 +1650,7 @@ class FlowRunExecutor:
         deps = RagRetrievalDeps(
             references_service=self.references_service,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
-            rag_max_reference_sources=self.rag_max_reference_sources,
-            rag_max_chunks_per_source=self.rag_max_chunks_per_source,
+            evidence_policy=self.rag_evidence_policy,
             logger=logger,
         )
         return await retrieve_rag_chunks(
@@ -1863,6 +1880,7 @@ class FlowRunExecutor:
             provenance_json=_build_incomplete_attempt_provenance(
                 state=state,
                 step=step,
+                rag_metadata=getattr(typed_exc, "rag_metadata", None),
             ),
             input_payload_json=failure_plan.failed_result.input_payload_json,
             output_payload_json=failure_plan.failed_result.output_payload_json,
@@ -1969,6 +1987,7 @@ class FlowRunExecutor:
             provenance_json=_build_incomplete_attempt_provenance(
                 state=state,
                 step=step,
+                rag_metadata=getattr(exc, "rag_metadata", None),
             ),
             input_payload_json=failure_plan.failed_result.input_payload_json,
             output_payload_json=failure_plan.failed_result.output_payload_json,
