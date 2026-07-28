@@ -769,6 +769,8 @@ class SpaceRepository:
                         user_id=website.user_id,
                         embedding_model_id=website.embedding_model.id,
                         space_id=space_in_db.id,
+                        chunk_size=website.chunk_size,
+                        chunk_overlap=website.chunk_overlap,
                         **auth_fields,
                     )
                 )
@@ -787,6 +789,8 @@ class SpaceRepository:
                     update_interval=website.update_interval,
                     size=_set_size_subquery(website),
                     embedding_model_id=website.embedding_model.id,
+                    chunk_size=website.chunk_size,
+                    chunk_overlap=website.chunk_overlap,
                     **auth_fields,
                 )
                 .where(WebsitesTable.id == website.id)

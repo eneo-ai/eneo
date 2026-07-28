@@ -121,6 +121,8 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
         description="True if website was auto-disabled after 10 consecutive failures. "
         "User must manually change update_interval to re-enable."
     )
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
 
     @classmethod
     def from_domain(cls, website: Website):
@@ -148,6 +150,8 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             consecutive_failures=website.consecutive_failures,
             next_retry_at=website.next_retry_at,
             is_auto_disabled=website.is_auto_disabled,
+            chunk_size=website.chunk_size,
+            chunk_overlap=website.chunk_overlap,
         )
 
 
@@ -159,6 +163,8 @@ class WebsiteCreate(BaseModel):
     update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: Optional[ModelId] = None
     """Embedding model to use (defaults to space's default model if not specified)"""
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
 
     http_auth_username: Optional[str] = Field(
         None, description="Username for HTTP Basic Authentication (optional)"
@@ -195,6 +201,8 @@ class WebsiteUpdate(BaseModel):
     download_files: Union[bool, NotProvided] = NOT_PROVIDED
     crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED
     update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED
+    chunk_size: Union[int, None, NotProvided] = NOT_PROVIDED
+    chunk_overlap: Union[int, None, NotProvided] = NOT_PROVIDED
 
     http_auth_username: Union[str, None, NotProvided] = Field(
         NOT_PROVIDED,

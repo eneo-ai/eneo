@@ -60,6 +60,8 @@ class WebsiteCRUDService:
         embedding_model_id: Optional["UUID"] = None,
         http_auth_username: Optional[str] = None,
         http_auth_password: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
     ) -> Website:
         space = await self.space_service.get_space(space_id)
         assert space.id is not None
@@ -86,6 +88,8 @@ class WebsiteCRUDService:
             embedding_model=embedding_model,
             http_auth_username=http_auth_username,
             http_auth_password=http_auth_password,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
         space.add_website(website)
@@ -115,6 +119,8 @@ class WebsiteCRUDService:
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
         http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
         http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
+        chunk_size: Union[int, None, NotProvided] = NOT_PROVIDED,
+        chunk_overlap: Union[int, None, NotProvided] = NOT_PROVIDED,
     ) -> Website:
         space = await self.space_service.get_space_by_website(id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -132,6 +138,8 @@ class WebsiteCRUDService:
             update_interval=update_interval,
             http_auth_username=http_auth_username,
             http_auth_password=http_auth_password,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
         await self.space_repo.update(space=space)

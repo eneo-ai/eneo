@@ -734,6 +734,8 @@ async def create_space_websites(
         ),
         http_auth_username=website.http_auth_username,
         http_auth_password=website.http_auth_password,
+        chunk_size=website.chunk_size,
+        chunk_overlap=website.chunk_overlap,
     )
 
     # Get space for context (graceful degradation if space fetch fails)

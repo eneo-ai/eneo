@@ -213,6 +213,8 @@ async def update_website(
         update_interval=website_update.update_interval,
         http_auth_username=website_update.http_auth_username,
         http_auth_password=website_update.http_auth_password,
+        chunk_size=website_update.chunk_size,
+        chunk_overlap=website_update.chunk_overlap,
     )
 
     # Audit logging
