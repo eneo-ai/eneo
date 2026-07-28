@@ -11,7 +11,7 @@
   import { m } from "$lib/paraglide/messages";
   import { IconCPU } from "@eneo/icons/CPU";
   import { AlertCircle } from "lucide-svelte";
-  import PolicySection from "./PolicySection.svelte";
+  import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type ModelSelection = { selected: boolean; isDefault: boolean };
   type CompletionModel = {

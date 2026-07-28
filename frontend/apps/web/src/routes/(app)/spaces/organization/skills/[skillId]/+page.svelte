@@ -339,7 +339,7 @@
             {/key}
           </section>
 
-          {#if approvedPreview}
+          {#if approvedPreview && data.skill.published_revision_number !== data.skill.current_revision_number}
             <section aria-labelledby="organization-skill-approved-heading">
               <div class="flex flex-col gap-1">
                 <h2

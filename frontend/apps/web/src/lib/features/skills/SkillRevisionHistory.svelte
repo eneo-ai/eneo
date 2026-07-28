@@ -413,7 +413,7 @@
         {/if}
       {/if}
     </div>
-    <Dialog.Footer class="border-t px-6 py-4">
+    <Dialog.Footer class="mx-0 mb-0 border-t px-6 py-4">
       {#if canRestore && viewedRevision && viewedRevision.id !== comparisonCurrentRevision.id}
         <Button variant="outline" onclick={() => viewedRevision && requestRestore(viewedRevision)}>
           <RotateCcw aria-hidden="true" />

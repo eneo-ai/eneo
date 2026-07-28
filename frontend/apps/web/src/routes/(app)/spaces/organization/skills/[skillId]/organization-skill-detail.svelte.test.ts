@@ -172,6 +172,52 @@ describe("organisation Skill detail page", () => {
     expect(createRevision).toHaveBeenCalledTimes(1);
   });
 
+  test("hides the approved snapshot when it matches the current revision", async () => {
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await expect
+      .element(page.getByRole("heading", { name: m.skills_library_content_heading() }))
+      .toBeVisible();
+    expect(document.querySelector("#organization-skill-approved-heading")).toBeNull();
+  });
+
   test("places adoption oversight after publication and before revision history", async () => {
     render(OrganizationSkillDetailPage, {
       data: {
