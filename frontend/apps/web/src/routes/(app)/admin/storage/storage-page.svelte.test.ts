@@ -220,7 +220,12 @@ describe("admin storage settings page", () => {
 
   test("queues a bounded page and pauses or resumes through revision-fenced commands", async () => {
     testUser.isPlatformAdmin = true;
+    const loadedPolicy = policy();
     const initial = policy({
+      policy: {
+        ...loadedPolicy.policy,
+        new_write_storage_target: "object_store"
+      },
       capabilities: [
         {
           target: "postgres_inline",
@@ -265,6 +270,33 @@ describe("admin storage settings page", () => {
       expected_revision: 5,
       moves_paused: false
     });
+  });
+
+  test("queues moves to PostgreSQL while object storage is unavailable", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    queueMoves.mockResolvedValue({ queued_count: 1, target_too_large_count: 0 });
+
+    render(StoragePage);
+
+    await page.getByLabelText("storage_moves_target").click();
+    await page.getByRole("option", { name: "storage_target_postgres_inline" }).click();
+    const queueButton = page.getByRole("button", { name: "storage_moves_queue" });
+    await expect.element(queueButton).toBeEnabled();
+    await queueButton.click();
+
+    expect(queueMoves).toHaveBeenCalledWith({ target: "postgres_inline", limit: 25 });
+  });
+
+  test("defaults the move destination to the current policy target", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+
+    render(StoragePage);
+
+    await expect
+      .element(page.getByLabelText("storage_moves_target"))
+      .toHaveTextContent("storage_target_postgres_inline");
   });
 
   test("shows progress only on the move action that is running", async () => {
@@ -367,8 +399,13 @@ describe("admin storage settings page", () => {
 
   test("keeps the selected destination and limit when readiness rejects queueing", async () => {
     testUser.isPlatformAdmin = true;
+    const loadedPolicy = policy();
     getPolicy.mockResolvedValue(
       policy({
+        policy: {
+          ...loadedPolicy.policy,
+          new_write_storage_target: "object_store"
+        },
         capabilities: [
           {
             target: "postgres_inline",
@@ -692,7 +729,15 @@ describe("admin storage settings page", () => {
 
   test("disables new move commands while compatible object storage is unavailable", async () => {
     testUser.isPlatformAdmin = true;
-    getPolicy.mockResolvedValue(policy());
+    const loadedPolicy = policy();
+    getPolicy.mockResolvedValue(
+      policy({
+        policy: {
+          ...loadedPolicy.policy,
+          new_write_storage_target: "object_store"
+        }
+      })
+    );
 
     render(StoragePage);
 
