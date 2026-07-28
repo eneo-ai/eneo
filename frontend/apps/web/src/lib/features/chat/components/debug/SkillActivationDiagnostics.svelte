@@ -104,35 +104,32 @@
   </dl>
 
   <dl class="grid grid-cols-1 gap-x-5 gap-y-4 text-sm @md:grid-cols-2">
-    <CopyableDebugValue label={m.chat_debug_model_route()} value={evidence.selected_model_route} />
-    <CopyableDebugValue label={m.chat_debug_model_id()} value={evidence.selected_model_id} />
     <div>
       <dt class="text-muted-foreground text-xs">{m.chat_debug_token_budget()}</dt>
       <dd class="mt-0.5 font-medium tabular-nums">
         {numberFormatter.format(evidence.skill_context_tokens)} /
         {numberFormatter.format(evidence.skill_context_token_limit)}
+        {#if evidence.token_count_source !== "litellm"}
+          <span class="text-muted-foreground font-normal">
+            ({m.chat_debug_token_source_fallback_estimate()})
+          </span>
+        {/if}
       </dd>
     </div>
-    <div>
-      <dt class="text-muted-foreground text-xs">{m.chat_debug_token_source()}</dt>
-      <dd class="mt-0.5 font-medium">
-        {evidence.token_count_source === "litellm"
-          ? m.chat_debug_token_source_litellm()
-          : m.chat_debug_token_source_fallback_estimate()}
-      </dd>
-    </div>
-    <div>
-      <dt class="text-muted-foreground text-xs">{m.chat_debug_rounds()}</dt>
-      <dd class="mt-0.5 font-medium tabular-nums">
-        {numberFormatter.format(evidence.activation_rounds ?? 0)}
-      </dd>
-    </div>
-    <div>
-      <dt class="text-muted-foreground text-xs">{m.chat_debug_latency()}</dt>
-      <dd class="mt-0.5 font-medium tabular-nums">
-        {m.chat_debug_milliseconds({ count: String(evidence.selection_latency_ms ?? 0) })}
-      </dd>
-    </div>
+    {#if evidence.effective_mode === "selective"}
+      <div>
+        <dt class="text-muted-foreground text-xs">{m.chat_debug_rounds()}</dt>
+        <dd class="mt-0.5 font-medium tabular-nums">
+          {numberFormatter.format(evidence.activation_rounds ?? 0)}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-muted-foreground text-xs">{m.chat_debug_latency()}</dt>
+        <dd class="mt-0.5 font-medium tabular-nums">
+          {m.chat_debug_milliseconds({ count: String(evidence.selection_latency_ms ?? 0) })}
+        </dd>
+      </div>
+    {/if}
   </dl>
 
   <div class="flex flex-col gap-3">
@@ -147,7 +144,14 @@
         {#each visibleRows as row (row.skill_revision_id)}
           <li class="border-border flex flex-col gap-3 rounded-lg border px-4 py-3.5">
             <div class="flex min-w-0 items-start justify-between gap-3">
-              <p class="text-sm font-semibold break-all">{row.skill_id}</p>
+              <div class="min-w-0">
+                <p class="text-sm font-semibold break-words">
+                  {row.display_name ?? row.slug ?? row.skill_id}
+                </p>
+                {#if row.display_name && row.slug}
+                  <p class="text-muted-foreground text-xs break-all">{row.slug}</p>
+                {/if}
+              </div>
               <span class="text-muted-foreground shrink-0 text-xs tabular-nums">
                 {m.chat_debug_candidate_position({ position: String(row.position + 1) })}
               </span>

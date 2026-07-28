@@ -4079,8 +4079,6 @@
   "chat_debug_fallback_token_measurement_unavailable": "Token measurement was unavailable, so the system kept only Always Skills in context.",
   "chat_debug_fallback_selective_activation_disabled": "On demand activation was disabled for this turn.",
   "chat_debug_token_budget": "Skill token budget",
-  "chat_debug_token_source": "Token measurement",
-  "chat_debug_token_source_litellm": "Measured by LiteLLM",
   "chat_debug_token_source_fallback_estimate": "Estimate",
   "chat_debug_model": "Model",
   "chat_debug_model_id": "Model ID",

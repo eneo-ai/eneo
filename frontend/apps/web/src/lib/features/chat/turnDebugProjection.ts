@@ -94,24 +94,26 @@ export function projectTurnDebugDetails(
     });
   }
 
+  // The activation evidence records the id and route LiteLLM actually used,
+  // so when it is present it wins over the model snapshot on the message;
+  // the snapshot still provides the human-readable display name.
+  const completionModel = message.completion_model;
+  const model =
+    completionModel || modelFallback
+      ? {
+          id: modelFallback?.id ?? completionModel!.id,
+          name: completionModel?.name ?? modelFallback!.route,
+          route:
+            modelFallback?.route ??
+            completionModel!.litellm_model_name ??
+            completionModel!.deployment_name ??
+            completionModel!.name
+        }
+      : null;
+
   return {
     createdAt: message.created_at ?? null,
-    model: message.completion_model
-      ? {
-          id: message.completion_model.id,
-          name: message.completion_model.name,
-          route:
-            message.completion_model.litellm_model_name ??
-            message.completion_model.deployment_name ??
-            message.completion_model.name
-        }
-      : modelFallback
-        ? {
-            id: modelFallback.id,
-            name: modelFallback.route,
-            route: modelFallback.route
-          }
-        : null,
+    model,
     inputTokens: message.num_tokens_question ?? 0,
     outputTokens: message.num_tokens_answer ?? 0,
     tools,

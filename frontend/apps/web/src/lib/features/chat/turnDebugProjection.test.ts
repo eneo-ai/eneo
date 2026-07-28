@@ -92,6 +92,28 @@ describe("turn debug projection", () => {
     expect(serialized).not.toMatch(/SENSITIVE_/);
   });
 
+  it("prefers the activation evidence for model id and route, keeping the display name", () => {
+    const source = {
+      ...message("message-1"),
+      completion_model: {
+        id: "model-1",
+        name: "Model display",
+        litellm_model_name: "gpt-x"
+      }
+    } as unknown as ConversationMessage;
+
+    const projected = projectTurnDebugDetails(source, {
+      id: "deployment-1",
+      route: "provider/gpt-x"
+    });
+
+    expect(projected.model).toEqual({
+      id: "deployment-1",
+      name: "Model display",
+      route: "provider/gpt-x"
+    });
+  });
+
   it("projects tool metadata from the live streaming field", () => {
     const source = {
       ...message("message-1"),

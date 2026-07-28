@@ -35,19 +35,17 @@
         <dd class="mt-0.5 font-medium tabular-nums">{sentAt}</dd>
       </div>
     {/if}
-    <div class="grid grid-cols-2 gap-x-5">
-      <div>
-        <dt class="text-muted-foreground text-xs">{m.chat_debug_input_tokens()}</dt>
-        <dd class="mt-0.5 font-medium tabular-nums">
-          {numberFormatter.format(details.inputTokens)}
-        </dd>
-      </div>
-      <div>
-        <dt class="text-muted-foreground text-xs">{m.chat_debug_output_tokens()}</dt>
-        <dd class="mt-0.5 font-medium tabular-nums">
-          {numberFormatter.format(details.outputTokens)}
-        </dd>
-      </div>
+    <div>
+      <dt class="text-muted-foreground text-xs">{m.chat_debug_input_tokens()}</dt>
+      <dd class="mt-0.5 font-medium tabular-nums">
+        {numberFormatter.format(details.inputTokens)}
+      </dd>
+    </div>
+    <div>
+      <dt class="text-muted-foreground text-xs">{m.chat_debug_output_tokens()}</dt>
+      <dd class="mt-0.5 font-medium tabular-nums">
+        {numberFormatter.format(details.outputTokens)}
+      </dd>
     </div>
     {#if details.model}
       <CopyableDebugValue label={m.chat_debug_model_route()} value={details.model.route} />

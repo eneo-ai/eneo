@@ -4079,8 +4079,6 @@
   "chat_debug_fallback_token_measurement_unavailable": "Tokenmätningen saknades. Därför behöll systemet endast Skills med Always i kontexten.",
   "chat_debug_fallback_selective_activation_disabled": "On demand var avstängt för det här meddelandet.",
   "chat_debug_token_budget": "Tokenbudget för Skills",
-  "chat_debug_token_source": "Tokenmätning",
-  "chat_debug_token_source_litellm": "Mätt med LiteLLM",
   "chat_debug_token_source_fallback_estimate": "Uppskattning",
   "chat_debug_model": "Modell",
   "chat_debug_model_id": "Modell-id",
