@@ -1,6 +1,7 @@
 import struct
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -22,6 +23,7 @@ from eneo.database.tables.spaces_table import Spaces, SpacesTranscriptionModels
 from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.jobs.job_models import Task
+from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
 from eneo.main.models import Status
 from eneo.worker.upload_tasks import transcription_task, upload_info_blob_task
@@ -32,6 +34,12 @@ OLD_CHUNKS = (
     (0, "Previously published knowledge", [0.1, 0.2, 0.3]),
     (1, "that must remain searchable.", [0.4, 0.5, 0.6]),
 )
+
+
+def _stage_job_file(tmp_path: Path, job_id: UUID, content: bytes) -> None:
+    path = job_staging_path(job_id, upload_tmp_dir=tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
 
 
 def _pgvector_values(values: list[float]) -> list[float]:
@@ -162,11 +170,14 @@ def _assert_prior_knowledge(prior, blobs, chunks):
 async def test_upload_failure_preserves_committed_prior_knowledge(
     db_container, tmp_path, monkeypatch, failure
 ):
-    filepath = tmp_path / TITLE
-    filepath.write_text("replacement")
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
     async with db_container() as container:
         user, space, group, job, prior = await _seed_attempt(container)
         job_id = job.id
+        _stage_job_file(tmp_path, job_id, b"replacement")
         extracted: str | Exception = "replacement knowledge"
         if failure == "extraction":
             extracted = RuntimeError("extraction failed")
@@ -191,7 +202,6 @@ async def test_upload_failure_preserves_committed_prior_knowledge(
                 user_id=user.id,
                 group_id=group.id,
                 space_id=space.id,
-                filepath=str(filepath),
                 filename=TITLE,
                 mimetype="text/plain",
             ),
@@ -209,13 +219,16 @@ async def test_upload_failure_preserves_committed_prior_knowledge(
 
 @pytest.mark.parametrize("failure", ["embedding", "blank"])
 async def test_first_upload_failure_publishes_no_knowledge(
-    db_container, tmp_path, failure
+    db_container, tmp_path, monkeypatch, failure
 ):
-    filepath = tmp_path / TITLE
-    filepath.write_text("replacement")
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
     async with db_container() as container:
         user, space, group, job, _ = await _seed_attempt(container, with_existing=False)
         job_id = job.id
+        _stage_job_file(tmp_path, job_id, b"replacement")
         container.text_extractor.override(
             providers.Object(
                 StubExtractor(" \n " if failure == "blank" else "replacement knowledge")
@@ -230,7 +243,6 @@ async def test_first_upload_failure_publishes_no_knowledge(
                 user_id=user.id,
                 group_id=group.id,
                 space_id=space.id,
-                filepath=str(filepath),
                 filename=TITLE,
                 mimetype="text/plain",
             ),
@@ -247,13 +259,18 @@ async def test_first_upload_failure_publishes_no_knowledge(
     assert chunks == []
 
 
-async def test_successful_upload_commits_replacement_knowledge(db_container, tmp_path):
-    filepath = tmp_path / TITLE
-    filepath.write_text("replacement")
+async def test_successful_upload_commits_replacement_knowledge(
+    db_container, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
     replacement_text = "Committed replacement knowledge"
     async with db_container() as container:
         user, space, group, job, prior = await _seed_attempt(container)
         job_id = job.id
+        _stage_job_file(tmp_path, job_id, b"replacement")
         container.text_extractor.override(
             providers.Object(StubExtractor(replacement_text))
         )
@@ -273,7 +290,6 @@ async def test_successful_upload_commits_replacement_knowledge(db_container, tmp
                 user_id=user.id,
                 group_id=group.id,
                 space_id=space.id,
-                filepath=str(filepath),
                 filename=TITLE,
                 mimetype="text/plain",
             ),
@@ -298,13 +314,16 @@ async def test_successful_upload_commits_replacement_knowledge(db_container, tmp
 
 @pytest.mark.parametrize("failure", ["embedding", "blank"])
 async def test_transcription_failure_preserves_committed_prior_knowledge(
-    db_container, tmp_path, transcription_model_factory, failure
+    db_container, tmp_path, monkeypatch, transcription_model_factory, failure
 ):
-    filepath = tmp_path / "audio.wav"
-    filepath.write_bytes(b"not used")
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
     async with db_container() as container:
         user, space, group, job, prior = await _seed_attempt(container)
         job_id = job.id
+        _stage_job_file(tmp_path, job_id, b"not used")
         transcription_model = await transcription_model_factory(
             container.session(), "ingestion-safety-transcription"
         )
@@ -329,7 +348,6 @@ async def test_transcription_failure_preserves_committed_prior_knowledge(
                 user_id=user.id,
                 group_id=group.id,
                 space_id=space.id,
-                filepath=str(filepath),
                 filename=TITLE,
                 mimetype="audio/wav",
             ),

@@ -33,7 +33,6 @@ def test_job_deserializer_remaps_pre_rename_package_payloads() -> None:
         user_id=uuid4(),
         group_id=uuid4(),
         space_id=uuid4(),
-        filepath="/tmp/document.txt",
         filename="document.txt",
         mimetype="text/plain",
     )

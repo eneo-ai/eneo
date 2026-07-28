@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.files.text import NoExtractableTextError
+from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
@@ -25,7 +26,7 @@ async def transcription_task(
 ):
     task_manager = container.task_manager(job_id=job_id)
     async with task_manager.set_status_on_exception():
-        filepath = Path(params.filepath)
+        filepath = job_staging_path(job_id)
 
         # Define cleanup function
         task_manager.cleanup_func = lambda: _remove_file(filepath)
@@ -77,7 +78,7 @@ async def upload_info_blob_task(
 ):
     task_manager = container.task_manager(job_id=job_id)
     async with task_manager.set_status_on_exception():
-        filepath = Path(params.filepath)
+        filepath = job_staging_path(job_id)
 
         # Define cleanup function
         task_manager.cleanup_func = lambda: _remove_file(filepath)
