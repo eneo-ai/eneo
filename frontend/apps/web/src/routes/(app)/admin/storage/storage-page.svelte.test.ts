@@ -727,7 +727,7 @@ describe("admin storage settings page", () => {
     });
   });
 
-  test("disables new move commands while compatible object storage is unavailable", async () => {
+  test("disables moves toward object storage while it is unavailable", async () => {
     testUser.isPlatformAdmin = true;
     const loadedPolicy = policy();
     getPolicy.mockResolvedValue(

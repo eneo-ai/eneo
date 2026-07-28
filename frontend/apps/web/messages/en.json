@@ -214,7 +214,7 @@
   "storage_moves_status_paused": "Paused",
   "storage_moves_status_running": "Processing",
   "storage_moves_store_unavailable": "Object storage is not available",
-  "storage_moves_store_unavailable_description": "PostgreSQL remains fully supported. Set up compatible object storage and wait until it is available before queueing new moves. Moves already queued remain in place.",
+  "storage_moves_store_unavailable_description": "PostgreSQL remains fully supported, and moves to PostgreSQL can still be queued. Set up compatible object storage and wait until it is available before queueing moves to it. Moves already queued remain in place.",
   "storage_moves_stale_title": "Move settings changed in another session",
   "storage_moves_stale_description": "Reload the latest storage settings before pausing or resuming again.",
   "storage_moves_action_error_title": "The move command could not be completed",
