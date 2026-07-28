@@ -24,8 +24,8 @@ describe("turn debug projection", () => {
     const messages = [message("message-1", "First"), message("message-2", "Second")];
 
     expect(listPersistedDebugTurns(messages, [])).toEqual([
-      { messageId: "message-1", turnNumber: 1 },
-      { messageId: "message-2", turnNumber: 2 }
+      { messageId: "message-1", turnNumber: 1, createdAt: null },
+      { messageId: "message-2", turnNumber: 2, createdAt: null }
     ]);
   });
 
@@ -37,8 +37,8 @@ describe("turn debug projection", () => {
     ];
 
     expect(listPersistedDebugTurns(messages, ["message-2"])).toEqual([
-      { messageId: "message-1", turnNumber: 1 },
-      { messageId: "message-3", turnNumber: 3 }
+      { messageId: "message-1", turnNumber: 1, createdAt: null },
+      { messageId: "message-3", turnNumber: 3, createdAt: null }
     ]);
   });
 

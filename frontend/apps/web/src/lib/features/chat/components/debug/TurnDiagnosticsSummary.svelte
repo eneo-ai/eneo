@@ -8,6 +8,17 @@
 
   let { details }: { details: TurnDebugDetails } = $props();
   const numberFormatter = $derived(new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US"));
+  const sentAtFormatter = $derived(
+    new Intl.DateTimeFormat(getLocale() === "sv" ? "sv-SE" : "en-US", {
+      dateStyle: "medium",
+      timeStyle: "short"
+    })
+  );
+  const sentAt = $derived.by(() => {
+    if (!details.createdAt) return null;
+    const parsed = new Date(details.createdAt);
+    return Number.isNaN(parsed.getTime()) ? null : sentAtFormatter.format(parsed);
+  });
 </script>
 
 <ChatDebugSection id="chat-debug-section-summary" title={m.chat_debug_generic_summary()}>
@@ -18,6 +29,12 @@
         {details.model?.name ?? m.chat_debug_unknown()}
       </dd>
     </div>
+    {#if sentAt}
+      <div>
+        <dt class="text-muted-foreground text-xs">{m.chat_debug_sent_at()}</dt>
+        <dd class="mt-0.5 font-medium tabular-nums">{sentAt}</dd>
+      </div>
+    {/if}
     <div class="grid grid-cols-2 gap-x-5">
       <div>
         <dt class="text-muted-foreground text-xs">{m.chat_debug_input_tokens()}</dt>

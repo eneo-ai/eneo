@@ -4059,6 +4059,7 @@
   "chat_debug_previous_turn": "Föregående meddelande",
   "chat_debug_next_turn": "Nästa meddelande",
   "chat_debug_resize_handle": "Ändra bredd på felsökningspanelen",
+  "chat_debug_sent_at": "Skickat",
   "chat_debug_skill_activation": "Aktivering av Skills",
   "chat_debug_generic_summary": "Meddelandeöversikt",
   "chat_debug_unknown": "Okänd",

@@ -4059,6 +4059,7 @@
   "chat_debug_previous_turn": "Previous turn",
   "chat_debug_next_turn": "Next turn",
   "chat_debug_resize_handle": "Resize the debug panel",
+  "chat_debug_sent_at": "Sent",
   "chat_debug_skill_activation": "Skill activation",
   "chat_debug_generic_summary": "Turn summary",
   "chat_debug_unknown": "Unknown",

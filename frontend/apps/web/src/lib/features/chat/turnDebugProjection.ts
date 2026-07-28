@@ -3,10 +3,12 @@ import type { ConversationMessage } from "@eneo/eneo-js";
 export type DebugTurnOption = {
   messageId: string;
   turnNumber: number;
+  createdAt: string | null;
 };
 
 export type TurnDebugDetails = {
   model: { id: string; name: string; route: string } | null;
+  createdAt: string | null;
   inputTokens: number;
   outputTokens: number;
   tools: Array<{
@@ -47,7 +49,8 @@ export function listPersistedDebugTurns(
     if (!message.id || pendingMessageIds.includes(message.id)) continue;
     turns.push({
       messageId: message.id,
-      turnNumber: index + 1
+      turnNumber: index + 1,
+      createdAt: message.created_at ?? null
     });
   }
 
@@ -92,6 +95,7 @@ export function projectTurnDebugDetails(
   }
 
   return {
+    createdAt: message.created_at ?? null,
     model: message.completion_model
       ? {
           id: message.completion_model.id,

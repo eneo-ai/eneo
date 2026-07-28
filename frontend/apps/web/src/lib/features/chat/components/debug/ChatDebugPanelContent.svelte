@@ -4,6 +4,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import Info from "@lucide/svelte/icons/info";
@@ -33,8 +34,29 @@
             : ""
   );
 
+  const timeFormatter = $derived(
+    new Intl.DateTimeFormat(getLocale() === "sv" ? "sv-SE" : "en-US", {
+      hour: "2-digit",
+      minute: "2-digit"
+    })
+  );
+  const dateTimeFormatter = $derived(
+    new Intl.DateTimeFormat(getLocale() === "sv" ? "sv-SE" : "en-US", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    })
+  );
+
   function turnLabel(turn: DebugTurnOption): string {
-    return m.chat_debug_turn_option({ number: String(turn.turnNumber) });
+    const label = m.chat_debug_turn_option({ number: String(turn.turnNumber) });
+    if (!turn.createdAt) return label;
+    const sent = new Date(turn.createdAt);
+    if (Number.isNaN(sent.getTime())) return label;
+    const formatter =
+      sent.toDateString() === new Date().toDateString() ? timeFormatter : dateTimeFormatter;
+    return `${label} · ${formatter.format(sent)}`;
   }
 </script>
 
@@ -96,7 +118,10 @@
           aria-label={m.chat_debug_refresh()}
           onclick={() => panel.retryLoad(true)}
         >
-          <RotateCcw class={panel.refreshing ? "animate-spin" : undefined} aria-hidden="true" />
+          <RotateCcw
+            class={panel.refreshing ? "animate-spin motion-reduce:animate-none" : undefined}
+            aria-hidden="true"
+          />
         </Button>
       {/if}
     </div>

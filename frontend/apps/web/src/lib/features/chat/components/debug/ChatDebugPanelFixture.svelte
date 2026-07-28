@@ -14,8 +14,15 @@
         <header class="flex justify-end p-2">
           {@render debugTrigger()}
         </header>
-        <!-- eslint-disable-next-line eneo/no-hardcoded-text -- test-only fixture -->
-        <main class="flex-1">conversation</main>
+        <!-- eslint-disable eneo/no-hardcoded-text -- test-only fixture -->
+        <main class="flex-1">
+          conversation
+          <label>
+            composer
+            <input type="text" />
+          </label>
+        </main>
+        <!-- eslint-enable eneo/no-hardcoded-text -->
       </div>
     {/snippet}
   </ChatDebugPanel>

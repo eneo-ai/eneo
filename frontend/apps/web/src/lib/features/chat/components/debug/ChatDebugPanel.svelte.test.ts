@@ -287,6 +287,100 @@ describe("ChatDebugPanel", () => {
       .not.toBeInTheDocument();
   });
 
+  test("resizes with the keyboard and restores the saved split on reopen", async () => {
+    const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-1", evidence(1)));
+    const chat = createChat(getTurnDiagnostics);
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
+    const handle = page.getByRole("separator", { name: m.chat_debug_resize_handle() });
+    await expect.element(handle).toBeInTheDocument();
+    const before = Number(handle.element().getAttribute("aria-valuenow"));
+
+    (handle.element() as HTMLElement).focus();
+    await userEvent.keyboard("{ArrowLeft}");
+    await vi.waitFor(() =>
+      expect(Number(handle.element().getAttribute("aria-valuenow"))).not.toBe(before)
+    );
+    const resized = Number(handle.element().getAttribute("aria-valuenow"));
+
+    // paneforge debounces the autoSaveId write; wait for it before unmounting.
+    await vi.waitFor(() => {
+      const raw = localStorage.getItem("paneforge:chat-debug-layout");
+      expect(raw).toBeTruthy();
+      const layouts = Object.values(JSON.parse(raw!)) as { layout: number[] }[];
+      expect(
+        layouts.some(
+          (entry) => entry.layout.length === 2 && Math.round(entry.layout[0]) === resized
+        )
+      ).toBe(true);
+    });
+
+    await page.getByRole("button", { name: m.close(), exact: true }).click();
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
+    await vi.waitFor(() =>
+      expect(
+        Number(
+          page
+            .getByRole("separator", { name: m.chat_debug_resize_handle() })
+            .element()
+            .getAttribute("aria-valuenow")
+        )
+      ).toBe(resized)
+    );
+  });
+
+  test("keeps the selection across breakpoint changes and scopes Escape to the panel", async () => {
+    const getTurnDiagnostics = vi.fn(({ messageId }: { messageId: string }) =>
+      Promise.resolve(diagnostics(messageId, evidence(1)))
+    );
+    const chat = createChat(getTurnDiagnostics, [
+      message("message-1", "First question", { created_at: "2026-07-27T08:30:00Z" }),
+      message("message-2", "Latest question")
+    ]);
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    const trigger = page.getByRole("button", { name: m.chat_debug_open(), exact: true });
+    await trigger.click();
+    await page.getByRole("button", { name: m.chat_debug_previous_turn() }).click();
+    await expect.element(page.getByText(m.chat_debug_sent_at(), { exact: true })).toBeVisible();
+
+    // Escape while typing in the composer must not close the panel.
+    (page.getByRole("textbox", { name: "composer" }).element() as HTMLElement).focus();
+    await userEvent.keyboard("{Escape}");
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .toBeVisible();
+
+    // Crossing the breakpoint swaps the shell but keeps the selected turn.
+    await page.viewport(800, 900);
+    await expect.element(page.getByRole("dialog")).toBeVisible();
+    await expect
+      .element(page.getByText(m.chat_debug_turn_option({ number: "1" }), { exact: false }).first())
+      .toBeVisible();
+
+    await page.viewport(1280, 800);
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .toBeVisible();
+    const callsForSelected = getTurnDiagnostics.mock.calls.filter(
+      ([args]) => (args as { messageId: string }).messageId === "message-1"
+    );
+    expect(callsForSelected).toHaveLength(1);
+
+    // Escape with focus inside the panel closes it and returns focus.
+    (page.getByRole("button", { name: m.close(), exact: true }).element() as HTMLElement).focus();
+    await userEvent.keyboard("{Escape}");
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .not.toBeInTheDocument();
+    await expect.element(trigger).toHaveFocus();
+  });
+
   test("steps between persisted turns with the previous and next buttons", async () => {
     const getTurnDiagnostics = vi.fn(({ messageId }: { messageId: string }) =>
       Promise.resolve(diagnostics(messageId, evidence(1)))

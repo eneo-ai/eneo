@@ -6,12 +6,17 @@
 
   let { label, value }: { label: string; value: string } = $props();
   let copied = $state(false);
+  let resetTimeout: ReturnType<typeof setTimeout> | undefined;
 
   async function copyValue() {
     if (!navigator.clipboard) return;
     await navigator.clipboard.writeText(value);
     copied = true;
+    clearTimeout(resetTimeout);
+    resetTimeout = setTimeout(() => (copied = false), 2000);
   }
+
+  $effect(() => () => clearTimeout(resetTimeout));
 </script>
 
 <div class="min-w-0">
@@ -30,5 +35,6 @@
         <Copy aria-hidden="true" />
       {/if}
     </Button>
+    <span class="sr-only" role="status">{copied ? m.copied_to_clipboard() : ""}</span>
   </dd>
 </div>
