@@ -188,7 +188,7 @@ async def test_new_chat_and_protocol_state_survive_outer_request_rollback(
             assistant_id=None,
             group_chat_id=None,
         )
-        question_id = await service.create_question_placeholder(
+        question_id, _question_created_at = await service.create_question_placeholder(
             question="Use the stateful tool",
             session=chat_session,
             files=None,

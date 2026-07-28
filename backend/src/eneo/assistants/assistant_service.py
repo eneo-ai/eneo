@@ -2329,6 +2329,7 @@ class AssistantService:
         )
 
         question_id: UUID | None = None
+        question_created_at: datetime | None = None
         is_new_session = session_id is None
         if not is_new_session:
             assert session_id is not None
@@ -2349,6 +2350,7 @@ class AssistantService:
                 (
                     session,
                     question_id,
+                    question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=name,
                     question=question,
@@ -2365,6 +2367,7 @@ class AssistantService:
                 (
                     session,
                     question_id,
+                    question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=name,
                     question=question,
@@ -2393,7 +2396,10 @@ class AssistantService:
 
         if not is_new_session:
             # Existing conversations need only the new placeholder transaction.
-            question_id = await self.session_service.create_question_placeholder(
+            (
+                question_id,
+                question_created_at,
+            ) = await self.session_service.create_question_placeholder(
                 question=question,
                 session=session,
                 files=files,
@@ -2483,6 +2489,7 @@ class AssistantService:
             info_blob_references = datastore_result.info_blobs
 
         final_response = AssistantResponse(
+            created_at=question_created_at,
             question=question,
             files=files,
             session=session,
