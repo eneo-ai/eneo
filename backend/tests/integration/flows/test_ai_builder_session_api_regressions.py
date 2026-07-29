@@ -6657,7 +6657,7 @@ async def _progress_builder_session_to_plan(
     question_answer: dict[str, object] | None = None
     answers = structured_answers or {}
 
-    for _ in range(6):
+    for _ in range(7):
         events = await _send_builder_message(
             client=client,
             bearer_token=bearer_token,
@@ -6852,11 +6852,11 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
             client=client,
             bearer_token=bearer_token,
             session_id=session_id,
-            message="Strukturera materialet",
+            message="Inga extra fält",
             question_answer={
-                "question_id": "post_processing_goal",
-                "selected_option_ids": ["structure_key_information"],
-                "selected_values": ["structure_key_information"],
+                "question_id": "runtime_metadata_fields",
+                "selected_option_ids": ["no_extra_metadata"],
+                "selected_values": ["no_extra_metadata"],
                 "ui_language": "sv",
             },
         )
@@ -6882,7 +6882,7 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
     assert any(
         event["event"] == "question"
         and cast(dict[str, object], event["data"]).get("question_id")
-        == "post_processing_goal"
+        == "runtime_metadata_fields"
         for event in second_events
     ), [
         (
@@ -7258,6 +7258,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_apply_and_publish
                     "document_kind": "case_documents",
                     "terminal_output": "pdf_document",
                     "post_processing_goal": "summarize_or_overview",
+                    "runtime_metadata_fields": "no_extra_metadata",
                 },
             )
 
@@ -7807,6 +7808,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
                     "flow_input_architecture": "audio_primary_input",
                     "terminal_output": "pdf_document",
                     "post_processing_goal": "summarize_or_overview",
+                    "runtime_metadata_fields": "no_extra_metadata",
                 },
             )
 
@@ -8008,7 +8010,7 @@ async def test_ai_builder_api_rejects_persisted_legacy_mcp_plan_before_create_ef
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_without_input_or_output_questions(
+async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_after_runtime_metadata_question(
     client,
     bearer_token,
     completion_model_factory,
@@ -8054,7 +8056,7 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_w
                 bearer_token=bearer_token,
                 space_id=space_id,
             )
-            events = await _send_builder_message(
+            first_events = await _send_builder_message(
                 client=client,
                 bearer_token=bearer_token,
                 session_id=session_id,
@@ -8066,10 +8068,26 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_w
                     "ämnet av samtalet också."
                 ),
             )
+            second_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message="Inga extra fält",
+                question_answer={
+                    "question_id": "runtime_metadata_fields",
+                    "selected_option_ids": ["no_extra_metadata"],
+                    "selected_values": ["no_extra_metadata"],
+                    "ui_language": "sv",
+                },
+            )
 
-    event_types = [event["event"] for event in events]
-    assert "question" not in event_types
-    assert "requirements_summary" in event_types
+    question_ids = [
+        cast(dict[str, object], event["data"]).get("question_id")
+        for event in first_events
+        if event["event"] == "question"
+    ]
+    assert question_ids == ["runtime_metadata_fields"]
+    assert any(event["event"] == "requirements_summary" for event in second_events)
 
 
 @pytest.mark.integration

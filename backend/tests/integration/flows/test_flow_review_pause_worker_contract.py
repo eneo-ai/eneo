@@ -59,6 +59,7 @@ from eneo.main.exceptions import TypedIOValidationException
 class _ModelKwargs:
     def __init__(self, **values):
         self._values = values
+        self.response_format = values.get("response_format")
 
     def model_dump(self, *, exclude_none: bool = False, **_kwargs):
         if exclude_none:
@@ -66,6 +67,11 @@ class _ModelKwargs:
                 key: value for key, value in self._values.items() if value is not None
             }
         return dict(self._values)
+
+    def model_copy(self, *, update):
+        values = dict(self._values)
+        values.update(update)
+        return _ModelKwargs(**values)
 
 
 class _RuntimeAssistant:

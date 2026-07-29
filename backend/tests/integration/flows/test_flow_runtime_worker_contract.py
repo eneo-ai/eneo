@@ -40,7 +40,11 @@ from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import build_published_definition_json
-from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
+from eneo.flows.runtime.executor import (
+    _PROVIDER_WORK_AMBIGUITY_DISCLOSURE,
+    FlowRunExecutor,
+    FlowRunExecutorConfig,
+)
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.step_attempt_runtime import (
     build_typed_failure_run_error_message,
@@ -62,6 +66,7 @@ class _RuntimeWorkerContext:
 class _ModelKwargs:
     def __init__(self, **values):
         self._values = values
+        self.response_format = values.get("response_format")
 
     def model_dump(self, *, exclude_none: bool = False, **_kwargs):
         if exclude_none:
@@ -1032,13 +1037,14 @@ async def test_generic_step_failure_persists_failed_state_for_fresh_sessions(
 
     assert run_row is not None
     assert run_row.status == FlowRunStatus.FAILED.value
-    assert (
-        FlowRunError.model_validate(run_row.error_json).message
-        == "Flow step 1 execution failed."
+    assert FlowRunError.model_validate(run_row.error_json).message == (
+        f"Flow step 1 execution failed. {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
     )
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.FAILED.value
-    assert step_result_row.error_message == "Flow step 1 execution failed."
+    assert step_result_row.error_message == (
+        f"Flow step 1 execution failed. {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+    )
     assert len(attempt_rows) == 1
     assert attempt_rows[0].status == FlowStepAttemptStatus.FAILED.value
     assert attempt_rows[0].error_code == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
@@ -1095,11 +1101,14 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
             retry_count=0,
         )
 
-    expected_message = build_typed_failure_run_error_message(
-        step_order=1,
-        error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
-        error_message="The model output is not valid JSON.",
-        contract_validation=None,
+    expected_message = (
+        build_typed_failure_run_error_message(
+            step_order=1,
+            error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+            error_message="The model output is not valid JSON.",
+            contract_validation=None,
+        )
+        + f" {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
     )
     assert result["status"] == "failed"
     assert result["error"] == expected_message
@@ -1166,7 +1175,10 @@ async def test_question_binding_variable_miss_persists_precise_typed_failure_wit
         "Unknown variable reference: 'flow.input.question'. Missing key 'question'. "
         "Available keys: expected_flow_version."
     )
-    run_message = f"Step 1: {resolver_message} (typed_io_variable_resolution_failed)."
+    run_message = (
+        f"Step 1: {resolver_message} (typed_io_variable_resolution_failed). "
+        f"{_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+    )
     assert result == {"status": "failed", "error": run_message}
     (
         run_row,
@@ -1183,7 +1195,9 @@ async def test_question_binding_variable_miss_persists_precise_typed_failure_wit
     assert FlowRunError.model_validate(run_row.error_json).message == run_message
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.FAILED.value
-    assert step_result_row.error_message == resolver_message
+    assert step_result_row.error_message == (
+        f"{resolver_message} {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+    )
     assert len(attempt_rows) == 1
     assert attempt_rows[0].status == FlowStepAttemptStatus.FAILED.value
     assert (
