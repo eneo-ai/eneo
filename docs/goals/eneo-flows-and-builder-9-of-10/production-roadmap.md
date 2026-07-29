@@ -31,6 +31,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-29 | Integration expectations realigned with their production owners (8 stale tests repaired; 5 left deliberately red exposing verified production defects — see item 2b) (`bc20307fa`, gate green 8/10) |
 | 2026-07-29 | **Slice 1**: every evidence response reads one REPEATABLE READ snapshot — route-owned isolation before the first statement, shared-session TaskGroup deleted, proven at the route boundary with a mid-read mutation and a revert-detection test (`f38354342`, gate green 8/10, no findings remaining) |
 | 2026-07-29 | Corruption-caused omission distinguished from size-based omission in the public knowledge view; reason-neutral narrowing contract sv+en (`27cef0327`, gate green 8/10) |
 | 2026-07-29 | JSONB docs honesty (`36c35b734`, `a3318a169`) |
@@ -75,6 +76,25 @@ external release gate (item 10); BM0.2 is external (item 10).
    `section`/`limit` identifiers instead of new error codes. Fixed
    ceilings. Tests: aggregate max+1, per-section max+1, compressible JSON
    (stored vs logical), simultaneous omissions in two sections.
+2b. **Fix the three verified production defects** *(medium, inserted —
+   broken behavior outranks honesty improvements)* — peer-confirmed root
+   causes, smallest corrections in their canonical owners:
+   (a) service keys get `403 admin` on documented `flows >= read/write`
+   paths because `load_published_runtime_inputs` resolves mapped
+   execution policy through admin-gated
+   `SettingService.get_mapped_execution_policy` — add an unprivileged
+   internal resolved-policy reader mirroring
+   `get_flow_input_limits_resolved`; the public settings endpoint stays
+   admin-protected; no per-router service-key special-casing.
+   (b) resume returns the stale pre-persistence step result —
+   `_persist_successful_step` returns `step_result` instead of the
+   repository's `saved_result` carrying `current_attempt_no`; return the
+   canonical saved result, assert the resumed downstream edge carries the
+   persisted attempt number.
+   (c) audio create-mode apply refused by a critic invariant demanding
+   source-capture fields the assembly contract forbids for audio — make
+   the invariant conditional on an applicable structured source reader.
+   Acceptance: the five deliberately-red integration tests go green.
 3. **Honest run token totals, retention included** *(medium/large)* —
    relational provider-call events own totals for LIVE runs with typed
    input/output completeness; at provider-detail purge, retention writes
