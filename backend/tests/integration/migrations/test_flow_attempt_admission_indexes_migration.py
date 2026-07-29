@@ -276,3 +276,31 @@ def test_upgrade_rejects_a_mixed_direction_attempt_index(
         )
         is None
     )
+
+
+def test_upgrade_rejects_an_attempt_index_with_included_columns(
+    fresh_chain_db: tuple[PsycopgConnection, Config],
+) -> None:
+    conn, cfg = fresh_chain_db
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            CREATE INDEX CONCURRENTLY ix_flow_step_attempts_run_step_order_attempt
+            ON flow_step_attempts (flow_run_id, step_order, attempt_no)
+            INCLUDE (status)
+            """
+        )
+
+    with pytest.raises(RuntimeError, match="unexpected state"):
+        command.upgrade(cfg, MIGRATION_REVISION)
+
+    assert current_revisions(conn) == {PRIOR_REVISION}
+    assert (
+        _index_metadata(
+            conn,
+            table_name="flow_step_results",
+            index_name="ix_flow_step_results_run_step_order",
+        )
+        is None
+    )

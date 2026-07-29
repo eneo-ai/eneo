@@ -35,6 +35,7 @@ class _IndexState(NamedTuple):
     table: str
     key_definitions: tuple[str, ...]
     key_options: tuple[int, ...]
+    has_included_columns: bool
     access_method: str
     unique: bool
     valid: bool
@@ -61,6 +62,7 @@ def _index_state(index: str) -> _IndexState | None:
                         ORDER BY key_position.position
                     ),
                     index_metadata.indoption::smallint[],
+                    index_metadata.indnatts != index_metadata.indnkeyatts,
                     access_method.amname,
                     index_metadata.indisunique,
                     index_metadata.indisvalid,
@@ -85,6 +87,8 @@ def _index_state(index: str) -> _IndexState | None:
                 GROUP BY
                     table_row.relname,
                     index_metadata.indoption,
+                    index_metadata.indnatts,
+                    index_metadata.indnkeyatts,
                     access_method.amname,
                     index_metadata.indisunique,
                     index_metadata.indisvalid,
@@ -104,13 +108,14 @@ def _index_state(index: str) -> _IndexState | None:
         table=str(row[0]),
         key_definitions=tuple(str(value) for value in row[1]),
         key_options=tuple(int(value) for value in row[2]),
-        access_method=str(row[3]),
-        unique=bool(row[4]),
-        valid=bool(row[5]),
-        ready=bool(row[6]),
-        live=bool(row[7]),
-        partial=bool(row[8]),
-        expression=bool(row[9]),
+        has_included_columns=bool(row[3]),
+        access_method=str(row[4]),
+        unique=bool(row[5]),
+        valid=bool(row[6]),
+        ready=bool(row[7]),
+        live=bool(row[8]),
+        partial=bool(row[9]),
+        expression=bool(row[10]),
     )
 
 
@@ -129,6 +134,7 @@ def _create_or_verify_index(
         table=table,
         key_definitions=columns,
         key_options=tuple(0 for _ in columns),
+        has_included_columns=False,
         access_method="btree",
         unique=False,
         valid=True,
