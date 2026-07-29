@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from types import SimpleNamespace
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -11,6 +13,9 @@ from pydantic import ValidationError
 
 from eneo.database.tables.flow_tables import BuilderPlans
 from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES,
+    BUILDER_PROPOSAL_SCHEMA_VERSION,
+    BuilderProposalPayloadTooLargeError,
     FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
@@ -28,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_repo import (
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
+    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
@@ -105,6 +111,144 @@ def _edit_approval() -> FlowBuilderEditApproval:
             net_steps_removed=1,
         ),
     )
+
+
+def _proposal_with_serialized_size(byte_size: int) -> FlowBuilderProposal:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(
+            spec=_make_spec(),
+            plan_rationale="",
+        )
+    )
+    empty_payload = proposal.model_dump(
+        mode="json",
+        exclude_none=True,
+        round_trip=True,
+    )
+    empty_size = len(
+        json.dumps(
+            empty_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    assert empty_size < byte_size
+    proposal.content.plan_rationale = "x" * (byte_size - empty_size)
+    measured_size = len(
+        json.dumps(
+            proposal.model_dump(
+                mode="json",
+                exclude_none=True,
+                round_trip=True,
+            ),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    assert measured_size == byte_size
+    return proposal
+
+
+def test_proposal_storage_json_has_current_schema_version() -> None:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
+
+    assert BUILDER_PROPOSAL_SCHEMA_VERSION == 1
+    assert proposal.schema_version == BUILDER_PROPOSAL_SCHEMA_VERSION
+    assert proposal.storage_json()["schema_version"] == BUILDER_PROPOSAL_SCHEMA_VERSION
+
+
+def test_proposal_storage_accepts_exactly_one_mebibyte() -> None:
+    proposal = _proposal_with_serialized_size(BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES)
+
+    stored = proposal.storage_json()
+
+    assert (
+        len(
+            json.dumps(
+                stored,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        == BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES
+    )
+
+
+def test_proposal_storage_rejects_one_byte_over_cap() -> None:
+    proposal = _proposal_with_serialized_size(BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES + 1)
+
+    with pytest.raises(BuilderProposalPayloadTooLargeError) as exc:
+        proposal.storage_json()
+
+    assert exc.value.byte_size == BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES + 1
+    assert exc.value.cap_bytes == BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES
+
+
+def test_proposal_storage_revalidates_nested_container_mutations() -> None:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
+    proposal.content.assumptions.append(cast(str, 123))
+
+    with pytest.raises(ValidationError, match="assumptions"):
+        proposal.storage_json()
+
+
+def test_persisted_proposal_parser_accepts_current_version() -> None:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
+
+    assert FlowBuilderProposal.from_persisted_json(proposal.storage_json()) == proposal
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (lambda payload: payload.pop("schema_version"), "schema_version"),
+        (
+            lambda payload: payload.__setitem__("schema_version", 2),
+            "Unsupported builder proposal schema_version",
+        ),
+        (
+            lambda payload: payload.__setitem__("legacy_extra", True),
+            "legacy_extra",
+        ),
+        (
+            lambda payload: payload.__setitem__("content", {}),
+            "spec",
+        ),
+    ],
+)
+def test_persisted_proposal_parser_rejects_invalid_payloads(
+    mutate,
+    match: str,
+) -> None:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
+    payload = proposal.storage_json()
+    mutate(payload)
+
+    with pytest.raises((ValueError, ValidationError), match=match):
+        FlowBuilderProposal.from_persisted_json(payload)
+
+
+def test_persisted_proposal_parser_rejects_oversized_payload() -> None:
+    proposal = _proposal_with_serialized_size(BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES + 1)
+    payload = proposal.model_dump(
+        mode="json",
+        exclude_none=True,
+        round_trip=True,
+    )
+
+    with pytest.raises(BuilderProposalPayloadTooLargeError) as exc:
+        FlowBuilderProposal.from_persisted_json(payload)
+
+    assert exc.value.byte_size == BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES + 1
+    assert exc.value.cap_bytes == BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES
 
 
 def test_plan_response_does_not_expose_resource_bindings() -> None:
@@ -231,6 +375,35 @@ def test_plan_from_row_rejects_unknown_proposal_json_fields() -> None:
     row.proposal_json["legacy_extra"] = True
 
     with pytest.raises(ValidationError, match="legacy_extra"):
+        _plan_from_row(row)
+
+
+def test_plan_from_row_rejects_unknown_nested_proposal_json_fields() -> None:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
+    row = _row(proposal=proposal)
+    row.proposal_json["content"]["spec"]["unknown_nested"] = True
+
+    with pytest.raises(ValueError, match="canonical"):
+        _plan_from_row(row)
+
+
+def test_plan_from_row_rejects_noncanonical_persisted_values() -> None:
+    spec = _make_spec()
+    spec.form_fields = [
+        FormFieldSpec(
+            name="subject",
+            type="text",
+            label="Subject",
+        )
+    ]
+    row = _row(
+        proposal=FlowBuilderProposal(content=FlowBuilderProposalContent(spec=spec))
+    )
+    row.proposal_json["content"]["spec"]["form_fields"][0]["type"] = " TEXT "
+
+    with pytest.raises(ValueError, match="canonical"):
         _plan_from_row(row)
 
 

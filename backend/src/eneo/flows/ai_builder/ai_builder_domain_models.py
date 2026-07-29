@@ -7,8 +7,10 @@ This module owns AI Builder session, plan, and materialization records.
 from __future__ import annotations
 
 import enum
+import json
 from collections.abc import Mapping
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 import uuid_utils
@@ -30,6 +32,39 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
 )
+
+BUILDER_PROPOSAL_SCHEMA_VERSION: Literal[1] = 1
+BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES: int = 1024 * 1024
+
+
+class BuilderProposalPayloadTooLargeError(ValueError):
+    """The serialized Builder proposal exceeds its persistence boundary."""
+
+    def __init__(self, *, byte_size: int, cap_bytes: int) -> None:
+        super().__init__(
+            f"Builder proposal payload is {byte_size} bytes, over the "
+            f"{cap_bytes}-byte cap."
+        )
+        self.byte_size = byte_size
+        self.cap_bytes = cap_bytes
+
+
+def _bounded_builder_proposal_json(
+    payload: FlowPersistedJsonObject,
+) -> bytes:
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    byte_size = len(serialized)
+    if byte_size > BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES:
+        raise BuilderProposalPayloadTooLargeError(
+            byte_size=byte_size,
+            cap_bytes=BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES,
+        )
+    return serialized
 
 
 class SessionStatus(str, enum.Enum):
@@ -204,6 +239,7 @@ class FlowBuilderProposalContent(BaseModel):
 class FlowBuilderProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: Literal[1] = BUILDER_PROPOSAL_SCHEMA_VERSION
     content: FlowBuilderProposalContent
     resource_bindings: tuple[LocalResourceBinding, ...] = Field(default_factory=tuple)
 
@@ -215,8 +251,55 @@ class FlowBuilderProposal(BaseModel):
     def spec_hash(self) -> str:
         return self.spec.spec_hash()
 
+    @classmethod
+    def from_persisted_json(
+        cls,
+        payload: Mapping[str, object],
+    ) -> FlowBuilderProposal:
+        schema_version = payload.get("schema_version")
+        if schema_version is None:
+            raise ValueError("Persisted builder proposal is missing schema_version.")
+        if type(schema_version) is not int or schema_version != (
+            BUILDER_PROPOSAL_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                f"Unsupported builder proposal schema_version: {schema_version!r}."
+            )
+        serialized = _bounded_builder_proposal_json(dict(payload))
+        snapshot = cls.model_validate_json(serialized)
+        canonical_payload = snapshot.model_dump(
+            mode="json",
+            exclude_none=True,
+            round_trip=True,
+        )
+        # Authoring models normalize provider input; persisted snapshots must
+        # already be canonical so hydration never hides stored corruption.
+        if _bounded_builder_proposal_json(canonical_payload) != serialized:
+            raise ValueError(
+                "Persisted builder proposal is not canonical for schema_version "
+                f"{BUILDER_PROPOSAL_SCHEMA_VERSION}."
+            )
+        return snapshot
+
     def storage_json(self) -> FlowPersistedJsonObject:
-        return self.model_dump(mode="json", exclude_none=True, round_trip=True)
+        # JSON-mode round-tripping forces mutated nested model instances back
+        # through validation; a shallow Python validation would trust them.
+        payload = self.model_dump(
+            mode="json",
+            exclude_none=True,
+            round_trip=True,
+            warnings=False,
+        )
+        snapshot = type(self).model_validate_json(
+            _bounded_builder_proposal_json(payload)
+        )
+        validated_payload = snapshot.model_dump(
+            mode="json",
+            exclude_none=True,
+            round_trip=True,
+        )
+        _bounded_builder_proposal_json(validated_payload)
+        return validated_payload
 
 
 class BuilderPlan(BaseModel):
@@ -244,7 +327,10 @@ class BuilderPlan(BaseModel):
 
 
 __all__ = [
+    "BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES",
+    "BUILDER_PROPOSAL_SCHEMA_VERSION",
     "BuilderPlan",
+    "BuilderProposalPayloadTooLargeError",
     "BuilderSession",
     "ConversationMessage",
     "FlowBuilderEditApproval",

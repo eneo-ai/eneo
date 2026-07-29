@@ -28,6 +28,7 @@ class FlowJsonbCorruptionBehavior(StrEnum):
     REJECT_BEFORE_WRITE = "reject_before_write"
     FAIL_RUN_OR_STEP = "fail_run_or_step"
     FAIL_SESSION_LOAD = "fail_session_load"
+    FAIL_PLAN_LOAD = "fail_plan_load"
     KEEP_AUDITABLE_FAILURE = "keep_auditable_failure"
     MARK_EVIDENCE_UNAVAILABLE = "mark_evidence_unavailable"
     NORMALIZE_TO_EMPTY = "normalize_to_empty"
@@ -687,13 +688,19 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         "proposal_json",
         owner_module="eneo.flows.ai_builder.ai_builder_domain_models",
         envelope_name="FlowBuilderProposal",
-        owner_symbols=("FlowBuilderProposal",),
+        owner_symbols=(
+            "FlowBuilderProposal",
+            "FlowBuilderProposal.from_persisted_json",
+            "FlowBuilderProposal.storage_json",
+        ),
         storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
-        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_PLAN_LOAD,
         rationale=(
-            "Builder plans persist one immutable proposal snapshot validated "
-            "through FlowBuilderProposal; spec_hash rejects silent row drift."
+            "Builder plans persist one current-version-only immutable proposal "
+            "snapshot. Writes and reads validate the typed envelope and 1 MiB "
+            "payload cap; invalid stored proposals fail plan hydration, while "
+            "spec_hash rejects silent row drift."
         ),
     ),
 )

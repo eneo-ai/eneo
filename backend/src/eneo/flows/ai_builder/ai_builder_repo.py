@@ -2024,7 +2024,7 @@ def _turn_preparation_baseline(
 def _plan_from_row(row: Any) -> BuilderPlan:
     """Convert a DB row/mapping to a BuilderPlan domain model."""
     data = _plan_row_data(row)
-    proposal = FlowBuilderProposal.model_validate(data["proposal_json"], strict=False)
+    proposal = FlowBuilderProposal.from_persisted_json(data["proposal_json"])
     if proposal.spec_hash != data["spec_hash"]:
         raise ValueError(
             "Persisted builder plan spec_hash does not match proposal_json"

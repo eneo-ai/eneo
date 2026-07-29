@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
 import pytest
+from sqlalchemy import func, select
 
 from eneo.database.tables.flow_tables import BuilderPlans
 from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES,
+    BUILDER_PROPOSAL_SCHEMA_VERSION,
+    BuilderProposalPayloadTooLargeError,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     TargetKind,
@@ -56,6 +61,30 @@ def _make_spec(flow_name: str = "Create plan roundtrip") -> FlowDraftSpecCore:
     )
 
 
+def _proposal_with_serialized_size(byte_size: int) -> FlowBuilderProposal:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(
+            spec=_make_spec(),
+            plan_rationale="",
+        )
+    )
+    empty_payload = proposal.model_dump(
+        mode="json",
+        exclude_none=True,
+        round_trip=True,
+    )
+    empty_size = len(
+        json.dumps(
+            empty_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    assert empty_size < byte_size
+    proposal.content.plan_rationale = "x" * (byte_size - empty_size)
+    return proposal
+
+
 @pytest.mark.asyncio
 async def test_create_plan_roundtrips_proposal_json(
     db_container,
@@ -97,6 +126,12 @@ async def test_create_plan_roundtrips_proposal_json(
     assert plan.session_id == session.id
     assert plan.tenant_id == user.tenant_id
     assert plan.status.value == "proposed"
+    assert set(stored_proposal_json) == {
+        "schema_version",
+        "content",
+        "resource_bindings",
+    }
+    assert stored_proposal_json["schema_version"] == BUILDER_PROPOSAL_SCHEMA_VERSION
     assert stored_proposal_json["content"]["spec"] == expected_stored_spec_json
     assert stored_proposal_json["content"]["assumptions"] == [
         "Runtime input is plain text."
@@ -122,6 +157,55 @@ async def test_create_plan_roundtrips_proposal_json(
     assert "reasoning" not in type(fetched.proposal).model_fields
     assert fetched.proposal.content.plan_rationale == "Direct repository round-trip."
     assert fetched.proposal.content.spec.model_dump(mode="json") == expected_spec_json
+    assert fetched.proposal.schema_version == BUILDER_PROPOSAL_SCHEMA_VERSION
+
+
+@pytest.mark.asyncio
+async def test_create_plan_enforces_proposal_size_before_insert(
+    db_container,
+) -> None:
+    space_id = await _create_space(
+        db_container=db_container,
+        space_name="AI Builder proposal size boundary",
+    )
+    at_cap = _proposal_with_serialized_size(BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES)
+    over_cap = _proposal_with_serialized_size(BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES + 1)
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space_id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        plan = await repo.create_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            proposal=at_cap,
+        )
+        with pytest.raises(BuilderProposalPayloadTooLargeError) as exc:
+            await repo.create_plan(
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+                proposal=over_cap,
+            )
+        plan_count = await container.session().scalar(
+            select(func.count(BuilderPlans.id)).where(
+                BuilderPlans.session_id == session.id,
+                BuilderPlans.tenant_id == user.tenant_id,
+            )
+        )
+        stored_plan = await container.session().get(BuilderPlans, plan.id)
+        assert stored_plan is not None
+        stored_proposal_json = stored_plan.proposal_json
+
+    assert exc.value.byte_size == BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES + 1
+    assert exc.value.cap_bytes == BUILDER_PROPOSAL_PAYLOAD_CAP_BYTES
+    assert plan_count == 1
+    assert stored_proposal_json["schema_version"] == BUILDER_PROPOSAL_SCHEMA_VERSION
 
 
 @pytest.mark.asyncio

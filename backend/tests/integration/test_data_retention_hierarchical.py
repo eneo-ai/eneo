@@ -231,8 +231,9 @@ async def create_builder_session_for_retention(
             tenant_id=tenant_id,
             status=PlanStatus.PROPOSED.value,
             proposal_json={
-                "summary": "retention test proposal",
+                "schema_version": 1,
                 "content": {"spec": {"flow_name": "Retention test flow", "steps": []}},
+                "resource_bindings": [],
             },
             spec_hash="f" * 64,
             created_at=retained_at,
