@@ -364,6 +364,9 @@ async def test_candidate_pin_fit_matches_current_save_and_reports_oversized_revi
                 [assistant_record.id]
             )
         )[assistant_record.id]
+        runtime_policy = await repo.get_or_seed_runtime_policy(
+            tenant_id=admin_user.tenant_id
+        )
         loaded_space = await container.space_repo().get_space_by_assistant(
             assistant_record.id
         )
@@ -392,6 +395,7 @@ async def test_candidate_pin_fit_matches_current_save_and_reports_oversized_revi
             ),
             candidate_binding=current_candidate_binding,
             resolution=resolution,
+            runtime_policy=runtime_policy,
             preflight_adapters=preflight_adapters,
         )
         oversized_verdict = await assistant_service.assert_assistant_fits_candidate_pin(
@@ -404,6 +408,7 @@ async def test_candidate_pin_fit_matches_current_save_and_reports_oversized_revi
             ),
             candidate_binding=candidate_bindings[0],
             resolution=resolution,
+            runtime_policy=runtime_policy,
             preflight_adapters=preflight_adapters,
         )
 

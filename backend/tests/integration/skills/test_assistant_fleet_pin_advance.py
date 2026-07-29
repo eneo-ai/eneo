@@ -7,8 +7,13 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.skill_table import AssistantSkillBindings, Skills
+from eneo.database.tables.skill_table import (
+    AssistantSkillBindings,
+    SkillRuntimePolicies,
+    Skills,
+)
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.main.exceptions import SkillRevisionConflictException
 from eneo.skills.domain.skill import (
     AssistantPinAdvanceOutcome,
     SkillBindingIntent,
@@ -154,6 +159,13 @@ async def _discover(container, *, tenant_id: UUID, seed: _FleetSeed):
     )
     assert next_after is None
     return targets
+
+
+async def _runtime_policy_version(container, *, tenant_id: UUID) -> str:
+    snapshot = await container.skill_repo().get_runtime_policy_snapshot(
+        tenant_id=tenant_id
+    )
+    return snapshot.row_version
 
 
 async def _wait_until_database_lock(db_container, *, pid: int) -> None:
@@ -361,6 +373,10 @@ async def test_discovery_walks_all_old_revision_cohorts_with_a_keyset_cursor(
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
             expected_published_revision_id=revision_three.id,
+            expected_runtime_policy_version=await _runtime_policy_version(
+                container,
+                tenant_id=admin_user.tenant_id,
+            ),
             targets=[*first_page, *second_page],
         )
 
@@ -476,6 +492,10 @@ async def test_advance_preserves_binding_rows_and_only_touches_parent_versions(
             tenant_id=admin_user.tenant_id,
             skill_id=seed.skill_id,
             expected_published_revision_id=seed.published_revision_id,
+            expected_runtime_policy_version=await _runtime_policy_version(
+                container,
+                tenant_id=admin_user.tenant_id,
+            ),
             targets=targets,
         )
 
@@ -621,6 +641,10 @@ async def test_parent_change_after_discovery_skips_only_that_assistant(
             tenant_id=admin_user.tenant_id,
             skill_id=seed.skill_id,
             expected_published_revision_id=seed.published_revision_id,
+            expected_runtime_policy_version=await _runtime_policy_version(
+                writer,
+                tenant_id=admin_user.tenant_id,
+            ),
             targets=targets,
         )
     async with db_container() as verifier:
@@ -641,6 +665,133 @@ async def test_parent_change_after_discovery_skips_only_that_assistant(
     }
     assert revisions[changed_id] == seed.old_revision_id
     assert revisions[targets[1].assistant_id] == seed.published_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_skips_binding_removed_after_discovery(
+    monkeypatch,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+    async with db_container() as writer:
+        service = writer.organization_skill_service()
+        skill_service = service.assistant_service.skill_service
+        original_resolve = skill_service.resolve_assistant_bindings_for_runtime_batch
+        resolution_started = asyncio.Event()
+        binding_changed = asyncio.Event()
+
+        async def resolve_after_binding_change(assistant_ids):
+            resolution_started.set()
+            await binding_changed.wait()
+            return await original_resolve(assistant_ids)
+
+        monkeypatch.setattr(
+            skill_service,
+            "resolve_assistant_bindings_for_runtime_batch",
+            resolve_after_binding_change,
+        )
+        advance_task = asyncio.create_task(
+            service.advance_assistant_bindings(
+                skill_id=seed.skill_id,
+                expected_published_revision_id=seed.published_revision_id,
+                cursor=None,
+            )
+        )
+        await asyncio.wait_for(resolution_started.wait(), timeout=5)
+        removed_id = seed.assistant_ids[0]
+        async with db_container() as editor:
+            await editor.skill_service().replace_assistant_bindings(
+                space_id=seed.space_id,
+                assistant_id=removed_id,
+                intents=[],
+            )
+        binding_changed.set()
+        outcome = await advance_task
+
+        assert {result.assistant_id: result.outcome for result in outcome.results} == {
+            removed_id: AssistantPinAdvanceOutcome.CONCURRENT_CHANGE,
+            seed.assistant_ids[1]: AssistantPinAdvanceOutcome.ADVANCED,
+        }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_rejects_policy_changed_after_validation(
+    monkeypatch,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=1,
+        )
+        await container.skill_repo().get_or_seed_runtime_policy(
+            tenant_id=admin_user.tenant_id
+        )
+
+    async with db_container() as writer:
+        service = writer.organization_skill_service()
+        original_apply = service.repo.advance_assistant_skill_pins
+        validation_finished = asyncio.Event()
+        policy_changed = asyncio.Event()
+
+        async def apply_after_policy_change(**kwargs):
+            validation_finished.set()
+            await policy_changed.wait()
+            return await original_apply(**kwargs)
+
+        monkeypatch.setattr(
+            service.repo,
+            "advance_assistant_skill_pins",
+            apply_after_policy_change,
+        )
+        advance_task = asyncio.create_task(
+            service.advance_assistant_bindings(
+                skill_id=seed.skill_id,
+                expected_published_revision_id=seed.published_revision_id,
+                cursor=None,
+            )
+        )
+        await asyncio.wait_for(validation_finished.wait(), timeout=5)
+        async with db_container() as editor:
+            await editor.session().execute(
+                sa.update(SkillRuntimePolicies)
+                .where(SkillRuntimePolicies.tenant_id == admin_user.tenant_id)
+                .values(context_share_percent=1)
+            )
+        policy_changed.set()
+
+        with pytest.raises(SkillRevisionConflictException):
+            await advance_task
+
+    async with db_container() as verifier:
+        pinned_revision_id = await verifier.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == seed.assistant_ids[0],
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pinned_revision_id == seed.old_revision_id
 
 
 @pytest.mark.integration
@@ -688,6 +839,10 @@ async def test_binding_change_after_discovery_is_not_overwritten(
             tenant_id=admin_user.tenant_id,
             skill_id=seed.skill_id,
             expected_published_revision_id=seed.published_revision_id,
+            expected_runtime_policy_version=await _runtime_policy_version(
+                writer,
+                tenant_id=admin_user.tenant_id,
+            ),
             targets=targets,
         )
     async with db_container() as verifier:
@@ -754,6 +909,10 @@ async def test_in_flight_parent_save_drains_before_xmin_guard(
                 tenant_id=admin_user.tenant_id,
                 skill_id=seed.skill_id,
                 expected_published_revision_id=seed.published_revision_id,
+                expected_runtime_policy_version=await _runtime_policy_version(
+                    writer,
+                    tenant_id=admin_user.tenant_id,
+                ),
                 targets=targets,
             )
 
@@ -809,6 +968,10 @@ async def test_terminal_state_rolls_back_current_chunk_but_keeps_prior_chunk(
             tenant_id=admin_user.tenant_id,
             skill_id=seed.skill_id,
             expected_published_revision_id=seed.published_revision_id,
+            expected_runtime_policy_version=await _runtime_policy_version(
+                container,
+                tenant_id=admin_user.tenant_id,
+            ),
             targets=targets[:1],
         )
         assert first_result[0].outcome is AssistantPinAdvanceOutcome.ADVANCED
@@ -845,6 +1008,10 @@ async def test_terminal_state_rolls_back_current_chunk_but_keeps_prior_chunk(
                 tenant_id=admin_user.tenant_id,
                 skill_id=seed.skill_id,
                 expected_published_revision_id=seed.published_revision_id,
+                expected_runtime_policy_version=await _runtime_policy_version(
+                    writer,
+                    tenant_id=admin_user.tenant_id,
+                ),
                 targets=targets[1:],
             )
     async with db_container() as verifier:
@@ -894,6 +1061,10 @@ async def test_concurrent_chunks_advance_each_assistant_at_most_once(
                 tenant_id=admin_user.tenant_id,
                 skill_id=seed.skill_id,
                 expected_published_revision_id=seed.published_revision_id,
+                expected_runtime_policy_version=await _runtime_policy_version(
+                    writer,
+                    tenant_id=admin_user.tenant_id,
+                ),
                 targets=targets,
             )
 

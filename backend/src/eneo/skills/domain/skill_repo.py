@@ -24,6 +24,7 @@ from eneo.skills.domain.skill import (
     SkillRevisionSummary,
     SkillRuntimePolicy,
     SkillRuntimePolicyChange,
+    SkillRuntimePolicySnapshot,
     SkillStatusChange,
     SkillSummary,
 )
@@ -96,12 +97,21 @@ class SkillRepo(Protocol):
         limit: int,
     ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]: ...
 
+    async def get_assistant_fleet_advance_candidate(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+    ) -> Skill | None: ...
+
     async def advance_assistant_skill_pins(
         self,
         *,
         tenant_id: UUID,
         skill_id: UUID,
         expected_published_revision_id: UUID,
+        expected_runtime_policy_version: str,
         targets: Sequence[AssistantPinAdvanceTarget],
     ) -> list[AssistantPinAdvanceTargetResult]: ...
 
@@ -232,6 +242,10 @@ class SkillRepo(Protocol):
     async def get_or_seed_runtime_policy(
         self, *, tenant_id: UUID, shared_lock: bool = False
     ) -> SkillRuntimePolicy: ...
+
+    async def get_runtime_policy_snapshot(
+        self, *, tenant_id: UUID
+    ) -> SkillRuntimePolicySnapshot: ...
 
     async def update_runtime_policy(
         self,

@@ -740,6 +740,12 @@ class SkillRuntimePolicy:
             )
 
 
+@dataclass(frozen=True)
+class SkillRuntimePolicySnapshot:
+    policy: SkillRuntimePolicy
+    row_version: str
+
+
 # Product-standard seeds. Reset restores these values, not a deployment's
 # migrated SKILL_MAX_BINDINGS environment seed.
 SKILL_RUNTIME_POLICY_DEFAULTS = SkillRuntimePolicy(

@@ -69,6 +69,7 @@ from eneo.skills.domain.skill import (
     SkillRevisionSummary,
     SkillRuntimePolicy,
     SkillRuntimePolicyChange,
+    SkillRuntimePolicySnapshot,
     SkillSlugConflictError,
     SkillStatusChange,
     SkillSummary,
@@ -990,12 +991,47 @@ class SkillRepoImpl:
         next_after = targets[-1].assistant_id if len(rows) > limit and targets else None
         return targets, next_after
 
+    async def get_assistant_fleet_advance_candidate(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+    ) -> Skill | None:
+        """Validate the reviewed fleet target without acquiring write locks."""
+        skill = await self.get_organization_for_tenant(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+        )
+        if skill is None:
+            return None
+        if skill.published_revision_number is None:
+            raise SkillNotPublishedForBindingError
+        published_revision_id = await self.session.scalar(
+            sa.select(SkillRevisions.id).where(
+                SkillRevisions.skill_id == skill_id,
+                SkillRevisions.revision_number == skill.published_revision_number,
+            )
+        )
+        if published_revision_id != expected_published_revision_id:
+            raise SkillRevisionConflictError
+        if (
+            await self.get_active_execution_block(
+                tenant_id=tenant_id,
+                skill_id=skill_id,
+            )
+            is not None
+        ):
+            raise SkillBlockedForBindingError
+        return skill
+
     async def advance_assistant_skill_pins(
         self,
         *,
         tenant_id: UUID,
         skill_id: UUID,
         expected_published_revision_id: UUID,
+        expected_runtime_policy_version: str,
         targets: Sequence[AssistantPinAdvanceTarget],
     ) -> list[AssistantPinAdvanceTargetResult]:
         """Apply one validated fleet chunk under deterministic row locks.
@@ -1006,6 +1042,8 @@ class SkillRepoImpl:
         Skill order. Personal Chat writes share only the Skill lock. A binding
         SET change also rewrites the already-locked parent row in its save
         transaction, so the captured xmin rejects that whole concurrent edit.
+        The runtime-policy FOR SHARE boundary rejects a policy changed after
+        validation before any binding is written.
         """
         ordered_targets = sorted(targets, key=lambda target: target.assistant_id)
         target_ids = [target.assistant_id for target in ordered_targets]
@@ -1045,6 +1083,12 @@ class SkillRepoImpl:
             is not None
         ):
             raise SkillBlockedForBindingError
+        runtime_policy_version = await self._runtime_policy_version(
+            tenant_id=tenant_id,
+            shared_lock=True,
+        )
+        if runtime_policy_version != expected_runtime_policy_version:
+            raise SkillRevisionConflictError
 
         results: list[AssistantPinAdvanceTargetResult] = []
         for target in ordered_targets:
@@ -2587,6 +2631,35 @@ class SkillRepoImpl:
                 tenant_id=tenant_id, for_update=False, shared_lock=shared_lock
             )
         return self._to_runtime_policy(row)
+
+    async def get_runtime_policy_snapshot(
+        self, *, tenant_id: UUID
+    ) -> SkillRuntimePolicySnapshot:
+        async def load() -> tuple[SkillRuntimePolicies, str] | None:
+            result = (
+                await self.session.execute(
+                    sa.select(
+                        SkillRuntimePolicies,
+                        self._RUNTIME_POLICY_ROW_VERSION,
+                    ).where(SkillRuntimePolicies.tenant_id == tenant_id)
+                )
+            ).one_or_none()
+            return (result[0], result[1]) if result is not None else None
+
+        result = await load()
+        if result is None:
+            await self._seed_and_reload_runtime_policy(
+                tenant_id=tenant_id,
+                for_update=False,
+            )
+            result = await load()
+        if result is None:
+            raise RuntimeError("Skill runtime policy seed did not persist")
+        row, row_version = result
+        return SkillRuntimePolicySnapshot(
+            policy=self._to_runtime_policy(row),
+            row_version=row_version,
+        )
 
     async def update_runtime_policy(
         self,

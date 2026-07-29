@@ -71,6 +71,8 @@ class PersonalDefaultValidationInput:
 class AssistantValidationInput:
     assistant: Assistant
     space_is_personal: bool
+    configured_mcp_servers: tuple["MCPServer", ...]
+    has_knowledge: bool
 
 
 def personal_defaults_page_query(
@@ -748,8 +750,25 @@ class AssistantRepository:
         """Load a bounded set of Assistants for save-equivalent fit validation."""
         if not assistant_ids:
             return {}
+        has_knowledge = sa.or_(
+            sa.exists(
+                sa.select(sa.literal(1)).where(
+                    AssistantsGroups.assistant_id == Assistants.id
+                )
+            ),
+            sa.exists(
+                sa.select(sa.literal(1)).where(
+                    AssistantsWebsites.assistant_id == Assistants.id
+                )
+            ),
+            sa.exists(
+                sa.select(sa.literal(1)).where(
+                    AssistantIntegrationKnowledge.assistant_id == Assistants.id
+                )
+            ),
+        ).label("has_knowledge")
         query = (
-            sa.select(Assistants, Spaces.user_id.is_not(None))
+            sa.select(Assistants, Spaces.user_id.is_not(None), has_knowledge)
             .join(Spaces, Spaces.id == Assistants.space_id)
             .where(
                 Spaces.tenant_id == tenant_id,
@@ -785,21 +804,25 @@ class AssistantRepository:
         prompts_by_assistant = {
             assistant_id: prompt for prompt, assistant_id in prompt_rows
         }
-        completion_models = await self.completion_model_repo.all()
+        completion_models = await self.completion_model_repo.all(with_deprecated=True)
         attachments = await self._load_attachments(records)
 
         inputs: dict[UUID, AssistantValidationInput] = {}
-        for record, space_is_personal in rows:
+        for record, space_is_personal, record_has_knowledge in rows:
             assistant = self.factory.create_assistant_from_db(
                 record,
                 attachments=attachments[record.id],
                 completion_model_list=completion_models,
                 prompt=prompts_by_assistant.get(record.id),
             )
-            assistant.mcp_servers = MCPServerMapper.to_entities(record.mcp_servers)
+            configured_mcp_servers = tuple(
+                MCPServerMapper.to_entities(record.mcp_servers)
+            )
             inputs[record.id] = AssistantValidationInput(
                 assistant=assistant,
                 space_is_personal=space_is_personal,
+                configured_mcp_servers=configured_mcp_servers,
+                has_knowledge=record_has_knowledge,
             )
         return inputs
 

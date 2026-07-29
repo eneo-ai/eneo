@@ -45,6 +45,15 @@ def _patch_reserve(monkeypatch, reserve):
     )
 
 
+def _runtime_policy() -> SkillRuntimePolicy:
+    return SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=3,
+    )
+
+
 def _text_attachment():
     return MagicMock(file_type=FileType.TEXT, mimetype="text/plain", size=1)
 
@@ -62,12 +71,7 @@ def _service(file_service=None):
         lambda *, base_instructions, resolution: SkillTurnPlan.create(
             base_instructions=base_instructions,
             resolution=resolution,
-            policy=SkillRuntimePolicy(
-                selective_activation_enabled=True,
-                max_attached_skills=100,
-                context_share_percent=10,
-                max_activations_per_turn=3,
-            ),
+            policy=_runtime_policy(),
         )
     )
     completion_service = AsyncMock()
@@ -210,6 +214,7 @@ async def test_candidate_pin_fit_uses_preloaded_resolution_without_repo_reads(
         ),
         candidate_binding=candidate,
         resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        runtime_policy=_runtime_policy(),
         preflight_adapters={},
     )
 
@@ -252,6 +257,7 @@ async def test_candidate_pin_fit_stages_blocked_always_binding_for_full_save(
             eligible=(target,),
             blocked=(blocked,),
         ),
+        runtime_policy=_runtime_policy(),
         preflight_adapters={},
     )
 
@@ -288,6 +294,7 @@ async def test_candidate_pin_fit_validates_every_on_demand_skill(monkeypatch):
             eligible=(target, on_demand),
             blocked=(),
         ),
+        runtime_policy=_runtime_policy(),
         preflight_adapters={assistant.completion_model.id: MagicMock()},
     )
 
@@ -316,6 +323,7 @@ async def test_candidate_pin_fit_revalidates_unchanged_on_demand_binding(monkeyp
         ),
         candidate_binding=current,
         resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        runtime_policy=_runtime_policy(),
         preflight_adapters={assistant.completion_model.id: MagicMock()},
     )
 
@@ -361,6 +369,7 @@ async def test_candidate_pin_fit_without_model_matches_full_save_behavior(
             eligible=(target, on_demand) if include_on_demand else (target,),
             blocked=(),
         ),
+        runtime_policy=_runtime_policy(),
         preflight_adapters={},
     )
 
@@ -397,6 +406,7 @@ async def test_candidate_pin_fit_reports_context_window_without_rejecting_curren
         ),
         candidate_binding=current,
         resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        runtime_policy=_runtime_policy(),
         preflight_adapters={},
     )
     oversized_verdict = await service.assert_assistant_fits_candidate_pin(
@@ -409,6 +419,7 @@ async def test_candidate_pin_fit_reports_context_window_without_rejecting_curren
         ),
         candidate_binding=oversized,
         resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        runtime_policy=_runtime_policy(),
         preflight_adapters={},
     )
 

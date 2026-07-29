@@ -80,6 +80,7 @@ from eneo.skills.domain.skill import (
     SkillBindingIntent,
     SkillComposition,
     SkillExecutionReference,
+    SkillRuntimePolicy,
     SkillRuntimeResolution,
     SkillTurnEffectiveMode,
     SkillTurnPlan,
@@ -762,6 +763,7 @@ class AssistantService:
         candidate: PersonalChatPinOverride,
         candidate_binding: ResolvedSkillBinding,
         resolution: SkillRuntimeResolution,
+        runtime_policy: SkillRuntimePolicy,
         preflight_adapters: dict[UUID, "CompletionModelAdapter"],
     ) -> AssistantPinAdvanceIncompatibleReason | None:
         """Every fit refusal maps to the single CONTEXT_WINDOW reason for now."""
@@ -794,11 +796,10 @@ class AssistantService:
                 for binding in resolution.blocked
             ),
         )
-        validation_plan = (
-            await self.skill_service.create_turn_plan(
-                base_instructions=assistant.get_prompt_text(),
-                resolution=candidate_resolution,
-            )
+        validation_plan = SkillTurnPlan.create(
+            base_instructions=assistant.get_prompt_text(),
+            resolution=candidate_resolution,
+            policy=runtime_policy,
         ).for_full_save_validation()
         candidate_skill_ids = frozenset(
             binding.binding.skill_id

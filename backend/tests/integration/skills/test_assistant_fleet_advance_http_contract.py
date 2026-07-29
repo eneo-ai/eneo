@@ -5,13 +5,27 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.assistant_table import (
+    AssistantMCPServers,
+    AssistantMCPServerTools,
+    Assistants,
+)
 from eneo.database.tables.audit_log_table import AuditLog
+from eneo.database.tables.mcp_server_table import (
+    MCPServers,
+    MCPServerTools,
+    SpacesMCPServers,
+)
 from eneo.database.tables.skill_table import AssistantSkillBindings
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.main.exceptions import BadRequestException
 from eneo.skills.domain.skill import (
     AssistantFleetAdvanceCursor,
+    SkillActivationMode,
     SkillBindingIntent,
     SkillBindingReference,
+    SkillRuntimePolicy,
 )
 
 
@@ -193,6 +207,114 @@ async def test_zero_target_chunk_completes_without_a_cursor_or_outcomes(
             )
         )
     assert audit_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_empty_pages_still_enforce_skill_lifecycle(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    missing = await client.post(
+        f"/api/v1/skills/organization/{uuid4()}/assistants/advance/",
+        json={"expected_published_revision_id": str(uuid4()), "cursor": None},
+        headers=headers,
+    )
+    assert missing.status_code == 404, missing.text
+
+    created = await client.post(
+        "/api/v1/skills/organization/",
+        json={
+            "slug": f"fleet-empty-{uuid4().hex[:8]}",
+            "display_name": "Fleet empty",
+            "description": "Empty lifecycle contract",
+            "instructions": "Original instructions.",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    skill_id = UUID(created.json()["id"])
+    first_revision_id = UUID(created.json()["current_revision"]["id"])
+
+    unpublished = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(first_revision_id),
+            "cursor": None,
+        },
+        headers=headers,
+    )
+    assert unpublished.status_code == 400, unpublished.text
+    assert unpublished.json()["eneo_error_code"] == 9053
+
+    published = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/publish/",
+        json={"expected_revision_id": str(first_revision_id)},
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    async with db_container() as container:
+        block = await container.skill_repo().block_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill_id,
+            blocked_by_user_id=admin_user.id,
+            reason="Lifecycle guard test",
+        )
+        assert block is not None
+
+    blocked = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(first_revision_id),
+            "cursor": None,
+        },
+        headers=headers,
+    )
+    assert blocked.status_code == 400, blocked.text
+    assert blocked.json()["eneo_error_code"] == 9054
+
+    async with db_container() as container:
+        await container.skill_repo().unblock_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill_id,
+            expected_block_id=block.block.id,
+            unblocked_by_user_id=admin_user.id,
+            reason="Continue lifecycle guard test",
+        )
+        change = await container.skill_repo().create_revision(
+            skill_id=skill_id,
+            display_name="Fleet empty",
+            description="Empty lifecycle contract",
+            instructions="Republished instructions.",
+            content_digest="e" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert change is not None
+        await container.skill_repo().publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill_id,
+            expected_revision_id=change.revision.id,
+        )
+
+    stale_cursor = AssistantFleetAdvanceCursor(
+        skill_id=skill_id,
+        expected_published_revision_id=first_revision_id,
+        run_id=uuid4(),
+        after_assistant_id=uuid4(),
+    )
+    republished = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(first_revision_id),
+            "cursor": stale_cursor.serialize(),
+        },
+        headers=headers,
+    )
+    assert republished.status_code == 409, republished.text
+    assert republished.json()["eneo_error_code"] == 9043
 
 
 @pytest.mark.integration
@@ -568,6 +690,259 @@ async def test_oversized_candidate_skips_only_the_incompatible_assistant(
         )
     assert pins[incompatible_id] == old_revision_id
     assert pins[compatible_id] == published_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_retained_deprecated_model_still_rejects_an_oversized_candidate(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=1,
+        )
+        model_id = await container.session().scalar(
+            sa.select(Assistants.completion_model_id).where(
+                Assistants.id == seed.assistant_ids[0]
+            )
+        )
+        assert model_id is not None
+        await container.session().execute(
+            sa.update(CompletionModels)
+            .where(CompletionModels.id == model_id)
+            .values(is_deprecated=True)
+        )
+        change = await container.skill_repo().create_revision(
+            skill_id=seed.skill_id,
+            display_name="Fleet deprecated model",
+            description="Retained model fit contract",
+            instructions="overflow " * 10_000,
+            content_digest="d" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert change is not None
+        await container.skill_repo().publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=seed.skill_id,
+            expected_revision_id=change.revision.id,
+        )
+        candidate_revision_id = change.revision.id
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(candidate_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 0,
+        "concurrent_change": 0,
+        "incompatible": 1,
+    }
+    assert response.json()["outcomes"][0]["reason"] == "context_window"
+    async with db_container() as container:
+        pin = await container.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == seed.assistant_ids[0],
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pin == seed.old_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_projected_mcp_tool_schema_matches_save_time_candidate_fit(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session,
+            f"fleet-mcp-{uuid4().hex[:8]}",
+            max_input_tokens=8_000,
+        )
+        model.supports_tool_calling = True
+        space = await space_factory(
+            session,
+            f"Fleet MCP {uuid4().hex[:8]}",
+            [model.id],
+        )
+        session.add(SpacesUsers(space_id=space.id, user_id=admin_user.id, role="admin"))
+        assistant = await assistant_factory(
+            session,
+            "Fleet MCP Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        organization = await session.scalar(
+            sa.select(Spaces).where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert organization is not None
+        repo = container.skill_repo()
+        skill = await repo.create(
+            space_id=organization.id,
+            slug=f"fleet-mcp-{uuid4().hex[:8]}",
+            display_name="Fleet MCP",
+            description="Projected MCP fit contract",
+            instructions="Original on-demand instructions.",
+            content_digest="m" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        old_revision = skill.current_revision
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=old_revision.id,
+        )
+        await repo.update_runtime_policy(
+            tenant_id=admin_user.tenant_id,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=100,
+                max_activations_per_turn=10,
+            ),
+        )
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=assistant.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill.id,
+                        skill_revision_id=old_revision.id,
+                    ),
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                )
+            ],
+        )
+        mcp_server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name="Fleet large-schema MCP",
+            description="Projected fleet tools",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=False,
+            tool_definition_max_bytes=4 * 1024 * 1024,
+        )
+        session.add(mcp_server)
+        await session.flush()
+        mcp_tool = MCPServerTools(
+            mcp_server_id=mcp_server.id,
+            name="warehouse_query",
+            title="Warehouse query",
+            description="Query the approved warehouse",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "warehouse field " * 100_000,
+                    }
+                },
+            },
+            is_enabled_by_default=True,
+            requires_approval=False,
+            removed_from_remote=False,
+        )
+        session.add(mcp_tool)
+        await session.flush()
+        session.add_all(
+            [
+                SpacesMCPServers(
+                    space_id=space.id,
+                    mcp_server_id=mcp_server.id,
+                ),
+                AssistantMCPServers(
+                    assistant_id=assistant.id,
+                    mcp_server_id=mcp_server.id,
+                ),
+                AssistantMCPServerTools(
+                    assistant_id=assistant.id,
+                    mcp_server_tool_id=mcp_tool.id,
+                    is_enabled=True,
+                ),
+            ]
+        )
+        change = await repo.create_revision(
+            skill_id=skill.id,
+            display_name="Fleet MCP",
+            description="Projected MCP fit contract",
+            instructions="Candidate on-demand instructions.",
+            content_digest="n" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert change is not None
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=change.revision.id,
+        )
+        skill_id = skill.id
+        assistant_id = assistant.id
+        space_id = space.id
+        candidate_revision_id = change.revision.id
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(candidate_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"]["incompatible"] == 1
+    assert response.json()["outcomes"][0]["reason"] == "context_window"
+
+    async with db_container() as container:
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space_id,
+            assistant_id=assistant_id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill_id,
+                        skill_revision_id=candidate_revision_id,
+                    ),
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                )
+            ],
+        )
+        loaded_space = await container.space_repo().get_space_by_assistant(assistant_id)
+        with pytest.raises(BadRequestException):
+            await container.assistant_service()._validate_attachments_fit(
+                loaded_space.get_assistant(assistant_id),
+                space=loaded_space,
+                validate_all_on_demand_candidates=True,
+            )
 
 
 @pytest.mark.integration

@@ -45,6 +45,7 @@ from eneo.skills.domain.skill import (
 )
 from eneo.skills.domain.skill_repo import SkillRepo
 from eneo.skills.presentation.skill_audit import skill_audit_extra
+from eneo.spaces.space_repo import AssistantMCPServerProjection
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -496,6 +497,19 @@ class OrganizationSkillService:
         ):
             raise BadRequestException("Assistant fleet cursor does not match request")
         run_id = parsed_cursor.run_id if parsed_cursor is not None else uuid4()
+        try:
+            skill = await self.repo.get_assistant_fleet_advance_candidate(
+                tenant_id=self.user.tenant_id,
+                skill_id=skill_id,
+                expected_published_revision_id=expected_published_revision_id,
+            )
+        except SkillRevisionConflictError as error:
+            raise SkillRevisionConflictException(
+                "The Skill's published version changed after you reviewed it. "
+                "Reload the Skill and review again."
+            ) from error
+        if skill is None:
+            raise NotFoundException()
         targets, next_after = await self.repo.list_assistant_pin_advance_targets(
             tenant_id=self.user.tenant_id,
             skill_id=skill_id,
@@ -515,7 +529,9 @@ class OrganizationSkillService:
                 incompatible_count=0,
             )
 
-        skill = await self.get_organization_skill(skill_id=skill_id)
+        runtime_policy_snapshot = await self.repo.get_runtime_policy_snapshot(
+            tenant_id=self.user.tenant_id
+        )
         assistant_ids = [target.assistant_id for target in targets]
         validation_inputs = await self.assistant_service.repo.get_by_ids_for_validation(
             tenant_id=self.user.tenant_id,
@@ -550,6 +566,23 @@ class OrganizationSkillService:
         preflight_adapters = await self.assistant_service.completion_service.load_skill_activation_preflight_adapters(
             [cast("AICompletionModel", model) for model in models.values()]
         )
+        mcp_projections = [
+            AssistantMCPServerProjection(
+                space_id=validation_input.assistant.space_id,
+                assistant_id=assistant_id,
+                mcp_servers=validation_input.configured_mcp_servers,
+            )
+            for assistant_id, validation_input in validation_inputs.items()
+            if validation_input.configured_mcp_servers
+            and not validation_input.has_knowledge
+        ]
+        projected_mcp_servers = (
+            await self.assistant_service.space_repo.project_assistants_mcp_servers(
+                mcp_projections
+            )
+            if mcp_projections
+            else {}
+        )
 
         validation_results: list[AssistantPinAdvanceTargetResult] = []
         write_targets: list[AssistantPinAdvanceTarget] = []
@@ -563,6 +596,24 @@ class OrganizationSkillService:
                     )
                 )
                 continue
+            resolution = resolutions[target.assistant_id]
+            source_binding_present = any(
+                binding.skill_id == skill_id
+                and binding.skill_revision_id == target.from_revision_id
+                for binding in (*resolution.eligible, *resolution.blocked)
+            )
+            if not source_binding_present:
+                validation_results.append(
+                    AssistantPinAdvanceTargetResult(
+                        assistant_id=target.assistant_id,
+                        outcome=AssistantPinAdvanceOutcome.CONCURRENT_CHANGE,
+                    )
+                )
+                continue
+            validation_input.assistant.mcp_servers = projected_mcp_servers.get(
+                target.assistant_id,
+                [],
+            )
             incompatible_reason = (
                 await self.assistant_service.assert_assistant_fits_candidate_pin(
                     assistant=validation_input.assistant,
@@ -573,7 +624,8 @@ class OrganizationSkillService:
                         to_revision_id=expected_published_revision_id,
                     ),
                     candidate_binding=candidate_binding,
-                    resolution=resolutions[target.assistant_id],
+                    resolution=resolution,
+                    runtime_policy=runtime_policy_snapshot.policy,
                     preflight_adapters=preflight_adapters,
                 )
             )
@@ -593,6 +645,7 @@ class OrganizationSkillService:
                 tenant_id=self.user.tenant_id,
                 skill_id=skill_id,
                 expected_published_revision_id=expected_published_revision_id,
+                expected_runtime_policy_version=runtime_policy_snapshot.row_version,
                 targets=write_targets,
             )
         except SkillRevisionConflictError as error:
