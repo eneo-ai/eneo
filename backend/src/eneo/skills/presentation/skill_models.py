@@ -9,6 +9,8 @@ from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
     MAX_SKILL_SLUG_LENGTH,
+    AssistantPinAdvanceIncompatibleReason,
+    AssistantPinAdvanceOutcome,
     PersonalChatPinAdvanceOutcome,
     SkillActivationFallbackReason,
     SkillActivationMode,
@@ -62,6 +64,30 @@ class PersonalChatPinAdvancePublic(BaseModel):
     ]
     from_revision_number: int
     to_revision_number: int
+
+
+class AssistantFleetAdvanceRequest(BaseModel):
+    expected_published_revision_id: UUID
+    cursor: str | None = None
+
+
+class AssistantFleetAdvanceCountsPublic(BaseModel):
+    advanced: int
+    concurrent_change: int
+    incompatible: int
+
+
+class AssistantPinAdvanceOutcomePublic(BaseModel):
+    assistant_id: UUID
+    outcome: AssistantPinAdvanceOutcome
+    reason: AssistantPinAdvanceIncompatibleReason | None = None
+
+
+class AssistantFleetAdvancePublic(BaseModel):
+    run_id: UUID
+    next_cursor: str | None
+    counts: AssistantFleetAdvanceCountsPublic
+    outcomes: list[AssistantPinAdvanceOutcomePublic] = Field(max_length=100)
 
 
 class SkillRevisionRestoreRequest(BaseModel):

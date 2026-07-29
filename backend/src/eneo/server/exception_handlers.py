@@ -160,7 +160,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ),
     SkillNotPublishedForBindingError: (
         400,
-        "Personal Chat can only use published organisation Skill versions",
+        "Bindings can only move to published organisation Skill versions",
         ErrorCodes.SKILL_NOT_PUBLISHED_FOR_BINDING,
     ),
     SkillBlockedForBindingError: (

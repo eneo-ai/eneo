@@ -81,6 +81,7 @@ def _service(*, organization, permissions, repo=None):
         space_service=space_service,
         # unsafe: the real method name starts with assert_, which mock guards.
         assistant_service=AsyncMock(unsafe=True),
+        audit_service=AsyncMock(),
     )
 
 

@@ -21,6 +21,10 @@ from eneo.skills.presentation.skill_audit import (
     skill_audit_extra,
 )
 from eneo.skills.presentation.skill_models import (
+    AssistantFleetAdvanceCountsPublic,
+    AssistantFleetAdvancePublic,
+    AssistantFleetAdvanceRequest,
+    AssistantPinAdvanceOutcomePublic,
     OrganizationSkillPublic,
     OrganizationSkillSummaryPagePublic,
     PersonalChatPinAdvancePublic,
@@ -470,6 +474,44 @@ async def advance_personal_chat_binding(
         outcome=advance.outcome,
         from_revision_number=advance.from_revision_number,
         to_revision_number=advance.to_revision_number,
+    )
+
+
+@router.post(
+    "/organization/{skill_id}/assistants/advance/",
+    response_model=AssistantFleetAdvancePublic,
+    description=(
+        "Move one bounded chunk of Assistant bindings to the reviewed "
+        "published Skill revision."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def advance_assistant_bindings(
+    skill_id: UUID,
+    payload: AssistantFleetAdvanceRequest,
+    container: _ContainerWithUser,
+) -> AssistantFleetAdvancePublic:
+    outcome = await container.organization_skill_service().advance_assistant_bindings(
+        skill_id=skill_id,
+        expected_published_revision_id=payload.expected_published_revision_id,
+        cursor=payload.cursor,
+    )
+    return AssistantFleetAdvancePublic(
+        run_id=outcome.run_id,
+        next_cursor=outcome.cursor.serialize() if outcome.cursor is not None else None,
+        counts=AssistantFleetAdvanceCountsPublic(
+            advanced=outcome.advanced_count,
+            concurrent_change=outcome.concurrent_change_count,
+            incompatible=outcome.incompatible_count,
+        ),
+        outcomes=[
+            AssistantPinAdvanceOutcomePublic(
+                assistant_id=result.assistant_id,
+                outcome=result.outcome,
+                reason=result.reason,
+            )
+            for result in outcome.results
+        ],
     )
 
 

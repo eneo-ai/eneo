@@ -67,6 +67,12 @@ class PersonalDefaultValidationInput:
     has_knowledge: bool
 
 
+@dataclass(frozen=True)
+class AssistantValidationInput:
+    assistant: Assistant
+    space_is_personal: bool
+
+
 def personal_defaults_page_query(
     *,
     tenant_id: UUID,
@@ -732,6 +738,70 @@ class AssistantRepository:
             items=items,
             next_after=(last.created_at, last.id) if has_more else None,
         )
+
+    async def get_by_ids_for_validation(
+        self,
+        *,
+        tenant_id: UUID,
+        assistant_ids: Sequence[UUID],
+    ) -> dict[UUID, AssistantValidationInput]:
+        """Load a bounded set of Assistants for save-equivalent fit validation."""
+        if not assistant_ids:
+            return {}
+        query = (
+            sa.select(Assistants, Spaces.user_id.is_not(None))
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(
+                Spaces.tenant_id == tenant_id,
+                Assistants.id.in_(assistant_ids),
+            )
+            .options(
+                selectinload(Assistants.user).selectinload(Users.tenant),
+                selectinload(Assistants.user).selectinload(Users.roles),
+                selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
+                selectinload(Assistants.template).selectinload(
+                    AssistantTemplates.completion_model
+                ),
+                selectinload(Assistants.mcp_servers),
+            )
+        )
+        rows = list((await self.session.execute(query)).all())
+        records = [row[0] for row in rows]
+        if not records:
+            return {}
+        prompt_rows = (
+            await self.session.execute(
+                sa.select(Prompts, PromptsAssistants.assistant_id)
+                .join(PromptsAssistants)
+                .where(
+                    PromptsAssistants.assistant_id.in_(
+                        [record.id for record in records]
+                    ),
+                    PromptsAssistants.is_selected,
+                )
+                .options(selectinload(Prompts.user))
+            )
+        ).all()
+        prompts_by_assistant = {
+            assistant_id: prompt for prompt, assistant_id in prompt_rows
+        }
+        completion_models = await self.completion_model_repo.all()
+        attachments = await self._load_attachments(records)
+
+        inputs: dict[UUID, AssistantValidationInput] = {}
+        for record, space_is_personal in rows:
+            assistant = self.factory.create_assistant_from_db(
+                record,
+                attachments=attachments[record.id],
+                completion_model_list=completion_models,
+                prompt=prompts_by_assistant.get(record.id),
+            )
+            assistant.mcp_servers = MCPServerMapper.to_entities(record.mcp_servers)
+            inputs[record.id] = AssistantValidationInput(
+                assistant=assistant,
+                space_is_personal=space_is_personal,
+            )
+        return inputs
 
     async def update(
         self,

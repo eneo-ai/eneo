@@ -1281,6 +1281,7 @@ class Container(containers.DeclarativeContainer):
         repo=skill_repo,
         space_service=space_service,
         assistant_service=assistant_service,
+        audit_service=audit_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,

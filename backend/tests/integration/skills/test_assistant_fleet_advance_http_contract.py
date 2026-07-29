@@ -1,0 +1,636 @@
+from dataclasses import dataclass
+from uuid import UUID, uuid4
+
+import pytest
+import sqlalchemy as sa
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.database.tables.audit_log_table import AuditLog
+from eneo.database.tables.skill_table import AssistantSkillBindings
+from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.skills.domain.skill import (
+    AssistantFleetAdvanceCursor,
+    SkillBindingIntent,
+    SkillBindingReference,
+)
+
+
+@pytest.fixture
+async def admin_token(db_container, patch_auth_service_jwt, admin_user):
+    async with db_container() as container:
+        return container.auth_service().create_access_token_for_user(admin_user)
+
+
+@pytest.fixture
+async def regular_token(
+    db_container,
+    patch_auth_service_jwt,
+    user_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        regular_user = await user_factory(
+            container.session(),
+            tenant_id=admin_user.tenant_id,
+        )
+        return container.auth_service().create_access_token_for_user(regular_user)
+
+
+async def _create_published_skill(client, *, headers):
+    created = await client.post(
+        "/api/v1/skills/organization/",
+        json={
+            "slug": f"fleet-http-{uuid4().hex[:8]}",
+            "display_name": "Fleet HTTP",
+            "description": "Fleet advance HTTP contract",
+            "instructions": "Use the reviewed instructions.",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    skill = created.json()
+    published = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/publish/",
+        json={"expected_revision_id": skill["current_revision"]["id"]},
+        headers=headers,
+    )
+    assert published.status_code == 200, published.text
+    return skill
+
+
+@dataclass(frozen=True)
+class _FleetSeed:
+    skill_id: UUID
+    old_revision_id: UUID
+    published_revision_id: UUID
+    assistant_ids: tuple[UUID, ...]
+
+
+async def _seed_behind_fleet(
+    container,
+    *,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    size: int = 2,
+) -> _FleetSeed:
+    session = container.session()
+    model = await completion_model_factory(
+        session,
+        f"fleet-http-{uuid4().hex[:8]}",
+        max_input_tokens=8_000,
+    )
+    space = await space_factory(
+        session,
+        f"Fleet HTTP {uuid4().hex[:8]}",
+        [model.id],
+    )
+    session.add(SpacesUsers(space_id=space.id, user_id=admin_user.id, role="admin"))
+    assistants = [
+        await assistant_factory(
+            session,
+            f"Fleet HTTP Assistant {index}",
+            model.id,
+            space_id=space.id,
+        )
+        for index in range(size)
+    ]
+    organization = await session.scalar(
+        sa.select(Spaces).where(
+            Spaces.tenant_id == admin_user.tenant_id,
+            Spaces.user_id.is_(None),
+            Spaces.tenant_space_id.is_(None),
+        )
+    )
+    assert organization is not None
+    repo = container.skill_repo()
+    skill = await repo.create(
+        space_id=organization.id,
+        slug=f"fleet-http-{uuid4().hex[:8]}",
+        display_name="Fleet HTTP",
+        description="Fleet advance HTTP contract",
+        instructions="Use the original instructions.",
+        content_digest="1" * 64,
+        created_by_user_id=admin_user.id,
+    )
+    old_revision = skill.current_revision
+    await repo.publish_organization(
+        tenant_id=admin_user.tenant_id,
+        skill_id=skill.id,
+        expected_revision_id=old_revision.id,
+    )
+    for assistant in assistants:
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=assistant.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill.id,
+                        skill_revision_id=old_revision.id,
+                    )
+                )
+            ],
+        )
+    change = await repo.create_revision(
+        skill_id=skill.id,
+        display_name="Fleet HTTP",
+        description="Fleet advance HTTP contract",
+        instructions="Use the reviewed instructions.",
+        content_digest="2" * 64,
+        created_by_user_id=admin_user.id,
+    )
+    assert change is not None
+    await repo.publish_organization(
+        tenant_id=admin_user.tenant_id,
+        skill_id=skill.id,
+        expected_revision_id=change.revision.id,
+    )
+    return _FleetSeed(
+        skill_id=skill.id,
+        old_revision_id=old_revision.id,
+        published_revision_id=change.revision.id,
+        assistant_ids=tuple(assistant.id for assistant in assistants),
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_zero_target_chunk_completes_without_a_cursor_or_outcomes(
+    client,
+    admin_token,
+    db_container,
+):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    skill = await _create_published_skill(client, headers=headers)
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/assistants/advance/",
+        json={
+            "expected_published_revision_id": skill["current_revision"]["id"],
+            "cursor": None,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["next_cursor"] is None
+    assert payload["counts"] == {
+        "advanced": 0,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    assert payload["outcomes"] == []
+    async with db_container() as container:
+        audit_count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.entity_id == UUID(skill["id"]),
+                AuditLog.action == ActionType.SKILL_BINDINGS_ADVANCED.value,
+            )
+        )
+    assert audit_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_endpoint_is_admin_only(client, regular_token):
+    response = await client.post(
+        f"/api/v1/skills/organization/{uuid4()}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(uuid4()),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {regular_token}"},
+    )
+
+    assert response.status_code == 403, response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cursor_must_be_well_formed_and_match_the_request(
+    client,
+    admin_token,
+):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    skill = await _create_published_skill(client, headers=headers)
+    skill_id = UUID(skill["id"])
+    revision_id = UUID(skill["current_revision"]["id"])
+
+    malformed = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(revision_id),
+            "cursor": "not-a-cursor",
+        },
+        headers=headers,
+    )
+    assert malformed.status_code == 400, malformed.text
+
+    mismatched = AssistantFleetAdvanceCursor(
+        skill_id=uuid4(),
+        expected_published_revision_id=revision_id,
+        run_id=uuid4(),
+        after_assistant_id=None,
+    )
+    wrong_skill = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(revision_id),
+            "cursor": mismatched.serialize(),
+        },
+        headers=headers,
+    )
+    assert wrong_skill.status_code == 400, wrong_skill.text
+
+    mismatched_revision = AssistantFleetAdvanceCursor(
+        skill_id=skill_id,
+        expected_published_revision_id=uuid4(),
+        run_id=uuid4(),
+        after_assistant_id=None,
+    )
+    wrong_revision = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(revision_id),
+            "cursor": mismatched_revision.serialize(),
+        },
+        headers=headers,
+    )
+    assert wrong_revision.status_code == 400, wrong_revision.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_chunk_advances_behind_assistants_and_writes_one_atomic_audit_receipt(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.published_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["next_cursor"] is None
+    assert payload["counts"] == {
+        "advanced": 2,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    assert payload["outcomes"] == [
+        {
+            "assistant_id": str(assistant_id),
+            "outcome": "advanced",
+            "reason": None,
+        }
+        for assistant_id in sorted(seed.assistant_ids)
+    ]
+
+    async with db_container() as container:
+        pins = list(
+            await container.session().scalars(
+                sa.select(AssistantSkillBindings.skill_revision_id)
+                .where(
+                    AssistantSkillBindings.assistant_id.in_(seed.assistant_ids),
+                    AssistantSkillBindings.skill_id == seed.skill_id,
+                )
+                .order_by(AssistantSkillBindings.assistant_id)
+            )
+        )
+        audit_metadata = list(
+            await container.session().scalars(
+                sa.select(AuditLog.log_metadata).where(
+                    AuditLog.entity_id == seed.skill_id,
+                    AuditLog.action == ActionType.SKILL_BINDINGS_ADVANCED.value,
+                )
+            )
+        )
+    assert pins == [seed.published_revision_id, seed.published_revision_id]
+    assert len(audit_metadata) == 1
+    metadata = audit_metadata[0]
+    assert metadata["changes"] == {
+        "advanced": 2,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    assert metadata["extra"]["surface"] == "assistant"
+    assert metadata["extra"]["run_id"] == payload["run_id"]
+    assert "instructions" not in str(metadata)
+
+
+@pytest.mark.parametrize(
+    ("terminal_state", "expected_code"),
+    [
+        ("unpublished", 9053),
+        ("republished", 9043),
+        ("blocked", 9054),
+    ],
+)
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_terminal_refusals_keep_the_pin_and_write_no_audit(
+    terminal_state,
+    expected_code,
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=1,
+        )
+    async with db_container() as container:
+        repo = container.skill_repo()
+        if terminal_state == "unpublished":
+            await repo.unpublish_organization(
+                tenant_id=admin_user.tenant_id,
+                skill_id=seed.skill_id,
+            )
+        elif terminal_state == "republished":
+            change = await repo.create_revision(
+                skill_id=seed.skill_id,
+                display_name="Fleet HTTP",
+                description="A third published revision",
+                instructions="Use a third set of instructions.",
+                content_digest="3" * 64,
+                created_by_user_id=admin_user.id,
+            )
+            assert change is not None
+            await repo.publish_organization(
+                tenant_id=admin_user.tenant_id,
+                skill_id=seed.skill_id,
+                expected_revision_id=change.revision.id,
+            )
+        else:
+            block = await repo.block_organization_skill(
+                tenant_id=admin_user.tenant_id,
+                skill_id=seed.skill_id,
+                blocked_by_user_id=admin_user.id,
+                reason="Confirmed unsafe instructions",
+            )
+            assert block is not None
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.published_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code in (400, 409), response.text
+    assert response.json()["eneo_error_code"] == expected_code
+    async with db_container() as container:
+        pin = await container.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == seed.assistant_ids[0],
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+        audit_count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.entity_id == seed.skill_id,
+                AuditLog.action == ActionType.SKILL_BINDINGS_ADVANCED.value,
+            )
+        )
+    assert pin == seed.old_revision_id
+    assert audit_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_oversized_candidate_skips_only_the_incompatible_assistant(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        small_model = await completion_model_factory(
+            session,
+            f"fleet-small-{uuid4().hex[:8]}",
+            max_input_tokens=1_000,
+        )
+        large_model = await completion_model_factory(
+            session,
+            f"fleet-large-{uuid4().hex[:8]}",
+            max_input_tokens=100_000,
+        )
+        space = await space_factory(
+            session,
+            f"Fleet fit {uuid4().hex[:8]}",
+            [small_model.id, large_model.id],
+        )
+        session.add(SpacesUsers(space_id=space.id, user_id=admin_user.id, role="admin"))
+        incompatible = await assistant_factory(
+            session,
+            "Fleet small context",
+            small_model.id,
+            space_id=space.id,
+        )
+        compatible = await assistant_factory(
+            session,
+            "Fleet large context",
+            large_model.id,
+            space_id=space.id,
+        )
+        organization = await session.scalar(
+            sa.select(Spaces).where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert organization is not None
+        repo = container.skill_repo()
+        skill = await repo.create(
+            space_id=organization.id,
+            slug=f"fleet-fit-{uuid4().hex[:8]}",
+            display_name="Fleet fit",
+            description="Fleet candidate fit",
+            instructions="Small original instructions.",
+            content_digest="a" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        old_revision = skill.current_revision
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=old_revision.id,
+        )
+        for assistant in (incompatible, compatible):
+            await container.skill_service().replace_assistant_bindings(
+                space_id=space.id,
+                assistant_id=assistant.id,
+                intents=[
+                    SkillBindingIntent(
+                        reference=SkillBindingReference(
+                            skill_id=skill.id,
+                            skill_revision_id=old_revision.id,
+                        )
+                    )
+                ],
+            )
+        change = await repo.create_revision(
+            skill_id=skill.id,
+            display_name="Fleet fit",
+            description="Fleet candidate fit",
+            instructions="overflow " * 10_000,
+            content_digest="b" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert change is not None
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=change.revision.id,
+        )
+        skill_id = skill.id
+        published_revision_id = change.revision.id
+        old_revision_id = old_revision.id
+        incompatible_id = incompatible.id
+        compatible_id = compatible.id
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(published_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["counts"] == {
+        "advanced": 1,
+        "concurrent_change": 0,
+        "incompatible": 1,
+    }
+    outcomes = {item["assistant_id"]: item for item in payload["outcomes"]}
+    assert outcomes[str(incompatible_id)] == {
+        "assistant_id": str(incompatible_id),
+        "outcome": "incompatible",
+        "reason": "context_window",
+    }
+    assert outcomes[str(compatible_id)]["outcome"] == "advanced"
+
+    async with db_container() as container:
+        pins = dict(
+            (
+                await container.session().execute(
+                    sa.select(
+                        AssistantSkillBindings.assistant_id,
+                        AssistantSkillBindings.skill_revision_id,
+                    ).where(AssistantSkillBindings.skill_id == skill_id)
+                )
+            ).all()
+        )
+    assert pins[incompatible_id] == old_revision_id
+    assert pins[compatible_id] == published_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cursor_drives_a_fleet_larger_than_one_chunk_to_completion(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=101,
+        )
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    first = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.published_revision_id),
+            "cursor": None,
+        },
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+    first_payload = first.json()
+    assert first_payload["counts"]["advanced"] == 100
+    assert len(first_payload["outcomes"]) == 100
+    assert first_payload["next_cursor"] is not None
+
+    second = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.published_revision_id),
+            "cursor": first_payload["next_cursor"],
+        },
+        headers=headers,
+    )
+    assert second.status_code == 200, second.text
+    second_payload = second.json()
+    assert second_payload["run_id"] == first_payload["run_id"]
+    assert second_payload["counts"] == {
+        "advanced": 1,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    assert second_payload["next_cursor"] is None
+
+    async with db_container() as container:
+        advanced_count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(AssistantSkillBindings)
+            .where(
+                AssistantSkillBindings.skill_id == seed.skill_id,
+                AssistantSkillBindings.skill_revision_id == seed.published_revision_id,
+            )
+        )
+    assert advanced_count == 101
