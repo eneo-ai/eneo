@@ -41,9 +41,9 @@ function evidenceWithCorruptPassageAggregates(
             passages_omitted: 0,
             passage_bytes_omitted: 0,
             attempts_with_omitted_passages: 0,
-            attempts_not_loaded: 2,
+            attempts_not_loaded: countTruncated ? 500 : 2,
             corrupt_passage_aggregates: 2,
-            current_attempts_not_loaded: 2,
+            current_attempts_not_loaded: countTruncated ? 2 : 1,
             current_step_orders_not_loaded: [3],
             count_truncated: countTruncated
           }
@@ -99,7 +99,7 @@ describe("FlowRunEvidence", () => {
     });
 
     expect(
-      await screen.findByText(m.flow_run_knowledge_view_attempts_not_loaded({ count: "≥2" }))
+      await screen.findByText(m.flow_run_knowledge_view_attempts_not_loaded({ count: "≥500" }))
     ).toBeTruthy();
     expect(
       screen.getByText(m.flow_run_knowledge_view_corrupt_passage_aggregates({ count: "≥2" }))
@@ -112,6 +112,7 @@ describe("FlowRunEvidence", () => {
         })
       )
     ).toBeTruthy();
+    expect(screen.getByText(/Bland de kända berörda stegen finns 3/)).toBeTruthy();
   });
 
   it("renders exact attempt-derived counts without a lower-bound marker", async () => {
@@ -131,7 +132,7 @@ describe("FlowRunEvidence", () => {
     expect(
       screen.getByText(
         m.flow_run_knowledge_view_current_attempts_not_loaded({
-          count: "2",
+          count: "1",
           steps: "3"
         })
       )

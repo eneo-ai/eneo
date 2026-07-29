@@ -1315,20 +1315,22 @@ async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> N
     service, run = _service_with_attempts(user=user, attempts_bytes=[100])
     service.flow_run_repo.measure_step_attempt_provenance.return_value = (
         StepAttemptProvenanceSize(
-            attempt_count=8,
+            attempt_count=501,
             stored_provenance_bytes=RUN_VIEW_MAX_LOADED_LOGICAL_BYTES + 1,
             recorded_passage_bytes=0,
         )
     )
-    # The narrowed statement returns one admitted attempt out of eight — the
-    # totals travel with the rows so all counts describe one snapshot.
+    # The narrowed statement returns one admitted attempt plus a truncation
+    # sentinel. The lower-bound totals travel with the rows so all counts
+    # describe one snapshot.
     page = service.flow_run_repo.list_step_attempts.return_value
     service.flow_run_repo.list_step_attempts.return_value = StepAttemptPage(
         attempts=page.attempts,
-        total_count=8,
+        total_count=501,
         current_total=2,
         current_admitted=1,
         count_truncated=True,
+        current_step_orders_not_loaded=(2,),
     )
 
     bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
@@ -1338,11 +1340,12 @@ async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> N
     assert call_kwargs["logical_byte_budget"] == RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
     assert call_kwargs["passage_byte_budget"] == RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
     omission = bundle.debug_export["run"]["summary"]["knowledge_evidence_view"]
-    assert omission["attempts_not_loaded"] == 7
+    assert omission["attempts_not_loaded"] == 500
     assert omission["count_truncated"] is True
     # One of the two current attempts did not fit: the response says so
     # instead of letting that step read as having no retrieval evidence.
     assert omission["current_attempts_not_loaded"] == 1
+    assert omission["current_step_orders_not_loaded"] == [2]
 
 
 async def test_view_reports_corrupt_passage_aggregates(user) -> None:

@@ -33,7 +33,8 @@ _RESULT_COLUMNS = ("flow_run_id", "step_order")
 
 class _IndexState(NamedTuple):
     table: str
-    columns: tuple[str, ...]
+    key_definitions: tuple[str, ...]
+    key_options: tuple[int, ...]
     access_method: str
     unique: bool
     valid: bool
@@ -51,7 +52,15 @@ def _index_state(index: str) -> _IndexState | None:
                 """
                 SELECT
                     table_row.relname,
-                    array_agg(attribute_row.attname ORDER BY index_key.ordinality),
+                    array_agg(
+                        pg_get_indexdef(
+                            index_metadata.indexrelid,
+                            key_position.position,
+                            true
+                        )
+                        ORDER BY key_position.position
+                    ),
+                    index_metadata.indoption::smallint[],
                     access_method.amname,
                     index_metadata.indisunique,
                     index_metadata.indisvalid,
@@ -66,16 +75,16 @@ def _index_state(index: str) -> _IndexState | None:
                   ON access_method.oid = index_row.relam
                 JOIN pg_class AS table_row
                   ON table_row.oid = index_metadata.indrelid
-                JOIN unnest(index_metadata.indkey)
-                  WITH ORDINALITY AS index_key(attnum, ordinality)
+                JOIN LATERAL generate_series(
+                    1,
+                    index_metadata.indnkeyatts
+                ) AS key_position(position)
                   ON true
-                JOIN pg_attribute AS attribute_row
-                  ON attribute_row.attrelid = table_row.oid
-                 AND attribute_row.attnum = index_key.attnum
                 WHERE index_row.relnamespace = current_schema()::regnamespace
                   AND index_row.relname = :index_name
                 GROUP BY
                     table_row.relname,
+                    index_metadata.indoption,
                     access_method.amname,
                     index_metadata.indisunique,
                     index_metadata.indisvalid,
@@ -93,14 +102,15 @@ def _index_state(index: str) -> _IndexState | None:
         return None
     return _IndexState(
         table=str(row[0]),
-        columns=tuple(row[1]),
-        access_method=str(row[2]),
-        unique=bool(row[3]),
-        valid=bool(row[4]),
-        ready=bool(row[5]),
-        live=bool(row[6]),
-        partial=bool(row[7]),
-        expression=bool(row[8]),
+        key_definitions=tuple(str(value) for value in row[1]),
+        key_options=tuple(int(value) for value in row[2]),
+        access_method=str(row[3]),
+        unique=bool(row[4]),
+        valid=bool(row[5]),
+        ready=bool(row[6]),
+        live=bool(row[7]),
+        partial=bool(row[8]),
+        expression=bool(row[9]),
     )
 
 
@@ -117,7 +127,8 @@ def _create_or_verify_index(
 
     expected = _IndexState(
         table=table,
-        columns=columns,
+        key_definitions=columns,
+        key_options=tuple(0 for _ in columns),
         access_method="btree",
         unique=False,
         valid=True,

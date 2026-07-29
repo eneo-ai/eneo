@@ -73,7 +73,7 @@ def _index_metadata(
     *,
     table_name: str,
     index_name: str,
-) -> tuple[bool, bool, bool, bool, str, tuple[str, ...]] | None:
+) -> tuple[bool, bool, bool, bool, str, tuple[str, ...], tuple[int, ...]] | None:
     with conn.cursor() as cursor:
         cursor.execute(
             """
@@ -83,7 +83,15 @@ def _index_metadata(
                 index_metadata.indisunique,
                 index_metadata.indpred IS NULL,
                 access_method.amname,
-                array_agg(attribute_row.attname ORDER BY index_key.ordinality)
+                array_agg(
+                    pg_get_indexdef(
+                        index_metadata.indexrelid,
+                        key_position.position,
+                        true
+                    )
+                    ORDER BY key_position.position
+                ),
+                index_metadata.indoption::smallint[]
             FROM pg_class AS index_row
             JOIN pg_namespace AS namespace_row
               ON namespace_row.oid = index_row.relnamespace
@@ -95,12 +103,11 @@ def _index_metadata(
               ON table_namespace_row.oid = table_row.relnamespace
             JOIN pg_am AS access_method
               ON access_method.oid = index_row.relam
-            JOIN unnest(index_metadata.indkey)
-              WITH ORDINALITY AS index_key(attnum, ordinality)
+            JOIN LATERAL generate_series(
+                1,
+                index_metadata.indnkeyatts
+            ) AS key_position(position)
               ON true
-            JOIN pg_attribute AS attribute_row
-              ON attribute_row.attrelid = table_row.oid
-             AND attribute_row.attnum = index_key.attnum
             WHERE namespace_row.nspname = 'public'
               AND table_namespace_row.nspname = 'public'
               AND table_row.relname = %s
@@ -110,6 +117,7 @@ def _index_metadata(
                 index_metadata.indisready,
                 index_metadata.indisunique,
                 index_metadata.indpred,
+                index_metadata.indoption,
                 access_method.amname
             """,
             (table_name, index_name),
@@ -117,7 +125,15 @@ def _index_metadata(
         row = cursor.fetchone()
     if row is None:
         return None
-    return row[0], row[1], row[2], row[3], row[4], tuple(row[5])
+    return (
+        row[0],
+        row[1],
+        row[2],
+        row[3],
+        row[4],
+        tuple(row[5]),
+        tuple(row[6]),
+    )
 
 
 def _assert_indexes_present(conn: PsycopgConnection) -> None:
@@ -126,7 +142,7 @@ def _assert_indexes_present(conn: PsycopgConnection) -> None:
             conn,
             table_name=table_name,
             index_name=index_name,
-        ) == (True, True, False, True, "btree", columns)
+        ) == (True, True, False, True, "btree", columns, (0,) * len(columns))
 
 
 def _assert_indexes_absent(conn: PsycopgConnection) -> None:
@@ -210,7 +226,48 @@ def test_upgrade_rejects_a_mismatched_named_index(
         True,
         "btree",
         ("flow_run_id", "attempt_no"),
+        (0, 0),
     )
+    assert (
+        _index_metadata(
+            conn,
+            table_name="flow_step_results",
+            index_name="ix_flow_step_results_run_step_order",
+        )
+        is None
+    )
+
+
+def test_upgrade_rejects_a_mixed_direction_attempt_index(
+    fresh_chain_db: tuple[PsycopgConnection, Config],
+) -> None:
+    conn, cfg = fresh_chain_db
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            CREATE INDEX CONCURRENTLY ix_flow_step_attempts_run_step_order_attempt
+            ON flow_step_attempts (flow_run_id, step_order DESC, attempt_no ASC)
+            """
+        )
+
+    assert _index_metadata(
+        conn,
+        table_name="flow_step_attempts",
+        index_name="ix_flow_step_attempts_run_step_order_attempt",
+    ) == (
+        True,
+        True,
+        False,
+        True,
+        "btree",
+        ("flow_run_id", "step_order", "attempt_no"),
+        (0, 3, 0),
+    )
+    with pytest.raises(RuntimeError, match="unexpected state"):
+        command.upgrade(cfg, MIGRATION_REVISION)
+
+    assert current_revisions(conn) == {PRIOR_REVISION}
     assert (
         _index_metadata(
             conn,
