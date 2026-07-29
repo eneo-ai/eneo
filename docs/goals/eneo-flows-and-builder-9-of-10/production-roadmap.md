@@ -174,6 +174,67 @@ constructors stay local until a real contract emerges); any new snapshot
 coordinator/query-bus/per-repo-session machinery; a second aggregation
 service for token totals; a separate "official decision basis" store.
 
+## Builder-excellence track (added 2026-07-29, peer pass 1 verified; pass-2 tightening pending)
+
+Source: xhigh peer review of Builder intent-understanding, attachments,
+HITL, and generated-flow efficiency against source at `10ccd6b94`.
+`production-roadmap.md` is the SOLE execution authority; the retired BM
+ledger is evidence only. (`goal.md`/`notes/handoff.md` still name retired
+roadmaps — user-owned dirty files, flagged to the human owner.)
+
+Product defaults adopted (owner may override): an uploaded fillable
+template binds as an immutable TEMPLATE_FILL asset (exact layout); an
+example-output attachment derives bounded structure/style/schema
+constraints surfaced at confirmation — never exact-visual-fidelity
+claims. Checkpoint vocabulary freezes to FlowStepReviewMode (view/edit).
+
+- **B1** (= item 4): terminal replayable Builder persistence. *(L)*
+- **B2** (= item 5 deepened, three slices): expected-result attachments
+  that actually affect the Flow — one-template binding at the
+  materialization seam; identical-schema dedup + conflicting-schema
+  question; full placeholder identity (display-only clipping); persisted
+  fully_seen/excerpted/unread/unsupported coverage reaching proposal and
+  confirmation; example-derived bounded sections/schema constraints
+  confirmed and compiled; proof reference/context material never resent
+  at runtime. *(L)*
+- **B3**: no silent guessing after question-budget exhaustion — every
+  material candidate ends asked, explicitly defaulted and surfaced at
+  confirmation, or rejected-as-irrelevant (verified: non-architecture
+  candidates are silently dropped today, only runtime_metadata_fields
+  gets a fallback; commit-grade defaults carry medium confidence). *(M)*
+- **B4**: exact user-requested HITL placement — typed cited checkpoint
+  intents in PlanningState from the existing understanding pass,
+  bijection between requested and compiled checkpoints enforced by
+  compiler/critic. *(M)*
+- **B5**: honest static execution efficiency — FIRST fix the verified
+  capability-truth bug: `requires_completion_model` treats TEMPLATE_FILL
+  as model-backed while it is deterministic zero-token rendering
+  (`flow_capability_manifest.py:637-647` vs `:692-700`); then critic
+  invariants for hard structural waste + a factual execution-shape
+  projection on proposals (model-backed vs deterministic steps, mapped
+  upper bound, schema-constrained outputs). No token/currency estimates,
+  no numeric step-count knob, no per-step rationale prose. *(M)*
+- **B6**: generated-flow contract proof — owner-level behavior tests:
+  form variables (inmatningsfalt), targeted underlag per step, JSON
+  input/output schemas enforced, unusual inputs non-brittle,
+  deterministic steps provably zero-call; measured economics stay in
+  item 10. *(M)*
+- **B7** (= item 8 deepened): vocabulary + semantic-owner convergence —
+  delete one proven-redundant heuristic family at a time (start:
+  case_like_flow treats "underlag" as a domain marker). *(M)*
+- **B8** (deferred): skills value gate — offline comparative evaluation
+  (same briefs with/without a curated playbook) before ANY coupling;
+  free-text admin guidance REJECTED (unversioned prompt ownership); if
+  lift is proven: one org-published revision selected through existing
+  settings, digest-pinned, token-budgeted. *(S, deferred)*
+
+**Rejected as overengineering**: a second assumption ledger (the
+ResolvedSlot -> action-policy -> confirmation surface already exists); a
+token/currency cost estimator; a numeric step-count knob; per-step
+rationale fields; attachment RAG/indexing; module splits driven by line
+count (the critic/compiler/metadata modules are deep, not defective —
+the debt is duplicated semantic ownership).
+
 ## Update protocol
 
 Landing a slice updates this file in the same commit series: move the item
