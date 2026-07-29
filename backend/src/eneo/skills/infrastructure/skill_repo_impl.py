@@ -29,6 +29,9 @@ from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     SKILL_RUNTIME_POLICY_DEFAULTS,
+    AssistantPinAdvanceOutcome,
+    AssistantPinAdvanceTarget,
+    AssistantPinAdvanceTargetResult,
     PersonalChatPinAdvance,
     PersonalChatPinAdvanceOutcome,
     PersonalChatPinAdvanceStage,
@@ -51,12 +54,14 @@ from eneo.skills.domain.skill import (
     SkillAdoptionSummary,
     SkillBindingReference,
     SkillBindingSource,
+    SkillBlockedForBindingError,
     SkillCatalogEntry,
     SkillExecutionBlock,
     SkillExecutionBlockChange,
     SkillExecutionBlockConflictError,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
+    SkillNotPublishedForBindingError,
     SkillPublicationChange,
     SkillRevision,
     SkillRevisionChange,
@@ -908,6 +913,207 @@ class SkillRepoImpl:
             next_cursor=next_cursor,
         )
 
+    async def list_assistant_pin_advance_targets(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        after_assistant_id: UUID | None,
+        limit: int,
+    ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]:
+        organization_space = aliased(Spaces, name="organization_skill_space")
+        statement = (
+            sa.select(
+                AssistantSkillBindings.assistant_id,
+                AssistantSkillBindings.skill_revision_id,
+                SkillRevisions.revision_number,
+                self._ASSISTANT_ROW_VERSION,
+            )
+            .select_from(AssistantSkillBindings)
+            .join(
+                Assistants,
+                sa.and_(
+                    Assistants.id == AssistantSkillBindings.assistant_id,
+                    Assistants.space_id == AssistantSkillBindings.space_id,
+                ),
+            )
+            .join(Spaces, Spaces.id == AssistantSkillBindings.space_id)
+            .join(
+                Skills,
+                sa.and_(
+                    Skills.id == AssistantSkillBindings.skill_id,
+                    Skills.space_id == AssistantSkillBindings.skill_space_id,
+                ),
+            )
+            .join(organization_space, organization_space.id == Skills.space_id)
+            .join(
+                SkillRevisions,
+                sa.and_(
+                    SkillRevisions.id == AssistantSkillBindings.skill_revision_id,
+                    SkillRevisions.skill_id == AssistantSkillBindings.skill_id,
+                ),
+            )
+            .where(
+                AssistantSkillBindings.skill_id == skill_id,
+                AssistantSkillBindings.skill_revision_id
+                != expected_published_revision_id,
+                Spaces.tenant_id == tenant_id,
+                organization_space.tenant_id == tenant_id,
+                organization_space.user_id.is_(None),
+                organization_space.tenant_space_id.is_(None),
+                sa.not_(
+                    sa.and_(
+                        Spaces.user_id.is_not(None),
+                        Assistants.is_default.is_(True),
+                    )
+                ),
+            )
+            .order_by(AssistantSkillBindings.assistant_id)
+            .limit(limit + 1)
+        )
+        if after_assistant_id is not None:
+            statement = statement.where(
+                AssistantSkillBindings.assistant_id > after_assistant_id
+            )
+        rows = (await self.session.execute(statement)).all()
+        visible = rows[:limit]
+        targets = [
+            AssistantPinAdvanceTarget(
+                assistant_id=row.assistant_id,
+                from_revision_id=row.skill_revision_id,
+                from_revision_number=row.revision_number,
+                assistant_row_version=row.assistant_row_version,
+            )
+            for row in visible
+        ]
+        next_after = targets[-1].assistant_id if len(rows) > limit and targets else None
+        return targets, next_after
+
+    async def advance_assistant_skill_pins(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        targets: Sequence[AssistantPinAdvanceTarget],
+    ) -> list[AssistantPinAdvanceTargetResult]:
+        """Apply one validated fleet chunk under deterministic row locks.
+
+        Every writer that needs both sides locks Assistant rows before Skill
+        rows. Binding saves take their parent Assistant lock before Skills FOR
+        SHARE, and concurrent fleet chunks take the same ascending-parent then
+        Skill order. Personal Chat writes share only the Skill lock. A binding
+        SET change also rewrites the already-locked parent row in its save
+        transaction, so the captured xmin rejects that whole concurrent edit.
+        """
+        ordered_targets = sorted(targets, key=lambda target: target.assistant_id)
+        target_ids = [target.assistant_id for target in ordered_targets]
+        locked_parent_rows = (
+            await self.session.execute(
+                sa.select(Assistants.id)
+                .join(Spaces, Spaces.id == Assistants.space_id)
+                .where(
+                    Assistants.id.in_(target_ids),
+                    Spaces.tenant_id == tenant_id,
+                )
+                .order_by(Assistants.id)
+                .with_for_update(of=Assistants)
+            )
+        ).scalars()
+        locked_parent_ids = set(locked_parent_rows)
+
+        skill_row = await self._lock_organization_skill(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+        )
+        if skill_row is None or skill_row.published_revision_number is None:
+            raise SkillNotPublishedForBindingError
+        published_revision_id = await self.session.scalar(
+            sa.select(SkillRevisions.id).where(
+                SkillRevisions.skill_id == skill_id,
+                SkillRevisions.revision_number == skill_row.published_revision_number,
+            )
+        )
+        if published_revision_id != expected_published_revision_id:
+            raise SkillRevisionConflictError
+        if (
+            await self.get_active_execution_block(
+                tenant_id=tenant_id,
+                skill_id=skill_id,
+            )
+            is not None
+        ):
+            raise SkillBlockedForBindingError
+
+        results: list[AssistantPinAdvanceTargetResult] = []
+        for target in ordered_targets:
+            parent_version = (
+                await self.session.scalar(
+                    sa.select(self._ASSISTANT_ROW_VERSION)
+                    .select_from(Assistants)
+                    .where(Assistants.id == target.assistant_id)
+                )
+                if target.assistant_id in locked_parent_ids
+                else None
+            )
+            if parent_version != target.assistant_row_version:
+                results.append(
+                    AssistantPinAdvanceTargetResult(
+                        assistant_id=target.assistant_id,
+                        outcome=AssistantPinAdvanceOutcome.CONCURRENT_CHANGE,
+                    )
+                )
+                continue
+            binding_revision_id = await self.session.scalar(
+                sa.select(AssistantSkillBindings.skill_revision_id)
+                .where(
+                    AssistantSkillBindings.tenant_id == tenant_id,
+                    AssistantSkillBindings.assistant_id == target.assistant_id,
+                    AssistantSkillBindings.skill_id == skill_id,
+                )
+                .with_for_update(of=AssistantSkillBindings)
+            )
+            if binding_revision_id != target.from_revision_id:
+                results.append(
+                    AssistantPinAdvanceTargetResult(
+                        assistant_id=target.assistant_id,
+                        outcome=AssistantPinAdvanceOutcome.CONCURRENT_CHANGE,
+                    )
+                )
+                continue
+            await self.session.execute(
+                sa.text(
+                    """
+                    UPDATE assistant_skill_bindings
+                    SET skill_revision_id = :published_revision_id
+                    WHERE tenant_id = :tenant_id
+                      AND assistant_id = :assistant_id
+                      AND skill_id = :skill_id
+                      AND skill_revision_id = :from_revision_id
+                    """
+                ),
+                {
+                    "published_revision_id": expected_published_revision_id,
+                    "tenant_id": tenant_id,
+                    "assistant_id": target.assistant_id,
+                    "skill_id": skill_id,
+                    "from_revision_id": target.from_revision_id,
+                },
+            )
+            await self.session.execute(
+                sa.update(Assistants)
+                .where(Assistants.id == target.assistant_id)
+                .values(updated_at=sa.func.now())
+            )
+            results.append(
+                AssistantPinAdvanceTargetResult(
+                    assistant_id=target.assistant_id,
+                    outcome=AssistantPinAdvanceOutcome.ADVANCED,
+                )
+            )
+        return results
+
     async def list_published_for_tenant(
         self,
         *,
@@ -1192,6 +1398,9 @@ class SkillRepoImpl:
     _POLICY_ROW_VERSION = sa.cast(
         sa.literal_column("governance_policies.xmin"), sa.Text
     ).label("policy_version")
+    _ASSISTANT_ROW_VERSION = sa.cast(
+        sa.literal_column("assistants.xmin"), sa.Text
+    ).label("assistant_row_version")
     _RUNTIME_POLICY_ROW_VERSION = sa.cast(
         sa.literal_column("skill_runtime_policies.xmin"), sa.Text
     ).label("runtime_policy_version")

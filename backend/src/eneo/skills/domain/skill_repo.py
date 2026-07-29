@@ -3,6 +3,8 @@ from typing import Protocol
 from uuid import UUID
 
 from eneo.skills.domain.skill import (
+    AssistantPinAdvanceTarget,
+    AssistantPinAdvanceTargetResult,
     PersonalChatPinAdvanceStage,
     PersonalChatPinConfirmOutcome,
     PersonalDefaultsSnapshot,
@@ -83,6 +85,25 @@ class SkillRepo(Protocol):
         limit: int,
         after: SkillAdoptionCursor | None,
     ) -> SkillAdoptionProjectionPage | None: ...
+
+    async def list_assistant_pin_advance_targets(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        after_assistant_id: UUID | None,
+        limit: int,
+    ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]: ...
+
+    async def advance_assistant_skill_pins(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        targets: Sequence[AssistantPinAdvanceTarget],
+    ) -> list[AssistantPinAdvanceTargetResult]: ...
 
     async def list_published_for_tenant(
         self,
