@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-29 | **Canonical completion-model capability**: every Flow output mode now has one typed completion-backed classification shared by runtime disclosure, retrieval validation, the capability manifest, authoring, and materialization; deterministic template-fill steps shed unused completion-model bindings, and new output modes must be explicitly classified (`4b0796152`, gate green 9/10, no findings) |
 | 2026-07-29 | **Honest run token totals**: provider-call lifecycle rows now own live usage; retained attempts preserve typed totals and per-dimension completeness in identity-validated tombstones; superseded/rerun spend survives retention; invalid retained evidence makes recoverable totals explicitly incomplete; live and retained reads stream and fold with bounded application memory; the UI distinguishes zero, incomplete, and unrecorded usage in Swedish and English (`9f7d70165`, gate green 8/10, no findings) |
 | 2026-07-29 | **Slice 2**: every evidence section measured and bounded — serialized per-projection measurement with a per-row floor, ceiling+1 bounded preflight, memory-budget-derived aggregate ceilings with peak/leak proofs, complete-or-refuse exports with typed section/limit context, ordered admitted prefixes with one truthful typed omissions collection sv+en, frontend consuming the generated union (`b1ee9b7e5`, gate green 8/10 after five iterations, no blockers) |
 | 2026-07-29 | **Slice 2b**: three production defects fixed — unprivileged resolved-policy reader for all runtime consumers (service keys work on documented paths, both defense layers intact), resume returns the canonical persisted step result, audio critic invariant scoped to structured source readers. Full integration suite 439/0 for the first time (`69f242cdd`, gate green 8/10, no blockers) |
@@ -70,11 +71,10 @@ external release gate (item 10); BM0.2 is external (item 10).
 2. ~~Whole-bundle evidence bounds~~ — **LANDED** `b1ee9b7e5` (narrowed
    claim: attempt-admission window deliberately excluded, see 2c; the
    serialized-floor width assertion for attempts rides with 2c).
-2d. **Correct deterministic template-fill capability truth** *(small)* —
-   `requires_completion_model` currently classifies TEMPLATE_FILL as
-   model-backed although runtime rendering is deterministic and zero-call.
-   Correct the canonical capability manifest and prove proposal/runtime
-   agreement before 2c; do not add token estimates or a step-count policy.
+2d. ~~Correct deterministic template-fill capability truth~~ — **LANDED**
+   `4b0796152`. Completion-backed modes now have one typed owner shared by
+   runtime, authoring, materialization, and the capability manifest; new output
+   modes fail the exhaustive classification test until explicitly classified.
 2c. **Bounded attempt admission** *(medium, contract redesign)* — the
    landed attempt window ranks/aggregates over the full history (bounded
    returned models, unbounded database work: ranking, cumulative sums,
@@ -193,9 +193,10 @@ example-output attachment derives bounded structure/style/schema
 constraints surfaced at confirmation — never exact-visual-fidelity
 claims. Checkpoint vocabulary freezes to FlowStepReviewMode (view/edit).
 
-Hard ordering constraints: B5a precedes item 2c; B5b follows B1; B2 runs
-evidence → interpretation → binding; B4 runs understanding/confirmation →
-compile/apply. The ranked plan above controls all other ordering.
+Hard ordering constraints: the B5a prerequisite for item 2c is complete
+(`4b0796152`); B5b follows B1; B2 runs evidence → interpretation → binding;
+B4 runs understanding/confirmation → compile/apply. The ranked plan above
+controls all other ordering.
 
 - **B1** (= item 4): terminal replayable Builder persistence. *(L)*
 - **B2** (= item 5 deepened, three ordered owner slices): (a) preserve the
@@ -217,8 +218,7 @@ compile/apply. The ranked plan above controls all other ordering.
   cited checkpoint intents and confirmation exposes them; (b) compile/apply and
   the critic share one canonical requested-versus-compiled checkpoint predicate.
   No parallel HITL classifier or duplicate matching rule. *(M)*
-- **B5a** (= item 2d): correct deterministic TEMPLATE_FILL capability truth
-  before item 2c. *(S)*
+- **B5a** (= item 2d): **LANDED** `4b0796152`. *(S)*
 - **B5b** (= item 4b): after B1, add structural-waste invariants and the factual
   execution-shape projection. *(M)*
 - Generated-flow proof is not a standalone B6 slice. Each owning slice carries
