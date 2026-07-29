@@ -48,6 +48,32 @@ function evidenceWithCorruptPassageAggregates(): FlowRunEvidenceWithTypedSteps {
   } as unknown as FlowRunEvidenceWithTypedSteps;
 }
 
+function evidenceWithBoundedSections(): FlowRunEvidenceWithTypedSteps {
+  const evidence = evidenceWithCorruptPassageAggregates();
+  evidence.debug_export!.run!.summary!.knowledge_evidence_view = undefined;
+  evidence.debug_export!.run!.summary!.omissions = [
+    {
+      reason: "row_limit",
+      section: "step_results",
+      rows_omitted: 3,
+      count_truncated: true
+    },
+    {
+      reason: "logical_bytes",
+      section: "result_files",
+      rows_omitted: 2,
+      count_truncated: false
+    },
+    {
+      reason: "parent_section_omitted",
+      section: "rerun_invalidated_steps",
+      rows_omitted: 1,
+      count_truncated: false
+    }
+  ];
+  return evidence;
+}
+
 function eneoReturning(evidence: FlowRunEvidenceWithTypedSteps): Eneo {
   return {
     flows: {
@@ -72,6 +98,41 @@ describe("FlowRunEvidence", () => {
     ).toBeTruthy();
     expect(
       screen.getByText(m.flow_run_knowledge_view_corrupt_passage_aggregates({ count: "2" }))
+    ).toBeTruthy();
+  });
+
+  it("reports every section omitted from the bounded view", async () => {
+    render(FlowRunEvidence, {
+      runId: "run-1",
+      flowId: "flow-1",
+      eneo: eneoReturning(evidenceWithBoundedSections()),
+      runStatus: "completed"
+    });
+
+    expect(await screen.findByTestId("evidence-view-omissions")).toBeTruthy();
+    expect(
+      screen.getByText(
+        m.flow_run_evidence_view_rows_omitted({
+          section: m.flow_run_evidence_section_step_results(),
+          count: "≥3"
+        })
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        m.flow_run_evidence_view_bytes_omitted({
+          section: m.flow_run_evidence_section_result_files(),
+          count: "2"
+        })
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        m.flow_run_evidence_view_parent_omitted({
+          section: m.flow_run_evidence_section_rerun_invalidated_steps(),
+          count: "1"
+        })
+      )
     ).toBeTruthy();
   });
 });

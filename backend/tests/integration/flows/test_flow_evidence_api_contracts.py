@@ -82,6 +82,32 @@ from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.users.user import UserAdd, UserInDB, UserState
 
 
+def test_evidence_export_413_context_has_typed_section_and_limit_unions() -> None:
+    schema = app.openapi()
+    export_operation = next(
+        operation
+        for path_item in schema["paths"].values()
+        for operation in path_item.values()
+        if isinstance(operation, dict)
+        and operation.get("operationId") == "export_flow_run_evidence"
+    )
+    error_schema = export_operation["responses"]["413"]["content"]["application/json"][
+        "schema"
+    ]
+    assert error_schema["$ref"].endswith("/FlowEvidenceExportTooLargeError")
+    context = schema["components"]["schemas"]["FlowEvidenceExportTooLargeContext"]
+    assert context["properties"]["limit"]["enum"] == [
+        "corrupt_passage_evidence",
+        "recorded_passage_bytes",
+        "stored_provenance_bytes",
+        "section_rows",
+        "aggregate_stored_json_bytes",
+        "aggregate_logical_json_bytes",
+        "provider_call_events",
+    ]
+    assert "whole_bundle" in context["properties"]["section"]["enum"]
+
+
 def _build_flow(
     *,
     tenant_id: UUID,
@@ -964,6 +990,7 @@ async def test_flow_run_evidence_hides_legacy_provider_call_jsonb_after_cutover(
         "items": [],
         "count": 0,
         "total_count": 0,
+        "total_count_truncated": False,
         "has_more": False,
         "next_after_event_id": None,
     }

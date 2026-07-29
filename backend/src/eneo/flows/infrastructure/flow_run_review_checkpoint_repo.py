@@ -89,6 +89,38 @@ class FlowRunReviewCheckpointResumeResult:
     accepted: bool
 
 
+@dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointEvidenceMeasurement:
+    row_count: int
+    stored_json_bytes: int
+    logical_json_bytes: int
+
+    @classmethod
+    def empty(cls) -> "FlowRunReviewCheckpointEvidenceMeasurement":
+        return cls(row_count=0, stored_json_bytes=0, logical_json_bytes=0)
+
+
+def _review_checkpoint_evidence_logical_bytes() -> Any:
+    json_bytes = sum(
+        (
+            sa.func.coalesce(sa.func.octet_length(sa.cast(column, sa.Text)), 0)
+            for column in (
+                FlowRunReviewCheckpoints.original_payload_json,
+                FlowRunReviewCheckpoints.current_payload_json,
+                FlowRunReviewCheckpoints.output_contract_json,
+                FlowRunReviewCheckpoints.next_step_ids_json,
+            )
+        ),
+        start=sa.literal(0),
+    )
+    return json_bytes + sa.func.coalesce(
+        sa.func.octet_length(
+            sa.cast(sa.func.to_jsonb(FlowRunReviewCheckpoints.step_label), sa.Text)
+        ),
+        0,
+    )
+
+
 _ACTIVE_REVIEW_CHECKPOINT_STATES = tuple(
     state.value for state in ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES
 )
@@ -125,6 +157,73 @@ class FlowRunReviewCheckpointRepository:
     ):
         self.session = session
         self.audit_outbox_repo = audit_outbox_repo
+
+    async def measure_evidence_row_count(
+        self, *, run_id: UUID, tenant_id: UUID, ceiling: int
+    ) -> int:
+        candidates = (
+            sa.select(FlowRunReviewCheckpoints.id)
+            .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .limit(ceiling + 1)
+            .subquery()
+        )
+        return int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(candidates)
+            )
+            or 0
+        )
+
+    async def measure_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunReviewCheckpointEvidenceMeasurement:
+        stored = sum(
+            (
+                sa.func.coalesce(sa.func.pg_column_size(column), 0)
+                for column in (
+                    FlowRunReviewCheckpoints.original_payload_json,
+                    FlowRunReviewCheckpoints.current_payload_json,
+                    FlowRunReviewCheckpoints.output_contract_json,
+                    FlowRunReviewCheckpoints.next_step_ids_json,
+                )
+            ),
+            start=sa.literal(0),
+        )
+        logical = _review_checkpoint_evidence_logical_bytes()
+        candidate_stmt = (
+            sa.select(FlowRunReviewCheckpoints.id)
+            .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            candidate_stmt = candidate_stmt.limit(candidate_limit)
+        candidates = candidate_stmt.subquery()
+        row = (
+            # Paired with `_dump_review_checkpoint_record`, including the two
+            # JSON columns it emits under contract-facing names.
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(sa.func.sum(stored), 0).label("stored_json_bytes"),
+                    sa.func.coalesce(sa.func.sum(logical), 0).label(
+                        "logical_json_bytes"
+                    ),
+                )
+                .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+                .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                .where(FlowRunReviewCheckpoints.id.in_(sa.select(candidates.c.id)))
+            )
+        ).one()
+        return FlowRunReviewCheckpointEvidenceMeasurement(
+            row_count=int(row.row_count),
+            stored_json_bytes=int(row.stored_json_bytes),
+            logical_json_bytes=int(row.logical_json_bytes),
+        )
 
     async def create_or_get_review_checkpoint_for_attempt(
         self,
@@ -962,21 +1061,58 @@ class FlowRunReviewCheckpointRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
     ) -> list[FlowRunReviewCheckpoint]:
-        rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunReviewCheckpoints)
-                    .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
-                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-                    .order_by(
-                        FlowRunReviewCheckpoints.step_order.asc(),
-                        FlowRunReviewCheckpoints.attempt_no.asc(),
-                        FlowRunReviewCheckpoints.id.asc(),
+        stmt = (
+            sa.select(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .order_by(
+                FlowRunReviewCheckpoints.step_order.asc(),
+                FlowRunReviewCheckpoints.attempt_no.asc(),
+                FlowRunReviewCheckpoints.id.asc(),
+            )
+        )
+        if limit is not None and logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowRunReviewCheckpoints.id.label("row_id"),
+                    FlowRunReviewCheckpoints.step_order.label("step_order"),
+                    FlowRunReviewCheckpoints.attempt_no.label("attempt_no"),
+                    _review_checkpoint_evidence_logical_bytes().label("logical_bytes"),
+                )
+                .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+                .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                .order_by(
+                    FlowRunReviewCheckpoints.step_order.asc(),
+                    FlowRunReviewCheckpoints.attempt_no.asc(),
+                    FlowRunReviewCheckpoints.id.asc(),
+                )
+                .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.step_order,
+                candidates.c.attempt_no,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunReviewCheckpoints.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
                     )
                 )
             )
-            .scalars()
-            .all()
-        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowRunReviewCheckpoint.model_validate(row) for row in rows]

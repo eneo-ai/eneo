@@ -123,6 +123,68 @@ def _recorded_passage_byte_expressions() -> tuple[Any, Any]:
     return passage_bytes, is_corrupt
 
 
+def _jsonb_evidence_logical_bytes(*columns: Any) -> Any:
+    return sum(
+        (
+            sa.func.coalesce(sa.func.octet_length(sa.cast(column, sa.Text)), 0)
+            for column in columns
+        ),
+        start=sa.literal(0),
+    )
+
+
+def _scalar_evidence_logical_bytes(*columns: Any) -> Any:
+    return sum(
+        (
+            sa.func.coalesce(
+                sa.func.octet_length(sa.cast(sa.func.to_jsonb(column), sa.Text)),
+                0,
+            )
+            for column in columns
+        ),
+        start=sa.literal(0),
+    )
+
+
+def _step_result_evidence_logical_bytes() -> Any:
+    # Paired with `FlowStepResult.model_validate`: every unbounded value in the
+    # emitted projection participates in both preflight and view admission.
+    return _jsonb_evidence_logical_bytes(
+        FlowStepResults.input_payload_json,
+        FlowStepResults.output_payload_json,
+        FlowStepResults.model_parameters_json,
+    ) + _scalar_evidence_logical_bytes(
+        FlowStepResults.effective_prompt,
+        FlowStepResults.error_code,
+        FlowStepResults.error_message,
+        FlowStepResults.flow_step_execution_hash,
+    )
+
+
+def _file_evidence_logical_bytes() -> Any:
+    return _scalar_evidence_logical_bytes(Files.name, Files.mimetype)
+
+
+def _attempt_evidence_logical_bytes() -> Any:
+    # Paired with `_dump_attempt_record`, including every emitted unbounded text
+    # scalar as serialized JSON so escaping expansion cannot bypass the budget.
+    return _jsonb_evidence_logical_bytes(
+        FlowStepAttempts.provenance_json,
+        FlowStepAttempts.input_payload_json,
+        FlowStepAttempts.output_payload_json,
+    ) + _scalar_evidence_logical_bytes(
+        FlowStepAttempts.celery_task_id,
+        FlowStepAttempts.error_code,
+        FlowStepAttempts.error_message,
+        FlowStepAttempts.requested_model,
+        FlowStepAttempts.response_model,
+        FlowStepAttempts.provider,
+        FlowStepAttempts.finish_reason,
+        FlowStepAttempts.provider_response_id,
+        FlowStepAttempts.flow_step_execution_hash,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class StepAttemptPage:
     """One snapshot's admitted attempts and the counts that qualify them.
@@ -155,7 +217,94 @@ class StepAttemptProvenanceSize:
     attempt_count: int
     stored_provenance_bytes: int
     recorded_passage_bytes: int
+    stored_json_bytes: int = 0
+    logical_json_bytes: int = 0
     corrupt_passage_aggregates: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunEvidenceMeasurements:
+    run_row_count: int
+    run_stored_json_bytes: int
+    run_logical_json_bytes: int
+    step_result_row_count: int
+    step_result_stored_json_bytes: int
+    step_result_logical_json_bytes: int
+    result_file_row_count: int
+    result_file_logical_json_bytes: int
+    runtime_input_file_row_count: int
+    runtime_input_file_logical_json_bytes: int
+
+    @classmethod
+    def empty(cls) -> "FlowRunEvidenceMeasurements":
+        return cls(
+            run_row_count=0,
+            run_stored_json_bytes=0,
+            run_logical_json_bytes=0,
+            step_result_row_count=0,
+            step_result_stored_json_bytes=0,
+            step_result_logical_json_bytes=0,
+            result_file_row_count=0,
+            result_file_logical_json_bytes=0,
+            runtime_input_file_row_count=0,
+            runtime_input_file_logical_json_bytes=0,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunEvidenceRowCounts:
+    step_results: int
+    step_attempts: int
+    result_files: int
+    runtime_input_files: int
+
+
+def _bounded_step_result_evidence_count_statement(
+    *, run_id: UUID, tenant_id: UUID, ceiling: int
+) -> sa.Select[tuple[int]]:
+    candidates = (
+        sa.select(FlowStepResults.id)
+        .where(FlowStepResults.flow_run_id == run_id)
+        .where(FlowStepResults.tenant_id == tenant_id)
+        .limit(ceiling + 1)
+        .subquery()
+    )
+    return sa.select(sa.func.count()).select_from(candidates)
+
+
+def _bounded_step_result_evidence_size_statement(
+    *, run_id: UUID, tenant_id: UUID, candidate_limit: int
+) -> sa.Select[Any]:
+    stored = sum(
+        (
+            sa.func.coalesce(sa.func.pg_column_size(column), 0)
+            for column in (
+                FlowStepResults.input_payload_json,
+                FlowStepResults.output_payload_json,
+                FlowStepResults.model_parameters_json,
+            )
+        ),
+        start=sa.literal(0),
+    )
+    candidates = (
+        sa.select(
+            stored.label("stored_json_bytes"),
+            _step_result_evidence_logical_bytes().label("logical_json_bytes"),
+        )
+        .where(FlowStepResults.flow_run_id == run_id)
+        .where(FlowStepResults.tenant_id == tenant_id)
+        .limit(candidate_limit)
+        .subquery()
+    )
+    return sa.select(
+        sa.func.count().label("row_count"),
+        sa.func.coalesce(sa.func.sum(candidates.c.stored_json_bytes), 0).label(
+            "stored_json_bytes"
+        ),
+        sa.func.coalesce(sa.func.sum(candidates.c.logical_json_bytes), 0).label(
+            "logical_json_bytes"
+        ),
+    ).select_from(candidates)
 
 
 @dataclass(frozen=True, slots=True)
@@ -849,26 +998,275 @@ class FlowRunRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
     ) -> list[FlowStepResult]:
-        rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowStepResults)
-                    .where(FlowStepResults.flow_run_id == run_id)
-                    .where(FlowStepResults.tenant_id == tenant_id)
-                    .order_by(FlowStepResults.step_order.asc())
+        stmt = (
+            sa.select(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .order_by(FlowStepResults.step_order.asc())
+        )
+        if limit is not None and logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowStepResults.id.label("row_id"),
+                    FlowStepResults.step_order.label("step_order"),
+                    _step_result_evidence_logical_bytes().label("logical_bytes"),
+                )
+                .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .order_by(FlowStepResults.step_order.asc(), FlowStepResults.id.asc())
+                .limit(limit + 1)
+                .subquery()
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number()
+                .over(order_by=(candidates.c.step_order, candidates.c.row_id))
+                .label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=(candidates.c.step_order, candidates.c.row_id))
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowStepResults.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
+                    )
                 )
             )
-            .scalars()
-            .all()
-        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowStepResult.model_validate(row) for row in rows]
+
+    async def measure_evidence_row_counts(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        ceiling: int,
+    ) -> FlowRunEvidenceRowCounts:
+        """Read at most ceiling+1 identities for each emitted fan-out."""
+        candidate_limit = ceiling + 1
+        step_attempts = (
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .limit(candidate_limit)
+            .subquery()
+        )
+        result_files = (
+            sa.select(FlowRunStepResultFiles.id)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .limit(candidate_limit)
+            .subquery()
+        )
+        runtime_input_files = (
+            sa.select(FlowRunStepInputFiles.id)
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.flow_run_id == FlowRunStepInputFiles.flow_run_id,
+                    FlowStepResults.tenant_id == FlowRunStepInputFiles.tenant_id,
+                    FlowStepResults.step_id == FlowRunStepInputFiles.step_id,
+                    FlowStepResults.current_attempt_no
+                    == FlowRunStepInputFiles.attempt_no,
+                ),
+            )
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+            .limit(candidate_limit)
+            .subquery()
+        )
+        step_result_count = int(
+            await self.session.scalar(
+                _bounded_step_result_evidence_count_statement(
+                    run_id=run_id, tenant_id=tenant_id, ceiling=ceiling
+                )
+            )
+            or 0
+        )
+        counts: list[int] = []
+        for candidates in (
+            step_attempts,
+            result_files,
+            runtime_input_files,
+        ):
+            counts.append(
+                int(
+                    await self.session.scalar(
+                        sa.select(sa.func.count()).select_from(candidates)
+                    )
+                    or 0
+                )
+            )
+        return FlowRunEvidenceRowCounts(step_result_count, *counts)
+
+    async def measure_evidence_sections(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunEvidenceMeasurements:
+        run_stored = sum(
+            (
+                sa.func.coalesce(sa.func.pg_column_size(column), 0)
+                for column in (
+                    FlowRuns.dispatch_last_error,
+                    FlowRuns.input_payload_json,
+                    FlowRuns.output_payload_json,
+                    FlowRuns.error_json,
+                )
+            ),
+            start=sa.literal(0),
+        )
+        run_logical = sum(
+            (
+                sa.func.coalesce(sa.func.octet_length(sa.cast(column, sa.Text)), 0)
+                for column in (
+                    FlowRuns.dispatch_last_error,
+                    FlowRuns.input_payload_json,
+                    FlowRuns.output_payload_json,
+                    FlowRuns.error_json,
+                )
+            ),
+            start=sa.literal(0),
+        )
+        run_measurement = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(sa.func.sum(run_stored), 0).label(
+                        "stored_json_bytes"
+                    ),
+                    sa.func.coalesce(sa.func.sum(run_logical), 0).label(
+                        "logical_json_bytes"
+                    ),
+                )
+                .where(FlowRuns.id == run_id)
+                .where(FlowRuns.tenant_id == tenant_id)
+            )
+        ).one()
+
+        result_measurement = (
+            await self.session.execute(
+                _bounded_step_result_evidence_size_statement(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    candidate_limit=candidate_limit or 2_147_483_647,
+                )
+            )
+        ).one()
+
+        # Paired with `_result_file_from_rows`: file names and MIME types are
+        # the only variable-width values that projection adds to the link row.
+        result_file_stmt = (
+            sa.select(FlowRunStepResultFiles.id)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            result_file_stmt = result_file_stmt.limit(candidate_limit)
+        result_file_candidates = result_file_stmt.subquery()
+        result_file_measurement = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(_file_evidence_logical_bytes()),
+                        0,
+                    ).label("logical_json_bytes"),
+                )
+                .select_from(FlowRunStepResultFiles)
+                .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+                .where(FlowRunStepResultFiles.flow_run_id == run_id)
+                .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+                .where(
+                    FlowRunStepResultFiles.id.in_(
+                        sa.select(result_file_candidates.c.id)
+                    )
+                )
+            )
+        ).one()
+        # Paired with `list_current_step_input_file_metadata_by_step_result_id`:
+        # runtime-file metadata emits the same unbounded file text fields.
+        runtime_input_stmt = (
+            sa.select(FlowRunStepInputFiles.id)
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.flow_run_id == FlowRunStepInputFiles.flow_run_id,
+                    FlowStepResults.tenant_id == FlowRunStepInputFiles.tenant_id,
+                    FlowStepResults.step_id == FlowRunStepInputFiles.step_id,
+                    FlowStepResults.current_attempt_no
+                    == FlowRunStepInputFiles.attempt_no,
+                ),
+            )
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            runtime_input_stmt = runtime_input_stmt.limit(candidate_limit)
+        runtime_input_candidates = runtime_input_stmt.subquery()
+        runtime_input_file_measurement = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(_file_evidence_logical_bytes()),
+                        0,
+                    ).label("logical_json_bytes"),
+                )
+                .select_from(FlowRunStepInputFiles)
+                .join(Files, Files.id == FlowRunStepInputFiles.file_id)
+                .join(
+                    FlowStepResults,
+                    sa.and_(
+                        FlowStepResults.flow_run_id
+                        == FlowRunStepInputFiles.flow_run_id,
+                        FlowStepResults.tenant_id == FlowRunStepInputFiles.tenant_id,
+                        FlowStepResults.step_id == FlowRunStepInputFiles.step_id,
+                        FlowStepResults.current_attempt_no
+                        == FlowRunStepInputFiles.attempt_no,
+                    ),
+                )
+                .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                .where(
+                    FlowRunStepInputFiles.id.in_(
+                        sa.select(runtime_input_candidates.c.id)
+                    )
+                )
+            )
+        ).one()
+        return FlowRunEvidenceMeasurements(
+            run_row_count=int(run_measurement.row_count),
+            run_stored_json_bytes=int(run_measurement.stored_json_bytes),
+            run_logical_json_bytes=int(run_measurement.logical_json_bytes),
+            step_result_row_count=int(result_measurement.row_count),
+            step_result_stored_json_bytes=int(result_measurement.stored_json_bytes),
+            step_result_logical_json_bytes=int(result_measurement.logical_json_bytes),
+            result_file_row_count=int(result_file_measurement.row_count),
+            result_file_logical_json_bytes=int(
+                result_file_measurement.logical_json_bytes
+            ),
+            runtime_input_file_row_count=int(runtime_input_file_measurement.row_count),
+            runtime_input_file_logical_json_bytes=int(
+                runtime_input_file_measurement.logical_json_bytes
+            ),
+        )
 
     async def measure_step_attempt_provenance(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
+        candidate_limit: int | None = None,
     ) -> StepAttemptProvenanceSize:
         """Size a run's attempt provenance without materializing any of it.
 
@@ -883,6 +1281,14 @@ class FlowRunRepository:
         # keeps a malformed persisted value from failing the statement, and
         # counts it as corruption instead of silently measuring zero.
         recorded_passage_bytes, is_corrupt = _recorded_passage_byte_expressions()
+        candidate_stmt = (
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            candidate_stmt = candidate_stmt.limit(candidate_limit)
+        candidates = candidate_stmt.subquery()
         row = (
             await self.session.execute(
                 sa.select(
@@ -893,6 +1299,26 @@ class FlowRunRepository:
                         ),
                         0,
                     ).label("provenance_bytes"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sum(
+                                (
+                                    sa.func.coalesce(sa.func.pg_column_size(column), 0)
+                                    for column in (
+                                        FlowStepAttempts.provenance_json,
+                                        FlowStepAttempts.input_payload_json,
+                                        FlowStepAttempts.output_payload_json,
+                                    )
+                                ),
+                                start=sa.literal(0),
+                            )
+                        ),
+                        0,
+                    ).label("stored_json_bytes"),
+                    sa.func.coalesce(
+                        sa.func.sum(_attempt_evidence_logical_bytes()),
+                        0,
+                    ).label("logical_json_bytes"),
                     sa.func.coalesce(sa.func.sum(recorded_passage_bytes), 0).label(
                         "passage_bytes"
                     ),
@@ -902,12 +1328,15 @@ class FlowRunRepository:
                 )
                 .where(FlowStepAttempts.flow_run_id == run_id)
                 .where(FlowStepAttempts.tenant_id == tenant_id)
+                .where(FlowStepAttempts.id.in_(sa.select(candidates.c.id)))
             )
         ).one()
         return StepAttemptProvenanceSize(
             attempt_count=int(row.attempt_count),
             stored_provenance_bytes=int(row.provenance_bytes),
             recorded_passage_bytes=int(row.passage_bytes),
+            stored_json_bytes=int(row.stored_json_bytes),
+            logical_json_bytes=int(row.logical_json_bytes),
             corrupt_passage_aggregates=int(row.corrupt_aggregates),
         )
 
@@ -917,17 +1346,16 @@ class FlowRunRepository:
         run_id: UUID,
         tenant_id: UUID,
         limit: int | None = None,
-        history_byte_budget: int | None = None,
+        logical_byte_budget: int | None = None,
         passage_byte_budget: int | None = None,
     ) -> StepAttemptPage:
         """Attempts for a run, oldest first, with snapshot-consistent totals.
 
         With `limit`, one statement ranks every attempt — each step's current
         attempt first, then history newest first — and admits rows while the
-        row limit and both cumulative budgets hold: stored provenance bytes
-        bound what the database ships, and exact recorded passage bytes bound
-        what the JSON expands to, because TOAST compression makes stored size
-        only a floor on logical size. Current attempts consume the budgets
+        row limit and both cumulative budgets hold: logical attempt JSON bytes
+        bound what materialization expands to, and exact recorded passage bytes
+        independently bound retained passage text. Current attempts consume the budgets
         first; when one is excluded the page says so, because the totals ride
         in the same statement — even when nothing is admitted at all.
         """
@@ -983,9 +1411,10 @@ class FlowRunRepository:
             ),
             else_=1,
         )
-        stored_bytes = sa.func.coalesce(
-            sa.func.pg_column_size(FlowStepAttempts.provenance_json), 0
-        )
+        # Paired with `_dump_attempt_record`: the admission window includes
+        # every JSON value the attempt projection materializes, not only RAG
+        # provenance. Logical bytes catch expansion hidden by TOAST compression.
+        logical_bytes = _attempt_evidence_logical_bytes()
         passage_bytes, is_corrupt = _recorded_passage_byte_expressions()
         admission_order = (
             is_current_flag.asc(),
@@ -999,9 +1428,9 @@ class FlowRunRepository:
                 is_current_flag.label("is_current"),
                 sa.case((is_corrupt, 1), else_=0).label("is_corrupt"),
                 sa.func.row_number().over(order_by=admission_order).label("row_rank"),
-                sa.func.sum(stored_bytes)
+                sa.func.sum(logical_bytes)
                 .over(order_by=admission_order)
-                .label("cumulative_stored"),
+                .label("cumulative_logical"),
                 sa.func.sum(passage_bytes)
                 .over(order_by=admission_order)
                 .label("cumulative_passages"),
@@ -1015,8 +1444,10 @@ class FlowRunRepository:
         admitted = sa.select(ranked.c.attempt_id, ranked.c.is_current).where(
             ranked.c.row_rank <= limit
         )
-        if history_byte_budget is not None:
-            admitted = admitted.where(ranked.c.cumulative_stored <= history_byte_budget)
+        if logical_byte_budget is not None:
+            admitted = admitted.where(
+                ranked.c.cumulative_logical <= logical_byte_budget
+            )
         if passage_byte_budget is not None:
             # A corrupt aggregate has an unknowable logical size; admitting it
             # under a size budget would be a silent bypass, so it is excluded
@@ -1180,6 +1611,8 @@ class FlowRunRepository:
         run_id: UUID,
         tenant_id: UUID,
         step_results: Sequence[FlowStepResult],
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
     ) -> dict[UUID, tuple[FlowRunStepInputFileMetadata, ...]]:
         step_result_id_by_step_attempt, current_attempt_pairs = (
             _current_step_attempt_pairs_by_result_id(step_results)
@@ -1194,20 +1627,43 @@ class FlowRunRepository:
         has_transcription = (
             sa.func.length(sa.func.btrim(sa.func.coalesce(Files.transcription, ""))) > 0
         ).label("has_transcription")
-        rows = (
-            await self.session.execute(
-                sa.select(
+        stmt = (
+            sa.select(
+                FlowRunStepInputFiles.step_id,
+                FlowRunStepInputFiles.attempt_no,
+                FlowRunStepInputFiles.file_id,
+                Files.name,
+                Files.checksum,
+                Files.size,
+                Files.mimetype,
+                Files.file_type,
+                text_length,
+                has_text,
+                has_transcription,
+            )
+            .join(Files, Files.id == FlowRunStepInputFiles.file_id)
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+            .where(
+                sa.tuple_(
                     FlowRunStepInputFiles.step_id,
                     FlowRunStepInputFiles.attempt_no,
-                    FlowRunStepInputFiles.file_id,
-                    Files.name,
-                    Files.checksum,
-                    Files.size,
-                    Files.mimetype,
-                    Files.file_type,
-                    text_length,
-                    has_text,
-                    has_transcription,
+                ).in_(current_attempt_pairs)
+            )
+            .order_by(
+                FlowRunStepInputFiles.step_order.asc(),
+                FlowRunStepInputFiles.attempt_no.asc(),
+                FlowRunStepInputFiles.ordinal.asc(),
+            )
+        )
+        if limit is not None and logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowRunStepInputFiles.id.label("row_id"),
+                    FlowRunStepInputFiles.step_order.label("step_order"),
+                    FlowRunStepInputFiles.attempt_no.label("attempt_no"),
+                    FlowRunStepInputFiles.ordinal.label("ordinal"),
+                    _file_evidence_logical_bytes().label("logical_bytes"),
                 )
                 .join(Files, Files.id == FlowRunStepInputFiles.file_id)
                 .where(FlowRunStepInputFiles.flow_run_id == run_id)
@@ -1222,9 +1678,35 @@ class FlowRunRepository:
                     FlowRunStepInputFiles.step_order.asc(),
                     FlowRunStepInputFiles.attempt_no.asc(),
                     FlowRunStepInputFiles.ordinal.asc(),
+                    FlowRunStepInputFiles.id.asc(),
+                )
+                .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.step_order,
+                candidates.c.attempt_no,
+                candidates.c.ordinal,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunStepInputFiles.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
+                    )
                 )
             )
-        ).all()
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).all()
 
         metadata_by_step_result_id: dict[UUID, list[FlowRunStepInputFileMetadata]] = {}
         for row in rows:
@@ -1257,6 +1739,8 @@ class FlowRunRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
     ) -> list[FlowRunStepResultFile]:
         stmt = (
             sa.select(FlowRunStepResultFiles, Files)
@@ -1269,6 +1753,50 @@ class FlowRunRepository:
                 FlowRunStepResultFiles.ordinal.asc(),
             )
         )
+        if limit is not None and logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowRunStepResultFiles.id.label("row_id"),
+                    FlowRunStepResultFiles.step_order.label("step_order"),
+                    FlowRunStepResultFiles.attempt_no.label("attempt_no"),
+                    FlowRunStepResultFiles.ordinal.label("ordinal"),
+                    _file_evidence_logical_bytes().label("logical_bytes"),
+                )
+                .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+                .where(FlowRunStepResultFiles.flow_run_id == run_id)
+                .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+                .order_by(
+                    FlowRunStepResultFiles.step_order.asc(),
+                    FlowRunStepResultFiles.attempt_no.asc(),
+                    FlowRunStepResultFiles.ordinal.asc(),
+                    FlowRunStepResultFiles.id.asc(),
+                )
+                .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.step_order,
+                candidates.c.attempt_no,
+                candidates.c.ordinal,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunStepResultFiles.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
         rows = (await self.session.execute(stmt)).all()
         return [
             _result_file_from_rows(result_file_row, file_row)

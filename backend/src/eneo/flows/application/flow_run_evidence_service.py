@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
@@ -12,6 +13,12 @@ from eneo.flows.application.flow_run_access_policy import (
 )
 from eneo.flows.application.flow_run_evidence import (
     EvidenceExportDetail,
+    EvidenceLimitIdentifier,
+    EvidenceSectionIdentifier,
+    RunViewEvidenceLogicalByteOmission,
+    RunViewEvidenceOmission,
+    RunViewEvidenceParentOmission,
+    RunViewEvidenceRowOmission,
     RunViewPassageOmission,
     exported_passage_bytes,
     omit_passages_beyond_view_budget,
@@ -48,7 +55,10 @@ from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
     StepAttemptProvenanceSize,
 )
-from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.infrastructure.flow_run_rerun_repo import (
+    FlowRunRerunEvidenceAdmissionReason,
+    FlowRunRerunRepository,
+)
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -78,24 +88,51 @@ EVIDENCE_EXPORT_MAX_PASSAGE_BYTES = 64 * 1024 * 1024
 # limit alone cannot see. Stored jsonb is a compressed floor on serialized
 # size, so exceeding this guard means the real cost is at least this large.
 EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES = 256 * 1024 * 1024
-# An interactive view bounds what it loads by rows, stored bytes, AND exact
-# recorded passage bytes: stored jsonb is a compressed floor, so highly
-# compressible passage text could pass a stored-byte guard and still expand
-# far beyond it in memory. Current attempts are admitted first and consume
+# Fan-out ceilings keep every emitted section finite even when its rows carry
+# no JSON. They are fixed synchronous-export invariants, not tenant policy.
+EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING = 10_000
+# Complete raw and redacted route measurements, including validation, hashing,
+# redaction and indented JSON rendering, peaked below twelve times the logical
+# projection size. Keep the admitted projection below one twelfth of the fixed
+# per-request memory budget so those copies cannot exhaust the worker.
+EVIDENCE_EXPORT_REQUEST_MEMORY_BUDGET_BYTES = 256 * 1024 * 1024
+EVIDENCE_EXPORT_MEASURED_PEAK_MEMORY_MULTIPLIER = 12
+# Fixed fields on the widest row projection serialize to about 1 KiB once UUIDs,
+# timestamps, keys and punctuation are included. Double that measured shape to
+# charge section containers and the debug projection before applying the peak
+# multiplier above.
+EVIDENCE_EXPORT_SERIALIZED_ROW_FLOOR_BYTES = 2 * 1024
+EVIDENCE_EXPORT_MAX_AGGREGATE_STORED_JSON_BYTES = 256 * 1024 * 1024
+EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES = (
+    EVIDENCE_EXPORT_REQUEST_MEMORY_BUDGET_BYTES
+    // EVIDENCE_EXPORT_MEASURED_PEAK_MEMORY_MULTIPLIER
+)
+# An interactive view bounds what it loads by rows, logical bytes, AND exact
+# recorded passage bytes. Current attempts are admitted first and consume
 # the budgets first; when even a current attempt does not fit, the response
 # says so rather than pretending it never existed. Memory-protection
 # invariants for one request, not operator policy.
 RUN_VIEW_MAX_LOADED_ATTEMPTS = 500
-RUN_VIEW_MAX_LOADED_STORED_BYTES = 32 * 1024 * 1024
+RUN_VIEW_MAX_LOADED_LOGICAL_BYTES = 32 * 1024 * 1024
 RUN_VIEW_MAX_LOADED_PASSAGE_BYTES = 64 * 1024 * 1024
+RUN_VIEW_MAX_LOADED_SECTION_ROWS = 500
+RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES = 16 * 1024 * 1024
 # Recovery guidance travels in the error context because clients read the
 # typed response body; a server-side hint field they never receive is not
 # remediation.
 _EVIDENCE_EXPORT_TOO_LARGE_HINT = (
-    "Inspect this run's knowledge evidence in the run view, which pages "
-    "it, or lower the retained-passage policy for future runs. An export "
-    "never returns a partial document."
+    "Inspect this run in the run view, page provider-call events where "
+    "available, or reduce retained evidence for future runs. An export never "
+    "returns a partial document."
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _EvidenceSectionUsage:
+    section: EvidenceSectionIdentifier
+    row_count: int
+    stored_json_bytes: int
+    logical_json_bytes: int
 
 
 class FlowRunEvidenceService:
@@ -319,47 +356,186 @@ class FlowRunEvidenceService:
                 resolved_run,
                 access_kind=access_kind,
             )
-        version = await self.flow_version_repo.get(
+        if access_kind != "evidence_view":
+            await self._refuse_export_rows_before_size_measurement(
+                run_id=resolved_run.id,
+                detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
+            )
+        measurement_candidate_limit = (
+            RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1
+            if access_kind == "evidence_view"
+            else EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING + 1
+        )
+        run_measurements = await self.flow_run_repo.measure_evidence_sections(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+            candidate_limit=measurement_candidate_limit,
+        )
+        version_measurement = await self.flow_version_repo.measure_definition_evidence(
             flow_id=resolved_run.flow_id,
             version=resolved_run.flow_version,
             tenant_id=self.user.tenant_id,
         )
-        # Size the stored attempt provenance before loading any of it. An
-        # export that cannot possibly fit refuses here, before the expensive
-        # fetch; an oversized interactive view narrows what it loads instead.
         provenance_size = await self.flow_run_repo.measure_step_attempt_provenance(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
+            candidate_limit=measurement_candidate_limit,
+        )
+        rerun_measurements = await self.flow_run_rerun_repo.measure_evidence_sections(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+            candidate_limit=measurement_candidate_limit,
+        )
+        review_measurement = (
+            await self.flow_run_review_checkpoint_repo.measure_evidence(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                candidate_limit=measurement_candidate_limit,
+            )
+        )
+        provider_call_measurement = await self.provider_call_repo.measure_evidence(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+            candidate_limit=(
+                provider_call_limit + 1
+                if access_kind == "evidence_view"
+                else PROVIDER_CALL_EXPORT_MAX_EVENTS + 1
+            ),
+        )
+        webhook_measurement = await self.webhook_delivery_repo.measure_evidence(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+            candidate_limit=measurement_candidate_limit,
+        )
+        section_usages = (
+            _EvidenceSectionUsage(
+                section="run",
+                row_count=run_measurements.run_row_count,
+                stored_json_bytes=run_measurements.run_stored_json_bytes,
+                logical_json_bytes=run_measurements.run_logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="definition_snapshot",
+                row_count=version_measurement.row_count,
+                stored_json_bytes=version_measurement.stored_json_bytes,
+                logical_json_bytes=version_measurement.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="step_results",
+                row_count=run_measurements.step_result_row_count,
+                stored_json_bytes=run_measurements.step_result_stored_json_bytes,
+                logical_json_bytes=run_measurements.step_result_logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="step_attempts",
+                row_count=provenance_size.attempt_count,
+                stored_json_bytes=provenance_size.stored_json_bytes,
+                logical_json_bytes=provenance_size.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="result_files",
+                row_count=run_measurements.result_file_row_count,
+                stored_json_bytes=0,
+                logical_json_bytes=run_measurements.result_file_logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="runtime_input_files",
+                row_count=run_measurements.runtime_input_file_row_count,
+                stored_json_bytes=0,
+                logical_json_bytes=(
+                    run_measurements.runtime_input_file_logical_json_bytes
+                ),
+            ),
+            _EvidenceSectionUsage(
+                section="rerun_operations",
+                row_count=rerun_measurements.operation_row_count,
+                stored_json_bytes=rerun_measurements.operation_stored_json_bytes,
+                logical_json_bytes=rerun_measurements.operation_logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="rerun_invalidated_steps",
+                row_count=rerun_measurements.invalidated_step_row_count,
+                stored_json_bytes=(
+                    rerun_measurements.invalidated_step_stored_json_bytes
+                ),
+                logical_json_bytes=(
+                    rerun_measurements.invalidated_step_logical_json_bytes
+                ),
+            ),
+            _EvidenceSectionUsage(
+                section="review_checkpoints",
+                row_count=review_measurement.row_count,
+                stored_json_bytes=review_measurement.stored_json_bytes,
+                logical_json_bytes=review_measurement.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="webhook_deliveries",
+                row_count=webhook_measurement.row_count,
+                stored_json_bytes=0,
+                logical_json_bytes=0,
+            ),
+            _EvidenceSectionUsage(
+                section="provider_calls",
+                row_count=provider_call_measurement.row_count,
+                stored_json_bytes=0,
+                logical_json_bytes=provider_call_measurement.logical_json_bytes,
+            ),
         )
         attempt_limit: int | None = None
-        history_byte_budget: int | None = None
+        logical_byte_budget: int | None = None
         passage_byte_budget: int | None = None
+        view_omissions: list[RunViewEvidenceOmission] = []
         if access_kind == "evidence_view":
             if (
                 provenance_size.attempt_count > RUN_VIEW_MAX_LOADED_ATTEMPTS
                 or provenance_size.stored_provenance_bytes
-                > RUN_VIEW_MAX_LOADED_STORED_BYTES
+                > RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
+                or provenance_size.logical_json_bytes
+                > RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
                 or provenance_size.recorded_passage_bytes
                 > RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
                 or provenance_size.corrupt_passage_aggregates > 0
             ):
                 attempt_limit = RUN_VIEW_MAX_LOADED_ATTEMPTS
-                history_byte_budget = RUN_VIEW_MAX_LOADED_STORED_BYTES
+                logical_byte_budget = RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
                 passage_byte_budget = RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
         else:
             self._refuse_export_beyond_preflight(
                 provenance_size,
+                section_usages=section_usages,
                 detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
             )
+        is_view = access_kind == "evidence_view"
+        view_read_kwargs = (
+            {
+                "limit": RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+                "logical_byte_budget": RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
+            }
+            if is_view
+            else {}
+        )
+        version = await self.flow_version_repo.get(
+            flow_id=resolved_run.flow_id,
+            version=resolved_run.flow_version,
+            tenant_id=self.user.tenant_id,
+        )
         step_results = await self.flow_run_repo.list_step_results(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
+            **view_read_kwargs,
         )
+        if is_view:
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "step_results"),
+                returned_count=len(step_results),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+            )
         attempt_page = await self.flow_run_repo.list_step_attempts(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
             limit=attempt_limit,
-            history_byte_budget=history_byte_budget,
+            logical_byte_budget=logical_byte_budget,
             passage_byte_budget=passage_byte_budget,
         )
         step_attempts = withhold_attempt_passages(
@@ -409,43 +585,135 @@ class FlowRunEvidenceService:
                 step_attempts,
                 detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
             )
-        rerun_operations = await self.flow_run_rerun_repo.list_rerun_operations_for_run(
-            run_id=resolved_run.id,
-            tenant_id=self.user.tenant_id,
+        rerun_admission_reason: FlowRunRerunEvidenceAdmissionReason | None = None
+        if is_view:
+            rerun_admission = (
+                await self.flow_run_rerun_repo.list_rerun_operations_for_evidence_view(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                    limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+                    logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
+                )
+            )
+            rerun_operations = list(rerun_admission.operations)
+            rerun_admission_reason = rerun_admission.omission_reason
+        else:
+            rerun_operations = (
+                await self.flow_run_rerun_repo.list_rerun_operations_for_run(
+                    run_id=resolved_run.id,
+                    tenant_id=self.user.tenant_id,
+                )
+            )
+        if is_view:
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "rerun_operations"),
+                returned_count=len(rerun_operations),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+                admission_reason=rerun_admission_reason,
+            )
+        admitted_operation_ids = (
+            [item.id for item in rerun_operations]
+            if access_kind == "evidence_view"
+            else None
         )
         rerun_invalidated_steps = (
             await self.flow_run_rerun_repo.list_rerun_invalidated_steps_for_run(
                 run_id=resolved_run.id,
                 tenant_id=self.user.tenant_id,
+                operation_ids=admitted_operation_ids,
+                **view_read_kwargs,
             )
         )
+        if is_view:
+            rerun_usage = self._section_usage(section_usages, "rerun_operations")
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "rerun_invalidated_steps"),
+                returned_count=len(rerun_invalidated_steps),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+                parent_omitted=len(rerun_operations) < rerun_usage.row_count,
+            )
         review_checkpoints = (
             await self.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run(
                 run_id=resolved_run.id,
                 tenant_id=self.user.tenant_id,
+                **view_read_kwargs,
             )
         )
+        if is_view:
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "review_checkpoints"),
+                returned_count=len(review_checkpoints),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+            )
         result_files = await self.flow_run_repo.list_result_files(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
+            **view_read_kwargs,
         )
-        provider_calls = await self.provider_call_repo.list_evidence_page(
-            run_id=resolved_run.id,
-            tenant_id=self.user.tenant_id,
-            limit=provider_call_limit,
-        )
+        if is_view:
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "result_files"),
+                returned_count=len(result_files),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+            )
+        if is_view:
+            provider_calls = await self.provider_call_repo.list_evidence_page(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                limit=provider_call_limit,
+                total_count_limit=provider_call_limit + 1,
+                logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
+            )
+        else:
+            provider_calls = await self.provider_call_repo.list_evidence_page(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                limit=provider_call_limit,
+            )
+        if is_view:
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "provider_calls"),
+                returned_count=provider_calls.count,
+                row_limit=provider_call_limit,
+            )
         webhook_deliveries = (
             await self.webhook_delivery_repo.list_run_delivery_statuses(
                 run_id=resolved_run.id,
                 tenant_id=self.user.tenant_id,
+                **({"limit": RUN_VIEW_MAX_LOADED_SECTION_ROWS} if is_view else {}),
             )
         )
+        if is_view:
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "webhook_deliveries"),
+                returned_count=len(webhook_deliveries),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+            )
         runtime_input_file_metadata_by_step_result_id = {}
         if step_results:
             runtime_input_file_metadata_by_step_result_id = await self.flow_run_repo.list_current_step_input_file_metadata_by_step_result_id(
                 run_id=resolved_run.id,
                 tenant_id=self.user.tenant_id,
                 step_results=step_results,
+                **view_read_kwargs,
+            )
+        if is_view:
+            step_result_usage = self._section_usage(section_usages, "step_results")
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "runtime_input_files"),
+                returned_count=sum(
+                    len(files)
+                    for files in runtime_input_file_metadata_by_step_result_id.values()
+                ),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+                parent_omitted=len(step_results) < step_result_usage.row_count,
             )
         return build_evidence_bundle(
             run=resolved_run,
@@ -462,6 +730,7 @@ class FlowRunEvidenceService:
                 runtime_input_file_metadata_by_step_result_id
             ),
             knowledge_evidence_view=knowledge_evidence_view,
+            omissions=view_omissions,
         )
 
     def _rag_evidence_policy(self) -> FlowRagEvidencePolicy:
@@ -470,10 +739,147 @@ class FlowRunEvidenceService:
             cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None))
         )
 
+    async def _refuse_export_rows_before_size_measurement(
+        self, *, run_id: UUID, detail: EvidenceExportDetail
+    ) -> None:
+        ceiling = EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING
+        run_counts = await self.flow_run_repo.measure_evidence_row_counts(
+            run_id=run_id,
+            tenant_id=self.user.tenant_id,
+            ceiling=ceiling,
+        )
+        rerun_counts = await self.flow_run_rerun_repo.measure_evidence_row_counts(
+            run_id=run_id,
+            tenant_id=self.user.tenant_id,
+            ceiling=ceiling,
+        )
+        counts: tuple[tuple[EvidenceSectionIdentifier, int, int], ...] = (
+            ("step_results", run_counts.step_results, ceiling),
+            ("step_attempts", run_counts.step_attempts, ceiling),
+            ("result_files", run_counts.result_files, ceiling),
+            ("runtime_input_files", run_counts.runtime_input_files, ceiling),
+            ("rerun_operations", rerun_counts.operations, ceiling),
+            ("rerun_operations", rerun_counts.nested_overrides, ceiling),
+            ("rerun_invalidated_steps", rerun_counts.invalidated_steps, ceiling),
+            (
+                "review_checkpoints",
+                await self.flow_run_review_checkpoint_repo.measure_evidence_row_count(
+                    run_id=run_id,
+                    tenant_id=self.user.tenant_id,
+                    ceiling=ceiling,
+                ),
+                ceiling,
+            ),
+            (
+                "webhook_deliveries",
+                await self.webhook_delivery_repo.measure_evidence_row_count(
+                    run_id=run_id,
+                    tenant_id=self.user.tenant_id,
+                    ceiling=ceiling,
+                ),
+                ceiling,
+            ),
+            (
+                "provider_calls",
+                await self.provider_call_repo.measure_evidence_row_count(
+                    run_id=run_id,
+                    tenant_id=self.user.tenant_id,
+                    ceiling=PROVIDER_CALL_EXPORT_MAX_EVENTS,
+                ),
+                PROVIDER_CALL_EXPORT_MAX_EVENTS,
+            ),
+        )
+        for section, row_count, section_ceiling in counts:
+            if row_count <= section_ceiling:
+                continue
+            limit_kind: EvidenceLimitIdentifier = (
+                "provider_call_events"
+                if section == "provider_calls"
+                else "section_rows"
+            )
+            raise FileTooLargeException(
+                "Flow evidence export contains too many rows in one section.",
+                code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
+                context={
+                    "section": section,
+                    "limit": limit_kind,
+                    "section_row_count": row_count,
+                    "max_section_rows": section_ceiling,
+                    "detail": detail,
+                    "hint": _EVIDENCE_EXPORT_TOO_LARGE_HINT,
+                },
+            )
+
+    @staticmethod
+    def _section_usage(
+        section_usages: Sequence[_EvidenceSectionUsage],
+        section: EvidenceSectionIdentifier,
+    ) -> _EvidenceSectionUsage:
+        return next(usage for usage in section_usages if usage.section == section)
+
+    @staticmethod
+    def _record_view_omission(
+        *,
+        omissions: list[RunViewEvidenceOmission],
+        usage: _EvidenceSectionUsage,
+        returned_count: int,
+        row_limit: int,
+        parent_omitted: bool = False,
+        admission_reason: FlowRunRerunEvidenceAdmissionReason | None = None,
+    ) -> None:
+        rows_omitted = max(0, usage.row_count - returned_count)
+        if rows_omitted == 0:
+            return
+        count_truncated = usage.row_count > row_limit
+        if parent_omitted:
+            omissions.append(
+                RunViewEvidenceParentOmission(
+                    section=usage.section,
+                    rows_omitted=rows_omitted,
+                    count_truncated=count_truncated,
+                )
+            )
+            return
+        if admission_reason == "logical_bytes":
+            omissions.append(
+                RunViewEvidenceLogicalByteOmission(
+                    section=usage.section,
+                    rows_omitted=rows_omitted,
+                    count_truncated=count_truncated,
+                )
+            )
+            return
+        if admission_reason == "row_limit":
+            omissions.append(
+                RunViewEvidenceRowOmission(
+                    section=usage.section,
+                    rows_omitted=rows_omitted,
+                    count_truncated=count_truncated,
+                )
+            )
+            return
+        if returned_count < min(usage.row_count, row_limit):
+            omissions.append(
+                RunViewEvidenceLogicalByteOmission(
+                    section=usage.section,
+                    rows_omitted=rows_omitted,
+                    count_truncated=count_truncated,
+                )
+            )
+            return
+        omissions.append(
+            RunViewEvidenceRowOmission(
+                section=usage.section,
+                rows_omitted=rows_omitted,
+                count_truncated=count_truncated,
+            )
+        )
+
     @staticmethod
     def _refuse_export_beyond_preflight(
         provenance_size: StepAttemptProvenanceSize,
         *,
+        section_usages: Sequence[_EvidenceSectionUsage],
         detail: EvidenceExportDetail,
     ) -> None:
         """Refuse an export that cannot fit, before loading any provenance.
@@ -495,6 +901,7 @@ class FlowRunEvidenceService:
                 "evidence has unreadable size aggregates.",
                 code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
                 context={
+                    "section": "step_attempts",
                     "limit": "corrupt_passage_evidence",
                     "corrupt_passage_aggregates": (
                         provenance_size.corrupt_passage_aggregates
@@ -511,6 +918,7 @@ class FlowRunEvidenceService:
                 "than an export document may carry.",
                 code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
                 context={
+                    "section": "step_attempts",
                     "limit": "recorded_passage_bytes",
                     "recorded_passage_bytes": (provenance_size.recorded_passage_bytes),
                     "max_passage_bytes": EVIDENCE_EXPORT_MAX_PASSAGE_BYTES,
@@ -527,12 +935,59 @@ class FlowRunEvidenceService:
                 "one request may materialize.",
                 code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
                 context={
+                    "section": "step_attempts",
                     "limit": "stored_provenance_bytes",
                     "stored_provenance_bytes": (
                         provenance_size.stored_provenance_bytes
                     ),
                     "max_stored_provenance_bytes": (
                         EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES
+                    ),
+                    "detail": detail,
+                    "hint": _EVIDENCE_EXPORT_TOO_LARGE_HINT,
+                },
+            )
+        aggregate_stored_json_bytes = sum(
+            usage.stored_json_bytes for usage in section_usages
+        )
+        if (
+            aggregate_stored_json_bytes
+            > EVIDENCE_EXPORT_MAX_AGGREGATE_STORED_JSON_BYTES
+        ):
+            raise FileTooLargeException(
+                "Flow evidence export would load more stored JSON than one "
+                "request may materialize.",
+                code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
+                context={
+                    "section": "whole_bundle",
+                    "limit": "aggregate_stored_json_bytes",
+                    "aggregate_stored_json_bytes": aggregate_stored_json_bytes,
+                    "max_aggregate_stored_json_bytes": (
+                        EVIDENCE_EXPORT_MAX_AGGREGATE_STORED_JSON_BYTES
+                    ),
+                    "detail": detail,
+                    "hint": _EVIDENCE_EXPORT_TOO_LARGE_HINT,
+                },
+            )
+        aggregate_logical_json_bytes = sum(
+            usage.logical_json_bytes
+            + usage.row_count * EVIDENCE_EXPORT_SERIALIZED_ROW_FLOOR_BYTES
+            for usage in section_usages
+        )
+        if (
+            aggregate_logical_json_bytes
+            > EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES
+        ):
+            raise FileTooLargeException(
+                "Flow evidence export would expand more JSON than one request "
+                "may materialize.",
+                code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
+                context={
+                    "section": "whole_bundle",
+                    "limit": "aggregate_logical_json_bytes",
+                    "aggregate_logical_json_bytes": aggregate_logical_json_bytes,
+                    "max_aggregate_logical_json_bytes": (
+                        EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES
                     ),
                     "detail": detail,
                     "hint": _EVIDENCE_EXPORT_TOO_LARGE_HINT,
@@ -562,6 +1017,7 @@ class FlowRunEvidenceService:
             "export document may carry.",
             code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
             context={
+                "section": "step_attempts",
                 "limit": "recorded_passage_bytes",
                 "recorded_passage_bytes": carried_bytes,
                 "max_passage_bytes": EVIDENCE_EXPORT_MAX_PASSAGE_BYTES,
@@ -580,6 +1036,7 @@ class FlowRunEvidenceService:
             "Flow evidence export contains too many provider-call events.",
             code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
             context={
+                "section": "provider_calls",
                 "limit": "provider_call_events",
                 "provider_call_count": provider_calls.total_count,
                 "max_provider_call_events": PROVIDER_CALL_EXPORT_MAX_EVENTS,

@@ -4245,7 +4245,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             run_id=run.id,
             tenant_id=tenant_id,
             limit=3,
-            history_byte_budget=10 * 1024 * 1024,
+            logical_byte_budget=10 * 1024 * 1024,
         )
         assert [(a.step_order, a.attempt_no) for a in narrowed.attempts] == [
             (1, 2),
@@ -4256,20 +4256,19 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         assert narrowed.current_total == 2
         assert narrowed.current_admitted == 2
 
-        # Currents consume the byte budget first. A one-byte budget admits the
-        # provenance-free current attempt and excludes everything with stored
-        # provenance — visibly: the totals still report all four rows and the
-        # excluded current attempt.
+        # Currents consume the byte budget first. A one-byte budget excludes
+        # every row because emitted attempt text, including celery_task_id, is
+        # measured as serialized JSON even when the payload JSON is absent.
         tiny_budget = await run_repo.list_step_attempts(
             run_id=run.id,
             tenant_id=tenant_id,
             limit=3,
-            history_byte_budget=1,
+            logical_byte_budget=1,
         )
-        assert [(a.step_order, a.attempt_no) for a in tiny_budget.attempts] == [(2, 1)]
+        assert tiny_budget.attempts == []
         assert tiny_budget.total_count == 4
         assert tiny_budget.current_total == 2
-        assert tiny_budget.current_admitted == 1
+        assert tiny_budget.current_admitted == 0
 
         # Zero admission still reports every count from the same statement:
         # a zero row limit admits nothing, and the totals do not fall back to
@@ -4278,7 +4277,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             run_id=run.id,
             tenant_id=tenant_id,
             limit=0,
-            history_byte_budget=1,
+            logical_byte_budget=1,
         )
         assert nothing.attempts == []
         assert nothing.total_count == 4
@@ -4293,7 +4292,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             run_id=run.id,
             tenant_id=tenant_id,
             limit=10,
-            history_byte_budget=10 * 1024 * 1024,
+            logical_byte_budget=10 * 1024 * 1024,
             passage_byte_budget=2500,
         )
         admitted_pairs = [(a.step_order, a.attempt_no) for a in logical.attempts]

@@ -58,6 +58,11 @@ from eneo.flows.api.flow_run_contract_models import (
 from eneo.flows.api.flow_run_contract_models import (
     FormFieldPublic as FormFieldPublic,
 )
+from eneo.flows.application.flow_run_evidence import (
+    EvidenceLimitIdentifier,
+    EvidenceSectionIdentifier,
+    RunViewEvidenceOmission,
+)
 from eneo.flows.application.flow_run_evidence_export_manifest import (
     EvidenceExportManifest,
 )
@@ -109,7 +114,7 @@ from eneo.flows.published_definition import (
     published_definition_checksum,
 )
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.main.models import (
     NOT_PROVIDED,
     InDB,
@@ -135,6 +140,27 @@ FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
     "can only tighten the active window. Organization and matching-classification "
     "minimum/no-purge barriers never activate deletion and cannot be weakened here."
 )
+
+
+class FlowEvidenceExportTooLargeContext(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    section: EvidenceSectionIdentifier
+    limit: EvidenceLimitIdentifier
+    detail: Literal["raw", "redacted"] | None = None
+    hint: str
+
+
+class FlowEvidenceExportTooLargeError(BaseModel):
+    message: str
+    eneo_error_code: ErrorCodes
+    code: Literal["flow_evidence_export_too_large"]
+    context: FlowEvidenceExportTooLargeContext
+    request_id: str | None = None
+    error_id: str | None = None
+    details: dict[str, Any] | None = None
+
+
 FlowDataRetentionDays: TypeAlias = Annotated[
     int,
     Field(strict=True, ge=MIN_RETENTION_DAYS, le=MAX_RETENTION_DAYS),
@@ -1651,6 +1677,13 @@ class FlowRunDebugRunSummary(BaseModel):
             "evidence by not loading attempts or trimming recorded passage "
             "text, including corruption-caused attempt exclusion. Absent on "
             "exports and when the view returned all retained knowledge evidence."
+        ),
+    )
+    omissions: list[RunViewEvidenceOmission] = Field(
+        default_factory=lambda: cast(list[RunViewEvidenceOmission], []),
+        description=(
+            "Sections narrowed in this interactive response, including how many "
+            "rows remain retained and whether the row or logical-byte bound applied."
         ),
     )
 

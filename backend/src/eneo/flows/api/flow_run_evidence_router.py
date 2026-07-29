@@ -16,6 +16,7 @@ from eneo.flows.api.flow_api_common import (
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
+    FlowEvidenceExportTooLargeError,
     FlowRunEvidenceExportResponse,
     FlowRunEvidenceResponse,
 )
@@ -367,28 +368,32 @@ async def list_flow_run_provider_calls(
                 "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
             },
         ),
-        413: error_response(
-            description=(
-                "The run holds more evidence than one synchronous export may "
-                "contain. context.limit names the exceeded boundary: "
-                "provider_call_events, recorded_passage_bytes, "
-                "stored_provenance_bytes, or corrupt_passage_evidence. An "
-                "export never returns a partial document; context.hint names "
-                "the recovery path."
-            ),
-            message="Flow evidence export contains too many provider-call events.",
-            eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
-            code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE,
-            context={
-                "limit": "provider_call_events",
-                "provider_call_count": 10_001,
-                "max_provider_call_events": 10_000,
-                "hint": (
-                    "Page this run's provider-call events through the "
-                    "provider-calls endpoint."
+        413: {
+            **error_response(
+                description=(
+                    "The run holds more evidence than one synchronous export may "
+                    "contain. context.section names the affected section and "
+                    "context.limit names its row, stored-byte, logical-byte, "
+                    "passage, provider-call, or integrity boundary. An export "
+                    "never returns a partial document; context.hint names the "
+                    "recovery path."
                 ),
-            },
-        ),
+                message="Flow evidence export exceeds a synchronous export limit.",
+                eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
+                code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE,
+                context={
+                    "section": "provider_calls",
+                    "limit": "provider_call_events",
+                    "provider_call_count": 10_001,
+                    "max_provider_call_events": 10_000,
+                    "hint": (
+                        "Page this run's provider-call events through the "
+                        "provider-calls endpoint."
+                    ),
+                },
+            ),
+            "model": FlowEvidenceExportTooLargeError,
+        },
         403: error_response(
             description=_FLOW_TRACE_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",

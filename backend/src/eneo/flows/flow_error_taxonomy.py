@@ -598,18 +598,15 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Evidence and artifacts",
         surfaced_through="API error response",
         cause=(
-            "The run exceeds an export limit named in the error context — "
-            "provider-call events, recorded passage bytes, stored provenance "
-            "size, or unreadable passage-size evidence."
+            "The run exceeds a row, stored-byte, logical-byte, passage, "
+            "provider-call, or evidence-integrity limit named in the error context."
         ),
         consumer_action=(
-            "Page provider-call events through the provider-calls endpoint or "
-            "inspect recorded passages in the run view — an export never "
-            "returns a partial document."
+            "Use the section and limit context fields to page supported evidence "
+            "or direct the caller to the bounded run view."
         ),
         user_action=(
-            "Open the run's evidence view instead of exporting it; the view "
-            "shows what fits and says exactly what it left out."
+            "Open the run view to inspect the bounded evidence available there."
         ),
     ),
     FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(

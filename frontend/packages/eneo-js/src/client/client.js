@@ -39,7 +39,7 @@ function hasReadableErrorMessage(value) {
  */
 
 export function createClient(args) {
-  const version = "DEV-20260728T140921Z"; // # Client version auto-updates when running the updater, do not edit this line.
+  const version = "DEV-20260729T125436Z"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
 

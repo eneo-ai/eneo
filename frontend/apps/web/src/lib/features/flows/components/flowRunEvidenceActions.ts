@@ -1,4 +1,4 @@
-import type { Eneo } from "@eneo/eneo-js";
+import type { components, Eneo } from "@eneo/eneo-js";
 import { describeFlowApiError } from "$lib/features/flows/flowRuntimeErrorMapping";
 
 export function serializeEvidencePayload(payload: unknown): string {
@@ -66,6 +66,25 @@ export async function downloadEvidenceExport(
 
 export type ExportRecoveryKind = "evidence_view" | "provider_calls" | "generic" | null;
 
+type EvidenceExportLimit = components["schemas"]["FlowEvidenceExportTooLargeContext"]["limit"];
+
+const evidenceExportLimits = [
+  "corrupt_passage_evidence",
+  "recorded_passage_bytes",
+  "stored_provenance_bytes",
+  "section_rows",
+  "aggregate_stored_json_bytes",
+  "aggregate_logical_json_bytes",
+  "provider_call_events"
+] as const satisfies readonly EvidenceExportLimit[];
+
+function evidenceExportLimit(value: unknown): EvidenceExportLimit | null {
+  if (typeof value !== "string") return null;
+  return evidenceExportLimits.includes(value as EvidenceExportLimit)
+    ? (value as EvidenceExportLimit)
+    : null;
+}
+
 export function classifyExportFailure(error: unknown): ExportRecoveryKind {
   // An oversized-export refusal names the exceeded limit in its typed
   // context; real client errors carry that context on the parsed response,
@@ -73,7 +92,7 @@ export function classifyExportFailure(error: unknown): ExportRecoveryKind {
   // copy at the call site — server-authored text is never echoed.
   const descriptor = describeFlowApiError(error);
   if (descriptor?.code !== "flow_evidence_export_too_large") return null;
-  switch (descriptor.context.limit) {
+  switch (evidenceExportLimit(descriptor.context.limit)) {
     case "recorded_passage_bytes":
     case "stored_provenance_bytes":
     case "corrupt_passage_evidence":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -50,11 +51,90 @@ class FlowProviderCallResolvedInputLinkError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class FlowProviderCallEvidenceMeasurement:
+    row_count: int
+    logical_json_bytes: int = 0
+
+    @classmethod
+    def empty(cls) -> "FlowProviderCallEvidenceMeasurement":
+        return cls(row_count=0, logical_json_bytes=0)
+
+
+def _provider_call_evidence_logical_bytes() -> ColumnElement[int]:
+    # Paired with `_to_evidence`: mapped_source_id is the projection's only
+    # unbounded scalar and must be measured as serialized JSON, including escapes.
+    return sa.func.coalesce(
+        sa.func.octet_length(
+            sa.cast(sa.func.to_jsonb(FlowProviderCalls.mapped_source_id), sa.Text)
+        ),
+        0,
+    )
+
+
 class FlowProviderCallRepository:
     """Owns ordered provider-call lifecycle rows under a Flow step attempt."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def measure_evidence_row_count(
+        self, *, run_id: UUID, tenant_id: UUID, ceiling: int
+    ) -> int:
+        candidates = (
+            sa.select(FlowProviderCalls.id)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .limit(ceiling + 1)
+            .subquery()
+        )
+        return int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(candidates)
+            )
+            or 0
+        )
+
+    async def measure_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowProviderCallEvidenceMeasurement:
+        candidate_stmt = (
+            sa.select(FlowProviderCalls.id)
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            candidate_stmt = candidate_stmt.limit(candidate_limit)
+        candidates = candidate_stmt.subquery()
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(_provider_call_evidence_logical_bytes()), 0
+                    ).label("logical_json_bytes"),
+                )
+                .select_from(FlowProviderCalls)
+                .where(FlowProviderCalls.id.in_(sa.select(candidates.c.id)))
+            )
+        ).one()
+        return FlowProviderCallEvidenceMeasurement(
+            row_count=int(row.row_count),
+            logical_json_bytes=int(row.logical_json_bytes),
+        )
 
     async def get_call(self, *, call_id: UUID) -> ProviderCall:
         row = await self.session.scalar(
@@ -74,6 +154,8 @@ class FlowProviderCallRepository:
         limit: int,
         after_event_id: UUID | None = None,
         attempt_id: UUID | None = None,
+        total_count_limit: int | None = None,
+        logical_byte_budget: int | None = None,
     ) -> ProviderCallEvidencePage:
         if limit < 1:
             raise ValueError("Provider-call evidence limit must be positive.")
@@ -85,17 +167,25 @@ class FlowProviderCallRepository:
         if attempt_id is not None:
             predicates.append(FlowStepAttempts.id == attempt_id)
 
+        count_stmt = (
+            sa.select(FlowProviderCalls.id)
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(*predicates)
+        )
+        if total_count_limit is not None:
+            count_stmt = count_stmt.limit(total_count_limit)
         total_count = int(
             await self.session.scalar(
-                sa.select(sa.func.count())
-                .select_from(FlowProviderCalls)
-                .join(
-                    FlowStepAttempts,
-                    FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
-                )
-                .where(*predicates)
+                sa.select(sa.func.count()).select_from(count_stmt.subquery())
             )
             or 0
+        )
+        total_count_truncated = (
+            total_count_limit is not None and total_count == total_count_limit
         )
 
         page_predicates = list(predicates)
@@ -131,13 +221,15 @@ class FlowProviderCallRepository:
                 > sa.tuple_(*cursor)
             )
 
-        rows = (
-            await self.session.execute(
+        admitted_ids = None
+        if logical_byte_budget is not None:
+            candidates = (
                 sa.select(
-                    FlowProviderCalls,
-                    FlowStepAttempts.step_id,
-                    FlowStepAttempts.step_order,
-                    FlowStepAttempts.attempt_no,
+                    FlowProviderCalls.id.label("row_id"),
+                    FlowStepAttempts.step_order.label("step_order"),
+                    FlowStepAttempts.attempt_no.label("attempt_no"),
+                    FlowProviderCalls.ordinal.label("ordinal"),
+                    _provider_call_evidence_logical_bytes().label("logical_bytes"),
                 )
                 .join(
                     FlowStepAttempts,
@@ -151,9 +243,56 @@ class FlowProviderCallRepository:
                     FlowProviderCalls.id.asc(),
                 )
                 .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.step_order,
+                candidates.c.attempt_no,
+                candidates.c.ordinal,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            admitted_ids = sa.select(ranked.c.row_id).where(
+                ranked.c.row_rank <= limit,
+                ranked.c.cumulative_logical <= logical_byte_budget,
+            )
+
+        row_stmt = (
+            sa.select(
+                FlowProviderCalls,
+                FlowStepAttempts.step_id,
+                FlowStepAttempts.step_order,
+                FlowStepAttempts.attempt_no,
+            )
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(*page_predicates)
+        )
+        if admitted_ids is not None:
+            row_stmt = row_stmt.where(FlowProviderCalls.id.in_(admitted_ids))
+        rows = (
+            await self.session.execute(
+                row_stmt.order_by(
+                    FlowStepAttempts.step_order.asc(),
+                    FlowStepAttempts.attempt_no.asc(),
+                    FlowProviderCalls.ordinal.asc(),
+                    FlowProviderCalls.id.asc(),
+                ).limit(limit + 1 if admitted_ids is None else limit)
             )
         ).all()
-        has_more = len(rows) > limit
+        has_more = (
+            len(rows) > limit
+            if admitted_ids is None
+            else bool(rows) and total_count > len(rows)
+        )
         visible_rows = rows[:limit]
         items = tuple(
             _to_evidence(
@@ -168,6 +307,7 @@ class FlowProviderCallRepository:
             items=items,
             count=len(items),
             total_count=total_count,
+            total_count_truncated=total_count_truncated,
             has_more=has_more,
             next_after_event_id=items[-1].event_id if has_more else None,
         )

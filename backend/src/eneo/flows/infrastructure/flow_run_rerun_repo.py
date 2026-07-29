@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence, TypeAlias
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -89,6 +89,79 @@ class FlowRunActiveRerunOperation:
     invalidated_steps: tuple[FlowRunRerunInvalidatedStep, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FlowRunRerunEvidenceMeasurements:
+    operation_row_count: int
+    operation_nested_override_row_count: int
+    operation_stored_json_bytes: int
+    operation_logical_json_bytes: int
+    invalidated_step_row_count: int
+    invalidated_step_stored_json_bytes: int
+    invalidated_step_logical_json_bytes: int
+
+    @classmethod
+    def empty(cls) -> "FlowRunRerunEvidenceMeasurements":
+        return cls(
+            operation_row_count=0,
+            operation_nested_override_row_count=0,
+            operation_stored_json_bytes=0,
+            operation_logical_json_bytes=0,
+            invalidated_step_row_count=0,
+            invalidated_step_stored_json_bytes=0,
+            invalidated_step_logical_json_bytes=0,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunRerunEvidenceRowCounts:
+    operations: int
+    invalidated_steps: int
+    nested_overrides: int = 0
+
+
+FlowRunRerunEvidenceAdmissionReason: TypeAlias = Literal["row_limit", "logical_bytes"]
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunRerunEvidenceAdmission:
+    operations: tuple[FlowRunRerunOperation, ...]
+    omission_reason: FlowRunRerunEvidenceAdmissionReason | None
+
+
+def _jsonb_evidence_logical_bytes(*columns: Any) -> Any:
+    return sum(
+        (
+            sa.func.coalesce(sa.func.octet_length(sa.cast(column, sa.Text)), 0)
+            for column in columns
+        ),
+        start=sa.literal(0),
+    )
+
+
+def _scalar_evidence_logical_bytes(*columns: Any) -> Any:
+    return sum(
+        (
+            sa.func.coalesce(
+                sa.func.octet_length(sa.cast(sa.func.to_jsonb(column), sa.Text)),
+                0,
+            )
+            for column in columns
+        ),
+        start=sa.literal(0),
+    )
+
+
+def _rerun_operation_evidence_logical_bytes() -> Any:
+    return _jsonb_evidence_logical_bytes(
+        FlowRunRerunOperations.input_payload_json,
+        FlowRunRerunOperations.changed_input_paths,
+        FlowRunRerunOperations.prior_input_payload_json,
+    ) + _scalar_evidence_logical_bytes(
+        FlowRunRerunOperations.reason,
+        FlowRunRerunOperations.failure_message,
+    )
+
+
 _ACTIVE_RERUN_OPERATION_STATUSES = (
     FlowRunRerunOperationStatus.QUEUED.value,
     FlowRunRerunOperationStatus.RUNNING.value,
@@ -144,6 +217,228 @@ def _rerun_operation_from_row(
 class FlowRunRerunRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def measure_evidence_row_counts(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        ceiling: int,
+    ) -> FlowRunRerunEvidenceRowCounts:
+        candidate_limit = ceiling + 1
+        operation_candidates = (
+            sa.select(FlowRunRerunOperations.id)
+            .where(FlowRunRerunOperations.flow_run_id == run_id)
+            .where(FlowRunRerunOperations.tenant_id == tenant_id)
+            .limit(candidate_limit)
+            .subquery()
+        )
+        operation_count = int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(operation_candidates)
+            )
+            or 0
+        )
+        override_count = 0
+        if operation_count <= ceiling:
+            override_candidates = (
+                sa.select(FlowRunStepInputFiles.id)
+                .join(
+                    FlowRunRerunOperations,
+                    sa.and_(
+                        FlowRunRerunOperations.id.in_(
+                            sa.select(operation_candidates.c.id)
+                        ),
+                        FlowRunRerunOperations.flow_run_id
+                        == FlowRunStepInputFiles.flow_run_id,
+                        FlowRunRerunOperations.flow_id == FlowRunStepInputFiles.flow_id,
+                        FlowRunRerunOperations.tenant_id
+                        == FlowRunStepInputFiles.tenant_id,
+                        FlowRunRerunOperations.rerun_step_id
+                        == FlowRunStepInputFiles.step_id,
+                        FlowRunRerunOperations.root_attempt_no
+                        == FlowRunStepInputFiles.attempt_no,
+                        FlowRunRerunOperations.root_step_input_override_requested.is_(
+                            True
+                        ),
+                    ),
+                )
+                .limit(candidate_limit)
+                .subquery()
+            )
+            override_count = int(
+                await self.session.scalar(
+                    sa.select(sa.func.count()).select_from(override_candidates)
+                )
+                or 0
+            )
+        invalidated_candidates = (
+            sa.select(FlowRunRerunInvalidatedSteps.id)
+            .where(FlowRunRerunInvalidatedSteps.flow_run_id == run_id)
+            .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+            .limit(candidate_limit)
+            .subquery()
+        )
+        invalidated_count = int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(invalidated_candidates)
+            )
+            or 0
+        )
+        return FlowRunRerunEvidenceRowCounts(
+            operations=operation_count,
+            invalidated_steps=invalidated_count,
+            nested_overrides=override_count,
+        )
+
+    async def measure_evidence_sections(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunRerunEvidenceMeasurements:
+        operation_candidate_stmt = (
+            sa.select(FlowRunRerunOperations.id)
+            .where(FlowRunRerunOperations.flow_run_id == run_id)
+            .where(FlowRunRerunOperations.tenant_id == tenant_id)
+        )
+        invalidated_candidate_stmt = (
+            sa.select(FlowRunRerunInvalidatedSteps.id)
+            .where(FlowRunRerunInvalidatedSteps.flow_run_id == run_id)
+            .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            operation_candidate_stmt = operation_candidate_stmt.limit(candidate_limit)
+            invalidated_candidate_stmt = invalidated_candidate_stmt.limit(
+                candidate_limit
+            )
+        operation_candidates = operation_candidate_stmt.subquery()
+        invalidated_candidates = invalidated_candidate_stmt.subquery()
+        operation_stored = sum(
+            (
+                sa.func.coalesce(sa.func.pg_column_size(column), 0)
+                for column in (
+                    FlowRunRerunOperations.input_payload_json,
+                    FlowRunRerunOperations.changed_input_paths,
+                    FlowRunRerunOperations.prior_input_payload_json,
+                )
+            ),
+            start=sa.literal(0),
+        )
+        operation_logical = _rerun_operation_evidence_logical_bytes()
+        operation = (
+            # Paired with `_rerun_operation_from_row`: this covers its JSON
+            # revision payloads and unbounded reason/failure text.
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(sa.func.sum(operation_stored), 0).label(
+                        "stored_json_bytes"
+                    ),
+                    sa.func.coalesce(sa.func.sum(operation_logical), 0).label(
+                        "logical_json_bytes"
+                    ),
+                )
+                .where(FlowRunRerunOperations.flow_run_id == run_id)
+                .where(FlowRunRerunOperations.tenant_id == tenant_id)
+                .where(
+                    FlowRunRerunOperations.id.in_(sa.select(operation_candidates.c.id))
+                )
+            )
+        ).one()
+        override_candidate_stmt = (
+            sa.select(FlowRunStepInputFiles.id)
+            .select_from(FlowRunStepInputFiles)
+            .join(
+                FlowRunRerunOperations,
+                sa.and_(
+                    FlowRunRerunOperations.flow_run_id
+                    == FlowRunStepInputFiles.flow_run_id,
+                    FlowRunRerunOperations.flow_id == FlowRunStepInputFiles.flow_id,
+                    FlowRunRerunOperations.tenant_id == FlowRunStepInputFiles.tenant_id,
+                    FlowRunRerunOperations.rerun_step_id
+                    == FlowRunStepInputFiles.step_id,
+                    FlowRunRerunOperations.root_attempt_no
+                    == FlowRunStepInputFiles.attempt_no,
+                    FlowRunRerunOperations.root_step_input_override_requested.is_(True),
+                ),
+            )
+            .where(FlowRunRerunOperations.flow_run_id == run_id)
+            .where(FlowRunRerunOperations.tenant_id == tenant_id)
+            .where(FlowRunRerunOperations.id.in_(sa.select(operation_candidates.c.id)))
+        )
+        if candidate_limit is not None:
+            override_candidate_stmt = override_candidate_stmt.limit(candidate_limit)
+        override_candidates = override_candidate_stmt.subquery()
+        override_file = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            _scalar_evidence_logical_bytes(
+                                FlowRunStepInputFiles.file_id
+                            )
+                        ),
+                        0,
+                    ).label("logical_json_bytes"),
+                )
+                .select_from(FlowRunStepInputFiles)
+                .where(
+                    FlowRunStepInputFiles.id.in_(sa.select(override_candidates.c.id))
+                )
+            )
+        ).one()
+        invalidated = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.coalesce(
+                                sa.func.pg_column_size(
+                                    FlowRunRerunInvalidatedSteps.dependency_sources_json
+                                ),
+                                0,
+                            )
+                        ),
+                        0,
+                    ).label("stored_json_bytes"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.coalesce(
+                                sa.func.octet_length(
+                                    sa.cast(
+                                        FlowRunRerunInvalidatedSteps.dependency_sources_json,
+                                        sa.Text,
+                                    )
+                                ),
+                                0,
+                            )
+                        ),
+                        0,
+                    ).label("logical_json_bytes"),
+                )
+                .where(FlowRunRerunInvalidatedSteps.flow_run_id == run_id)
+                .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+                .where(
+                    FlowRunRerunInvalidatedSteps.id.in_(
+                        sa.select(invalidated_candidates.c.id)
+                    )
+                )
+            )
+        ).one()
+        return FlowRunRerunEvidenceMeasurements(
+            operation_row_count=int(operation.row_count),
+            operation_nested_override_row_count=int(override_file.row_count),
+            operation_stored_json_bytes=int(operation.stored_json_bytes),
+            operation_logical_json_bytes=int(operation.logical_json_bytes)
+            + int(override_file.logical_json_bytes),
+            invalidated_step_row_count=int(invalidated.row_count),
+            invalidated_step_stored_json_bytes=int(invalidated.stored_json_bytes),
+            invalidated_step_logical_json_bytes=int(invalidated.logical_json_bytes),
+        )
 
     async def get_latest_completed_attempt_id_for_step(
         self,
@@ -503,23 +798,30 @@ class FlowRunRerunRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
     ) -> list[FlowRunRerunOperation]:
-        rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunRerunOperations)
-                    .where(FlowRunRerunOperations.flow_run_id == run_id)
-                    .where(FlowRunRerunOperations.tenant_id == tenant_id)
-                    .order_by(
-                        FlowRunRerunOperations.accepted_run_revision.asc(),
-                        FlowRunRerunOperations.created_at.asc(),
-                        FlowRunRerunOperations.id.asc(),
-                    )
-                )
+        if limit is not None and logical_byte_budget is not None:
+            admission = await self.list_rerun_operations_for_evidence_view(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                limit=limit,
+                logical_byte_budget=logical_byte_budget,
             )
-            .scalars()
-            .all()
+            return list(admission.operations)
+        stmt = (
+            sa.select(FlowRunRerunOperations)
+            .where(FlowRunRerunOperations.flow_run_id == run_id)
+            .where(FlowRunRerunOperations.tenant_id == tenant_id)
+            .order_by(
+                FlowRunRerunOperations.accepted_run_revision.asc(),
+                FlowRunRerunOperations.created_at.asc(),
+                FlowRunRerunOperations.id.asc(),
+            )
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).scalars().all()
         overrides_by_operation_id = (
             await self._root_step_input_overrides_by_operation_id(rows)
         )
@@ -531,28 +833,225 @@ class FlowRunRerunRepository:
             for row in rows
         ]
 
-    async def list_rerun_invalidated_steps_for_run(
+    async def list_rerun_operations_for_evidence_view(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
-    ) -> list[FlowRunRerunInvalidatedStep]:
+        limit: int,
+        logical_byte_budget: int,
+    ) -> FlowRunRerunEvidenceAdmission:
+        override_candidate_stmt = (
+            sa.select(FlowRunStepInputFiles.file_id.label("file_id"))
+            .where(
+                FlowRunStepInputFiles.flow_run_id == FlowRunRerunOperations.flow_run_id,
+                FlowRunStepInputFiles.tenant_id == FlowRunRerunOperations.tenant_id,
+                FlowRunStepInputFiles.step_id == FlowRunRerunOperations.rerun_step_id,
+                FlowRunStepInputFiles.attempt_no
+                == FlowRunRerunOperations.root_attempt_no,
+                FlowRunRerunOperations.root_step_input_override_requested.is_(True),
+            )
+            .limit(limit + 1)
+            .correlate(FlowRunRerunOperations)
+        )
+        override_candidates = override_candidate_stmt.subquery()
+        override_logical = (
+            sa.select(
+                sa.func.coalesce(
+                    sa.func.sum(
+                        _scalar_evidence_logical_bytes(override_candidates.c.file_id)
+                    ),
+                    0,
+                )
+            )
+            .correlate(FlowRunRerunOperations)
+            .scalar_subquery()
+        )
+        override_count = (
+            sa.select(sa.func.count())
+            .select_from(override_candidates)
+            .correlate(FlowRunRerunOperations)
+            .scalar_subquery()
+        )
+        candidates = (
+            sa.select(
+                FlowRunRerunOperations.id.label("row_id"),
+                FlowRunRerunOperations.accepted_run_revision.label("revision"),
+                FlowRunRerunOperations.created_at.label("created_at"),
+                (_rerun_operation_evidence_logical_bytes() + override_logical).label(
+                    "logical_bytes"
+                ),
+                override_count.label("override_count"),
+            )
+            .where(FlowRunRerunOperations.flow_run_id == run_id)
+            .where(FlowRunRerunOperations.tenant_id == tenant_id)
+            .order_by(
+                FlowRunRerunOperations.accepted_run_revision.asc(),
+                FlowRunRerunOperations.created_at.asc(),
+                FlowRunRerunOperations.id.asc(),
+            )
+            .limit(limit + 1)
+            .subquery()
+        )
+        order = (
+            candidates.c.revision,
+            candidates.c.created_at,
+            candidates.c.row_id,
+        )
+        ranked = sa.select(
+            candidates.c.row_id,
+            sa.func.row_number().over(order_by=order).label("row_rank"),
+            sa.func.sum(candidates.c.logical_bytes)
+            .over(order_by=order)
+            .label("cumulative_logical"),
+            sa.func.sum(candidates.c.override_count)
+            .over(order_by=order)
+            .label("cumulative_override_count"),
+        ).subquery()
+        admitted_row_ids = sa.select(ranked.c.row_id).where(
+            ranked.c.row_rank <= limit,
+            ranked.c.cumulative_logical <= logical_byte_budget,
+            ranked.c.cumulative_override_count <= limit,
+        )
         rows = (
             (
                 await self.session.execute(
-                    sa.select(FlowRunRerunInvalidatedSteps)
-                    .where(FlowRunRerunInvalidatedSteps.flow_run_id == run_id)
-                    .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+                    sa.select(FlowRunRerunOperations)
+                    .where(FlowRunRerunOperations.flow_run_id == run_id)
+                    .where(FlowRunRerunOperations.tenant_id == tenant_id)
+                    .where(FlowRunRerunOperations.id.in_(admitted_row_ids))
                     .order_by(
-                        FlowRunRerunInvalidatedSteps.operation_id.asc(),
-                        FlowRunRerunInvalidatedSteps.invalidation_order.asc(),
-                        FlowRunRerunInvalidatedSteps.id.asc(),
+                        FlowRunRerunOperations.accepted_run_revision.asc(),
+                        FlowRunRerunOperations.created_at.asc(),
+                        FlowRunRerunOperations.id.asc(),
                     )
+                    .limit(limit)
                 )
             )
             .scalars()
             .all()
         )
+        rejection_reason = await self.session.scalar(
+            sa.select(
+                sa.case(
+                    (
+                        ranked.c.cumulative_override_count > limit,
+                        sa.literal("row_limit"),
+                    ),
+                    (ranked.c.row_rank > limit, sa.literal("row_limit")),
+                    (
+                        ranked.c.cumulative_logical > logical_byte_budget,
+                        sa.literal("logical_bytes"),
+                    ),
+                )
+            )
+            .where(
+                sa.or_(
+                    ranked.c.row_rank > limit,
+                    ranked.c.cumulative_logical > logical_byte_budget,
+                    ranked.c.cumulative_override_count > limit,
+                )
+            )
+            .order_by(ranked.c.row_rank)
+            .limit(1)
+        )
+        omission_reason: FlowRunRerunEvidenceAdmissionReason | None
+        if rejection_reason == "row_limit":
+            omission_reason = "row_limit"
+        elif rejection_reason == "logical_bytes":
+            omission_reason = "logical_bytes"
+        else:
+            omission_reason = None
+        overrides_by_operation_id = (
+            await self._root_step_input_overrides_by_operation_id(rows)
+        )
+        return FlowRunRerunEvidenceAdmission(
+            operations=tuple(
+                _rerun_operation_from_row(
+                    row,
+                    root_step_input_override=overrides_by_operation_id[row.id],
+                )
+                for row in rows
+            ),
+            omission_reason=omission_reason,
+        )
+
+    async def list_rerun_invalidated_steps_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int | None = None,
+        operation_ids: Sequence[UUID] | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> list[FlowRunRerunInvalidatedStep]:
+        if operation_ids is not None and not operation_ids:
+            return []
+        stmt = (
+            sa.select(FlowRunRerunInvalidatedSteps)
+            .where(FlowRunRerunInvalidatedSteps.flow_run_id == run_id)
+            .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+            .order_by(
+                FlowRunRerunInvalidatedSteps.operation_id.asc(),
+                FlowRunRerunInvalidatedSteps.invalidation_order.asc(),
+                FlowRunRerunInvalidatedSteps.id.asc(),
+            )
+        )
+        if operation_ids is not None:
+            stmt = stmt.where(
+                FlowRunRerunInvalidatedSteps.operation_id.in_(operation_ids)
+            )
+        if limit is not None and logical_byte_budget is not None:
+            candidate_stmt = (
+                sa.select(
+                    FlowRunRerunInvalidatedSteps.id.label("row_id"),
+                    FlowRunRerunInvalidatedSteps.operation_id.label("operation_id"),
+                    FlowRunRerunInvalidatedSteps.invalidation_order.label(
+                        "invalidation_order"
+                    ),
+                    _jsonb_evidence_logical_bytes(
+                        FlowRunRerunInvalidatedSteps.dependency_sources_json
+                    ).label("logical_bytes"),
+                )
+                .where(FlowRunRerunInvalidatedSteps.flow_run_id == run_id)
+                .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+            )
+            if operation_ids is not None:
+                candidate_stmt = candidate_stmt.where(
+                    FlowRunRerunInvalidatedSteps.operation_id.in_(operation_ids)
+                )
+            candidates = (
+                candidate_stmt.order_by(
+                    FlowRunRerunInvalidatedSteps.operation_id.asc(),
+                    FlowRunRerunInvalidatedSteps.invalidation_order.asc(),
+                    FlowRunRerunInvalidatedSteps.id.asc(),
+                )
+                .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.operation_id,
+                candidates.c.invalidation_order,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunRerunInvalidatedSteps.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowRunRerunInvalidatedStep.model_validate(row) for row in rows]
 
     async def get_active_rerun_operation(

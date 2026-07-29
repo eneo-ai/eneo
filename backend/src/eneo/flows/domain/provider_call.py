@@ -289,6 +289,7 @@ class ProviderCallEvidencePage(BaseModel):
     items: tuple[ProviderCallEvidence, ...]
     count: int = Field(ge=0)
     total_count: int = Field(ge=0)
+    total_count_truncated: bool = False
     has_more: bool
     next_after_event_id: UUID | None
 

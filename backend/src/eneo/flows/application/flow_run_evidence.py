@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, TypeAlias, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
@@ -29,6 +29,74 @@ from eneo.flows.flow_run_provenance import normalize_rag_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 
 DEBUG_EXPORT_SCHEMA_VERSION = "eneo.flow.debug-export.v2"
+
+EvidenceSectionIdentifier: TypeAlias = Literal[
+    "run",
+    "definition_snapshot",
+    "step_results",
+    "step_attempts",
+    "result_files",
+    "runtime_input_files",
+    "rerun_operations",
+    "rerun_invalidated_steps",
+    "review_checkpoints",
+    "webhook_deliveries",
+    "provider_calls",
+    "whole_bundle",
+]
+EvidenceLimitIdentifier: TypeAlias = Literal[
+    "corrupt_passage_evidence",
+    "recorded_passage_bytes",
+    "stored_provenance_bytes",
+    "section_rows",
+    "aggregate_stored_json_bytes",
+    "aggregate_logical_json_bytes",
+    "provider_call_events",
+]
+EvidenceOmissionReason: TypeAlias = Literal[
+    "row_limit",
+    "logical_bytes",
+    "parent_section_omitted",
+]
+
+
+class RunViewEvidenceRowOmission(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: Literal["row_limit"] = "row_limit"
+    section: EvidenceSectionIdentifier
+    rows_omitted: int = Field(ge=1)
+    count_truncated: bool = False
+
+
+class RunViewEvidenceLogicalByteOmission(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: Literal["logical_bytes"] = "logical_bytes"
+    section: EvidenceSectionIdentifier
+    rows_omitted: int = Field(ge=1)
+    count_truncated: bool = False
+
+
+class RunViewEvidenceParentOmission(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: Literal["parent_section_omitted"] = "parent_section_omitted"
+    section: EvidenceSectionIdentifier
+    rows_omitted: int = Field(ge=1)
+    count_truncated: bool = False
+
+
+RunViewEvidenceOmission: TypeAlias = Annotated[
+    RunViewEvidenceRowOmission
+    | RunViewEvidenceLogicalByteOmission
+    | RunViewEvidenceParentOmission,
+    Field(discriminator="reason"),
+]
+
+
+def _empty_run_view_evidence_omissions() -> list[RunViewEvidenceOmission]:
+    return []
 
 
 class DebugAttemptProjection(BaseModel):
@@ -80,6 +148,9 @@ class DebugRunSummaryProjection(BaseModel):
     models_used: list[str]
     token_usage: DebugRunTokenUsageProjection | None = None
     knowledge_evidence_view: RunViewPassageOmission | None = None
+    omissions: list[RunViewEvidenceOmission] = Field(
+        default_factory=_empty_run_view_evidence_omissions
+    )
 
 
 def build_debug_export(
@@ -92,6 +163,7 @@ def build_debug_export(
     rerun_operations: list[FlowRunRerunOperation] | None = None,
     rerun_invalidated_steps: list[FlowRunRerunInvalidatedStep] | None = None,
     knowledge_evidence_view: RunViewPassageOmission | None = None,
+    omissions: Sequence[RunViewEvidenceOmission] = (),
 ) -> dict[str, Any]:
     definition_snapshot = version.definition_json
     evidence_generated_at = _latest_evidence_timestamp(
@@ -152,6 +224,7 @@ def build_debug_export(
         models_used=_collect_models_used(step_attempts or []),
         token_usage=_build_run_token_usage_summary(step_attempts or []),
         knowledge_evidence_view=knowledge_evidence_view,
+        omissions=list(omissions),
     )
 
     return {

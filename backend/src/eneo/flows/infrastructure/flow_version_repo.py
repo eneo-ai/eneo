@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -20,6 +21,17 @@ from eneo.flows.published_definition import (
     scan_published_template_references,
 )
 from eneo.main.exceptions import NotFoundException
+
+
+@dataclass(frozen=True, slots=True)
+class FlowVersionEvidenceMeasurement:
+    row_count: int
+    stored_json_bytes: int
+    logical_json_bytes: int
+
+    @classmethod
+    def empty(cls) -> "FlowVersionEvidenceMeasurement":
+        return cls(row_count=0, stored_json_bytes=0, logical_json_bytes=0)
 
 
 async def scan_flow_version_template_references(
@@ -102,6 +114,43 @@ async def audit_flow_version_template_identity_readiness(
 
 class FlowVersionRepository:
     """Tenant-scoped repository for immutable flow definition snapshots."""
+
+    async def measure_definition_evidence(
+        self,
+        *,
+        flow_id: UUID,
+        version: int,
+        tenant_id: UUID,
+    ) -> FlowVersionEvidenceMeasurement:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.pg_column_size(FlowVersions.definition_json)
+                        ),
+                        0,
+                    ).label("stored_json_bytes"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.octet_length(
+                                sa.cast(FlowVersions.definition_json, sa.Text)
+                            )
+                        ),
+                        0,
+                    ).label("logical_json_bytes"),
+                )
+                .where(FlowVersions.flow_id == flow_id)
+                .where(FlowVersions.version == version)
+                .where(FlowVersions.tenant_id == tenant_id)
+            )
+        ).one()
+        return FlowVersionEvidenceMeasurement(
+            row_count=int(row.row_count),
+            stored_json_bytes=int(row.stored_json_bytes),
+            logical_json_bytes=int(row.logical_json_bytes),
+        )
 
     def __init__(self, session: AsyncSession):
         self.session = session

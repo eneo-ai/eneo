@@ -1,5 +1,6 @@
 <script lang="ts">
   import type {
+    components,
     FlowRunEvidenceWithTypedSteps,
     FlowRunResultFile,
     FlowRunStep,
@@ -45,6 +46,7 @@
   } = $props();
 
   type EvidencePayload = FlowRunEvidenceWithTypedSteps;
+  type EvidenceSection = components["schemas"]["RunViewEvidenceRowOmission"]["section"];
 
   type FlowRunTranscriptionTelemetry = {
     transcript_bytes?: number;
@@ -70,6 +72,7 @@
   let knowledgeEvidenceView = $derived.by(
     () => evidence?.debug_export?.run?.summary?.knowledge_evidence_view ?? null
   );
+  let evidenceOmissions = $derived.by(() => evidence?.debug_export?.run?.summary?.omissions ?? []);
   let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = $derived.by(() =>
     groupStepAttemptsByOrder(evidence?.step_attempts ?? [])
   );
@@ -296,6 +299,39 @@
       ? m.flow_run_uploaded_files_singular()
       : m.flow_run_uploaded_files_plural({ count: String(fileCount) });
   }
+
+  function evidenceSectionLabel(section: EvidenceSection): string {
+    switch (section) {
+      case "run":
+        return m.flow_run_evidence_section_run();
+      case "definition_snapshot":
+        return m.flow_run_evidence_section_definition_snapshot();
+      case "step_results":
+        return m.flow_run_evidence_section_step_results();
+      case "step_attempts":
+        return m.flow_run_evidence_section_step_attempts();
+      case "result_files":
+        return m.flow_run_evidence_section_result_files();
+      case "runtime_input_files":
+        return m.flow_run_evidence_section_runtime_input_files();
+      case "rerun_operations":
+        return m.flow_run_evidence_section_rerun_operations();
+      case "rerun_invalidated_steps":
+        return m.flow_run_evidence_section_rerun_invalidated_steps();
+      case "review_checkpoints":
+        return m.flow_run_evidence_section_review_checkpoints();
+      case "webhook_deliveries":
+        return m.flow_run_evidence_section_webhook_deliveries();
+      case "provider_calls":
+        return m.flow_run_evidence_section_provider_calls();
+      case "whole_bundle":
+        return m.flow_run_evidence_section_whole_bundle();
+    }
+  }
+
+  function omittedCountLabel(rowsOmitted: number, countTruncated?: boolean): string {
+    return `${countTruncated ? "≥" : ""}${rowsOmitted}`;
+  }
 </script>
 
 {#if loading}
@@ -372,6 +408,34 @@
             })}
           </p>
         {/if}
+      </div>
+    {/if}
+
+    {#if evidenceOmissions.length > 0}
+      <div
+        class="border-default text-secondary flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs"
+        data-testid="evidence-view-omissions"
+      >
+        {#each evidenceOmissions as omission (`${omission.section}-${omission.reason}`)}
+          <p>
+            {#if omission.reason === "logical_bytes"}
+              {m.flow_run_evidence_view_bytes_omitted({
+                section: evidenceSectionLabel(omission.section),
+                count: omittedCountLabel(omission.rows_omitted, omission.count_truncated)
+              })}
+            {:else if omission.reason === "parent_section_omitted"}
+              {m.flow_run_evidence_view_parent_omitted({
+                section: evidenceSectionLabel(omission.section),
+                count: omittedCountLabel(omission.rows_omitted, omission.count_truncated)
+              })}
+            {:else}
+              {m.flow_run_evidence_view_rows_omitted({
+                section: evidenceSectionLabel(omission.section),
+                count: omittedCountLabel(omission.rows_omitted, omission.count_truncated)
+              })}
+            {/if}
+          </p>
+        {/each}
       </div>
     {/if}
 

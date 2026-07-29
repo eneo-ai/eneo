@@ -49,9 +49,54 @@ class FlowRunWebhookDeliveryRead:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class FlowRunWebhookDeliveryEvidenceMeasurement:
+    row_count: int
+
+    @classmethod
+    def empty(cls) -> "FlowRunWebhookDeliveryEvidenceMeasurement":
+        return cls(row_count=0)
+
+
 class FlowRunWebhookDeliveryRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def measure_evidence_row_count(
+        self, *, run_id: UUID, tenant_id: UUID, ceiling: int
+    ) -> int:
+        candidates = (
+            sa.select(FlowRunWebhookDeliveries.id)
+            .where(FlowRunWebhookDeliveries.flow_run_id == run_id)
+            .where(FlowRunWebhookDeliveries.tenant_id == tenant_id)
+            .limit(ceiling + 1)
+            .subquery()
+        )
+        return int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(candidates)
+            )
+            or 0
+        )
+
+    async def measure_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunWebhookDeliveryEvidenceMeasurement:
+        candidate_stmt = (
+            sa.select(FlowRunWebhookDeliveries.id)
+            .where(FlowRunWebhookDeliveries.flow_run_id == run_id)
+            .where(FlowRunWebhookDeliveries.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            candidate_stmt = candidate_stmt.limit(candidate_limit)
+        row_count = await self.session.scalar(
+            sa.select(sa.func.count()).select_from(candidate_stmt.subquery())
+        )
+        return FlowRunWebhookDeliveryEvidenceMeasurement(row_count=int(row_count or 0))
 
     async def insert_pending_delivery(
         self,
@@ -96,31 +141,33 @@ class FlowRunWebhookDeliveryRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
+        limit: int | None = None,
     ) -> list[FlowRunWebhookDeliveryRead]:
-        rows = (
-            await self.session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.id,
-                    FlowRunWebhookDeliveries.step_id,
-                    FlowRunWebhookDeliveries.step_order,
-                    FlowRunWebhookDeliveries.attempt_no,
-                    FlowRunWebhookDeliveries.delivery_status,
-                    FlowRunWebhookDeliveries.delivery_attempts,
-                    FlowRunWebhookDeliveries.next_delivery_at,
-                    FlowRunWebhookDeliveries.delivered_at,
-                    FlowRunWebhookDeliveries.dead_lettered_at,
-                    FlowRunWebhookDeliveries.created_at,
-                    FlowRunWebhookDeliveries.updated_at,
-                )
-                .where(FlowRunWebhookDeliveries.flow_run_id == run_id)
-                .where(FlowRunWebhookDeliveries.tenant_id == tenant_id)
-                .order_by(
-                    FlowRunWebhookDeliveries.step_order.asc(),
-                    FlowRunWebhookDeliveries.attempt_no.asc(),
-                    FlowRunWebhookDeliveries.id.asc(),
-                )
+        stmt = (
+            sa.select(
+                FlowRunWebhookDeliveries.id,
+                FlowRunWebhookDeliveries.step_id,
+                FlowRunWebhookDeliveries.step_order,
+                FlowRunWebhookDeliveries.attempt_no,
+                FlowRunWebhookDeliveries.delivery_status,
+                FlowRunWebhookDeliveries.delivery_attempts,
+                FlowRunWebhookDeliveries.next_delivery_at,
+                FlowRunWebhookDeliveries.delivered_at,
+                FlowRunWebhookDeliveries.dead_lettered_at,
+                FlowRunWebhookDeliveries.created_at,
+                FlowRunWebhookDeliveries.updated_at,
             )
-        ).tuples()
+            .where(FlowRunWebhookDeliveries.flow_run_id == run_id)
+            .where(FlowRunWebhookDeliveries.tenant_id == tenant_id)
+            .order_by(
+                FlowRunWebhookDeliveries.step_order.asc(),
+                FlowRunWebhookDeliveries.attempt_no.asc(),
+                FlowRunWebhookDeliveries.id.asc(),
+            )
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).tuples()
         return [
             FlowRunWebhookDeliveryRead(
                 id=row.id,

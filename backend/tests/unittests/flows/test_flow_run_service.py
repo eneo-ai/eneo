@@ -74,19 +74,29 @@ from eneo.flows.flow_run_step_inputs import (
 )
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallEvidenceMeasurement,
     FlowProviderCallRepository,
 )
 from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunEvidenceMeasurements,
+    FlowRunEvidenceRowCounts,
     StepAttemptPage,
     StepAttemptProvenanceSize,
 )
 from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunCommandResult,
+    FlowRunRerunEvidenceMeasurements,
+    FlowRunRerunEvidenceRowCounts,
     FlowRunRerunRepository,
 )
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointEvidenceMeasurement,
+)
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryEvidenceMeasurement,
     FlowRunWebhookDeliveryRepository,
 )
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionEvidenceMeasurement
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -132,6 +142,8 @@ def flow_run_repo_mock() -> AsyncMock:
     """
     repo = AsyncMock()
     repo.measure_step_attempt_provenance.return_value = EMPTY_PROVENANCE_SIZE
+    repo.measure_evidence_sections.return_value = FlowRunEvidenceMeasurements.empty()
+    repo.measure_evidence_row_counts.return_value = FlowRunEvidenceRowCounts(0, 0, 0, 0)
     return repo
 
 
@@ -184,6 +196,10 @@ def _flow_run_rerun_repo() -> AsyncMock:
     repo = AsyncMock(spec=FlowRunRerunRepository)
     repo.list_rerun_operations_for_run.return_value = []
     repo.list_rerun_invalidated_steps_for_run.return_value = []
+    repo.measure_evidence_sections.return_value = (
+        FlowRunRerunEvidenceMeasurements.empty()
+    )
+    repo.measure_evidence_row_counts.return_value = FlowRunRerunEvidenceRowCounts(0, 0)
     return repo
 
 
@@ -196,13 +212,73 @@ def _provider_call_repo() -> AsyncMock:
         has_more=False,
         next_after_event_id=None,
     )
+    repo.measure_evidence.return_value = FlowProviderCallEvidenceMeasurement.empty()
+    repo.measure_evidence_row_count.return_value = 0
     return repo
 
 
 def _webhook_delivery_repo() -> AsyncMock:
     repo = AsyncMock(spec=FlowRunWebhookDeliveryRepository)
     repo.list_run_delivery_statuses.return_value = []
+    repo.measure_evidence.return_value = (
+        FlowRunWebhookDeliveryEvidenceMeasurement.empty()
+    )
+    repo.measure_evidence_row_count.return_value = 0
     return repo
+
+
+def _flow_run_evidence_service(
+    *,
+    user,
+    flow_repo,
+    flow_run_repo,
+    provider_call_repo,
+    flow_run_rerun_repo,
+    flow_run_review_checkpoint_repo,
+    flow_version_repo,
+    file_repo,
+    webhook_delivery_repo,
+    access_policy=None,
+) -> FlowRunEvidenceService:
+    flow_run_repo.measure_evidence_sections.return_value = (
+        FlowRunEvidenceMeasurements.empty()
+    )
+    flow_run_repo.measure_evidence_row_counts.return_value = FlowRunEvidenceRowCounts(
+        0, 0, 0, 0
+    )
+    flow_version_repo.measure_definition_evidence.return_value = (
+        FlowVersionEvidenceMeasurement.empty()
+    )
+    flow_run_rerun_repo.measure_evidence_sections.return_value = (
+        FlowRunRerunEvidenceMeasurements.empty()
+    )
+    flow_run_rerun_repo.measure_evidence_row_counts.return_value = (
+        FlowRunRerunEvidenceRowCounts(0, 0)
+    )
+    flow_run_review_checkpoint_repo.measure_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    flow_run_review_checkpoint_repo.measure_evidence_row_count.return_value = 0
+    provider_call_repo.measure_evidence.return_value = (
+        FlowProviderCallEvidenceMeasurement.empty()
+    )
+    provider_call_repo.measure_evidence_row_count.return_value = 0
+    webhook_delivery_repo.measure_evidence.return_value = (
+        FlowRunWebhookDeliveryEvidenceMeasurement.empty()
+    )
+    webhook_delivery_repo.measure_evidence_row_count.return_value = 0
+    return FlowRunEvidenceService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=provider_call_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=file_repo,
+        webhook_delivery_repo=webhook_delivery_repo,
+        access_policy=access_policy,
+    )
 
 
 def _flow_run_service(
@@ -2326,7 +2402,7 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
     flow_version_repo = AsyncMock()
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2381,7 +2457,7 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
     flow_version_repo.get.return_value = version.model_copy(
         update={"flow_id": run.flow_id}
     )
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2427,7 +2503,7 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
     flow_version_repo.get.return_value = version.model_copy(
         update={"flow_id": run.flow_id}
     )
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2481,7 +2557,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     flow_version_repo.get.return_value = version
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2520,7 +2596,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_de
     run = _run(user=user, flow_id=sensitive_flow.id)
     flow_run_repo.get.return_value = run
     flow_repo.get.return_value = sensitive_flow
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2567,7 +2643,7 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
             }
         )
     )
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=allowed_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2607,7 +2683,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
     flow_run_repo.get.return_value = run
     flow_repo.get.return_value = sensitive_flow
     space_service.get_space.return_value = SimpleNamespace(id=sensitive_flow.space_id)
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2655,7 +2731,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
     )
     flow_run_repo.get.return_value = run
     flow_repo.get.return_value = sensitive_flow
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2690,7 +2766,7 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
     flow_version_repo.get.return_value = version
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2729,7 +2805,7 @@ async def test_export_evidence_json_rejects_cross_tenant_injected_run_for_tenant
     flow_version_repo.get.return_value = version
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -3172,7 +3248,7 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -3218,7 +3294,7 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
         id=flow.space_id,
         security_classification=SimpleNamespace(security_level=3),
     )
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -3267,7 +3343,7 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
         id=flow.space_id,
         security_classification=SimpleNamespace(security_level=3),
     )
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -3324,7 +3400,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
         id=flow.space_id,
         security_classification=SimpleNamespace(security_level=3),
     )
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=trace_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4019,7 +4095,7 @@ async def test_get_evidence_redacts_sensitive_values(user):
         ]
     )
 
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4175,7 +4251,7 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
         ]
     )
 
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4267,7 +4343,7 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
         ]
     )
 
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4321,7 +4397,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     access_policy = _access_policy_double()
 
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4407,7 +4483,7 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     access_policy = _access_policy_double()
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4473,7 +4549,7 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
         ]
     )
 
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4535,7 +4611,7 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
 
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4587,7 +4663,7 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
 
-    service = FlowRunEvidenceService(
+    service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -4789,7 +4865,7 @@ def _artifact_service(user, *, file_repo, result_file=None, run=None):
         run = _run(user=user, flow_id=uuid4())
     flow_run_repo.get.return_value = run
     flow_run_repo.get_result_file.return_value = result_file
-    return FlowRunEvidenceService(
+    return _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
