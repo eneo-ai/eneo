@@ -24,7 +24,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import SkillAdoptionProjection from "$lib/features/skills/SkillAdoptionProjection.svelte";
   import { Info, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-svelte";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
 
   type PublicationAction = "publish" | "unpublish";
   type ExecutionAction = "block" | "unblock";
@@ -43,6 +43,15 @@
   let executionError = $state<string | null>(null);
   let refreshWarning = $state(false);
   let restoreAnnouncement = $state("");
+  let advancePinned = $state<{
+    skillId: string;
+    revisionId: string;
+    revisionNumber: number;
+    publishedRevisionId: string;
+  } | null>(null);
+  let advanceSaving = $state(false);
+  let advanceError = $state<string | null>(null);
+  let advanceAnnouncement = $state("");
 
   const pageTitle = $derived(data.skill.display_name);
   const approvedPreview = $derived(
@@ -255,6 +264,68 @@
     }
     publicationAction = null;
     publicationSaving = false;
+    await refreshOrganizationSkills();
+  }
+
+  function openAdvanceDialog(pinned: { revisionId: string; revisionNumber: number }) {
+    if (data.published === null) return;
+    advancePinned = {
+      ...pinned,
+      skillId: data.skill.id,
+      publishedRevisionId: data.published.revision_id
+    };
+  }
+
+  // SvelteKit reuses this component across skillId navigations; everything the
+  // administrator reviewed belongs to the previous Skill and must not survive.
+  let advanceObservedSkillId = untrack(() => data.skill.id);
+  $effect(() => {
+    const nextSkillId = data.skill.id;
+    if (nextSkillId === advanceObservedSkillId) return;
+    advanceObservedSkillId = nextSkillId;
+    advancePinned = null;
+    advanceError = null;
+    advanceAnnouncement = "";
+  });
+
+  const onAdvancePersonalChat = $derived(
+    data.published !== null && executionBlock.block === null ? openAdvanceDialog : undefined
+  );
+
+  function setAdvanceDialogOpen(open: boolean) {
+    if (open || advanceSaving) return;
+    advancePinned = null;
+    advanceError = null;
+  }
+
+  async function advancePersonalChat(event: MouseEvent) {
+    event.preventDefault();
+    const pinned = advancePinned;
+    if (pinned === null || advanceSaving) return;
+    advanceSaving = true;
+    advanceError = null;
+    let movedToVersion: number;
+    try {
+      const advance = await data.eneo.skills.organization.advancePersonalChat({
+        skillId: pinned.skillId,
+        expected_pinned_revision_id: pinned.revisionId,
+        expected_published_revision_id: pinned.publishedRevisionId
+      });
+      movedToVersion = advance.to_revision_number;
+    } catch (error) {
+      advanceSaving = false;
+      if (data.skill.id !== pinned.skillId) return;
+      advanceError = getErrorMessage(error, m.organization_skills_advance_error());
+      return;
+    }
+    advanceSaving = false;
+    if (data.skill.id !== pinned.skillId) return;
+    advancePinned = null;
+    advanceAnnouncement = "";
+    await tick();
+    advanceAnnouncement = m.organization_skills_advance_announcement({
+      version: String(movedToVersion)
+    });
     await refreshOrganizationSkills();
   }
 
@@ -519,20 +590,25 @@
           initialPage={null}
           initialLoading
           {getOrganizationSkillAdoption}
+          {onAdvancePersonalChat}
         />
       {:then adoptionPage}
         <SkillAdoptionProjection
           skillId={data.skill.id}
           initialPage={adoptionPage}
           {getOrganizationSkillAdoption}
+          {onAdvancePersonalChat}
         />
+        <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
       {:catch}
         <SkillAdoptionProjection
           skillId={data.skill.id}
           initialPage={null}
           initialError
           {getOrganizationSkillAdoption}
+          {onAdvancePersonalChat}
         />
+        <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
       {/await}
 
       <section aria-labelledby="organization-skill-history-heading">
@@ -599,6 +675,32 @@
           : publicationAction === "unpublish"
             ? m.organization_skills_unpublish_action()
             : m.organization_skills_publish_action()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
+
+<AlertDialog.Root open={advancePinned !== null} onOpenChange={setAdvanceDialogOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.organization_skills_advance_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.organization_skills_advance_description({
+          pinned: String(advancePinned?.revisionNumber ?? ""),
+          published: String(data.skill.published_revision_number ?? "")
+        })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    {#if advanceError}
+      <Alert.Root variant="destructive">
+        <Alert.Title>{m.organization_skills_advance_error_title()}</Alert.Title>
+        <Alert.Description>{advanceError}</Alert.Description>
+      </Alert.Root>
+    {/if}
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={advanceSaving}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action disabled={advanceSaving} onclick={advancePersonalChat}>
+        {advanceSaving ? m.saving() : m.organization_skills_advance_confirm()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>

@@ -106,6 +106,22 @@ function unblockedState(): SkillExecutionBlockState {
   };
 }
 
+function deferredAdvance() {
+  let resolve!: (value: {
+    outcome: "advanced";
+    from_revision_number: number;
+    to_revision_number: number;
+  }) => void;
+  const promise = new Promise<{
+    outcome: "advanced";
+    from_revision_number: number;
+    to_revision_number: number;
+  }>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("organisation Skill detail page", () => {
   beforeEach(() => {
     invalidate.mockReset();
@@ -170,6 +186,355 @@ describe("organisation Skill detail page", () => {
       .element(page.getByText(m.skills_revision_form_error_title()))
       .not.toBeInTheDocument();
     expect(createRevision).toHaveBeenCalledTimes(1);
+  });
+
+  test("moves the Personal Chat binding through the reviewed pin and refreshes", async () => {
+    const advancePersonalChat = vi.fn(async () => ({
+      outcome: "advanced" as const,
+      from_revision_number: 1,
+      to_revision_number: 2
+    }));
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(behindAdoption),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await expect
+      .element(
+        page.getByText(m.organization_skills_advance_description({ pinned: "1", published: "2" }))
+      )
+      .toBeVisible();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+    await expect
+      .element(page.getByText(m.organization_skills_advance_title()))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText(m.organization_skills_advance_announcement({ version: "2" })))
+      .toBeInTheDocument();
+  });
+
+  test("a retried adoption load still offers the Personal Chat update", async () => {
+    const advancePersonalChat = vi.fn(async () => ({
+      outcome: "advanced" as const,
+      from_revision_number: 1,
+      to_revision_number: 2
+    }));
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    const getAdoption = vi.fn(async () => behindAdoption);
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.reject(new Error("Transient adoption failure")),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption,
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_adoption_error_title()))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.retry() }).click();
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+  });
+
+  test("navigating to another Skill discards the reviewed update state", async () => {
+    const firstAdvance = deferredAdvance();
+    const advancePersonalChat = vi.fn(() => firstAdvance.promise);
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    const dataFor = (skillId: string) =>
+      ({
+        skill: { ...skill, id: skillId },
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(behindAdoption),
+        executionBlock: { skill_id: skillId, block: null },
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      }) as never;
+    const rendered = render(OrganizationSkillDetailPage, { data: dataFor("skill-1") });
+
+    // Submit for Skill A, then navigate to Skill B while the request runs.
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+
+    await rendered.rerender({ data: dataFor("skill-2") });
+    await expect
+      .element(page.getByText(m.organization_skills_advance_title()))
+      .not.toBeInTheDocument();
+
+    firstAdvance.resolve({
+      outcome: "advanced",
+      from_revision_number: 1,
+      to_revision_number: 2
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_advance_announcement({ version: "2" })))
+      .not.toBeInTheDocument();
+    expect(invalidate).not.toHaveBeenCalled();
+    // The dialog opened for Skill B must review Skill B, not replay Skill A.
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenLastCalledWith({
+        skillId: "skill-2",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+  });
+
+  test("keeps the update dialog open with the error when the move is refused", async () => {
+    const advancePersonalChat = vi.fn(async () => {
+      throw new Error("Refused");
+    });
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(behindAdoption),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+
+    await expect.element(page.getByText(m.organization_skills_advance_error())).toBeVisible();
+    await expect.element(page.getByText(m.organization_skills_advance_title())).toBeVisible();
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   test("hides the approved snapshot when it matches the current revision", async () => {

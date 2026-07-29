@@ -118,6 +118,66 @@ describe("Skill adoption projection", () => {
     await expect.element(page.getByRole("table").first()).toBeVisible();
   });
 
+  test("offers the Personal Chat update only through the reviewed pin", async () => {
+    const onAdvancePersonalChat = vi.fn();
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      onAdvancePersonalChat
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+
+    expect(onAdvancePersonalChat).toHaveBeenCalledWith({
+      revisionId: "revision-1",
+      revisionNumber: 1
+    });
+  });
+
+  test("shows no Personal Chat update without a handler or when the pin is current", async () => {
+    const rendered = render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn()
+    });
+
+    await expect
+      .element(
+        page.getByText(m.organization_skills_adoption_personal_chat_pinned({ version: "1" }))
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_adoption_personal_chat_advance_action()
+        })
+      )
+      .not.toBeInTheDocument();
+
+    const current = adoptionPage();
+    if (current.summary?.personal_chat) {
+      current.summary.personal_chat.drift = "current";
+    }
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: current,
+      getOrganizationSkillAdoption: vi.fn(),
+      onAdvancePersonalChat: vi.fn()
+    });
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_adoption_personal_chat_advance_action()
+        })
+      )
+      .not.toBeInTheDocument();
+  });
+
   test("distinguishes an empty structural projection from runtime usage", async () => {
     render(SkillAdoptionProjection, {
       skillId: "skill-1",
