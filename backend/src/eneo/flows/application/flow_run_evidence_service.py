@@ -424,6 +424,7 @@ class FlowRunEvidenceService:
                 attempts_not_loaded=max(
                     0, attempt_page.total_count - len(step_attempts)
                 ),
+                corrupt_passage_aggregates=attempt_page.corrupt_passage_aggregates,
                 current_attempts_not_loaded=max(
                     0,
                     attempt_page.current_total - attempt_page.current_admitted,
@@ -435,6 +436,7 @@ class FlowRunEvidenceService:
             if (
                 knowledge_evidence_view.passages_omitted == 0
                 and knowledge_evidence_view.attempts_not_loaded == 0
+                and knowledge_evidence_view.corrupt_passage_aggregates == 0
                 and knowledge_evidence_view.current_attempts_not_loaded == 0
             ):
                 # The public contract says this summary is absent when the

@@ -423,13 +423,14 @@ EvidenceExportDetail = Literal["raw", "redacted"]
 class RunViewPassageOmission(BaseModel):
     """Passage text an interactive run view left out of its response.
 
-    Two distinct narrowings can occur, and each is reported separately. When a
-    run's stored attempt history is too large to load whole, the view admits
-    current attempts first and recent history next, under row and byte
-    budgets; what did not fit is reported as ``attempts_not_loaded``, and any
-    excluded CURRENT attempt is named per step so its empty trace cannot be
-    read as the step never having retrieved. The loaded evidence is then
-    trimmed to the view byte budget — an output-size cap on the response.
+    Two stages can narrow the view, and each reports its effects. The bounded
+    repository read admits current attempts first and recent history next under
+    row and byte budgets. Every excluded row is reported in
+    ``attempts_not_loaded``; ``corrupt_passage_aggregates`` identifies the
+    subset excluded because its recorded passage-size aggregate is unreadable,
+    and any excluded CURRENT attempt is named per step so its empty trace
+    cannot be read as the step never having retrieved. The loaded evidence is
+    then trimmed to the view byte budget — an output-size cap on the response.
 
     It never applies to an evidence export: an export returns the evidence that
     is actually retained, or fails, but never a quiet subset.
@@ -443,6 +444,7 @@ class RunViewPassageOmission(BaseModel):
     passage_bytes_omitted: int
     attempts_with_omitted_passages: int
     attempts_not_loaded: int = 0
+    corrupt_passage_aggregates: int = 0
     current_attempts_not_loaded: int = 0
     current_step_orders_not_loaded: list[int] = []
 
@@ -457,6 +459,7 @@ def omit_passages_beyond_view_budget(
     step_results: Sequence[FlowStepResult],
     byte_budget: int,
     attempts_not_loaded: int = 0,
+    corrupt_passage_aggregates: int = 0,
     current_attempts_not_loaded: int = 0,
     current_step_orders_not_loaded: tuple[int, ...] = (),
 ) -> tuple[list[FlowStepAttempt], RunViewPassageOmission]:
@@ -534,6 +537,7 @@ def omit_passages_beyond_view_budget(
             passage_bytes_omitted=bytes_omitted,
             attempts_with_omitted_passages=attempts_with_omitted_passages,
             attempts_not_loaded=attempts_not_loaded,
+            corrupt_passage_aggregates=corrupt_passage_aggregates,
             current_attempts_not_loaded=current_attempts_not_loaded,
             current_step_orders_not_loaded=list(current_step_orders_not_loaded),
         ),

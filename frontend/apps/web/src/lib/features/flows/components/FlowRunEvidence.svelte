@@ -335,7 +335,7 @@
       />
     {/if}
 
-    {#if knowledgeEvidenceView && (knowledgeEvidenceView.passages_omitted > 0 || (knowledgeEvidenceView.attempts_not_loaded ?? 0) > 0 || (knowledgeEvidenceView.current_attempts_not_loaded ?? 0) > 0)}
+    {#if knowledgeEvidenceView && (knowledgeEvidenceView.passages_omitted > 0 || (knowledgeEvidenceView.attempts_not_loaded ?? 0) > 0 || (knowledgeEvidenceView.corrupt_passage_aggregates ?? 0) > 0 || (knowledgeEvidenceView.current_attempts_not_loaded ?? 0) > 0)}
       <div
         class="border-default text-secondary flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs"
         data-testid="knowledge-evidence-view-omission"
@@ -351,6 +351,16 @@
           <p>
             {m.flow_run_knowledge_view_attempts_not_loaded({
               count: String(knowledgeEvidenceView.attempts_not_loaded)
+            })}
+          </p>
+        {/if}
+        {#if (knowledgeEvidenceView.corrupt_passage_aggregates ?? 0) > 0}
+          <p
+            class="text-warning-stronger font-medium"
+            data-testid="knowledge-evidence-corrupt-passage-aggregates"
+          >
+            {m.flow_run_knowledge_view_corrupt_passage_aggregates({
+              count: String(knowledgeEvidenceView.corrupt_passage_aggregates)
             })}
           </p>
         {/if}

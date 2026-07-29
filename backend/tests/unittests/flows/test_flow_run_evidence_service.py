@@ -933,6 +933,37 @@ async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> N
     assert omission["current_attempts_not_loaded"] == 1
 
 
+async def test_view_reports_corrupt_passage_aggregates(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    service.flow_run_repo.measure_step_attempt_provenance.return_value = (
+        StepAttemptProvenanceSize(
+            attempt_count=2,
+            stored_provenance_bytes=1024,
+            recorded_passage_bytes=0,
+            corrupt_passage_aggregates=2,
+        )
+    )
+    service.flow_run_repo.list_step_attempts.return_value = StepAttemptPage(
+        attempts=[],
+        total_count=2,
+        current_total=0,
+        current_admitted=0,
+        corrupt_passage_aggregates=2,
+    )
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    call_kwargs = service.flow_run_repo.list_step_attempts.await_args.kwargs
+    assert call_kwargs["limit"] == RUN_VIEW_MAX_LOADED_ATTEMPTS
+    assert call_kwargs["history_byte_budget"] == RUN_VIEW_MAX_LOADED_STORED_BYTES
+    assert call_kwargs["passage_byte_budget"] == RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
+    omission = bundle.debug_export["run"]["summary"]["knowledge_evidence_view"]
+    assert omission is not None
+    assert omission["attempts_not_loaded"] == 2
+    assert omission["corrupt_passage_aggregates"] == 2
+
+
 async def test_redacted_export_is_not_charged_for_withheld_text(
     user, monkeypatch
 ) -> None:

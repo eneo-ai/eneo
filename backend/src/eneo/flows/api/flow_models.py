@@ -1584,10 +1584,12 @@ def _empty_int_list() -> list[int]:
 
 
 class FlowRunDebugKnowledgeEvidenceView(BaseModel):
-    """Passage text this response left out to stay within the view budget.
+    """How this response narrowed retained knowledge evidence to a bounded view.
 
-    The evidence is still retained: these counts describe this response only.
-    An evidence export is never trimmed this way.
+    Counts cover attempts the bounded repository read did not load, including
+    corruption-caused exclusions, and passage text trimmed from admitted
+    attempts. The evidence remains retained; exports are never quietly narrowed
+    this way.
     """
 
     byte_budget: int
@@ -1599,11 +1601,19 @@ class FlowRunDebugKnowledgeEvidenceView(BaseModel):
         default=0,
         ge=0,
         description=(
-            "Attempt rows this response did not load because the run's "
-            "attempt history exceeds what one interactive view may "
-            "materialize. Current attempts are loaded first; excluded "
-            "evidence remains retained and available for export when export "
-            "limits permit."
+            "Attempts this bounded response did not load. Current attempts "
+            "are prioritized; excluded evidence remains retained and "
+            "available for export when export limits permit."
+        ),
+    )
+    corrupt_passage_aggregates: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Attempts excluded from the budgeted view because their recorded "
+            "passage-size evidence is unreadable; they are included in "
+            "attempts_not_loaded, and exports refuse until the stored "
+            "evidence is repaired."
         ),
     )
     current_attempts_not_loaded: int = Field(
@@ -1637,9 +1647,10 @@ class FlowRunDebugRunSummary(BaseModel):
     knowledge_evidence_view: FlowRunDebugKnowledgeEvidenceView | None = Field(
         default=None,
         description=(
-            "Present when the interactive view omitted recorded passage text to "
-            "stay within its budget. Absent on exports and on views that "
-            "returned every recorded passage."
+            "Present when the interactive view narrowed retained knowledge "
+            "evidence by not loading attempts or trimming recorded passage "
+            "text, including corruption-caused attempt exclusion. Absent on "
+            "exports and when the view returned all retained knowledge evidence."
         ),
     )
 
