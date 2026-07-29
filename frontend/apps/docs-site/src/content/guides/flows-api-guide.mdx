@@ -1302,11 +1302,11 @@ is evaluated. The evidence capability levels are:
 - `flow_evidence >= write` → redacted export
 - `flow_evidence = admin` → raw export, still subject to classification-3 tenant policy
 
-#### RAG trace and highlighted segments
+#### RAG trace and highlighted passages
 
-If a step used knowledge, the evidence/debug payload includes RAG provenance such as retrieved sources, chunk snippets, scores, and prompt-context inclusion metadata.
+If a step used knowledge, the evidence/debug payload includes RAG provenance such as retrieved sources, the verbatim retrieved passages, scores, and prompt-context inclusion metadata.
 
-In the web UI, that same trace can open the source document and highlight the matched segments that influenced the answer.
+In the web UI, that same trace can open the source document and highlight the exact passages that were retrieved. The trace records what was retrieved and what was included in the prompt context; it does not assert which passages materially influenced the model's answer, because the runtime records that influence as unknown.
 
 ## Reference
 

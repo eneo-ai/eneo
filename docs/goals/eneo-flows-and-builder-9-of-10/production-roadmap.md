@@ -58,40 +58,71 @@ external release gate (item 10); BM0.2 is external (item 10).
 
 1. **One consistent evidence snapshot** *(medium)* — remove the
    shared-session `asyncio.TaskGroup` fan-out in
-   `flow_run_evidence_service`; one sequential `REPEATABLE READ` evidence
-   transaction owned by the service; proven by a real PostgreSQL two-session
-   mutation-barrier test (all-before or all-after, never mixed).
-   *(Verified P1: unsupported concurrent AsyncSession use + independently
-   observed database states. Only shared-session fan-out in flows; the
-   webhook delivery TaskGroup opens a session per task and is the in-repo
-   exemplar of safe concurrency.)*
+   `flow_run_evidence_service`; sequential reads. The evidence routes keep
+   their existing explicit transaction as the canonical owner
+   (`commit_flow_runtime_write_before_response` shape); a dedicated
+   evidence-read manager sets `REPEATABLE READ` as the FIRST database
+   operation, so authorization, disclosure policy, preflight, sections,
+   and audit writes all observe one snapshot. Proven by a real PostgreSQL
+   two-session mutation-barrier test (all-before or all-after, never
+   mixed) including a retention-purge race, plus an in-path isolation
+   assertion. No serialization-retry machinery: a database failure rolls
+   back before response. *(Verified P1. Only shared-session fan-out in
+   flows; the webhook delivery TaskGroup opens a session per task and is
+   the in-repo exemplar of safe concurrency.)*
 2. **Whole-bundle evidence bounds** *(large)* — within that snapshot,
-   preflight EVERY emitted section against named row/stored-byte/logical-
-   byte limits before materialization: attempts (`limit is None` on export
-   today), attempt AND step-result `input/output/model_parameters` payload
-   columns (invisible to the provenance-only measurement), rerun revisions,
-   checkpoints, result files. Export refuses before loading an incomplete
-   bundle; the view discloses typed omissions. Fixed ceilings (correctness
-   invariants, not tenant policy). Tests: max+1 rows per section, highly
-   compressible JSON (stored vs logical), concurrent mutation.
-3. **Honest run token totals** *(medium)* — relational provider-call events
-   become the sole owner of run totals with typed input/output completeness;
-   delete the attempt-derived `NULL→0` aggregation
-   (`flow_run_repo.list_token_usage_for_runs`). A known+unreported run
-   returns typed incomplete totals, never a silent partial number. Tests:
-   mixed, unknown-only, zero-provider, outcome-unknown runs.
-4. **Bounded Builder persistence and terminal behavior** *(large)* — a
-   locally detected oversized planning state becomes a typed, replayable
-   terminal outcome preserving the last valid state (never
-   `PROVIDER_OUTCOME_UNKNOWN`, which asserts provider ambiguity that does
-   not exist); bound and version builder proposal JSON (BM4.10). Max+1
+   preflight EVERY emitted section before materialization: run row +
+   definition snapshot JSON, step results (incl. payload columns),
+   attempts (`limit is None` on export today; payload columns invisible to
+   the provenance-only measurement), result files, rerun operations +
+   revisions, invalidated steps, checkpoints, webhook deliveries, provider
+   calls, runtime-input metadata, and the debug projection's duplication —
+   under per-section limits PLUS one aggregate whole-bundle
+   row/stored-byte/logical-byte ceiling. Export refuses before loading an
+   incomplete bundle; the view reports narrowing as one bounded typed
+   discriminated `omissions[]` collection so multiple sections can narrow
+   honestly at once. Keep the existing export error code; add stable
+   `section`/`limit` identifiers instead of new error codes. Fixed
+   ceilings. Tests: aggregate max+1, per-section max+1, compressible JSON
+   (stored vs logical), simultaneous omissions in two sections.
+3. **Honest run token totals, retention included** *(medium/large)* —
+   relational provider-call events own totals for LIVE runs with typed
+   input/output completeness; at provider-detail purge, retention writes
+   one typed usage summary (totals + known/incomplete) into the
+   tombstone; retained runs read the tombstone — never both, and never
+   silent zero (today retention deletes every provider-call row keeping
+   only a count, and the frontend hides zero totals entirely, erasing
+   real spend). Delete the attempt-derived `NULL→0` aggregation
+   (`flow_run_repo.list_token_usage_for_runs`). Superseded and rerun
+   attempts count — they incurred real spend. Reset unsupported
+   pre-release rows; no backfill. Frontend renders incompleteness
+   explicitly. Tests: before/after retention, superseded, reruns, mixed
+   reported/unreported, outcome-unknown.
+4. **Bounded Builder persistence and terminal behavior** *(large, two
+   reviewable commits)* — (a) a locally detected oversized planning state
+   becomes a typed, replayable terminal outcome preserving the last valid
+   state; the handler catches ONLY `PlanningStatePayloadTooLargeError` and
+   never rewrites an existing `PROVIDER_OUTCOME_UNKNOWN` (no combined
+   ambiguity/oversize state); (b) bound builder proposal JSON with a
+   top-level current-only schema version — do not wrap `content`, and do
+   not break the draft-title JSON path (BM4.10). Max+1
    repository-level test proves retry replays without another provider call.
-5. **Operational attachment semantics** *(large)* — Builder apply converts
-   an attached template file into a real template binding by reusing
-   `FlowTemplateAssetService` (BM2.4 — currently documented but not
-   implemented); JSON schema selection stops silently taking the first
-   parseable file (BM2.7). An attached DOCX must survive apply, publish,
-   and runtime rendering through the existing asset owner.
+5. **Operational attachment semantics** *(large)* — the conversion happens
+   at the post-flow-creation materialization seam, inside the existing
+   atomic apply transaction: the Builder carries one typed
+   template-attachment INTENT through the authoring command; after the
+   materializer creates/locks the Flow, a deepened
+   `FlowTemplateAssetService.create_from_existing_attached_file` converts
+   it and the normal template-asset binding replaces the intent before
+   steps are built. Builder never creates a temporary Flow, copies the
+   file, or patches after apply (BM2.4 — currently documented but not
+   implemented; `upload_asset` requires a persisted flow, which create-mode
+   only has mid-materialization). Exactly ONE selected template for the
+   terminal template-fill step; zero or multiple → typed question/refusal.
+   JSON schema selection stops silently taking the first parseable file
+   (BM2.7). Tests: detach/retention races, tenant/space mismatch, replay,
+   rollback, publish, runtime rendering, survival after Builder-session
+   deletion.
 6. **One canonical attempt-evidence projection** *(medium/large)* —
    ownership boundary: the immutable attempt input owns the exact execution
    snapshot; relational result files own artifacts; attempt provenance owns
@@ -100,29 +131,49 @@ external release gate (item 10); BM0.2 is external (item 10).
    store. `step_result_builder` becomes the sole projection builder,
    executor orchestrates. Delete redundant fields FIRST, then type the
    surviving envelopes (reuse `RetrievedKnowledgeEvidence`); typing before
-   deletion would formalize duplication.
+   deletion would formalize duplication. Acceptance: a survivor matrix
+   proving each exported fact has exactly one owner and retention-purged
+   output stays honest.
 7. **Resolved-input lineage projection** *(medium)* — batch-project the
    persisted exact lineage into the existing evidence bundle for admitted
-   attempts, under the item-1 snapshot, inside the item-2 budgets;
-   retained / purged / corrupt / omitted states explicit.
-8. **Builder frontend/server contract closure** *(medium)* — generated
-   event types, attachment limits, explicit draft lifecycle, tolerant
-   validated SSE handling (FE remnants); finish vocabulary neutrality
-   (`case_documents`, `basic_case_metadata`, `case_like_flow` — direct
-   pre-release correction, no tolerant readers); serve RAG policy ceilings
-   from the server and delete the duplicated admin-page TS constants.
-9. **Docs-site contract correction** *(medium, after contracts freeze)* —
-   remove causal "influenced the answer" overclaims (runtime records
-   influence as unknown); stop promising attachment-to-template binding
-   until item 5 lands; document all four export refusal limits (guide names
-   only one); lineage writer is active, not future work. Add contract tests
-   covering all four limits and prohibiting material-influence wording.
+   attempts, under the item-1 snapshot, inside the item-2 aggregate
+   budget. A missing lineage row today parses as `not_tracked` even when
+   retention purged it; the projection must reuse the attempt retention
+   marker: missing + marker = `retention_purged`, missing without =
+   `not_tracked`, malformed = `corrupt`.
+8. **Builder frontend/server contract closure** *(medium, three reviewed
+   commits by owner)* — (a) stream/attachment/draft contract: validate
+   known SSE payload shapes at runtime (parser currently casts parsed
+   JSON), one explicit stream-failure state, KEEP fail-fast unknown-event
+   behavior; attachment limits; explicit draft lifecycle. (b) vocabulary
+   neutrality: direct pre-release correction of `case_documents`,
+   `basic_case_metadata`, `case_like_flow` — no tolerant readers.
+   (c) serve RAG policy ceilings through the existing settings response
+   and delete the duplicated admin-page TS constants — no generic
+   constraints-discovery API.
+9. **Docs-site contract correction** *(medium, per-slice from now on)* —
+   the false "influenced the answer" claim is CORRECTED (2026-07-29, with
+   this roadmap revision); each remaining correction lands with its owning
+   slice: attachment-to-template promise with item 5, export limits +
+   lineage writer with items 2/7. Add contract tests covering all four
+   export limits and prohibiting material-influence wording.
 10. **Release proof** *(external gates, tracked not implemented here)* —
-    live quality/economics thresholds run repeatedly (p50/p95), server
-    build identity, diverse structural goldens (BM5.2–5.4), HTTP-secret
-    deployment inventory (M2.9 operational half; with zero users any hit
-    means reset/delete, not compatibility), branch-protection evidence
-    (BM0.2).
+    BEFORE any live run, freeze in the tracked gate input: repetition
+    count, required cases, non-municipal domain families, provider
+    route/model identity, and numeric p50/p95 latency + token/call
+    ceilings (the harness today has none of these and only
+    municipal-domain cases; thresholds must never be chosen after
+    observing results). Preserve raw receipts. Then: server build
+    identity, structural goldens (BM5.2–5.4), HTTP-secret deployment
+    inventory (M2.9 operational half; with zero users any hit means
+    reset/delete), branch-protection evidence (BM0.2).
+
+**Product decisions adopted as defaults (owner may override):** token
+totals survive debug retention via a typed tombstone summary rather than
+an explicit `retention_purged`-only state; exactly one template attachment
+is required per template-fill step (multiple template-role files become a
+structured question); release-gate numeric thresholds are product-owned
+inputs to be fixed before execution.
 
 **Deferred:** export streaming/pagination transport until item 2 exists and
 measured refusal metrics justify more; document-render offloading (M6.6)
