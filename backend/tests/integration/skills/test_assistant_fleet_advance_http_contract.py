@@ -698,6 +698,96 @@ async def test_oversized_candidate_skips_only_the_incompatible_assistant(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_disabled_selective_activation_keeps_on_demand_pin_unchanged(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=1,
+        )
+        assistant_id = seed.assistant_ids[0]
+        space_id = await container.session().scalar(
+            sa.select(Assistants.space_id).where(Assistants.id == assistant_id)
+        )
+        assert space_id is not None
+        repo = container.skill_repo()
+        await repo.update_runtime_policy(
+            tenant_id=admin_user.tenant_id,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=100,
+                max_activations_per_turn=10,
+            ),
+        )
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space_id,
+            assistant_id=assistant_id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=seed.skill_id,
+                        skill_revision_id=seed.old_revision_id,
+                    ),
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                )
+            ],
+        )
+        await repo.update_runtime_policy(
+            tenant_id=admin_user.tenant_id,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=False,
+                max_attached_skills=100,
+                context_share_percent=100,
+                max_activations_per_turn=10,
+            ),
+        )
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.published_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 0,
+        "concurrent_change": 0,
+        "incompatible": 1,
+    }
+    assert response.json()["outcomes"] == [
+        {
+            "assistant_id": str(assistant_id),
+            "outcome": "incompatible",
+            "reason": "activation_unavailable",
+        }
+    ]
+    async with db_container() as container:
+        pin = await container.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == assistant_id,
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pin == seed.old_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_retained_deprecated_model_still_rejects_an_oversized_candidate(
     client,
     admin_token,

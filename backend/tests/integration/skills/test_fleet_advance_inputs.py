@@ -9,6 +9,7 @@ from eneo.skills.domain.skill import (
     AssistantPinAdvanceIncompatibleReason,
     PersonalChatPinOverride,
     SkillActivationMode,
+    SkillActivationUnavailableException,
     SkillBindingIntent,
     SkillBindingReference,
     SkillRuntimePolicy,
@@ -209,7 +210,7 @@ async def test_preflight_adapter_batch_loads_one_shared_provider_once(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_candidate_pin_fit_matches_current_save_and_reports_oversized_revision(
+async def test_candidate_pin_fit_matches_current_save_and_reports_candidate_refusal(
     db_container,
     admin_user,
     completion_model_factory,
@@ -413,7 +414,10 @@ async def test_candidate_pin_fit_matches_current_save_and_reports_oversized_revi
         )
 
         assert current_verdict is None
-        assert oversized_verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+        assert (
+            oversized_verdict
+            is AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
+        )
 
         await skill_service.replace_assistant_bindings(
             space_id=space_record.id,
@@ -451,6 +455,10 @@ async def test_candidate_pin_fit_matches_current_save_and_reports_oversized_revi
                 candidate_assistant,
                 space=candidate_space,
                 validate_all_on_demand_candidates=True,
+            )
+        except SkillActivationUnavailableException:
+            ordinary_candidate_verdict = (
+                AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
             )
         except BadRequestException:
             ordinary_candidate_verdict = (

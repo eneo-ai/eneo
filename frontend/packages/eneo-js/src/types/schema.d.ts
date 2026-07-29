@@ -9364,7 +9364,7 @@ export interface components {
      * AssistantPinAdvanceIncompatibleReason
      * @enum {string}
      */
-    AssistantPinAdvanceIncompatibleReason: "context_window";
+    AssistantPinAdvanceIncompatibleReason: "activation_unavailable" | "context_window";
     /**
      * AssistantPinAdvanceOutcome
      * @enum {string}

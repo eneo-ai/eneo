@@ -77,6 +77,7 @@ from eneo.skills.domain.skill import (
     SkillActivationFallbackReason,
     SkillActivationMode,
     SkillActivationRejectionReason,
+    SkillActivationUnavailableException,
     SkillBindingIntent,
     SkillComposition,
     SkillExecutionReference,
@@ -135,6 +136,7 @@ _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES: dict[
         "does not fit the selected completion model context"
     ),
 }
+
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
@@ -603,7 +605,7 @@ class AssistantService:
                 if snapshot.fallback_reason is not None
                 else _ON_DEMAND_REJECTION_DEFAULT
             )
-            raise BadRequestException(message)
+            raise SkillActivationUnavailableException(message)
 
         assessments = runtime.assess_on_demand_candidates(candidate_skill_ids)
         rejected_assessment = next(
@@ -775,7 +777,7 @@ class AssistantService:
         runtime_policy: SkillRuntimePolicy,
         preflight_adapters: dict[UUID, "CompletionModelAdapter"],
     ) -> AssistantPinAdvanceIncompatibleReason | None:
-        """Every fit refusal maps to the single CONTEXT_WINDOW reason for now."""
+        """Token-limit fit refusals map to CONTEXT_WINDOW for now."""
         assert not (space_is_personal and assistant.is_default)
         assert candidate_binding.skill_id == candidate.skill_id
         assert candidate_binding.skill_revision_id == candidate.to_revision_id
@@ -840,6 +842,8 @@ class AssistantService:
                     else None
                 ),
             )
+        except SkillActivationUnavailableException:
+            return AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
         except BadRequestException:
             return AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
         return None

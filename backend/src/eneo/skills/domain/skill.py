@@ -120,6 +120,7 @@ class AssistantPinAdvanceOutcome(str, Enum):
 
 
 class AssistantPinAdvanceIncompatibleReason(str, Enum):
+    ACTIVATION_UNAVAILABLE = "activation_unavailable"
     CONTEXT_WINDOW = "context_window"
 
 
@@ -897,6 +898,10 @@ class SkillActivationFallbackReason(str, Enum):
     CATALOG_BUDGET_EXCEEDED = "catalog_budget_exceeded"
     TOKEN_MEASUREMENT_UNAVAILABLE = "token_measurement_unavailable"
     SELECTIVE_ACTIVATION_DISABLED = "selective_activation_disabled"
+
+
+class SkillActivationUnavailableException(BadRequestException):
+    pass
 
 
 class SkillActivationRejectionReason(str, Enum):

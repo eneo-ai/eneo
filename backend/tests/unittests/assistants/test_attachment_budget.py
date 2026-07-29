@@ -300,7 +300,7 @@ async def test_candidate_pin_fit_validates_every_on_demand_skill(monkeypatch):
         preflight_adapters={assistant.completion_model.id: MagicMock()},
     )
 
-    assert verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+    assert verdict is AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
 
 
 @pytest.mark.asyncio
@@ -329,7 +329,7 @@ async def test_candidate_pin_fit_revalidates_unchanged_on_demand_binding(monkeyp
         preflight_adapters={assistant.completion_model.id: MagicMock()},
     )
 
-    assert verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+    assert verdict is AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
 
 
 @pytest.mark.parametrize(

@@ -284,7 +284,10 @@ async def test_skill_policy_counts_personal_assistant_mcp_schema_and_rolls_back(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert rejected.status_code == 400, rejected.text
-    assert "selected completion model context" in rejected.json()["message"]
+    # The baseline provider-payload measurement refuses before the
+    # per-candidate assessment: prompt + files + MCP tool schemas exceed the
+    # model's window, so the whole-config message is the right signal here.
+    assert "exceed the completion model context window" in rejected.json()["message"]
 
     persisted = await client.get(
         "/api/v1/admin/governance-policy/",
