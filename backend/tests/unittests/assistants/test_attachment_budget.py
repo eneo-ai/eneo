@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -12,6 +13,8 @@ from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.skills.domain.skill import (
+    AssistantPinAdvanceIncompatibleReason,
+    PersonalChatPinOverride,
     ResolvedSkillBinding,
     SkillActivationMode,
     SkillBindingProjection,
@@ -180,6 +183,237 @@ def _resolved_skill(
         source=SkillBindingSource.SPACE,
         activation_mode=activation_mode,
     )
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_uses_preloaded_resolution_without_repo_reads(
+    monkeypatch,
+):
+    _patch_reserve(monkeypatch, 10)
+    current = _resolved_skill(
+        name="Candidate",
+        position=3,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 1_000
+    candidate = replace(current, instructions="Candidate instructions")
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=current.skill_id,
+            from_revision_id=current.skill_revision_id,
+            to_revision_id=candidate.skill_revision_id,
+        ),
+        candidate_binding=candidate,
+        resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        preflight_adapters={},
+    )
+
+    assert verdict is None
+    service.skill_service.resolve_assistant_bindings_for_runtime.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_stages_blocked_always_binding_for_full_save(
+    monkeypatch,
+):
+    _patch_reserve(monkeypatch, 10)
+    target = _resolved_skill(
+        name="Target",
+        position=0,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    blocked = replace(
+        _resolved_skill(
+            name="Blocked",
+            position=1,
+            activation_mode=SkillActivationMode.ALWAYS,
+        ),
+        instructions="overflow " * 10_000,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 200
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=target.skill_id,
+            from_revision_id=target.skill_revision_id,
+            to_revision_id=target.skill_revision_id,
+        ),
+        candidate_binding=target,
+        resolution=SkillRuntimeResolution(
+            eligible=(target,),
+            blocked=(blocked,),
+        ),
+        preflight_adapters={},
+    )
+
+    assert verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_validates_every_on_demand_skill(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    target = _resolved_skill(
+        name="Target",
+        position=0,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=1,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.supports_tool_calling = False
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=target.skill_id,
+            from_revision_id=target.skill_revision_id,
+            to_revision_id=target.skill_revision_id,
+        ),
+        candidate_binding=target,
+        resolution=SkillRuntimeResolution(
+            eligible=(target, on_demand),
+            blocked=(),
+        ),
+        preflight_adapters={assistant.completion_model.id: MagicMock()},
+    )
+
+    assert verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_revalidates_unchanged_on_demand_binding(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    current = _resolved_skill(
+        name="Candidate",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.supports_tool_calling = False
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=current.skill_id,
+            from_revision_id=current.skill_revision_id,
+            to_revision_id=current.skill_revision_id,
+        ),
+        candidate_binding=current,
+        resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        preflight_adapters={assistant.completion_model.id: MagicMock()},
+    )
+
+    assert verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+
+
+@pytest.mark.parametrize(
+    ("include_on_demand", "expected"),
+    [
+        (True, AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW),
+        (False, None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_without_model_matches_full_save_behavior(
+    include_on_demand,
+    expected,
+):
+    target = _resolved_skill(
+        name="Target",
+        position=0,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=1,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model = None
+    service = _service()
+
+    verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=target.skill_id,
+            from_revision_id=target.skill_revision_id,
+            to_revision_id=target.skill_revision_id,
+        ),
+        candidate_binding=target,
+        resolution=SkillRuntimeResolution(
+            eligible=(target, on_demand) if include_on_demand else (target,),
+            blocked=(),
+        ),
+        preflight_adapters={},
+    )
+
+    assert verdict is expected
+
+
+@pytest.mark.asyncio
+async def test_candidate_pin_fit_reports_context_window_without_rejecting_current_pin(
+    monkeypatch,
+):
+    _patch_reserve(monkeypatch, 10)
+    current = _resolved_skill(
+        name="Candidate",
+        position=0,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 200
+    oversized = replace(
+        current,
+        skill_revision_id=uuid4(),
+        revision_number=2,
+        instructions="overflow " * 10_000,
+    )
+    service = _service()
+
+    current_verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=current.skill_id,
+            from_revision_id=current.skill_revision_id,
+            to_revision_id=current.skill_revision_id,
+        ),
+        candidate_binding=current,
+        resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        preflight_adapters={},
+    )
+    oversized_verdict = await service.assert_assistant_fits_candidate_pin(
+        assistant=assistant,
+        space_is_personal=False,
+        candidate=PersonalChatPinOverride(
+            skill_id=current.skill_id,
+            from_revision_id=current.skill_revision_id,
+            to_revision_id=oversized.skill_revision_id,
+        ),
+        candidate_binding=oversized,
+        resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
+        preflight_adapters={},
+    )
+
+    assert current_verdict is None
+    assert oversized_verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
 
 
 def _assistant_with_runtime_model(*, prompt_text: str = "Base instructions"):

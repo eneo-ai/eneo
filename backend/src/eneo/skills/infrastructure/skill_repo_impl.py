@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import TypeVar
 from uuid import UUID, uuid4
@@ -2088,6 +2089,46 @@ class SkillRepoImpl:
                 attachable_revision_number,
             ) in rows.all()
         ]
+
+    async def list_assistant_bindings_batch(
+        self, *, assistant_ids: Sequence[UUID]
+    ) -> dict[UUID, list[ResolvedSkillBinding]]:
+        bindings_by_assistant = dict.fromkeys(assistant_ids)
+        if not bindings_by_assistant:
+            return {}
+        grouped: dict[UUID, list[ResolvedSkillBinding]] = {
+            assistant_id: [] for assistant_id in bindings_by_assistant
+        }
+        rows = await self.session.execute(
+            self._resolved_query(AssistantSkillBindings)
+            .where(AssistantSkillBindings.assistant_id.in_(bindings_by_assistant))
+            .order_by(
+                AssistantSkillBindings.assistant_id,
+                AssistantSkillBindings.position,
+            )
+        )
+        for (
+            binding,
+            skill,
+            revision,
+            current_revision_id,
+            is_organization,
+            attachable_revision_id,
+            attachable_revision_number,
+        ) in rows.all():
+            grouped[binding.assistant_id].append(
+                self._to_resolved(
+                    skill,
+                    revision,
+                    current_revision_id,
+                    is_organization,
+                    attachable_revision_id,
+                    attachable_revision_number,
+                    binding.position,
+                    activation_mode=SkillActivationMode(binding.activation_mode),
+                )
+            )
+        return grouped
 
     async def has_assistant_bindings(self, *, assistant_id: UUID) -> bool:
         return bool(

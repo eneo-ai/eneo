@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -973,6 +974,34 @@ class SkillService:
             tenant_id=self.user.tenant_id,
             bindings=bindings,
         )
+
+    async def resolve_assistant_bindings_for_runtime_batch(
+        self,
+        assistant_ids: Sequence[UUID],
+    ) -> dict[UUID, SkillRuntimeResolution]:
+        bindings_by_assistant = await self.repo.list_assistant_bindings_batch(
+            assistant_ids=assistant_ids
+        )
+        all_bindings = [
+            binding
+            for bindings in bindings_by_assistant.values()
+            for binding in bindings
+        ]
+        blocks = await self._active_execution_blocks(
+            tenant_id=self.user.tenant_id,
+            bindings=all_bindings,
+        )
+        return {
+            assistant_id: SkillRuntimeResolution(
+                eligible=tuple(
+                    binding for binding in bindings if binding.skill_id not in blocks
+                ),
+                blocked=tuple(
+                    binding for binding in bindings if binding.skill_id in blocks
+                ),
+            )
+            for assistant_id, bindings in bindings_by_assistant.items()
+        }
 
     async def create_turn_plan(
         self,

@@ -43,6 +43,9 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
     )
+    from eneo.model_providers.infrastructure.litellm_provider import (
+        ResolvedLiteLLMProvider,
+    )
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
     from eneo.users.user import UserInDB
@@ -93,9 +96,6 @@ class CompletionService:
         All models must have a provider_id linking to a ModelProvider.
         Uses TenantModelAdapter which routes through LiteLLM.
         """
-        from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
-            TenantModelAdapter,
-        )
         from eneo.model_providers.infrastructure.litellm_provider import (
             load_active_litellm_provider,
         )
@@ -133,6 +133,18 @@ class CompletionService:
             provider_id=model.provider_id,
             tenant_id=self.tenant.id,
         )
+        return self._create_tenant_model_adapter(model=model, provider=provider)
+
+    def _create_tenant_model_adapter(
+        self,
+        *,
+        model: CompletionModel,
+        provider: "ResolvedLiteLLMProvider",
+    ) -> "CompletionModelAdapter":
+        from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+            TenantModelAdapter,
+        )
+
         credential_resolver = provider.create_credential_resolver(
             self.encryption_service
         )
@@ -212,10 +224,41 @@ class CompletionService:
         models: Sequence[CompletionModel],
     ) -> dict[UUID, "CompletionModelAdapter"]:
         """Load each distinct model adapter once for one save-time preflight."""
+        from eneo.model_providers.infrastructure.litellm_provider import (
+            load_active_litellm_provider,
+        )
+
         adapters: dict[UUID, CompletionModelAdapter] = {}
+        providers: dict[UUID, ResolvedLiteLLMProvider] = {}
         for model in models:
-            if model.id not in adapters:
-                adapters[model.id] = await self._get_adapter(model)
+            if model.id in adapters:
+                continue
+            if not model.provider_id:
+                raise ValueError(
+                    f"Model '{model.name}' is missing required provider_id. "
+                    "All models must be associated with a ModelProvider."
+                )
+            if not self.session:
+                raise ValueError(
+                    f"Model '{model.name}' requires database session to load provider credentials. "
+                    "Please ensure the CompletionService is initialized with a database session."
+                )
+            if self.tenant is None:
+                raise ValueError(
+                    f"Model '{model.name}' requires tenant context to load its provider."
+                )
+            provider = providers.get(model.provider_id)
+            if provider is None:
+                provider = await load_active_litellm_provider(
+                    session=self.session,
+                    provider_id=model.provider_id,
+                    tenant_id=self.tenant.id,
+                )
+                providers[model.provider_id] = provider
+            adapters[model.id] = self._create_tenant_model_adapter(
+                model=model,
+                provider=provider,
+            )
         return adapters
 
     @staticmethod

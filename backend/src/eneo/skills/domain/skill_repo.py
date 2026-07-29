@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
@@ -257,6 +258,10 @@ class SkillRepo(Protocol):
     async def list_assistant_bindings(
         self, *, assistant_id: UUID
     ) -> list[ResolvedSkillBinding]: ...
+
+    async def list_assistant_bindings_batch(
+        self, *, assistant_ids: Sequence[UUID]
+    ) -> dict[UUID, list[ResolvedSkillBinding]]: ...
 
     async def has_assistant_bindings(self, *, assistant_id: UUID) -> bool: ...
 

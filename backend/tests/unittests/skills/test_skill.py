@@ -23,6 +23,7 @@ from eneo.skills import (
 )
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
+    AssistantFleetAdvanceCursor,
     NormalizedSkillContent,
     Skill,
     SkillActivationEvidenceV1,
@@ -41,6 +42,24 @@ from eneo.skills.domain.skill import (
 )
 
 SKILL_ACTIVATION_EVIDENCE_SIZE_BUDGET_BYTES = 400_000
+
+
+def test_assistant_fleet_advance_cursor_round_trips_all_fields():
+    cursor = AssistantFleetAdvanceCursor(
+        skill_id=uuid4(),
+        expected_published_revision_id=uuid4(),
+        run_id=uuid4(),
+        after_assistant_id=uuid4(),
+    )
+
+    assert AssistantFleetAdvanceCursor.parse(cursor.serialize()) == cursor
+    assert AssistantFleetAdvanceCursor.parse(None) is None
+
+
+@pytest.mark.parametrize("cursor", ["not-base64!", "bm90OmVub3VnaA"])
+def test_assistant_fleet_advance_cursor_rejects_malformed_values(cursor: str):
+    with pytest.raises(BadRequestException, match="Invalid Assistant fleet cursor"):
+        AssistantFleetAdvanceCursor.parse(cursor)
 
 
 def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
@@ -716,6 +735,51 @@ async def test_assistant_composition_excludes_blocked_skill_without_changing_bin
         allowed.skill_id
     ]
     repo.replace_assistant_bindings.assert_not_awaited()
+
+
+async def test_batch_assistant_runtime_resolution_matches_single_resolution():
+    first_id, second_id, empty_id = uuid4(), uuid4(), uuid4()
+    blocked = _binding(position=0, name="Payroll")
+    first_allowed = _binding(position=1, name="Absence")
+    second_allowed = _binding(position=0, name="Expenses")
+    tenant_id = uuid4()
+    block = _execution_block(tenant_id=tenant_id, binding=blocked)
+
+    batch_repo = AsyncMock()
+    batch_repo.list_assistant_bindings_batch.return_value = {
+        first_id: [blocked, first_allowed],
+        second_id: [second_allowed],
+        empty_id: [],
+    }
+    batch_repo.list_active_execution_blocks.return_value = {blocked.skill_id: block}
+    batch_service = _service(batch_repo)
+    batch_service.user.tenant_id = tenant_id
+
+    single_repo = AsyncMock()
+    single_repo.list_assistant_bindings.side_effect = [
+        [blocked, first_allowed],
+        [second_allowed],
+        [],
+    ]
+    single_repo.list_active_execution_blocks.return_value = {blocked.skill_id: block}
+    single_service = _service(single_repo)
+    single_service.user.tenant_id = tenant_id
+    expected = {
+        assistant_id: await single_service.resolve_assistant_bindings_for_runtime(
+            assistant_id=assistant_id
+        )
+        for assistant_id in (first_id, second_id, empty_id)
+    }
+
+    resolutions = await batch_service.resolve_assistant_bindings_for_runtime_batch(
+        [first_id, second_id, empty_id]
+    )
+
+    assert resolutions == expected
+    batch_repo.list_assistant_bindings_batch.assert_awaited_once_with(
+        assistant_ids=[first_id, second_id, empty_id]
+    )
+    batch_repo.list_active_execution_blocks.assert_awaited_once()
 
 
 async def test_runtime_composition_keeps_all_bindings_without_execution_blocks():

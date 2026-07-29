@@ -1,7 +1,7 @@
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
 from uuid import UUID
@@ -68,9 +68,11 @@ from eneo.roles.permissions import (
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
 from eneo.skills.domain.skill import (
+    AssistantPinAdvanceIncompatibleReason,
     AssistantSkillConfigurationProjection,
     AssistantSkillRuntimeProjection,
     PersonalChatPinOverride,
+    ResolvedSkillBinding,
     SkillActivationEvidenceV1,
     SkillActivationFallbackReason,
     SkillActivationMode,
@@ -751,6 +753,86 @@ class AssistantService:
             completion_prompt_files=completion_prompt_files,
             effective_mcp_servers=effective_mcp_servers,
         )
+
+    async def assert_assistant_fits_candidate_pin(
+        self,
+        *,
+        assistant: Assistant,
+        space_is_personal: bool,
+        candidate: PersonalChatPinOverride,
+        candidate_binding: ResolvedSkillBinding,
+        resolution: SkillRuntimeResolution,
+        preflight_adapters: dict[UUID, "CompletionModelAdapter"],
+    ) -> AssistantPinAdvanceIncompatibleReason | None:
+        """Every fit refusal maps to the single CONTEXT_WINDOW reason for now."""
+        assert not (space_is_personal and assistant.is_default)
+        assert candidate_binding.skill_id == candidate.skill_id
+        assert candidate_binding.skill_revision_id == candidate.to_revision_id
+
+        current_binding = next(
+            (
+                binding
+                for binding in (*resolution.eligible, *resolution.blocked)
+                if binding.skill_id == candidate.skill_id
+                and binding.skill_revision_id == candidate.from_revision_id
+            ),
+            None,
+        )
+        assert current_binding is not None
+        resolved_candidate = replace(
+            candidate_binding,
+            position=current_binding.position,
+            activation_mode=current_binding.activation_mode,
+        )
+        candidate_resolution = SkillRuntimeResolution(
+            eligible=tuple(
+                resolved_candidate if binding is current_binding else binding
+                for binding in resolution.eligible
+            ),
+            blocked=tuple(
+                resolved_candidate if binding is current_binding else binding
+                for binding in resolution.blocked
+            ),
+        )
+        validation_plan = (
+            await self.skill_service.create_turn_plan(
+                base_instructions=assistant.get_prompt_text(),
+                resolution=candidate_resolution,
+            )
+        ).for_full_save_validation()
+        candidate_skill_ids = frozenset(
+            binding.binding.skill_id
+            for binding in validation_plan.available
+            if binding.binding.activation_mode is SkillActivationMode.ON_DEMAND
+        )
+        model = assistant.completion_model
+        if model is None:
+            if candidate_skill_ids:
+                return AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+            return None
+        completion_prompt_files = await self._completion_prompt_files_for_model(
+            persistent_attachments=assistant.attachments,
+            completion_model=model,
+        )
+        effective_mcp_servers = (
+            []
+            if not candidate_skill_ids or assistant.has_knowledge()
+            else assistant.mcp_servers
+        )
+        try:
+            await self._validate_skill_activation_fit(
+                validation_plan=validation_plan,
+                candidate_skill_ids=candidate_skill_ids,
+                model=model,
+                completion_prompt_files=completion_prompt_files,
+                effective_mcp_servers=effective_mcp_servers,
+                preflight_adapter=(
+                    preflight_adapters[model.id] if candidate_skill_ids else None
+                ),
+            )
+        except BadRequestException:
+            return AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+        return None
 
     @staticmethod
     def _context_model(
