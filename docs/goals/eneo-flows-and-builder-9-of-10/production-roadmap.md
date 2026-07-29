@@ -31,6 +31,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-29 | Corruption-caused omission distinguished from size-based omission in the public knowledge view; reason-neutral narrowing contract sv+en (`27cef0327`, gate green 8/10) |
 | 2026-07-29 | JSONB docs honesty (`36c35b734`, `a3318a169`) |
 | 2026-07-28 | RAG evidence transparency, `615200dcc..cf0cddc16`: verbatim retrieved passages as typed bounded evidence; sensitivity-gated disclosure; single-statement bounded admission with per-step attribution; corruption fail-closed; four-limit complete-or-refuse exports; admin tenant policy for recording limits; full source rendering sv+en |
 | 2026-07-28 | Bounded evidence view + honest export refusal (`3ad737a79`) |
@@ -40,10 +41,6 @@ plan against current source, not carried over blind).
 
 ## In flight
 
-- **Corrupt-evidence visibility follow-ups** (task #1): surface
-  `corrupt_passage_aggregates` in the public knowledge view with truthful
-  reason-neutral omission copy sv+en + real fixtures. Worker iteration 3
-  (wrapper-contract wording); gate at 7/10 and converging; lands on green ≥8.
 - **Roadmap reconciliation pass 2** (peer, xhigh): verifying the old
   ledger's open items (OPEN-WORK A–D, M6.6, M6.7, M2.9 operational half,
   BM5.4, BM2.4/2.7/4.10/5.2/5.3, FE.1–4, BM0.2) against current source
@@ -57,12 +54,17 @@ plan against current source, not carried over blind).
    reads inside one `REPEATABLE READ` transaction; proven by a real
    PostgreSQL two-session interleaving test. *(Verified P1: unsupported
    concurrent AsyncSession use + preflight and load can see different
-   committed states.)*
+   committed states. This is the only shared-session fan-out in flows —
+   the webhook delivery TaskGroup in `runtime/tasks.py` correctly opens a
+   session per task and is the in-repo exemplar of safe concurrency.)*
 2. **Complete export/view bounds** — preflight and admission must count
    attempts and measure `input_payload_json`/`output_payload_json` bytes,
    which today bypass every guard (`limit is None` on export; admission
-   sums `pg_column_size(provenance_json)` only). New named export limits,
-   fixed ceilings (correctness invariants, not tenant policy).
+   sums `pg_column_size(provenance_json)` only). Step results carry the
+   same unmeasured payload columns (`flow_tables.py:900-908`) and the
+   bundle loads all of them unbounded — the bound must cover both fan-out
+   dimensions. New named export limits, fixed ceilings (correctness
+   invariants, not tenant policy).
 3. **Delete duplicate provenance projections** — field-by-field: drop
    attempt-provenance copies of `runtime_input`, `transcription`, `guards`
    (step-result snapshot and reduced citations stay — they have runtime
