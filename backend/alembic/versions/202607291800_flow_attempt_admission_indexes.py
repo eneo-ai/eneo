@@ -1,11 +1,20 @@
 """Bound Flow attempt evidence admission by runtime ordering indexes.
 
+Concurrent index builds commit independently of Alembic's revision stamp. Each
+named index is therefore verified before reuse so an interrupted upgrade can
+resume after a successful build, while an invalid or unexpected index fails
+closed for operator inspection.
+
 Revision ID: 202607291800_attempt_admit_idx
 Revises: 202607271700_call_input_indexes
 Create Date: 2026-07-29 18:00:00.000000
 """
 
 from __future__ import annotations
+
+from typing import NamedTuple
+
+import sqlalchemy as sa
 
 from alembic import op
 
@@ -22,33 +31,125 @@ _RESULT_TABLE = "flow_step_results"
 _RESULT_COLUMNS = ("flow_run_id", "step_order")
 
 
+class _IndexState(NamedTuple):
+    table: str
+    columns: tuple[str, ...]
+    access_method: str
+    unique: bool
+    valid: bool
+    ready: bool
+    live: bool
+    partial: bool
+    expression: bool
+
+
+def _index_state(index: str) -> _IndexState | None:
+    row = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
+                SELECT
+                    table_row.relname,
+                    array_agg(attribute_row.attname ORDER BY index_key.ordinality),
+                    access_method.amname,
+                    index_metadata.indisunique,
+                    index_metadata.indisvalid,
+                    index_metadata.indisready,
+                    index_metadata.indislive,
+                    index_metadata.indpred IS NOT NULL,
+                    index_metadata.indexprs IS NOT NULL
+                FROM pg_class AS index_row
+                JOIN pg_index AS index_metadata
+                  ON index_metadata.indexrelid = index_row.oid
+                JOIN pg_am AS access_method
+                  ON access_method.oid = index_row.relam
+                JOIN pg_class AS table_row
+                  ON table_row.oid = index_metadata.indrelid
+                JOIN unnest(index_metadata.indkey)
+                  WITH ORDINALITY AS index_key(attnum, ordinality)
+                  ON true
+                JOIN pg_attribute AS attribute_row
+                  ON attribute_row.attrelid = table_row.oid
+                 AND attribute_row.attnum = index_key.attnum
+                WHERE index_row.relnamespace = current_schema()::regnamespace
+                  AND index_row.relname = :index_name
+                GROUP BY
+                    table_row.relname,
+                    access_method.amname,
+                    index_metadata.indisunique,
+                    index_metadata.indisvalid,
+                    index_metadata.indisready,
+                    index_metadata.indislive,
+                    (index_metadata.indpred IS NOT NULL),
+                    (index_metadata.indexprs IS NOT NULL)
+                """
+            ),
+            {"index_name": index},
+        )
+        .one_or_none()
+    )
+    if row is None:
+        return None
+    return _IndexState(
+        table=str(row[0]),
+        columns=tuple(row[1]),
+        access_method=str(row[2]),
+        unique=bool(row[3]),
+        valid=bool(row[4]),
+        ready=bool(row[5]),
+        live=bool(row[6]),
+        partial=bool(row[7]),
+        expression=bool(row[8]),
+    )
+
+
+def _create_or_verify_index(
+    index: str,
+    *,
+    table: str,
+    columns: tuple[str, ...],
+) -> None:
+    if _index_state(index) is None:
+        op.execute(
+            f"CREATE INDEX CONCURRENTLY {index} ON {table} ({', '.join(columns)})"
+        )
+
+    expected = _IndexState(
+        table=table,
+        columns=columns,
+        access_method="btree",
+        unique=False,
+        valid=True,
+        ready=True,
+        live=True,
+        partial=False,
+        expression=False,
+    )
+    actual = _index_state(index)
+    if actual != expected:
+        raise RuntimeError(
+            f"Cannot continue Flow attempt admission migration: index {index} "
+            f"has unexpected state {actual!r}; expected {expected!r}. Drop an "
+            "invalid or mismatched index concurrently, then rerun the upgrade."
+        )
+
+
 def upgrade() -> None:
     with op.get_context().autocommit_block():
-        op.create_index(
+        _create_or_verify_index(
             _ATTEMPT_INDEX,
-            _ATTEMPT_TABLE,
-            _ATTEMPT_COLUMNS,
-            unique=False,
-            postgresql_concurrently=True,
+            table=_ATTEMPT_TABLE,
+            columns=_ATTEMPT_COLUMNS,
         )
-        op.create_index(
+        _create_or_verify_index(
             _RESULT_INDEX,
-            _RESULT_TABLE,
-            _RESULT_COLUMNS,
-            unique=False,
-            postgresql_concurrently=True,
+            table=_RESULT_TABLE,
+            columns=_RESULT_COLUMNS,
         )
 
 
 def downgrade() -> None:
     with op.get_context().autocommit_block():
-        op.drop_index(
-            _RESULT_INDEX,
-            table_name=_RESULT_TABLE,
-            postgresql_concurrently=True,
-        )
-        op.drop_index(
-            _ATTEMPT_INDEX,
-            table_name=_ATTEMPT_TABLE,
-            postgresql_concurrently=True,
-        )
+        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {_RESULT_INDEX}")
+        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {_ATTEMPT_INDEX}")

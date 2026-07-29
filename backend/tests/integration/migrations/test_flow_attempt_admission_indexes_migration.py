@@ -161,3 +161,61 @@ def test_upgrade_downgrade_and_reupgrade_restore_attempt_admission_indexes(
     command.upgrade(cfg, MIGRATION_REVISION)
     assert current_revisions(conn) == {MIGRATION_REVISION}
     _assert_indexes_present(conn)
+
+
+def test_upgrade_resumes_after_first_index_was_committed(
+    fresh_chain_db: tuple[PsycopgConnection, Config],
+) -> None:
+    conn, cfg = fresh_chain_db
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            CREATE INDEX CONCURRENTLY ix_flow_step_attempts_run_step_order_attempt
+            ON flow_step_attempts (flow_run_id, step_order, attempt_no)
+            """
+        )
+
+    assert current_revisions(conn) == {PRIOR_REVISION}
+    command.upgrade(cfg, MIGRATION_REVISION)
+    assert current_revisions(conn) == {MIGRATION_REVISION}
+    _assert_indexes_present(conn)
+
+
+def test_upgrade_rejects_a_mismatched_named_index(
+    fresh_chain_db: tuple[PsycopgConnection, Config],
+) -> None:
+    conn, cfg = fresh_chain_db
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            CREATE INDEX CONCURRENTLY ix_flow_step_attempts_run_step_order_attempt
+            ON flow_step_attempts (flow_run_id, attempt_no)
+            """
+        )
+
+    with pytest.raises(RuntimeError, match="unexpected state"):
+        command.upgrade(cfg, MIGRATION_REVISION)
+
+    assert current_revisions(conn) == {PRIOR_REVISION}
+    assert _index_metadata(
+        conn,
+        table_name="flow_step_attempts",
+        index_name="ix_flow_step_attempts_run_step_order_attempt",
+    ) == (
+        True,
+        True,
+        False,
+        True,
+        "btree",
+        ("flow_run_id", "attempt_no"),
+    )
+    assert (
+        _index_metadata(
+            conn,
+            table_name="flow_step_results",
+            index_name="ix_flow_step_results_run_step_order",
+        )
+        is None
+    )

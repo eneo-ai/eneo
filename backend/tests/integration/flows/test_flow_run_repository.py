@@ -107,12 +107,15 @@ def _rows_produced(node: dict[str, object]) -> int:
 
 
 def _scan_rows_examined(node: dict[str, object]) -> int:
-    examined = _rows_produced(node)
+    actual_loops = node.get("Actual Loops", 0)
+    assert isinstance(actual_loops, (int, float))
+    examined_per_loop = node.get("Actual Rows", 0)
+    assert isinstance(examined_per_loop, (int, float))
     for key in ("Rows Removed by Filter", "Rows Removed by Index Recheck"):
         removed = node.get(key, 0)
         assert isinstance(removed, (int, float))
-        examined += int(removed)
-    return examined
+        examined_per_loop += removed
+    return int(examined_per_loop * actual_loops)
 
 
 def _build_flow(
