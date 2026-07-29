@@ -112,6 +112,7 @@
   "governance_prompts_delete_label": "Delete {name}",
   "governance_prompts_delete_named": "Remove “{name}”? This cannot be undone. If the prompt is active in the personal assistant governance, it must be deactivated there first.",
   "admin_nav_aria": "Admin sections",
+  "admin_nav_toggle": "Open admin navigation",
   "admin_section_organisation": "Organisation",
   "admin_section_overview": "Overview",
   "admin_section_governance": "Governance",
