@@ -759,6 +759,7 @@ class Container(containers.DeclarativeContainer):
         AssistantRepository,
         session=session,
         factory=assistant_factory,
+        file_repo=file_repo,
         file_content_loader=file_content_loader,
         completion_model_repo=completion_model_repo2,
         user=user,

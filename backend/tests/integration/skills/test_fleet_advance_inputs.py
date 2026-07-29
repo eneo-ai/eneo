@@ -398,6 +398,7 @@ async def test_candidate_pin_fit_matches_current_save_and_reports_candidate_refu
             resolution=resolution,
             runtime_policy=runtime_policy,
             preflight_adapters=preflight_adapters,
+            completion_prompt_files=assistant.attachments,
         )
         oversized_verdict = await assistant_service.assert_assistant_fits_candidate_pin(
             assistant=assistant,
@@ -411,6 +412,7 @@ async def test_candidate_pin_fit_matches_current_save_and_reports_candidate_refu
             resolution=resolution,
             runtime_policy=runtime_policy,
             preflight_adapters=preflight_adapters,
+            completion_prompt_files=assistant.attachments,
         )
 
         assert current_verdict is None

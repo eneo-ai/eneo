@@ -2,21 +2,35 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from datetime import UTC, datetime
+from hashlib import sha256
+from io import BytesIO
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from PIL import Image
 
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import (
     AssistantMCPServers,
     AssistantMCPServerTools,
+    Assistants,
+    AssistantsFiles,
 )
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.mcp_server_table import (
     MCPServers,
     MCPServerTools,
     SpacesMCPServers,
 )
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    InlineContentPayloads,
+    ObjectContents,
+)
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.object_content.content import StorageKind
 from eneo.skills.domain.skill import SkillRuntimePolicy
 from eneo.users.user import UserAdd, UserState
 
@@ -45,6 +59,50 @@ async def regular_user_token(db_container, patch_auth_service_jwt):
         )
         auth_service = container.auth_service()
         return auth_service.create_access_token_for_user(user)
+
+
+async def _add_inline_file_content(
+    session,
+    *,
+    file: Files,
+    user_id: UUID,
+    payload: bytes,
+    variant: FileContentVariant,
+    media_type: str,
+) -> None:
+    digest = sha256(payload).digest()
+    content = ObjectContents(
+        tenant_id=file.tenant_id,
+        created_by_user_id=user_id,
+        storage_kind=StorageKind.POSTGRES_INLINE.value,
+        state="available",
+        access_class="private_resource",
+        sha256=digest,
+        size_bytes=len(payload),
+        declared_media_type=media_type,
+        verified_media_type=media_type,
+        idempotency_key=f"governance-derived-{uuid4().hex}",
+        request_fingerprint=digest,
+        available_at=datetime.now(UTC),
+    )
+    session.add(content)
+    await session.flush()
+    session.add_all(
+        [
+            InlineContentPayloads(
+                content_id=content.id,
+                storage_kind=StorageKind.POSTGRES_INLINE.value,
+                payload=payload,
+            ),
+            FileContentReferences(
+                file_id=file.id,
+                content_id=content.id,
+                variant=variant.value,
+                ordinal=0,
+            ),
+        ]
+    )
+    await session.flush()
 
 
 @pytest.mark.integration
@@ -299,6 +357,124 @@ async def test_skill_policy_counts_personal_assistant_mcp_schema_and_rolls_back(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_skill_policy_counts_other_owners_visible_derived_images(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+):
+    async with db_container() as container:
+        owner = await container.user_repo().add(
+            UserAdd(
+                email=f"governance-owner-{uuid4().hex[:8]}@example.com",
+                username=f"governance_owner_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+        model = await completion_model_factory(
+            container.session(),
+            f"governance-owner-vision-{uuid4().hex[:8]}",
+            max_input_tokens=4_000,
+            vision=True,
+        )
+        model_id = model.id
+
+    async with db_container(user=owner) as container:
+        space = await container.space_init_service().get_personal_space()
+        assistant = space.default_assistant
+        assert assistant is not None
+        assert assistant.id is not None
+        assistant_row = await container.session().get(Assistants, assistant.id)
+        assert assistant_row is not None
+        assistant_row.completion_model_id = model_id
+
+        root = Files(
+            name="owner-governance-document.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT.value,
+            tenant_id=admin_user.tenant_id,
+            user_id=owner.id,
+        )
+        container.session().add(root)
+        await container.session().flush()
+        derived = Files(
+            name="owner-governance-page.png",
+            mimetype="image/png",
+            file_type=FileType.IMAGE.value,
+            tenant_id=admin_user.tenant_id,
+            user_id=owner.id,
+            parent_file_id=root.id,
+        )
+        container.session().add(derived)
+        await container.session().flush()
+        await _add_inline_file_content(
+            container.session(),
+            file=root,
+            user_id=owner.id,
+            payload=b"short owner attachment",
+            variant=FileContentVariant.ORIGINAL,
+            media_type="text/plain",
+        )
+        image = BytesIO()
+        Image.new("RGB", (2_048, 1_024), color=(24, 95, 180)).save(
+            image,
+            format="PNG",
+        )
+        await _add_inline_file_content(
+            container.session(),
+            file=derived,
+            user_id=owner.id,
+            payload=image.getvalue(),
+            variant=FileContentVariant.DERIVED_PAGE,
+            media_type="image/png",
+        )
+        container.session().add(
+            AssistantsFiles(assistant_id=assistant.id, file_id=root.id)
+        )
+
+    async with db_container() as container:
+        skill = await container.organization_skill_service().create_organization_skill(
+            slug=f"owner-derived-{uuid4().hex[:8]}",
+            display_name="Owner-derived pages",
+            description="Validate another user's personal default",
+            instructions="overflow " * 1_500,
+        )
+        skill = (
+            await container.organization_skill_service().publish(
+                skill_id=skill.id,
+                expected_revision_id=skill.current_revision.id,
+            )
+        ).skill
+
+    response = await client.put(
+        "/api/v1/admin/governance-policy/",
+        json={
+            "skills": {
+                "bindings": [
+                    {
+                        "skill_id": str(skill.id),
+                        "skill_revision_id": str(skill.current_revision.id),
+                    }
+                ]
+            }
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "context window" in response.json()["message"]
+    persisted = await client.get(
+        "/api/v1/admin/governance-policy/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert persisted.status_code == 200, persisted.text
+    assert persisted.json()["skills"]["bindings"] == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_skill_policy_preflight_queries_do_not_grow_per_personal_assistant(
     client, admin_token, db_container, admin_user
 ):
@@ -397,7 +573,9 @@ async def test_skill_policy_preflight_queries_do_not_grow_per_personal_assistant
         "skills": {"bindings": [binding]},
     }
 
-    async def save_and_capture_queries() -> tuple[int, dict[str, int]]:
+    async def save_and_capture_queries(
+        request_payload: dict[str, object],
+    ) -> tuple[int, dict[str, int]]:
         async with db_container() as container:
             bind = container.session().get_bind()
             engine = getattr(bind, "engine", bind)
@@ -418,7 +596,7 @@ async def test_skill_policy_preflight_queries_do_not_grow_per_personal_assistant
             try:
                 response = await client.put(
                     "/api/v1/admin/governance-policy/",
-                    json=payload,
+                    json=request_payload,
                     headers={"Authorization": f"Bearer {admin_token}"},
                 )
             finally:
@@ -436,7 +614,7 @@ async def test_skill_policy_preflight_queries_do_not_grow_per_personal_assistant
             for table in tables
         }
 
-    single_status, single_counts = await save_and_capture_queries()
+    single_status, single_counts = await save_and_capture_queries(payload)
     assert single_status == 200
 
     cleared = await client.put(
@@ -445,6 +623,16 @@ async def test_skill_policy_preflight_queries_do_not_grow_per_personal_assistant
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert cleared.status_code == 200, cleared.text
+
+    unrestricted_payload = {
+        "models_restriction": {"enabled": False, "models": []},
+        "skills": {"bindings": []},
+    }
+    (
+        single_unrestricted_status,
+        single_unrestricted_counts,
+    ) = await save_and_capture_queries(unrestricted_payload)
+    assert single_unrestricted_status == 200
 
     personal_default_users = []
     async with db_container() as container:
@@ -484,6 +672,21 @@ async def test_skill_policy_preflight_queries_do_not_grow_per_personal_assistant
                 ]
             )
 
-    many_status, many_counts = await save_and_capture_queries()
+    many_status, many_counts = await save_and_capture_queries(payload)
     assert many_status == 200
     assert many_counts == single_counts
+
+    cleared = await client.put(
+        "/api/v1/admin/governance-policy/",
+        json={"skills": {"bindings": []}},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert cleared.status_code == 200, cleared.text
+    many_unrestricted_status, many_unrestricted_counts = await save_and_capture_queries(
+        unrestricted_payload
+    )
+    assert many_unrestricted_status == 200
+    assert (
+        many_unrestricted_counts["model_providers"]
+        == (single_unrestricted_counts["model_providers"])
+    )

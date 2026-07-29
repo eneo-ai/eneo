@@ -1,7 +1,9 @@
+import gc
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+from weakref import ReferenceType, ref
 
 import pytest
 
@@ -126,6 +128,12 @@ def _service(file_service=None):
         help_assistant_assignment_history_repo=AsyncMock(),
         skill_service=skill_service,
     )
+    service.repo.project_completion_file_metadata_for_validation.side_effect = (
+        lambda *, assistants, **_kwargs: {assistant.id: () for assistant in assistants}
+    )
+    service.repo.hydrate_completion_files_for_validation.side_effect = (
+        lambda *, assistant, **_kwargs: tuple(assistant.attachments)
+    )
     return service
 
 
@@ -218,6 +226,7 @@ async def test_candidate_pin_fit_uses_preloaded_resolution_without_repo_reads(
         resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
         runtime_policy=_runtime_policy(),
         preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
     )
 
     assert verdict is None
@@ -261,6 +270,7 @@ async def test_candidate_pin_fit_stages_blocked_always_binding_for_full_save(
         ),
         runtime_policy=_runtime_policy(),
         preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
     )
 
     assert verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
@@ -298,6 +308,7 @@ async def test_candidate_pin_fit_validates_every_on_demand_skill(monkeypatch):
         ),
         runtime_policy=_runtime_policy(),
         preflight_adapters={assistant.completion_model.id: MagicMock()},
+        completion_prompt_files=assistant.attachments,
     )
 
     assert verdict is AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
@@ -327,6 +338,7 @@ async def test_candidate_pin_fit_revalidates_unchanged_on_demand_binding(monkeyp
         resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
         runtime_policy=_runtime_policy(),
         preflight_adapters={assistant.completion_model.id: MagicMock()},
+        completion_prompt_files=assistant.attachments,
     )
 
     assert verdict is AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
@@ -335,7 +347,7 @@ async def test_candidate_pin_fit_revalidates_unchanged_on_demand_binding(monkeyp
 @pytest.mark.parametrize(
     ("include_on_demand", "expected"),
     [
-        (True, AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW),
+        (True, AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE),
         (False, None),
     ],
 )
@@ -373,6 +385,7 @@ async def test_candidate_pin_fit_without_model_matches_full_save_behavior(
         ),
         runtime_policy=_runtime_policy(),
         preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
     )
 
     assert verdict is expected
@@ -410,6 +423,7 @@ async def test_candidate_pin_fit_reports_context_window_without_rejecting_curren
         resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
         runtime_policy=_runtime_policy(),
         preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
     )
     oversized_verdict = await service.assert_assistant_fits_candidate_pin(
         assistant=assistant,
@@ -423,6 +437,7 @@ async def test_candidate_pin_fit_reports_context_window_without_rejecting_curren
         resolution=SkillRuntimeResolution(eligible=(current,), blocked=()),
         runtime_policy=_runtime_policy(),
         preflight_adapters={},
+        completion_prompt_files=assistant.attachments,
     )
 
     assert current_verdict is None
@@ -1611,18 +1626,16 @@ async def test_governance_preflight_projects_each_personal_assistants_mcp_tools(
 
 @pytest.mark.asyncio
 async def test_governance_preflight_walks_every_page_of_personal_defaults():
-    """A fleet larger than one page must be validated in full, page by page,
-    with the MCP projection scoped to each page rather than the tenant."""
-    on_demand = _resolved_skill(
-        name="On demand",
-        position=0,
-        activation_mode=SkillActivationMode.ON_DEMAND,
-    )
+    """Unrestricted scans retain projected adapters across every bounded page."""
     first = _assistant_with_runtime_model()
     second = _assistant_with_runtime_model()
+    second.completion_model = first.completion_model
+    configured_server = MagicMock()
+    projected_server = MagicMock()
+    retained_adapter = MagicMock()
     effective_config = SimpleNamespace(
-        models_enforced=True,
-        available_models=[first.completion_model],
+        models_enforced=False,
+        available_models=[],
         locked_model=None,
         policy_default_model=first.completion_model,
         mcp_enforced=False,
@@ -1630,19 +1643,19 @@ async def test_governance_preflight_walks_every_page_of_personal_defaults():
         prompt_enforced=False,
         enforced_prompt_text=None,
         models_bounded_for_on_demand=True,
-        governance_skill_resolution=SkillRuntimeResolution(
-            eligible=(on_demand,),
-            blocked=(),
-        ),
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service = _service()
+    service.completion_service.load_skill_activation_preflight_adapters.side_effect = [
+        {first.completion_model.id: retained_adapter},
+    ]
     cursor = ("2026-07-01", first.id)
     service.repo.get_personal_defaults_page.side_effect = [
         SimpleNamespace(
             items=[
                 SimpleNamespace(
                     assistant=first,
-                    configured_mcp_servers=(MagicMock(),),
+                    configured_mcp_servers=(configured_server,),
                     has_knowledge=False,
                 )
             ],
@@ -1652,7 +1665,7 @@ async def test_governance_preflight_walks_every_page_of_personal_defaults():
             items=[
                 SimpleNamespace(
                     assistant=second,
-                    configured_mcp_servers=(MagicMock(),),
+                    configured_mcp_servers=(configured_server,),
                     has_knowledge=False,
                 )
             ],
@@ -1660,8 +1673,8 @@ async def test_governance_preflight_walks_every_page_of_personal_defaults():
         ),
     ]
     service.space_repo.project_assistants_mcp_servers.side_effect = [
-        {first.id: []},
-        {second.id: []},
+        {first.id: [projected_server]},
+        {second.id: [projected_server]},
     ]
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_personal_default.return_value = (
@@ -1671,19 +1684,160 @@ async def test_governance_preflight_walks_every_page_of_personal_defaults():
 
     await service.assert_personal_default_governance_context_fit()
 
-    # Both pages were requested, the second with the first page's cursor.
     page_calls = service.repo.get_personal_defaults_page.await_args_list
     assert len(page_calls) == 2
     assert page_calls[0].kwargs["after"] is None
     assert page_calls[1].kwargs["after"] == cursor
-    # Both assistants were validated, and the projection ran once per page.
-    validated = {
-        call.kwargs["completion_prompt_files"] is not None
-        for call in service._validate_skill_activation_fit.await_args_list
-    }
-    assert len(service._validate_skill_activation_fit.await_args_list) >= 2
+    preload_calls = service.completion_service.load_skill_activation_preflight_adapters.await_args_list
+    assert len(preload_calls) == 1
+    assert preload_calls[0].args == ([first.completion_model],)
+    validation_calls = service._validate_skill_activation_fit.await_args_list
+    assert len(validation_calls) == 2
+    assert all(
+        call.kwargs["preflight_adapter"] is retained_adapter
+        for call in validation_calls
+    )
     assert service.space_repo.project_assistants_mcp_servers.await_count == 2
-    assert validated == {True}
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_does_not_load_unused_page_model_adapter():
+    assistant = _assistant_with_runtime_model()
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=assistant.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        models_bounded_for_on_demand=True,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+    service = _service()
+    service.completion_service.load_skill_activation_preflight_adapters.return_value = {}
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            )
+        ],
+        next_after=None,
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service._validate_skill_activation_fit = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service.completion_service.load_skill_activation_preflight_adapters.assert_not_awaited()
+    assert (
+        service._validate_skill_activation_fit.await_args.kwargs["preflight_adapter"]
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_hydrates_each_assistant_projection_separately():
+    class HydratedBlob:
+        pass
+
+    first = _assistant_with_runtime_model()
+    second = _assistant_with_runtime_model()
+    first_metadata = MagicMock()
+    second_metadata = MagicMock()
+    events: list[str] = []
+    first_blob_ref: ReferenceType[HydratedBlob] | None = None
+    second_blob_ref: ReferenceType[HydratedBlob] | None = None
+
+    async def hydrate_completion_files(*, assistant, derived_image_metadata):
+        nonlocal first_blob_ref, second_blob_ref
+        if assistant is second:
+            gc.collect()
+            assert first_blob_ref is not None
+            assert first_blob_ref() is None
+            events.append("release first")
+        blob = HydratedBlob()
+        if assistant is first:
+            assert derived_image_metadata == (first_metadata,)
+            first_blob_ref = ref(blob)
+            events.append("hydrate first")
+        else:
+            assert assistant is second
+            assert derived_image_metadata == (second_metadata,)
+            second_blob_ref = ref(blob)
+            events.append("hydrate second")
+        return (blob,)
+
+    async def validate_fit(*, model, completion_prompt_files, **_kwargs):
+        assert len(completion_prompt_files) == 1
+        if model is first.completion_model:
+            assert first_blob_ref is not None
+            assert first_blob_ref() is completion_prompt_files[0]
+            events.append("validate first")
+        else:
+            assert model is second.completion_model
+            assert second_blob_ref is not None
+            assert second_blob_ref() is completion_prompt_files[0]
+            events.append("validate second")
+
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=first.completion_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        models_bounded_for_on_demand=True,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=first,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            ),
+            SimpleNamespace(
+                assistant=second,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            ),
+        ],
+        next_after=None,
+    )
+    service.repo.project_completion_file_metadata_for_validation.side_effect = None
+    service.repo.project_completion_file_metadata_for_validation.return_value = {
+        first.id: (first_metadata,),
+        second.id: (second_metadata,),
+    }
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+    service.repo.hydrate_completion_files_for_validation = hydrate_completion_files
+    service._validate_skill_activation_fit = validate_fit
+
+    await service.assert_personal_default_governance_context_fit()
+
+    gc.collect()
+    assert second_blob_ref is not None
+    assert second_blob_ref() is None
+    assert events == [
+        "hydrate first",
+        "validate first",
+        "release first",
+        "hydrate second",
+        "validate second",
+    ]
 
 
 @pytest.mark.asyncio

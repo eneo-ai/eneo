@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy import Select
 from sqlalchemy.orm import aliased
 
 from eneo.database.database import AsyncSession
@@ -168,6 +169,33 @@ class FileRepository:
         )
         return sa.and_(root_has_content.correlate(file), ~unavailable_content)
 
+    def _visible_children_query(
+        self,
+        *,
+        parent_ids: list[UUID],
+        user_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        file_type: FileType | None = None,
+    ) -> Select[tuple[Files]]:
+        parent = aliased(Files)
+        query = (
+            sa.select(Files)
+            .join(parent, Files.parent_file_id == parent.id)
+            .where(
+                Files.parent_file_id.in_(parent_ids),
+                Files.user_id == parent.user_id,
+                Files.tenant_id == parent.tenant_id,
+                self._visible_family(),
+            )
+        )
+        if user_id is not None:
+            query = query.where(parent.user_id == user_id)
+        if tenant_id is not None:
+            query = query.where(parent.tenant_id == tenant_id)
+        if file_type is not None:
+            query = query.where(Files.file_type == file_type.value)
+        return query.order_by(Files.created_at, Files.id)
+
     async def add_metadata(self, file: FileMetadataCreate) -> FileMetadata:
         row = Files(**file.model_dump())
         self.session.add(row)
@@ -234,13 +262,27 @@ class FileRepository:
         if not parent_ids:
             return []
         rows = await self.session.scalars(
-            sa.select(Files)
-            .where(
-                Files.parent_file_id.in_(parent_ids),
-                Files.user_id == user_id,
-                self._visible_family(),
+            self._visible_children_query(
+                parent_ids=parent_ids,
+                user_id=user_id,
             )
-            .order_by(Files.created_at)
+        )
+        return [FileMetadata.model_validate(row) for row in rows]
+
+    async def get_visible_derived_images_for_attached_roots(
+        self,
+        *,
+        parent_ids: list[UUID],
+        tenant_id: UUID,
+    ) -> list[FileMetadata]:
+        if not parent_ids:
+            return []
+        rows = await self.session.scalars(
+            self._visible_children_query(
+                parent_ids=parent_ids,
+                tenant_id=tenant_id,
+                file_type=FileType.IMAGE,
+            )
         )
         return [FileMetadata.model_validate(row) for row in rows]
 

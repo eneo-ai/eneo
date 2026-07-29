@@ -614,20 +614,24 @@ class OrganizationSkillService:
                 target.assistant_id,
                 [],
             )
-            incompatible_reason = (
-                await self.assistant_service.assert_assistant_fits_candidate_pin(
-                    assistant=validation_input.assistant,
-                    space_is_personal=validation_input.space_is_personal,
-                    candidate=PersonalChatPinOverride(
-                        skill_id=skill_id,
-                        from_revision_id=target.from_revision_id,
-                        to_revision_id=expected_published_revision_id,
-                    ),
-                    candidate_binding=candidate_binding,
-                    resolution=resolution,
-                    runtime_policy=runtime_policy_snapshot.policy,
-                    preflight_adapters=preflight_adapters,
-                )
+            incompatible_reason = await self.assistant_service.assert_assistant_fits_candidate_pin(
+                assistant=validation_input.assistant,
+                space_is_personal=validation_input.space_is_personal,
+                candidate=PersonalChatPinOverride(
+                    skill_id=skill_id,
+                    from_revision_id=target.from_revision_id,
+                    to_revision_id=expected_published_revision_id,
+                ),
+                candidate_binding=candidate_binding,
+                resolution=resolution,
+                runtime_policy=runtime_policy_snapshot.policy,
+                preflight_adapters=preflight_adapters,
+                completion_prompt_files=(
+                    await self.assistant_service.repo.hydrate_completion_files_for_validation(
+                        assistant=validation_input.assistant,
+                        derived_image_metadata=validation_input.derived_image_metadata,
+                    )
+                ),
             )
             if incompatible_reason is not None:
                 validation_results.append(

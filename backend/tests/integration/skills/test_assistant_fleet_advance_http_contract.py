@@ -1,11 +1,15 @@
 import asyncio
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from hashlib import sha256
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from PIL import Image
 
 from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.audit.domain.action_types import ActionType
@@ -14,19 +18,29 @@ from eneo.database.tables.assistant_table import (
     AssistantMCPServers,
     AssistantMCPServerTools,
     Assistants,
+    AssistantsFiles,
 )
 from eneo.database.tables.audit_log_table import AuditLog
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.mcp_server_table import (
     MCPServers,
     MCPServerTools,
     SpacesMCPServers,
+)
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    InlineContentPayloads,
+    ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.skill_table import (
     AssistantSkillBindings,
     SkillRuntimePolicies,
 )
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.files.file_models import FileContentVariant, FileType
 from eneo.main.exceptions import BadRequestException
+from eneo.object_content.content import ContentState, StorageKind
 from eneo.skills.domain.skill import (
     AssistantFleetAdvanceCursor,
     SkillActivationMode,
@@ -87,6 +101,95 @@ class _FleetSeed:
     old_revision_id: UUID
     published_revision_id: UUID
     assistant_ids: tuple[UUID, ...]
+
+
+async def _add_inline_file_content(
+    session,
+    *,
+    file: Files,
+    user_id: UUID,
+    payload: bytes,
+    variant: FileContentVariant,
+    media_type: str,
+) -> None:
+    digest = sha256(payload).digest()
+    content = ObjectContents(
+        tenant_id=file.tenant_id,
+        created_by_user_id=user_id,
+        storage_kind=StorageKind.POSTGRES_INLINE.value,
+        state="available",
+        access_class="private_resource",
+        sha256=digest,
+        size_bytes=len(payload),
+        declared_media_type=media_type,
+        verified_media_type=media_type,
+        idempotency_key=f"fleet-derived-{uuid4().hex}",
+        request_fingerprint=digest,
+        available_at=datetime.now(UTC),
+    )
+    session.add(content)
+    await session.flush()
+    session.add_all(
+        [
+            InlineContentPayloads(
+                content_id=content.id,
+                storage_kind=StorageKind.POSTGRES_INLINE.value,
+                payload=payload,
+            ),
+            FileContentReferences(
+                file_id=file.id,
+                content_id=content.id,
+                variant=variant.value,
+                ordinal=0,
+            ),
+        ]
+    )
+    await session.flush()
+
+
+async def _add_pending_file_content(
+    session,
+    *,
+    file: Files,
+    user_id: UUID,
+    payload: bytes,
+    variant: FileContentVariant,
+    media_type: str,
+) -> None:
+    digest = sha256(payload).digest()
+    content = ObjectContents(
+        tenant_id=file.tenant_id,
+        created_by_user_id=user_id,
+        storage_kind=StorageKind.OBJECT_STORE.value,
+        state=ContentState.PENDING.value,
+        access_class="private_resource",
+        sha256=digest,
+        size_bytes=len(payload),
+        declared_media_type=media_type,
+        verified_media_type=media_type,
+        idempotency_key=f"fleet-pending-{uuid4().hex}",
+        request_fingerprint=digest,
+    )
+    session.add(content)
+    await session.flush()
+    session.add_all(
+        [
+            ObjectStoreObjects(
+                content_id=content.id,
+                storage_kind=StorageKind.OBJECT_STORE.value,
+                object_key=f"fleet-pending/{uuid4().hex}",
+                verification_chunk_size_bytes=len(payload),
+                verification_chunk_sha256=digest,
+            ),
+            FileContentReferences(
+                file_id=file.id,
+                content_id=content.id,
+                variant=variant.value,
+                ordinal=0,
+            ),
+        ]
+    )
+    await session.flush()
 
 
 async def _seed_behind_fleet(
@@ -864,6 +967,91 @@ async def test_disabled_selective_activation_keeps_on_demand_pin_unchanged(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_missing_model_keeps_on_demand_pin_unchanged(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=1,
+        )
+        assistant_id = seed.assistant_ids[0]
+        space_id = await container.session().scalar(
+            sa.select(Assistants.space_id).where(Assistants.id == assistant_id)
+        )
+        assert space_id is not None
+        await container.skill_repo().update_runtime_policy(
+            tenant_id=admin_user.tenant_id,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=100,
+                max_activations_per_turn=10,
+            ),
+        )
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space_id,
+            assistant_id=assistant_id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=seed.skill_id,
+                        skill_revision_id=seed.old_revision_id,
+                    ),
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                )
+            ],
+        )
+        await container.session().execute(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant_id)
+            .values(completion_model_id=None)
+        )
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.published_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 0,
+        "concurrent_change": 0,
+        "incompatible": 1,
+    }
+    assert response.json()["outcomes"] == [
+        {
+            "assistant_id": str(assistant_id),
+            "outcome": "incompatible",
+            "reason": "activation_unavailable",
+        }
+    ]
+    async with db_container() as container:
+        pin = await container.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == assistant_id,
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pin == seed.old_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_retained_deprecated_model_still_rejects_an_oversized_candidate(
     client,
     admin_token,
@@ -933,6 +1121,361 @@ async def test_retained_deprecated_model_still_rejects_an_oversized_candidate(
             )
         )
     assert pin == seed.old_revision_id
+
+
+@dataclass(frozen=True)
+class _OwnerAttachmentFleetSeed:
+    skill_id: UUID
+    old_revision_id: UUID
+    candidate_revision_id: UUID
+    assistant_id: UUID
+
+
+async def _seed_owner_attachment_fleet(
+    db_container,
+    *,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    space_factory,
+    derived_available: bool,
+    vision: bool = True,
+) -> _OwnerAttachmentFleetSeed:
+    async with db_container() as container:
+        session = container.session()
+        owner = await user_factory(session, tenant_id=admin_user.tenant_id)
+        model = await completion_model_factory(
+            session,
+            f"fleet-vision-{uuid4().hex[:8]}",
+            max_input_tokens=4_000,
+            vision=vision,
+        )
+        personal_space = await space_factory(
+            session,
+            f"Fleet owner {uuid4().hex[:8]}",
+            [model.id],
+            user_id=owner.id,
+        )
+        assistant = Assistants(
+            name="Owner vision Assistant",
+            user_id=owner.id,
+            completion_model_id=model.id,
+            completion_model_kwargs={},
+            logging_enabled=True,
+            is_default=False,
+            published=False,
+            space_id=personal_space.id,
+        )
+        session.add(assistant)
+        await session.flush()
+
+        root = Files(
+            name="owner-document.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT.value,
+            tenant_id=admin_user.tenant_id,
+            user_id=owner.id,
+        )
+        session.add(root)
+        await session.flush()
+        derived = Files(
+            name="owner-page.png",
+            mimetype="image/png",
+            file_type=FileType.IMAGE.value,
+            tenant_id=admin_user.tenant_id,
+            user_id=owner.id,
+            parent_file_id=root.id,
+        )
+        session.add(derived)
+        await session.flush()
+        await _add_inline_file_content(
+            session,
+            file=root,
+            user_id=owner.id,
+            payload=b"short root attachment",
+            variant=FileContentVariant.ORIGINAL,
+            media_type="text/plain",
+        )
+        derived_image = BytesIO()
+        Image.new("RGB", (2_048, 1_024), color=(24, 95, 180)).save(
+            derived_image,
+            format="PNG",
+        )
+        add_derived_content = (
+            _add_inline_file_content if derived_available else _add_pending_file_content
+        )
+        await add_derived_content(
+            session,
+            file=derived,
+            user_id=owner.id,
+            payload=derived_image.getvalue(),
+            variant=FileContentVariant.DERIVED_PAGE,
+            media_type="image/png",
+        )
+        session.add(AssistantsFiles(assistant_id=assistant.id, file_id=root.id))
+        await session.flush()
+        personal_space_id = personal_space.id
+        assistant_id = assistant.id
+
+    async with db_container() as container:
+        session = container.session()
+        organization = await session.scalar(
+            sa.select(Spaces).where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert organization is not None
+        repo = container.skill_repo()
+        skill = await repo.create(
+            space_id=organization.id,
+            slug=f"fleet-owner-files-{uuid4().hex[:8]}",
+            display_name="Fleet owner files",
+            description="Owner-derived image fit contract",
+            instructions="Short instructions.",
+            content_digest="f" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        old_revision = skill.current_revision
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=old_revision.id,
+        )
+        session.add(
+            AssistantSkillBindings(
+                assistant_id=assistant_id,
+                tenant_id=admin_user.tenant_id,
+                space_id=personal_space_id,
+                skill_space_id=organization.id,
+                skill_id=skill.id,
+                skill_revision_id=old_revision.id,
+                position=0,
+                activation_mode=SkillActivationMode.ALWAYS.value,
+            )
+        )
+        change = await repo.create_revision(
+            skill_id=skill.id,
+            display_name="Fleet owner files",
+            description="Owner-derived image fit contract",
+            instructions="overflow " * 1_500,
+            content_digest="e" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert change is not None
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=change.revision.id,
+        )
+        skill_id = skill.id
+        old_revision_id = old_revision.id
+        candidate_revision_id = change.revision.id
+
+    return _OwnerAttachmentFleetSeed(
+        skill_id=skill_id,
+        old_revision_id=old_revision_id,
+        candidate_revision_id=candidate_revision_id,
+        assistant_id=assistant_id,
+    )
+
+
+async def _advance_owner_attachment_fleet_with_derived_query_count(
+    *,
+    client,
+    admin_token: str,
+    db_container,
+    seed: _OwnerAttachmentFleetSeed,
+):
+    async with db_container() as container:
+        bind = container.session().get_bind()
+        engine = getattr(bind, "engine", bind)
+        derived_selects = 0
+
+        def record_statement(
+            _connection: object,
+            _cursor: object,
+            statement: str,
+            _parameters: object,
+            _context: object,
+            _executemany: bool,
+        ) -> None:
+            nonlocal derived_selects
+            normalized = statement.lower()
+            if (
+                normalized.lstrip().startswith("select")
+                and "files.parent_file_id in" in normalized
+            ):
+                derived_selects += 1
+
+        sa.event.listen(engine, "before_cursor_execute", record_statement)
+        try:
+            response = await client.post(
+                f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+                json={
+                    "expected_published_revision_id": str(seed.candidate_revision_id),
+                    "cursor": None,
+                },
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        finally:
+            sa.event.remove(engine, "before_cursor_execute", record_statement)
+    return response, derived_selects
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_owner_derived_images_are_included_in_admin_fleet_validation(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    space_factory,
+):
+    seed = await _seed_owner_attachment_fleet(
+        db_container,
+        admin_user=admin_user,
+        user_factory=user_factory,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        derived_available=True,
+    )
+
+    (
+        response,
+        derived_selects,
+    ) = await _advance_owner_attachment_fleet_with_derived_query_count(
+        client=client,
+        admin_token=admin_token,
+        db_container=db_container,
+        seed=seed,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 0,
+        "concurrent_change": 0,
+        "incompatible": 1,
+    }
+    assert response.json()["outcomes"] == [
+        {
+            "assistant_id": str(seed.assistant_id),
+            "outcome": "incompatible",
+            "reason": "context_window",
+        }
+    ]
+    assert derived_selects == 1
+    async with db_container() as container:
+        pin = await container.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == seed.assistant_id,
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pin == seed.old_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_non_vision_fleet_skips_derived_image_projection(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    space_factory,
+):
+    seed = await _seed_owner_attachment_fleet(
+        db_container,
+        admin_user=admin_user,
+        user_factory=user_factory,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        derived_available=True,
+        vision=False,
+    )
+
+    (
+        response,
+        derived_selects,
+    ) = await _advance_owner_attachment_fleet_with_derived_query_count(
+        client=client,
+        admin_token=admin_token,
+        db_container=db_container,
+        seed=seed,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 1,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    assert derived_selects == 0
+    async with db_container() as container:
+        pin = await container.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == seed.assistant_id,
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pin == seed.candidate_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_unavailable_owner_derivative_matches_owner_time_fleet_validation(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    space_factory,
+):
+    seed = await _seed_owner_attachment_fleet(
+        db_container,
+        admin_user=admin_user,
+        user_factory=user_factory,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        derived_available=False,
+    )
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.candidate_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 1,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    assert response.json()["outcomes"] == [
+        {
+            "assistant_id": str(seed.assistant_id),
+            "outcome": "advanced",
+            "reason": None,
+        }
+    ]
+    async with db_container() as container:
+        pin = await container.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == seed.assistant_id,
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pin == seed.candidate_revision_id
 
 
 @pytest.mark.integration

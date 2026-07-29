@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
@@ -41,7 +42,8 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import CrawlRuns, Websites
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
-from eneo.files.file_models import File, FileMetadata
+from eneo.files.file_models import File, FileMetadata, FileType
+from eneo.files.file_repo import FileRepository
 from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt import Prompt
@@ -49,6 +51,7 @@ from eneo.skills.domain.skill import PersonalDefaultsSnapshot
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
+    from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
@@ -73,6 +76,7 @@ class AssistantValidationInput:
     space_is_personal: bool
     configured_mcp_servers: tuple["MCPServer", ...]
     has_knowledge: bool
+    derived_image_metadata: tuple[FileMetadata, ...]
 
 
 def personal_defaults_page_query(
@@ -165,6 +169,7 @@ class AssistantRepository:
         self,
         session: AsyncSession,
         factory: AssistantFactory,
+        file_repo: FileRepository,
         file_content_loader: FileContentLoader,
         completion_model_repo: "CompletionModelRepository",
         user: "UserInDB",
@@ -172,6 +177,7 @@ class AssistantRepository:
         super().__init__()
         self.session = session
         self.factory = factory
+        self.file_repo = file_repo
         self.file_content_loader = file_content_loader
         self.completion_model_repo = completion_model_repo
         self.user = user
@@ -233,6 +239,70 @@ class AssistantRepository:
         ]
         loaded = await self.file_content_loader.load_attachment_groups(groups)
         return {record.id: loaded[("assistant", record.id)] for record in records}
+
+    async def project_completion_file_metadata_for_validation(
+        self,
+        *,
+        assistants: Sequence[Assistant],
+        models_by_assistant_id: Mapping[UUID, "CompletionModel | None"],
+        tenant_id: UUID,
+    ) -> dict[UUID, tuple[FileMetadata, ...]]:
+        """Batch-project visible derived-image metadata for validation."""
+        metadata_by_assistant_id: dict[UUID, list[FileMetadata]] = {}
+        present_ids_by_assistant_id: dict[UUID, set[UUID]] = {}
+        assistant_ids_by_parent_id: defaultdict[UUID, list[UUID]] = defaultdict(list)
+        parent_ids: list[UUID] = []
+        seen_parent_ids: set[UUID] = set()
+
+        for assistant in assistants:
+            assert assistant.id is not None
+            metadata_by_assistant_id[assistant.id] = []
+            present_ids_by_assistant_id[assistant.id] = {
+                file.id for file in assistant.attachments
+            }
+            model = models_by_assistant_id.get(assistant.id)
+            if model is None or not model.vision:
+                continue
+            for file in assistant.attachments:
+                if file.file_type is not FileType.TEXT:
+                    continue
+                assistant_ids_by_parent_id[file.id].append(assistant.id)
+                if file.id not in seen_parent_ids:
+                    seen_parent_ids.add(file.id)
+                    parent_ids.append(file.id)
+
+        if parent_ids:
+            derived_metadata = (
+                await self.file_repo.get_visible_derived_images_for_attached_roots(
+                    parent_ids=parent_ids,
+                    tenant_id=tenant_id,
+                )
+            )
+            for metadata in derived_metadata:
+                assert metadata.parent_file_id is not None
+                for assistant_id in assistant_ids_by_parent_id[metadata.parent_file_id]:
+                    if metadata.id in present_ids_by_assistant_id[assistant_id]:
+                        continue
+                    metadata_by_assistant_id[assistant_id].append(metadata)
+                    present_ids_by_assistant_id[assistant_id].add(metadata.id)
+
+        return {
+            assistant_id: tuple(metadata)
+            for assistant_id, metadata in metadata_by_assistant_id.items()
+        }
+
+    async def hydrate_completion_files_for_validation(
+        self,
+        *,
+        assistant: Assistant,
+        derived_image_metadata: Sequence[FileMetadata],
+    ) -> tuple[File, ...]:
+        """Hydrate one Assistant's projected derivatives for immediate validation."""
+        derived_images = await self.file_content_loader.load(derived_image_metadata)
+        return (
+            *assistant.attachments,
+            *(derived_images[metadata.id] for metadata in derived_image_metadata),
+        )
 
     @staticmethod
     def _options():
@@ -807,14 +877,29 @@ class AssistantRepository:
         completion_models = await self.completion_model_repo.all(with_deprecated=True)
         attachments = await self._load_attachments(records)
 
-        inputs: dict[UUID, AssistantValidationInput] = {}
-        for record, space_is_personal, record_has_knowledge in rows:
-            assistant = self.factory.create_assistant_from_db(
+        assistants_by_id = {
+            record.id: self.factory.create_assistant_from_db(
                 record,
                 attachments=attachments[record.id],
                 completion_model_list=completion_models,
                 prompt=prompts_by_assistant.get(record.id),
             )
+            for record in records
+        }
+        derived_image_metadata = (
+            await self.project_completion_file_metadata_for_validation(
+                assistants=list(assistants_by_id.values()),
+                models_by_assistant_id={
+                    assistant_id: assistant.completion_model
+                    for assistant_id, assistant in assistants_by_id.items()
+                },
+                tenant_id=tenant_id,
+            )
+        )
+
+        inputs: dict[UUID, AssistantValidationInput] = {}
+        for record, space_is_personal, record_has_knowledge in rows:
+            assistant = assistants_by_id[record.id]
             configured_mcp_servers = tuple(
                 MCPServerMapper.to_entities(record.mcp_servers)
             )
@@ -823,6 +908,7 @@ class AssistantRepository:
                 space_is_personal=space_is_personal,
                 configured_mcp_servers=configured_mcp_servers,
                 has_knowledge=record_has_knowledge,
+                derived_image_metadata=derived_image_metadata[record.id],
             )
         return inputs
 
