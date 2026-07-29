@@ -31,6 +31,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-29 | **Slice 2**: every evidence section measured and bounded — serialized per-projection measurement with a per-row floor, ceiling+1 bounded preflight, memory-budget-derived aggregate ceilings with peak/leak proofs, complete-or-refuse exports with typed section/limit context, ordered admitted prefixes with one truthful typed omissions collection sv+en, frontend consuming the generated union (`b1ee9b7e5`, gate green 8/10 after five iterations, no blockers) |
 | 2026-07-29 | **Slice 2b**: three production defects fixed — unprivileged resolved-policy reader for all runtime consumers (service keys work on documented paths, both defense layers intact), resume returns the canonical persisted step result, audio critic invariant scoped to structured source readers. Full integration suite 439/0 for the first time (`69f242cdd`, gate green 8/10, no blockers) |
 | 2026-07-29 | Integration expectations realigned with their production owners (8 stale tests repaired; 5 left deliberately red exposing verified production defects — see item 2b) (`bc20307fa`, gate green 8/10) |
 | 2026-07-29 | **Slice 1**: every evidence response reads one REPEATABLE READ snapshot — route-owned isolation before the first statement, shared-session TaskGroup deleted, proven at the route boundary with a mid-read mutation and a revert-detection test (`f38354342`, gate green 8/10, no findings remaining) |
@@ -62,19 +63,9 @@ external release gate (item 10); BM0.2 is external (item 10).
 1. ~~One consistent evidence snapshot~~ — **LANDED** `f38354342`. The
    retention-purge race variant of the mutation-barrier proof carries into
    item 7's acceptance (where purged-state semantics are implemented).
-2. **Whole-bundle evidence bounds** *(large, at final gate)* — within that
-   snapshot, preflight every emitted section before materialization (JSON
-   columns, emitted text via serialized measurement, nested children, a
-   per-row serialized floor) under per-section limits PLUS aggregate
-   stored/logical ceilings derived from a measured per-request memory
-   budget; complete-or-refuse exports with typed `section`/`limit`
-   context; views return ordered admitted prefixes and report narrowing
-   as one typed discriminated `omissions[]` collection with truthful
-   causes and `count_truncated` honesty. **Deliberate exception**: the
-   pre-existing attempt-admission window (landed knowledge-evidence
-   contract with exact totals) is unchanged by this slice — its
-   boundedness is item 2c below, because converting exact totals to
-   truncated counts is a public-contract redesign.
+2. ~~Whole-bundle evidence bounds~~ — **LANDED** `b1ee9b7e5` (narrowed
+   claim: attempt-admission window deliberately excluded, see 2c; the
+   serialized-floor width assertion for attempts rides with 2c).
 2c. **Bounded attempt admission** *(medium, contract redesign)* — the
    landed attempt window ranks/aggregates over the full history (bounded
    returned models, unbounded database work: ranking, cumulative sums,
