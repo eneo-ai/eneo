@@ -1387,7 +1387,7 @@ tasks:
       - "docs/enterprise-skills-roadmap.md"
       - "docs/goals/enterprise-skills-rollout/"
     constraints:
-      - "OrganizationSkillService owns tenant-admin authorization and lifecycle; SkillRepo owns target discovery, guarded pin writes, and concrete operation persistence."
+      - "OrganizationSkillService owns tenant-admin authorization and lifecycle; SkillRepo owns target discovery and stateless guarded pin writes (expected old pin + captured parent row version); re-run equals resume, no operation persistence."
       - "Change only the expected old revision pin for existing same-Skill bindings; preserve order, activation mode, source identity, other bindings, and every parent field."
       - "Never call parent-save commands, impersonate builders, attach missing bindings, or create a parallel full binding API."
       - "Use T016's exact fit/activatability function; stop instead of duplicating compatibility calculations."
@@ -1396,15 +1396,20 @@ tasks:
       - "Use server pagination/search and installed shadcn-svelte; never render all targets."
     verify:
       - "Tenant-admin bearer access; scoped API keys and synthetic service principals denied"
-      - "Exact ready preview, provisional preparation counts, exclusions, idempotent retry, cancellation, and resumability"
+      - "Provisional adoption counts, per-chunk validated apply with typed exclusions, idempotent re-run, and stop-between-chunks safety"
       - "Ten-thousand-target bounded memory, lock scope, stable cursor, and no N+1 target loading"
       - "Concurrent edit skip; block, unpublish, publication change, missing target, context incompatibility, and partial failure"
       - "Only exact pins change; operation/audit payloads remain body-free"
-      - "Migration round-trip, generated contracts, Swedish/English, a11y, responsive UI, CI, and fresh /review"
+      - "No schema change; generated contracts, Swedish/English, a11y, responsive UI, CI, and fresh /review"
     stop_if:
       - "A second fit calculation, a generic jobs framework, or a parent-save impersonation path is required."
       - "Exact preview cannot remain stable without copying parent or Skill content into operation rows."
-    receipt: null
+    receipt:
+      result: in_progress
+      summary: "Personal Chat slice merged: #629 (stage/validate/confirm advance with guarded write, clock-free snapshot, advisory fit token) and #635 (adoption-view advance dialog). Assistant fleet slice in this branch: stateless chunked discovery + apply, every write guarded by expected old pin and captured parent row version (re-run equals resume), per-target candidate-pin fit via the shared validator, synchronous per-chunk audit receipt. The durable-operation requirement was replaced by the stateless design; ADR amended in the same change."
+      next:
+        - "Frontend: publish-dialog update option + fleet run UI"
+        - "T018 Apps eager-only extension"
 
   - id: T018
     type: worker

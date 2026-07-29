@@ -160,6 +160,28 @@ of the Personal Chat policy. The move:
 - is recorded in the audit log when it changes anything, and repeating it is a
   clean no-op.
 
+### Moving Assistant bindings to the published version
+
+When Assistants across the organisation pin older versions of a Skill, a
+tenant admin can move them all to the currently published version in one run.
+The run works through the fleet in chunks:
+
+- every binding pinned to any older version is included, whichever version it
+  currently pins;
+- each Assistant is validated against the published version before its pin
+  moves — an Assistant whose configuration no longer fits (for example, the
+  new version no longer fits the model's context window) is excluded and
+  reported, and the rest continue;
+- an Assistant edited while the run is in progress is skipped rather than
+  overwritten; a later run picks it up again from its current state;
+- stopping between chunks is always safe: pins already moved stay moved, and
+  starting again continues where the run effectively left off, because
+  already-moved bindings are no longer behind;
+- unpublishing, publishing a different version, or blocking the Skill during
+  the run ends it with a clear failure, and a fresh run is required;
+- each chunk that changes anything writes one audit event with the run
+  identity and the counts of moved, skipped, and excluded Assistants.
+
 These are structural configuration facts:
 
 | Evidence   | Meaning                                                           |
