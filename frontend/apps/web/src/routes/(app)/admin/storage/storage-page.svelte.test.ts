@@ -32,18 +32,25 @@ vi.mock("$lib/core/Eneo", () => ({
   })
 }));
 
-vi.mock("$lib/paraglide/messages", () => ({
-  m: new Proxy<Record<string, unknown>>(
-    {},
-    {
-      get: (_target, key) => {
-        const label = String(key);
-        return (params?: Record<string, unknown>) =>
-          params ? `${label} ${JSON.stringify(params)}` : label;
+vi.mock("$lib/paraglide/messages", async () => {
+  const { default: englishMessages } = await import("../../../../../messages/en.json");
+
+  return {
+    m: new Proxy<Record<string, unknown>>(
+      {},
+      {
+        get: (_target, key) => {
+          const label = String(key);
+          return (params?: Record<string, unknown>) => {
+            if (label === "storage_settings_target_description")
+              return englishMessages.storage_settings_target_description;
+            return params ? `${label} ${JSON.stringify(params)}` : label;
+          };
+        }
       }
-    }
-  )
-}));
+    )
+  };
+});
 
 vi.mock("$lib/paraglide/runtime", () => ({
   getLocale: () => "en"
@@ -264,6 +271,29 @@ describe("admin storage settings page", () => {
           .first()
       )
       .toBeVisible();
+  });
+
+  test("explains the knowledge-content exclusion shown by the effective limits", async () => {
+    getPolicy.mockResolvedValue(policy());
+
+    render(StoragePage);
+
+    await expect
+      .element(
+        page.getByText(
+          "Applies to new file and icon content across this deployment. Knowledge content is always stored in the database and is not affected by this choice."
+        )
+      )
+      .toBeVisible();
+    const limitsTable = page.getByRole("table", {
+      name: "storage_effective_limits_caption"
+    });
+    await expect.element(limitsTable).toBeVisible();
+    expect(
+      [...limitsTable.element().querySelectorAll("td")].filter(
+        (cell) => cell.textContent === "storage_target_not_applicable"
+      )
+    ).toHaveLength(2);
   });
 
   test("shows localized policy governance metadata and links unavailable storage to its guide", async () => {
