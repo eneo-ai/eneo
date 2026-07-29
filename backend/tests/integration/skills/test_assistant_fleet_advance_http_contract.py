@@ -1,9 +1,12 @@
 from dataclasses import dataclass
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
+from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import (
@@ -27,6 +30,7 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillRuntimePolicy,
 )
+from eneo.tokens.token_utils import TokenCount, TokenCountSource
 
 
 @pytest.fixture
@@ -943,6 +947,254 @@ async def test_projected_mcp_tool_schema_matches_save_time_candidate_fit(
                 space=loaded_space,
                 validate_all_on_demand_candidates=True,
             )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_always_candidate_counts_mcp_baseline_and_fitting_control_can_ask(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.get_settings",
+        lambda: SimpleNamespace(attachment_context_reserve_tokens=1_000),
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_tokens",
+        lambda *_args, **_kwargs: 100,
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_attachment_tokens",
+        lambda **_kwargs: 0,
+    )
+    monkeypatch.setattr(
+        "eneo.assistants.assistant_service.measure_provider_input_tokens",
+        lambda *_args, **_kwargs: TokenCount(
+            tokens=8_000,
+            source=TokenCountSource.LITELLM,
+        ),
+    )
+
+    async with db_container() as container:
+        session = container.session()
+        constrained_model = await completion_model_factory(
+            session,
+            f"fleet-always-mcp-small-{uuid4().hex[:8]}",
+            max_input_tokens=8_000,
+        )
+        fitting_model = await completion_model_factory(
+            session,
+            f"fleet-always-mcp-large-{uuid4().hex[:8]}",
+            max_input_tokens=20_000,
+        )
+        constrained_model.supports_tool_calling = True
+        fitting_model.supports_tool_calling = True
+        space = await space_factory(
+            session,
+            f"Fleet always MCP {uuid4().hex[:8]}",
+            [constrained_model.id, fitting_model.id],
+        )
+        session.add(SpacesUsers(space_id=space.id, user_id=admin_user.id, role="admin"))
+        constrained_assistant = await assistant_factory(
+            session,
+            "Fleet constrained MCP Assistant",
+            constrained_model.id,
+            space_id=space.id,
+        )
+        fitting_assistant = await assistant_factory(
+            session,
+            "Fleet fitting MCP Assistant",
+            fitting_model.id,
+            space_id=space.id,
+        )
+        organization = await session.scalar(
+            sa.select(Spaces).where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert organization is not None
+        repo = container.skill_repo()
+        skill = await repo.create(
+            space_id=organization.id,
+            slug=f"fleet-always-mcp-{uuid4().hex[:8]}",
+            display_name="Fleet always MCP",
+            description="Provider-visible MCP baseline contract",
+            instructions="Original always instructions.",
+            content_digest="a" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        old_revision = skill.current_revision
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=old_revision.id,
+        )
+        for assistant in (constrained_assistant, fitting_assistant):
+            await container.skill_service().replace_assistant_bindings(
+                space_id=space.id,
+                assistant_id=assistant.id,
+                intents=[
+                    SkillBindingIntent(
+                        reference=SkillBindingReference(
+                            skill_id=skill.id,
+                            skill_revision_id=old_revision.id,
+                        ),
+                        activation_mode=SkillActivationMode.ALWAYS,
+                    )
+                ],
+            )
+        mcp_server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name="Fleet always MCP baseline",
+            description="Provider-visible fleet tools",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=False,
+        )
+        session.add(mcp_server)
+        await session.flush()
+        mcp_tool = MCPServerTools(
+            mcp_server_id=mcp_server.id,
+            name="warehouse_query",
+            title="Warehouse query",
+            description="Query the approved warehouse",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            is_enabled_by_default=True,
+            requires_approval=False,
+            removed_from_remote=False,
+        )
+        session.add(mcp_tool)
+        await session.flush()
+        session.add(SpacesMCPServers(space_id=space.id, mcp_server_id=mcp_server.id))
+        for assistant in (constrained_assistant, fitting_assistant):
+            session.add_all(
+                [
+                    AssistantMCPServers(
+                        assistant_id=assistant.id,
+                        mcp_server_id=mcp_server.id,
+                    ),
+                    AssistantMCPServerTools(
+                        assistant_id=assistant.id,
+                        mcp_server_tool_id=mcp_tool.id,
+                        is_enabled=True,
+                    ),
+                ]
+            )
+        change = await repo.create_revision(
+            skill_id=skill.id,
+            display_name="Fleet always MCP",
+            description="Provider-visible MCP baseline contract",
+            instructions="Published always instructions.",
+            content_digest="b" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert change is not None
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=change.revision.id,
+        )
+        skill_id = skill.id
+        old_revision_id = old_revision.id
+        candidate_revision_id = change.revision.id
+        constrained_assistant_id = constrained_assistant.id
+        fitting_assistant_id = fitting_assistant.id
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(candidate_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 1,
+        "concurrent_change": 0,
+        "incompatible": 1,
+    }
+    assert {
+        outcome["assistant_id"]: outcome["outcome"]
+        for outcome in response.json()["outcomes"]
+    } == {
+        str(constrained_assistant_id): "incompatible",
+        str(fitting_assistant_id): "advanced",
+    }
+
+    async with db_container() as container:
+        pins = dict(
+            (
+                await container.session().execute(
+                    sa.select(
+                        AssistantSkillBindings.assistant_id,
+                        AssistantSkillBindings.skill_revision_id,
+                    ).where(AssistantSkillBindings.skill_id == skill_id)
+                )
+            ).all()
+        )
+        loaded_space = await container.space_repo().get_space_by_assistant(
+            fitting_assistant_id
+        )
+        fitting = loaded_space.get_assistant(fitting_assistant_id)
+        resolution = (
+            await container.skill_service().resolve_assistant_bindings_for_runtime(
+                assistant_id=fitting_assistant_id
+            )
+        )
+        plan = await container.skill_service().create_turn_plan(
+            base_instructions=fitting.get_prompt_text(),
+            resolution=resolution,
+        )
+        assert fitting.completion_model is not None
+        runtime = plan.to_activation_runtime(
+            selected_model_route=fitting.completion_model.get_model_route(),
+            max_input_tokens=fitting.completion_model.max_input_tokens,
+            supports_tool_calling=fitting.completion_model.supports_tool_calling,
+        )
+        adapter = MagicMock()
+        adapter.model = fitting.completion_model
+        adapter.get_token_limit_of_model.return_value = (
+            fitting.completion_model.max_input_tokens
+        )
+        adapter.get_model_route.return_value = (
+            fitting.completion_model.get_model_route()
+        )
+        adapter.get_logging_details.return_value = None
+        adapter.get_response = AsyncMock(
+            return_value=Completion(text="The fitting Assistant answered.")
+        )
+        completion_service = container.completion_service()
+        monkeypatch.setattr(
+            completion_service,
+            "_get_adapter",
+            AsyncMock(return_value=adapter),
+        )
+        completion, _ = await fitting.ask(
+            question="Can I query the warehouse?",
+            completion_service=completion_service,
+            references_service=container.references_service(),
+            skill_runtime=runtime,
+        )
+
+    assert pins[constrained_assistant_id] == old_revision_id
+    assert pins[fitting_assistant_id] == candidate_revision_id
+    assert completion.completion.text == "The fitting Assistant answered."
+    mcp_proxy = adapter.get_response.await_args.kwargs["mcp_proxy"]
+    assert mcp_proxy is not None
+    assert mcp_proxy.get_tool_count() == 1
 
 
 @pytest.mark.integration

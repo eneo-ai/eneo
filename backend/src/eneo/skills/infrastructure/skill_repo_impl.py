@@ -1049,7 +1049,7 @@ class SkillRepoImpl:
         target_ids = [target.assistant_id for target in ordered_targets]
         locked_parent_rows = (
             await self.session.execute(
-                sa.select(Assistants.id)
+                sa.select(Assistants.id, self._ASSISTANT_ROW_VERSION)
                 .join(Spaces, Spaces.id == Assistants.space_id)
                 .where(
                     Assistants.id.in_(target_ids),
@@ -1058,8 +1058,11 @@ class SkillRepoImpl:
                 .order_by(Assistants.id)
                 .with_for_update(of=Assistants)
             )
-        ).scalars()
-        locked_parent_ids = set(locked_parent_rows)
+        ).all()
+        locked_parent_versions: dict[UUID, str] = {
+            assistant_id: row_version
+            for assistant_id, row_version in locked_parent_rows
+        }
 
         skill_row = await self._lock_organization_skill(
             tenant_id=tenant_id,
@@ -1090,73 +1093,82 @@ class SkillRepoImpl:
         if runtime_policy_version != expected_runtime_policy_version:
             raise SkillRevisionConflictError
 
-        results: list[AssistantPinAdvanceTargetResult] = []
-        for target in ordered_targets:
-            parent_version = (
-                await self.session.scalar(
-                    sa.select(self._ASSISTANT_ROW_VERSION)
-                    .select_from(Assistants)
-                    .where(Assistants.id == target.assistant_id)
+        binding_rows = (
+            await self.session.execute(
+                sa.select(
+                    AssistantSkillBindings.assistant_id,
+                    AssistantSkillBindings.skill_revision_id,
                 )
-                if target.assistant_id in locked_parent_ids
-                else None
-            )
-            if parent_version != target.assistant_row_version:
-                results.append(
-                    AssistantPinAdvanceTargetResult(
-                        assistant_id=target.assistant_id,
-                        outcome=AssistantPinAdvanceOutcome.CONCURRENT_CHANGE,
-                    )
-                )
-                continue
-            binding_revision_id = await self.session.scalar(
-                sa.select(AssistantSkillBindings.skill_revision_id)
                 .where(
                     AssistantSkillBindings.tenant_id == tenant_id,
-                    AssistantSkillBindings.assistant_id == target.assistant_id,
+                    AssistantSkillBindings.assistant_id.in_(target_ids),
                     AssistantSkillBindings.skill_id == skill_id,
                 )
+                .order_by(AssistantSkillBindings.assistant_id)
                 .with_for_update(of=AssistantSkillBindings)
             )
-            if binding_revision_id != target.from_revision_id:
-                results.append(
-                    AssistantPinAdvanceTargetResult(
-                        assistant_id=target.assistant_id,
-                        outcome=AssistantPinAdvanceOutcome.CONCURRENT_CHANGE,
+        ).all()
+        binding_revisions: dict[UUID, UUID] = {
+            assistant_id: revision_id for assistant_id, revision_id in binding_rows
+        }
+        safe_targets = [
+            target
+            for target in ordered_targets
+            if locked_parent_versions.get(target.assistant_id)
+            == target.assistant_row_version
+            and binding_revisions.get(target.assistant_id) == target.from_revision_id
+        ]
+        advanced_ids: set[UUID] = set()
+        if safe_targets:
+            parameters: dict[str, object] = {
+                "tenant_id": tenant_id,
+                "skill_id": skill_id,
+                "published_revision_id": expected_published_revision_id,
+                "assistant_ids": [target.assistant_id for target in safe_targets],
+                "from_revision_ids": [
+                    target.from_revision_id for target in safe_targets
+                ],
+            }
+            advanced_ids = set(
+                (
+                    await self.session.execute(
+                        sa.text(
+                            """
+                            UPDATE assistant_skill_bindings AS binding
+                            SET skill_revision_id = :published_revision_id
+                            FROM unnest(
+                                CAST(:assistant_ids AS uuid[]),
+                                CAST(:from_revision_ids AS uuid[])
+                            ) AS expected(assistant_id, from_revision_id)
+                            WHERE binding.tenant_id = :tenant_id
+                              AND binding.skill_id = :skill_id
+                              AND binding.assistant_id = expected.assistant_id
+                              AND binding.skill_revision_id =
+                                  expected.from_revision_id
+                            RETURNING binding.assistant_id
+                            """
+                        ).columns(assistant_id=sa.Uuid),
+                        parameters,
                     )
-                )
-                continue
-            await self.session.execute(
-                sa.text(
-                    """
-                    UPDATE assistant_skill_bindings
-                    SET skill_revision_id = :published_revision_id
-                    WHERE tenant_id = :tenant_id
-                      AND assistant_id = :assistant_id
-                      AND skill_id = :skill_id
-                      AND skill_revision_id = :from_revision_id
-                    """
-                ),
-                {
-                    "published_revision_id": expected_published_revision_id,
-                    "tenant_id": tenant_id,
-                    "assistant_id": target.assistant_id,
-                    "skill_id": skill_id,
-                    "from_revision_id": target.from_revision_id,
-                },
+                ).scalars()
             )
+        if advanced_ids:
             await self.session.execute(
                 sa.update(Assistants)
-                .where(Assistants.id == target.assistant_id)
+                .where(Assistants.id.in_(advanced_ids))
                 .values(updated_at=sa.func.now())
             )
-            results.append(
-                AssistantPinAdvanceTargetResult(
-                    assistant_id=target.assistant_id,
-                    outcome=AssistantPinAdvanceOutcome.ADVANCED,
-                )
+        return [
+            AssistantPinAdvanceTargetResult(
+                assistant_id=target.assistant_id,
+                outcome=(
+                    AssistantPinAdvanceOutcome.ADVANCED
+                    if target.assistant_id in advanced_ids
+                    else AssistantPinAdvanceOutcome.CONCURRENT_CHANGE
+                ),
             )
-        return results
+            for target in ordered_targets
+        ]
 
     async def list_published_for_tenant(
         self,

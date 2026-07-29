@@ -1094,6 +1094,81 @@ async def test_concurrent_chunks_advance_each_assistant_at_most_once(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_apply_statement_count_is_independent_of_chunk_size(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        one = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=1,
+        )
+        hundred = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=100,
+        )
+        repo = container.skill_repo()
+        assert container.session().bind is not None
+        sync_engine = container.session().bind.sync_engine
+
+        async def apply_and_count(seed: _FleetSeed) -> tuple[int, int]:
+            targets = await _discover(
+                container,
+                tenant_id=admin_user.tenant_id,
+                seed=seed,
+            )
+            policy_version = await _runtime_policy_version(
+                container,
+                tenant_id=admin_user.tenant_id,
+            )
+            statement_count = 0
+
+            def count_statements(*_args) -> None:
+                nonlocal statement_count
+                statement_count += 1
+
+            sa.event.listen(sync_engine, "before_cursor_execute", count_statements)
+            try:
+                results = await repo.advance_assistant_skill_pins(
+                    tenant_id=admin_user.tenant_id,
+                    skill_id=seed.skill_id,
+                    expected_published_revision_id=seed.published_revision_id,
+                    expected_runtime_policy_version=policy_version,
+                    targets=targets,
+                )
+            finally:
+                sa.event.remove(
+                    sync_engine,
+                    "before_cursor_execute",
+                    count_statements,
+                )
+            return statement_count, sum(
+                result.outcome is AssistantPinAdvanceOutcome.ADVANCED
+                for result in results
+            )
+
+        one_count, one_advanced = await apply_and_count(one)
+        hundred_count, hundred_advanced = await apply_and_count(hundred)
+
+    assert one_advanced == 1
+    assert hundred_advanced == 100
+    assert one_count == hundred_count
+    assert hundred_count <= 8
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_discovery_scales_as_one_bounded_forward_index_walk(
     db_container,
     admin_user,

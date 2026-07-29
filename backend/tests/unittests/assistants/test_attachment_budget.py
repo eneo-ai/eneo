@@ -160,8 +160,10 @@ def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None, vision=
         is_default=False,
         completion_model=model,
         attachments=[_text_attachment() for _ in range(n_attachments)],
+        mcp_servers=[],
         prompt=prompt,
         get_prompt_text=lambda: prompt_text or "",
+        has_knowledge=lambda: False,
     )
 
 
@@ -612,6 +614,10 @@ async def test_changed_on_demand_candidates_share_the_attachment_ceiling(
 
     monkeypatch.setattr(
         "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        measure_provider_input,
+    )
+    monkeypatch.setattr(
+        "eneo.assistants.assistant_service.measure_provider_input_tokens",
         measure_provider_input,
     )
     bindings = (
@@ -1392,6 +1398,8 @@ async def test_fit_uses_governance_effective_model(monkeypatch):
     service._resolve_effective_config = AsyncMock(
         return_value=SimpleNamespace(
             models_enforced=True,
+            mcp_enforced=False,
+            available_mcp_servers=[],
             prompt_enforced=False,
             enforced_prompt_text=None,
             governance_skill_resolution=SkillRuntimeResolution(
@@ -1423,6 +1431,8 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
     service._resolve_effective_config = AsyncMock(
         return_value=SimpleNamespace(
             models_enforced=False,
+            mcp_enforced=False,
+            available_mcp_servers=[],
             prompt_enforced=True,
             enforced_prompt_text="x" * 95,
             governance_skill_resolution=SkillRuntimeResolution(
