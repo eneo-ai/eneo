@@ -13,7 +13,6 @@ from eneo.database.tables.skill_table import (
     Skills,
 )
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
-from eneo.main.exceptions import SkillRevisionConflictException
 from eneo.skills.domain.skill import (
     AssistantPinAdvanceOutcome,
     SkillBindingIntent,
@@ -21,6 +20,7 @@ from eneo.skills.domain.skill import (
     SkillBlockedForBindingError,
     SkillNotPublishedForBindingError,
     SkillRevisionConflictError,
+    SkillRuntimePolicyChangedError,
 )
 
 
@@ -781,7 +781,7 @@ async def test_service_rejects_policy_changed_after_validation(
             )
         policy_changed.set()
 
-        with pytest.raises(SkillRevisionConflictException):
+        with pytest.raises(SkillRuntimePolicyChangedError):
             await advance_task
 
     async with db_container() as verifier:

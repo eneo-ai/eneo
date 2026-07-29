@@ -613,6 +613,10 @@ class SkillRevisionConflictError(Exception):
     pass
 
 
+class SkillRuntimePolicyChangedError(Exception):
+    pass
+
+
 class SkillNotPublishedForBindingError(Exception):
     """A binding change targeted a Skill with no published revision."""
 

@@ -69,6 +69,7 @@ from eneo.skills.domain.skill import (
     SkillRevisionSummary,
     SkillRuntimePolicy,
     SkillRuntimePolicyChange,
+    SkillRuntimePolicyChangedError,
     SkillRuntimePolicySnapshot,
     SkillSlugConflictError,
     SkillStatusChange,
@@ -1091,7 +1092,7 @@ class SkillRepoImpl:
             shared_lock=True,
         )
         if runtime_policy_version != expected_runtime_policy_version:
-            raise SkillRevisionConflictError
+            raise SkillRuntimePolicyChangedError
 
         binding_rows = (
             await self.session.execute(

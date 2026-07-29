@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -20,7 +21,10 @@ from eneo.database.tables.mcp_server_table import (
     MCPServerTools,
     SpacesMCPServers,
 )
-from eneo.database.tables.skill_table import AssistantSkillBindings
+from eneo.database.tables.skill_table import (
+    AssistantSkillBindings,
+    SkillRuntimePolicies,
+)
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.main.exceptions import BadRequestException
 from eneo.skills.domain.skill import (
@@ -30,6 +34,7 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillRuntimePolicy,
 )
+from eneo.skills.infrastructure.skill_repo_impl import SkillRepoImpl
 from eneo.tokens.token_utils import TokenCount, TokenCountSource
 
 
@@ -557,6 +562,77 @@ async def test_terminal_refusals_keep_the_pin_and_write_no_audit(
         )
     assert pin == seed.old_revision_id
     assert audit_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runtime_policy_change_during_validation_returns_policy_conflict(
+    monkeypatch,
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            size=1,
+        )
+        await container.skill_repo().get_or_seed_runtime_policy(
+            tenant_id=admin_user.tenant_id
+        )
+
+    validation_finished = asyncio.Event()
+    policy_changed = asyncio.Event()
+    original_apply = SkillRepoImpl.advance_assistant_skill_pins
+
+    async def apply_after_policy_change(repo, **kwargs):
+        validation_finished.set()
+        await policy_changed.wait()
+        return await original_apply(repo, **kwargs)
+
+    monkeypatch.setattr(
+        SkillRepoImpl,
+        "advance_assistant_skill_pins",
+        apply_after_policy_change,
+    )
+    request = asyncio.create_task(
+        client.post(
+            f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+            json={
+                "expected_published_revision_id": str(seed.published_revision_id),
+                "cursor": None,
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    )
+    await asyncio.wait_for(validation_finished.wait(), timeout=5)
+    async with db_container() as editor:
+        await editor.session().execute(
+            sa.update(SkillRuntimePolicies)
+            .where(SkillRuntimePolicies.tenant_id == admin_user.tenant_id)
+            .values(context_share_percent=1)
+        )
+    policy_changed.set()
+    response = await request
+
+    assert response.status_code == 409, response.text
+    assert response.json()["eneo_error_code"] == 9055
+    async with db_container() as verifier:
+        pin = await verifier.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == seed.assistant_ids[0],
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pin == seed.old_revision_id
 
 
 @pytest.mark.integration
