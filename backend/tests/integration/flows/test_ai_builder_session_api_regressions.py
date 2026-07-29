@@ -3134,6 +3134,71 @@ async def test_ai_builder_repo_sql_and_python_turn_projection_are_exhaustive(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_complete_session_turn_never_rewrites_provider_outcome_unknown(
+    db_container,
+) -> None:
+    async with db_container() as container:
+        user = container.user()
+        space = Spaces(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            name=f"ai-builder-unknown-completion-{uuid4().hex}",
+        )
+        container.session().add(space)
+        await container.session().flush()
+
+        repo = AIBuilderRepository(container.session())
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space.id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        await repo.mark_session_turn_processing(turn=turn)
+        await container.session().execute(
+            update(BuilderSessions)
+            .where(
+                BuilderSessions.id == session.id,
+                BuilderSessions.tenant_id == user.tenant_id,
+            )
+            .values(latest_turn_state=BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN.value)
+        )
+        oversized_error = build_ai_builder_error(
+            message="Planning state is too large.",
+            code=AIBuilderErrorCode.PLANNING_STATE_PAYLOAD_TOO_LARGE,
+            details={
+                "payload_bytes": 131_073,
+                "payload_cap_bytes": 131_072,
+            },
+        )
+
+        with pytest.raises(AIBuilderBadRequestException) as exc:
+            await repo.complete_session_turn(turn=turn, error=oversized_error)
+
+        stored_state, stored_error = (
+            await container.session().execute(
+                select(
+                    BuilderSessions.latest_turn_state,
+                    BuilderSessions.latest_turn_error_jsonb,
+                ).where(
+                    BuilderSessions.id == session.id,
+                    BuilderSessions.tenant_id == user.tenant_id,
+                )
+            )
+        ).one()
+
+    assert exc.value.code == AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value
+    assert stored_state == BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN.value
+    assert stored_error is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_session_reload_uses_database_clock_for_turn_state(
     client,
     bearer_token,

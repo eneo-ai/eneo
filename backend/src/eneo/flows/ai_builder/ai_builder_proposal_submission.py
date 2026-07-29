@@ -94,7 +94,10 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
     build_propose_flow_tool_schema,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import (
+    PlanningState,
+    PlanningStatePayloadTooLargeError,
+)
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.main.logging import get_logger
 
@@ -675,6 +678,8 @@ class ProposalSubmissionOwner:
                 tool_name=PROPOSE_FLOW_TOOL_NAME,
             )
             return
+        except PlanningStatePayloadTooLargeError:
+            raise
         except Exception as error:
             # A proposal response already came back from the provider. If local
             # compilation or persistence now fails, replay could repeat paid

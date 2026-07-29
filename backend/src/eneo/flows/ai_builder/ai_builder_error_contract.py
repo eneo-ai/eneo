@@ -140,6 +140,7 @@ class AIBuilderErrorCode(StrEnum):
     NO_PLANNER_MODEL_AVAILABLE = "no_planner_model_available"
     PLAN_NOT_PROPOSED = "plan_not_proposed"
     PLAN_SESSION_MISMATCH = "plan_session_mismatch"
+    PLANNING_STATE_PAYLOAD_TOO_LARGE = "planning_state_payload_too_large"
     PLANNING_STATE_VERSION_MISMATCH = "planning_state_version_mismatch"
     PLANNER_BUDGET_MISSING = "planner_budget_missing"
     PLANNER_MODEL_MISSING_CONTEXT_WINDOW = "planner_model_missing_context_window"
@@ -777,6 +778,12 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
         AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH: _entry(
             category=AIBuilderErrorCategory.CONFLICT,
             http_status=409,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.PLANNING_STATE_PAYLOAD_TOO_LARGE: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,
             default_phase=AIBuilderErrorPhase.PLANNER,
         ),

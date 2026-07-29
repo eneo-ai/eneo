@@ -22,7 +22,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderErrorEvent,
+    AIBuilderErrorPhase,
     AIBuilderKnownProviderRejectionException,
+    build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import (
@@ -83,6 +85,7 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
     resolve_user_question_metadata,
 )
+from eneo.flows.ai_builder.planning_state import PlanningStatePayloadTooLargeError
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import (
@@ -150,6 +153,26 @@ class AIBuilderPlanner:
     ) -> AIBuilderErrorEvent:
         await self.repo.complete_session_turn(turn=turn, error=error.public_error)
         return AIBuilderErrorEvent(data=error.public_error)
+
+    async def _complete_planning_state_payload_too_large(
+        self,
+        *,
+        turn: "SessionSendTurn",
+        error: PlanningStatePayloadTooLargeError,
+        request_id: str,
+    ) -> AIBuilderErrorEvent:
+        event = build_ai_builder_error_event(
+            message="The AI Builder planning state is too large to save.",
+            code=AIBuilderErrorCode.PLANNING_STATE_PAYLOAD_TOO_LARGE,
+            phase=AIBuilderErrorPhase.PLANNER,
+            request_id=request_id,
+            details={
+                "payload_bytes": error.byte_size,
+                "payload_cap_bytes": error.cap_bytes,
+            },
+        )
+        await self.repo.complete_session_turn(turn=turn, error=event.data)
+        return event
 
     async def _stream_proposal_events(
         self,
@@ -233,6 +256,13 @@ class AIBuilderPlanner:
                         ),
                     )
                 ]
+        except PlanningStatePayloadTooLargeError as error:
+            yield await self._complete_planning_state_payload_too_large(
+                turn=turn,
+                error=error,
+                request_id=request_id,
+            )
+            return
         except AIBuilderKnownProviderRejectionException as error:
             yield await self._complete_known_provider_rejection(turn=turn, error=error)
             return
@@ -531,6 +561,14 @@ class AIBuilderPlanner:
                                 ),
                             )
                         )
+                    except PlanningStatePayloadTooLargeError as error:
+                        yield await self._complete_planning_state_payload_too_large(
+                            turn=turn,
+                            error=error,
+                            request_id=request_id,
+                        )
+                        yield build_done_event()
+                        return
                     except AIBuilderBadRequestException as error:
                         if error.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST:
                             yield build_session_send_lease_lost_event(

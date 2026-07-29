@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
@@ -18,6 +19,7 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient, Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -26,6 +28,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
+from eneo.database.tables.flow_tables import BuilderSessions
 from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.flows.ai_builder.ai_builder_api_models import (
     SendMessageRequest,
@@ -34,7 +37,18 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     MAX_SESSION_MESSAGES,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import BuilderTurnState
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BuilderTurnState,
+    PlanStatus,
+)
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import AIBuilderPlanEditContext
+from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.planning_state import (
+    PLANNING_STATE_PAYLOAD_CAP_BYTES,
+    PlanningSignal,
+    PlanningState,
+)
 from eneo.main.config import Settings
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
@@ -151,15 +165,31 @@ async def bearer_token(db_container, patch_auth_service_jwt, admin_user) -> str:
         return container.auth_service().create_access_token_for_user(user)
 
 
-def _make_llm_response() -> MagicMock:
+def _make_llm_response(
+    *,
+    content: str | None = "Jag kan hjälpa dig bygga flödet.",
+    tool_calls: list[MagicMock] | None = None,
+) -> MagicMock:
     message = MagicMock()
-    message.content = "Jag kan hjälpa dig bygga flödet."
-    message.tool_calls = None
+    message.content = content
+    message.tool_calls = tool_calls
     choice = MagicMock()
     choice.message = message
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+def _make_tool_call(
+    *,
+    name: str,
+    arguments: dict[str, object],
+) -> MagicMock:
+    tool_call = MagicMock()
+    tool_call.id = f"call-{uuid4()}"
+    tool_call.function.name = name
+    tool_call.function.arguments = json.dumps(arguments)
+    return tool_call
 
 
 def _record_marker(marker_path: Path, marker: str) -> None:
@@ -185,18 +215,28 @@ def _hard_exit(marker_path: Path, marker: str) -> NoReturn:
 
 
 async def _deterministic_completion(
-    *, marker_path: Path, marker: str, **_kwargs: object
+    *,
+    marker_path: Path,
+    marker: str,
+    response: MagicMock | None = None,
+    **_kwargs: object,
 ) -> MagicMock:
     _record_marker(marker_path, marker)
-    return _make_llm_response()
+    return response or _make_llm_response()
 
 
 @contextmanager
-def _deterministic_provider(*, marker_path: Path, marker: str) -> Iterator[None]:
+def _deterministic_provider(
+    *,
+    marker_path: Path,
+    marker: str,
+    response: MagicMock | None = None,
+) -> Iterator[None]:
     async def completion(**kwargs: object) -> MagicMock:
         return await _deterministic_completion(
             marker_path=marker_path,
             marker=marker,
+            response=response,
             **kwargs,
         )
 
@@ -326,6 +366,173 @@ def _event_names(response: Response) -> tuple[str, ...]:
     )
 
 
+def _parse_sse_payload(response: Response) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    current_event: str | None = None
+    data_lines: list[str] = []
+    for raw_line in response.text.splitlines():
+        line = raw_line.rstrip("\r")
+        if line.startswith("event:"):
+            current_event = line[6:].strip()
+        elif line.startswith("data:"):
+            data_lines.append(line[5:].strip())
+        elif line == "" and current_event is not None:
+            raw_data = "\n".join(data_lines)
+            events.append(
+                {
+                    "event": current_event,
+                    "data": json.loads(raw_data) if raw_data else "",
+                }
+            )
+            current_event = None
+            data_lines = []
+    return events
+
+
+def _proposal_response(*, flow_name: str) -> MagicMock:
+    proposal = _make_tool_call(
+        name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={
+            "flow_name": flow_name,
+            "flow_description": "Sammanfattar dokument till en PDF-rapport.",
+            "plan_rationale": "Extrahera en grundad sammanfattning till rapporten.",
+            "steps": [
+                {
+                    "name": "Extrahera sammanfattning",
+                    "instructions": (
+                        "Sammanfatta dokumentunderlaget tydligt på svenska."
+                    ),
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "En kort sammanfattning.",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    return _make_llm_response(content=None, tool_calls=[proposal])
+
+
+async def _progress_session_to_plan(
+    *,
+    client: AsyncClient,
+    bearer_token: str,
+    session_id: str,
+) -> Response:
+    message = "Skapa ett flöde som sammanfattar dokument till en PDF-rapport."
+    question_answer: dict[str, object] | None = None
+    structured_answers = {
+        "primary_runtime_input": "documents",
+        "input_material_mode": "documents",
+        "flow_input_architecture": "document_primary_input",
+        "document_kind": "case_documents",
+        "terminal_output": "pdf_document",
+        "post_processing_goal": "summarize_or_overview",
+        "runtime_metadata_fields": "no_extra_metadata",
+    }
+    for _ in range(7):
+        response = await _send_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            request=SendMessageRequest(
+                client_turn_id=uuid4(),
+                message=message,
+                question_answer=question_answer,
+                ui_language="sv",
+            ),
+        )
+        assert response.status_code == 200, response.text
+        events = _parse_sse_payload(response)
+        if any(event["event"] == "plan" for event in events):
+            return response
+
+        requirements = next(
+            (event for event in events if event["event"] == "requirements_summary"),
+            None,
+        )
+        if requirements is not None:
+            requirements_data = requirements["data"]
+            assert isinstance(requirements_data, dict)
+            message = "Ja, det stämmer. Bygg planen."
+            question_answer = {
+                "kind": "requirements_confirmation",
+                "requirements_confirmed": True,
+                "requirements_version": requirements_data["requirements_version"],
+                "ui_language": "sv",
+            }
+            continue
+
+        question = next(
+            (event for event in events if event["event"] == "question"),
+            None,
+        )
+        assert question is not None, events
+        question_data = question["data"]
+        assert isinstance(question_data, dict)
+        question_id = str(question_data["question_id"])
+        selected_option_id = structured_answers.get(question_id)
+        assert selected_option_id is not None, events
+        options = question_data["options"]
+        assert isinstance(options, list)
+        selected_option = next(
+            (
+                option
+                for option in options
+                if isinstance(option, dict) and option.get("id") == selected_option_id
+            ),
+            None,
+        )
+        assert selected_option is not None, question_data
+        message = str(selected_option["label"])
+        question_answer = {
+            "kind": "structured_question_answer",
+            "question_id": question_id,
+            "selected_option_ids": [selected_option_id],
+            "selected_values": [selected_option_id],
+            "ui_language": "sv",
+        }
+
+    raise AssertionError("AI Builder did not produce the setup plan.")
+
+
+def _planning_state_at_byte_size(
+    prior_state: PlanningState,
+    *,
+    byte_size: int,
+) -> PlanningState:
+    state = prior_state.model_copy(deep=True)
+    filler = PlanningSignal(
+        question_id="payload_cap",
+        value="",
+        confidence="high",
+        source="model",
+    )
+    state.signals.append(filler)
+    empty_size = len(
+        json.dumps(
+            state.model_dump(mode="json"),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    assert empty_size < byte_size
+    filler.value = "x" * (byte_size - empty_size)
+    measured_size = len(
+        json.dumps(
+            state.model_dump(mode="json"),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    assert measured_size == byte_size
+    return state
+
+
 async def _wait_for_turn_state(
     *,
     client: AsyncClient,
@@ -451,6 +658,187 @@ def _assert_one_accepted_user_message(
     assert len(matching_messages) == 1
     assert matching_messages[0].message_id == str(message_id)
     return message_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_oversized_planning_state_is_committed_once_and_replayed(
+    client: AsyncClient,
+    bearer_token: str,
+    completion_model_factory,
+    db_container,
+    tmp_path: Path,
+) -> None:
+    marker_path = tmp_path / "oversized-state-provider-markers.txt"
+    space_id = await _create_space_with_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+    )
+    session_id = await _create_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    with _deterministic_provider(
+        marker_path=marker_path,
+        marker="setup_provider",
+        response=_proposal_response(flow_name="Första planen"),
+    ):
+        setup_response = await _progress_session_to_plan(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+        )
+    assert "plan" in _event_names(setup_response)
+
+    public_before = await _load_session(
+        client=client,
+        bearer_token=bearer_token,
+        session_id=session_id,
+    )
+    async with db_container() as container:
+        tenant_id = (
+            await container.session().execute(
+                select(BuilderSessions.tenant_id).where(
+                    BuilderSessions.id == UUID(session_id)
+                )
+            )
+        ).scalar_one()
+        repo = AIBuilderRepository(container.session())
+        session_before = await repo.get_session(
+            session_id=UUID(session_id),
+            tenant_id=tenant_id,
+        )
+        planning_state_before = await repo.load_planning_state(
+            session_id=UUID(session_id),
+            tenant_id=tenant_id,
+        )
+        plans_before = await repo.list_session_plans(
+            session_id=UUID(session_id),
+            tenant_id=tenant_id,
+        )
+
+    assert planning_state_before is not None
+    assert len(plans_before) == 1
+    prior_plan = plans_before[0]
+    assert prior_plan.status is PlanStatus.PROPOSED
+    assert public_before.latest_plan_id == prior_plan.id
+    oversized_state = _planning_state_at_byte_size(
+        planning_state_before,
+        byte_size=PLANNING_STATE_PAYLOAD_CAP_BYTES + 1,
+    )
+    revision_request = SendMessageRequest(
+        client_turn_id=uuid4(),
+        message="Byt namn på planen men behåll samma beteende.",
+        edit_context=AIBuilderPlanEditContext(
+            scope="whole_plan",
+            plan_id=prior_plan.id,
+        ),
+        ui_language="sv",
+    )
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
+            return_value=oversized_state,
+        ),
+        _deterministic_provider(
+            marker_path=marker_path,
+            marker="oversized_state_provider",
+            response=_proposal_response(flow_name="Reviderad plan"),
+        ),
+    ):
+        first_response = await _send_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            request=revision_request,
+        )
+
+    assert first_response.status_code == 200, first_response.text
+    assert _event_names(first_response) == ("error", "done")
+    first_events = _parse_sse_payload(first_response)
+    error_data = first_events[0]["data"]
+    assert isinstance(error_data, dict)
+    assert error_data["code"] == "planning_state_payload_too_large"
+    assert error_data["category"] == "bad_request"
+    assert error_data["phase"] == "planner"
+    assert error_data["details"] == {
+        "payload_bytes": PLANNING_STATE_PAYLOAD_CAP_BYTES + 1,
+        "payload_cap_bytes": PLANNING_STATE_PAYLOAD_CAP_BYTES,
+    }
+    provider_calls_before_replay = _marker_count(
+        marker_path,
+        "oversized_state_provider",
+    )
+    assert provider_calls_before_replay > 0
+
+    public_after = await _load_session(
+        client=client,
+        bearer_token=bearer_token,
+        session_id=session_id,
+    )
+    latest_turn = _latest_turn(public_after)
+    assert latest_turn.state is BuilderTurnState.COMMITTED
+    assert latest_turn.error is not None
+    assert latest_turn.error.code == "planning_state_payload_too_large"
+    assert public_after.latest_plan_id == prior_plan.id
+    assert public_after.conversation[: len(public_before.conversation)] == (
+        public_before.conversation
+    )
+    appended_messages = public_after.conversation[len(public_before.conversation) :]
+    assert len(appended_messages) == 1
+    assert appended_messages[0].role == "user"
+    _assert_one_accepted_user_message(
+        session=public_after,
+        expected_content=revision_request.message,
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        session_after = await repo.get_session(
+            session_id=UUID(session_id),
+            tenant_id=tenant_id,
+        )
+        planning_state_after = await repo.load_planning_state(
+            session_id=UUID(session_id),
+            tenant_id=tenant_id,
+        )
+        plans_after = await repo.list_session_plans(
+            session_id=UUID(session_id),
+            tenant_id=tenant_id,
+        )
+
+    assert session_after.planning_state_version == session_before.planning_state_version
+    assert planning_state_after == planning_state_before
+    assert [(plan.id, plan.status) for plan in plans_after] == [
+        (prior_plan.id, PlanStatus.PROPOSED)
+    ]
+
+    with _provider_must_not_run():
+        replay = await _send_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            request=revision_request,
+        )
+    assert replay.status_code == 200, replay.text
+    assert replay.text == first_response.text
+    assert _event_names(replay) == ("error", "done")
+    assert (
+        _marker_count(marker_path, "oversized_state_provider")
+        == provider_calls_before_replay
+    )
+    replayed_session = await _load_session(
+        client=client,
+        bearer_token=bearer_token,
+        session_id=session_id,
+    )
+    assert replayed_session.conversation == public_after.conversation
+    assert replayed_session.latest_turn == public_after.latest_turn
+    assert replayed_session.latest_plan_id == prior_plan.id
 
 
 @pytest.mark.integration

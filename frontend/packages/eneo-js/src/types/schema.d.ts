@@ -8850,6 +8850,7 @@ export interface components {
       | "no_planner_model_available"
       | "plan_not_proposed"
       | "plan_session_mismatch"
+      | "planning_state_payload_too_large"
       | "planning_state_version_mismatch"
       | "planner_budget_missing"
       | "planner_model_missing_context_window"

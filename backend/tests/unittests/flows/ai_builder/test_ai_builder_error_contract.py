@@ -26,6 +26,14 @@ def test_error_registry_has_entry_for_every_error_code_enum_member() -> None:
     assert set(AI_BUILDER_ERROR_REGISTRY) == set(AIBuilderErrorCode)
 
 
+def test_planning_state_payload_too_large_is_a_planner_bad_request() -> None:
+    code = AIBuilderErrorCode("planning_state_payload_too_large")
+    entry = AI_BUILDER_ERROR_REGISTRY[code]
+
+    assert entry.category.value == "bad_request"
+    assert entry.default_phase is AIBuilderErrorPhase.PLANNER
+
+
 def test_typed_public_exceptions_store_enum_error_code() -> None:
     bad_request = AIBuilderBadRequestException(
         "Invalid settings.",

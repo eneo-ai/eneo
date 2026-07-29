@@ -101,6 +101,7 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
+    PlanningStatePayloadTooLargeError,
     ResolvedSlot,
     StepTriple,
 )
@@ -1442,6 +1443,49 @@ async def test_send_message_converts_dispatch_lease_lost_exception_to_events(
 
 
 @pytest.mark.asyncio
+async def test_send_message_commits_planning_state_payload_too_large_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
+
+    async def reject_oversized_state(
+        _: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        raise PlanningStatePayloadTooLargeError(
+            byte_size=131_073,
+            cap_bytes=131_072,
+        )
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        reject_oversized_state,
+    )
+
+    events = await _collect_send_message_events(planner, session_id=session_id)
+
+    assert [event["event"] for event in events] == ["error", "done"]
+    error = json.loads(events[0]["data"])
+    assert error["code"] == "planning_state_payload_too_large"
+    assert error["category"] == "bad_request"
+    assert error["phase"] == "planner"
+    assert error["details"] == {
+        "payload_bytes": 131_073,
+        "payload_cap_bytes": 131_072,
+    }
+    planner.repo.complete_session_turn.assert_awaited_once()
+    assert (
+        planner.repo.complete_session_turn.await_args.kwargs["error"].model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+        == error
+    )
+    planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2075,6 +2119,89 @@ async def test_stream_proposal_events_dispatches_once_to_the_selected_owner(
     assert scoped_attempt.await_count == expected_scoped_calls
     assert submission_calls == expected_submission_calls
     planner.repo.complete_session_turn.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_proposal_events_commits_planning_state_payload_too_large(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    turn = cast(Any, SimpleNamespace())
+    proposal_request = ProposalPrepared(
+        requirements_state=_requirements_state_confirmed(),
+        ui_language="sv",
+        message_groups=(
+            ProposalMessageGroup(
+                messages=({"role": "system", "content": "proposal"},),
+                kind="system",
+                protected=True,
+            ),
+        ),
+        system_prompt_hash="proposal-hash",
+        prior_plan_for_revision=None,
+        slot_classification_metadata=None,
+        plan_edit_context=None,
+        planning_state=PlanningState.empty(),
+        requested_output_sections=RequestedOutputSections.empty(),
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+            prior_bindings=(),
+        ),
+    )
+
+    async def reject_oversized_state(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        raise PlanningStatePayloadTooLargeError(
+            byte_size=131_073,
+            cap_bytes=131_072,
+        )
+        yield
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.run_scoped_plan_revision_attempt",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        planner._proposal_submission,
+        "run_active_submission_attempt",
+        reject_oversized_state,
+    )
+
+    events = [
+        event
+        async for event in planner._stream_proposal_events(
+            turn=turn,
+            conversation=[],
+            new_messages_start=0,
+            proposal_request=proposal_request,
+            completion_model_route=_route(),
+            max_output_tokens=1024,
+            request_id="oversized-proposal-state",
+            usage_tracker=ProposalTurnTelemetry(
+                request_id="oversized-proposal-state",
+                model="openai/gpt-5.4",
+                target_kind=TargetKind.CREATE,
+            ),
+            flow=None,
+            assistant_snapshots=None,
+            before_provider_call=AsyncMock(),
+        )
+    ]
+
+    assert len(events) == 1
+    error_event = events[0]
+    assert error_event.event == "error"
+    assert error_event.data.code == AIBuilderErrorCode.PLANNING_STATE_PAYLOAD_TOO_LARGE
+    assert error_event.data.details == {
+        "payload_bytes": 131_073,
+        "payload_cap_bytes": 131_072,
+    }
+    planner.repo.complete_session_turn.assert_awaited_once_with(
+        turn=turn,
+        error=error_event.data,
+    )
 
 
 @pytest.mark.asyncio

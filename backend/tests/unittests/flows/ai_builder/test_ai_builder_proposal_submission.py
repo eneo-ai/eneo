@@ -73,6 +73,7 @@ from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
+    PlanningStatePayloadTooLargeError,
     StepTriple,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
@@ -640,6 +641,75 @@ async def test_edit_propose_flow_architecture_error_is_not_translated_to_create_
 
     repair.assert_not_called()
     process_edit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_propose_flow_re_raises_planning_state_payload_too_large() -> None:
+    submission = _make_submission()
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Oversized planning state",
+            "plan_rationale": "Exercise the persistence boundary.",
+            "steps": [],
+        },
+    )
+    oversized_error = PlanningStatePayloadTooLargeError(
+        byte_size=131_073,
+        cap_bytes=131_072,
+    )
+    process_outline = AsyncMock(side_effect=oversized_error)
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
+            "process_create_intent_arguments",
+            new=process_outline,
+        ),
+        pytest.raises(PlanningStatePayloadTooLargeError) as exc_info,
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(),
+            tool_call=tool_call,
+        )
+        assert dispatched is not None
+        _ = [event async for event in dispatched]
+
+    assert exc_info.value is oversized_error
+    process_outline.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_propose_flow_keeps_unrelated_post_provider_failure_unknown() -> (
+    None
+):
+    submission = _make_submission()
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Unrelated persistence failure",
+            "plan_rationale": "Exercise the unknown-outcome boundary.",
+            "steps": [],
+        },
+    )
+    process_outline = AsyncMock(side_effect=ValueError("unrelated failure"))
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
+            "process_create_intent_arguments",
+            new=process_outline,
+        ),
+        pytest.raises(AIBuilderProviderOutcomeUnknownException),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(),
+            tool_call=tool_call,
+        )
+        assert dispatched is not None
+        _ = [event async for event in dispatched]
+
+    process_outline.assert_awaited_once()
 
 
 @pytest.mark.asyncio

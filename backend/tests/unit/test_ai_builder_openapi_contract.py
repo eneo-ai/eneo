@@ -387,6 +387,7 @@ def test_openapi_ai_builder_turn_retry_errors_and_recovery_are_documented(
 
     assert {
         "planner_context_limit_exceeded",
+        "planning_state_payload_too_large",
         "session_turn_idempotency_conflict",
         "session_turn_provider_outcome_unknown",
     }.issubset(error_codes)
