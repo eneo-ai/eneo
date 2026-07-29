@@ -191,7 +191,11 @@ def test_durable_dispatch_migration_round_trip_and_query_plan(
                 )
                 assert cursor.fetchone() == ({"version": 1},)
                 cursor.execute(
-                    "UPDATE jobs SET status = 'failed' WHERE id = %s::uuid",
+                    """
+                    UPDATE jobs
+                    SET status = 'failed', staging_cleaned_at = now()
+                    WHERE id = %s::uuid
+                    """,
                     (str(pending_job_id),),
                 )
     finally:
@@ -222,6 +226,15 @@ def test_downgrade_excludes_a_concurrent_durable_insert(
     barrier.autocommit = True
     try:
         with barrier.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE jobs
+                SET staging_cleaned_at = now()
+                WHERE dispatch_envelope IS NOT NULL
+                  AND status IN ('complete', 'failed')
+                  AND staging_cleaned_at IS NULL
+                """
+            )
             cursor.execute("ALTER TABLE jobs DISABLE TRIGGER ALL")
             cursor.execute("SELECT pg_advisory_lock(%s)", (barrier_key,))
             cursor.execute(
@@ -231,7 +244,8 @@ def test_downgrade_excludes_a_concurrent_durable_insert(
                 LANGUAGE plpgsql
                 AS $$
                 BEGIN
-                    IF tg_tag = 'DROP INDEX' THEN
+                    IF tg_tag = 'DROP INDEX'
+                       AND current_query() LIKE '%ix_jobs_durable_dispatch%' THEN
                         PERFORM pg_advisory_lock({barrier_key});
                         PERFORM pg_advisory_unlock({barrier_key});
                     END IF;

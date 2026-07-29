@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import TYPE_CHECKING, Optional
 
@@ -128,7 +129,7 @@ class Datastore:
 
     async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
         logger.debug("Chunking text.")
-        info_blob_chunks = self._chunk_text(info_blob)
+        info_blob_chunks = await asyncio.to_thread(self._chunk_text, info_blob)
 
         if not info_blob_chunks:
             raise ValueError(
