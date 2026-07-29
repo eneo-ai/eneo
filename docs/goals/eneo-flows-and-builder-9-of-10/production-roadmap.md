@@ -31,6 +31,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-29 | **Slice 1**: every evidence response reads one REPEATABLE READ snapshot — route-owned isolation before the first statement, shared-session TaskGroup deleted, proven at the route boundary with a mid-read mutation and a revert-detection test (`f38354342`, gate green 8/10, no findings remaining) |
 | 2026-07-29 | Corruption-caused omission distinguished from size-based omission in the public knowledge view; reason-neutral narrowing contract sv+en (`27cef0327`, gate green 8/10) |
 | 2026-07-29 | JSONB docs honesty (`36c35b734`, `a3318a169`) |
 | 2026-07-28 | RAG evidence transparency, `615200dcc..cf0cddc16`: verbatim retrieved passages as typed bounded evidence; sensitivity-gated disclosure; single-statement bounded admission with per-step attribution; corruption fail-closed; four-limit complete-or-refuse exports; admin tenant policy for recording limits; full source rendering sv+en |
@@ -56,20 +57,9 @@ external release gate (item 10); BM0.2 is external (item 10).
 
 ## Ranked plan (merged and source-verified, 2026-07-29 pass 2)
 
-1. **One consistent evidence snapshot** *(medium)* — remove the
-   shared-session `asyncio.TaskGroup` fan-out in
-   `flow_run_evidence_service`; sequential reads. The evidence routes keep
-   their existing explicit transaction as the canonical owner
-   (`commit_flow_runtime_write_before_response` shape); a dedicated
-   evidence-read manager sets `REPEATABLE READ` as the FIRST database
-   operation, so authorization, disclosure policy, preflight, sections,
-   and audit writes all observe one snapshot. Proven by a real PostgreSQL
-   two-session mutation-barrier test (all-before or all-after, never
-   mixed) including a retention-purge race, plus an in-path isolation
-   assertion. No serialization-retry machinery: a database failure rolls
-   back before response. *(Verified P1. Only shared-session fan-out in
-   flows; the webhook delivery TaskGroup opens a session per task and is
-   the in-repo exemplar of safe concurrency.)*
+1. ~~One consistent evidence snapshot~~ — **LANDED** `f38354342`. The
+   retention-purge race variant of the mutation-barrier proof carries into
+   item 7's acceptance (where purged-state semantics are implemented).
 2. **Whole-bundle evidence bounds** *(large)* — within that snapshot,
    preflight EVERY emitted section before materialization: run row +
    definition snapshot JSON, step results (incl. payload columns),
