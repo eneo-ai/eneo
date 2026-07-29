@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-29 | **Bounded interactive attempt evidence**: current and recent attempt candidates stop at 500 rows plus one truncation sentinel before ranking, aggregation, and payload hydration; every attempt-derived count is explicitly exact or a lower bound through the API and Swedish/English UI; unlimited exports remain complete; narrow PostgreSQL indexes are resumable and reject wrong, mixed-direction, or widened definitions (`acf340e9a..f82a2419a`, gate green 8/10 after three total passes, no findings) |
 | 2026-07-29 | **Canonical completion-model capability**: every Flow output mode now has one typed completion-backed classification shared by runtime disclosure, retrieval validation, the capability manifest, authoring, and materialization; deterministic template-fill steps shed unused completion-model bindings, and new output modes must be explicitly classified (`4b0796152`, gate green 9/10, no findings) |
 | 2026-07-29 | **Honest run token totals**: provider-call lifecycle rows now own live usage; retained attempts preserve typed totals and per-dimension completeness in identity-validated tombstones; superseded/rerun spend survives retention; invalid retained evidence makes recoverable totals explicitly incomplete; live and retained reads stream and fold with bounded application memory; the UI distinguishes zero, incomplete, and unrecorded usage in Swedish and English (`9f7d70165`, gate green 8/10, no findings) |
 | 2026-07-29 | **Slice 2**: every evidence section measured and bounded — serialized per-projection measurement with a per-row floor, ceiling+1 bounded preflight, memory-budget-derived aggregate ceilings with peak/leak proofs, complete-or-refuse exports with typed section/limit context, ordered admitted prefixes with one truthful typed omissions collection sv+en, frontend consuming the generated union (`b1ee9b7e5`, gate green 8/10 after five iterations, no blockers) |
@@ -69,21 +70,17 @@ external release gate (item 10); BM0.2 is external (item 10).
    retention-purge race variant of the mutation-barrier proof carries into
    item 7's acceptance (where purged-state semantics are implemented).
 2. ~~Whole-bundle evidence bounds~~ — **LANDED** `b1ee9b7e5` (narrowed
-   claim: attempt-admission window deliberately excluded, see 2c; the
-   serialized-floor width assertion for attempts rides with 2c).
+   claim: the companion attempt-admission window and serialized-floor proof
+   landed under 2c).
 2d. ~~Correct deterministic template-fill capability truth~~ — **LANDED**
    `4b0796152`. Completion-backed modes now have one typed owner shared by
    runtime, authoring, materialization, and the capability manifest; new output
    modes fail the exhaustive classification test until explicitly classified.
-2c. **Bounded attempt admission** *(medium, contract redesign)* — the
-   landed attempt window ranks/aggregates over the full history (bounded
-   returned models, unbounded database work: ranking, cumulative sums,
-   exact totals, `array_agg` over every attempt). Bound the current-first
-   candidate relation before windowing; exact totals become explicitly
-   truncated/lower-bound counts (public change to the knowledge-evidence
-   totals semantics). Acceptance: `EXPLAIN (ANALYZE, FORMAT JSON)` proof
-   on a materially over-limit attempt population that no scan node
-   examines more than ceiling+1 rows.
+2c. ~~Bounded attempt admission~~ — **LANDED** `acf340e9a..f82a2419a`.
+   Current-first admission is bounded before windows and aggregates; counts
+   expose exact or lower-bound semantics through the public contract and UI;
+   a real 5,004-attempt PostgreSQL plan proves every scan and aggregate/window
+   input stays at ceiling+1 or below.
 2b. ~~Fix the three verified production defects~~ — **LANDED** `69f242cdd`.
 3. ~~Honest run token totals, retention included~~ — **LANDED**
    `9f7d70165`.
