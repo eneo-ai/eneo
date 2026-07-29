@@ -29,6 +29,7 @@ from eneo.skills.domain.skill import (
     PublishedSkillSummaryPage,
     PublishedSkillSummaryProjection,
     Skill,
+    SkillActivationMode,
     SkillAdoptionCursor,
     SkillAdoptionProjectionPage,
     SkillBindingReference,
@@ -40,6 +41,7 @@ from eneo.skills.domain.skill import (
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
+    SkillRuntimeResolution,
     parse_skill_revision_cursor,
     validate_skill_slug,
 )
@@ -556,16 +558,6 @@ class OrganizationSkillService:
                 "Reload the Skill and review again."
             )
         candidate_binding = candidate_bindings[0]
-        models = {
-            validation_input.assistant.completion_model.id: (
-                validation_input.assistant.completion_model
-            )
-            for validation_input in validation_inputs.values()
-            if validation_input.assistant.completion_model is not None
-        }
-        preflight_adapters = await self.assistant_service.completion_service.load_skill_activation_preflight_adapters(
-            [cast("AICompletionModel", model) for model in models.values()]
-        )
         mcp_projections = [
             AssistantMCPServerProjection(
                 space_id=validation_input.assistant.space_id,
@@ -583,26 +575,44 @@ class OrganizationSkillService:
             if mcp_projections
             else {}
         )
-
-        validation_results: list[AssistantPinAdvanceTargetResult] = []
-        write_targets: list[AssistantPinAdvanceTarget] = []
+        validation_resolutions: dict[UUID, SkillRuntimeResolution] = {}
+        models: dict[UUID, AICompletionModel] = {}
         for target in targets:
             validation_input = validation_inputs.get(target.assistant_id)
-            if validation_input is None:
-                validation_results.append(
-                    AssistantPinAdvanceTargetResult(
-                        assistant_id=target.assistant_id,
-                        outcome=AssistantPinAdvanceOutcome.CONCURRENT_CHANGE,
-                    )
-                )
+            resolution = resolutions.get(target.assistant_id)
+            if validation_input is None or resolution is None:
                 continue
-            resolution = resolutions[target.assistant_id]
             source_binding_present = any(
                 binding.skill_id == skill_id
                 and binding.skill_revision_id == target.from_revision_id
                 for binding in (*resolution.eligible, *resolution.blocked)
             )
             if not source_binding_present:
+                continue
+            validation_input.assistant.mcp_servers = projected_mcp_servers.get(
+                target.assistant_id,
+                [],
+            )
+            validation_resolutions[target.assistant_id] = resolution
+            model = validation_input.assistant.completion_model
+            if model is not None and (
+                validation_input.assistant.mcp_servers
+                or any(
+                    binding.activation_mode is SkillActivationMode.ON_DEMAND
+                    for binding in (*resolution.eligible, *resolution.blocked)
+                )
+            ):
+                models[model.id] = cast("AICompletionModel", model)
+        preflight_adapters = await self.assistant_service.completion_service.load_skill_activation_preflight_adapters(
+            list(models.values())
+        )
+
+        validation_results: list[AssistantPinAdvanceTargetResult] = []
+        write_targets: list[AssistantPinAdvanceTarget] = []
+        for target in targets:
+            validation_input = validation_inputs.get(target.assistant_id)
+            resolution = validation_resolutions.get(target.assistant_id)
+            if validation_input is None or resolution is None:
                 validation_results.append(
                     AssistantPinAdvanceTargetResult(
                         assistant_id=target.assistant_id,
@@ -610,10 +620,6 @@ class OrganizationSkillService:
                     )
                 )
                 continue
-            validation_input.assistant.mcp_servers = projected_mcp_servers.get(
-                target.assistant_id,
-                [],
-            )
             incompatible_reason = await self.assistant_service.assert_assistant_fits_candidate_pin(
                 assistant=validation_input.assistant,
                 space_is_personal=validation_input.space_is_personal,

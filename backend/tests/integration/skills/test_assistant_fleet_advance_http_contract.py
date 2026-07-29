@@ -27,6 +27,7 @@ from eneo.database.tables.mcp_server_table import (
     MCPServerTools,
     SpacesMCPServers,
 )
+from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     InlineContentPayloads,
@@ -1048,6 +1049,77 @@ async def test_missing_model_keeps_on_demand_pin_unchanged(
             )
         )
     assert pin == seed.old_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_inactive_provider_does_not_block_always_only_fleet_targets(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        seed = await _seed_behind_fleet(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        inactive_model = await completion_model_factory(
+            session,
+            f"fleet-inactive-{uuid4().hex[:8]}",
+            provider=f"fleet-inactive-{uuid4().hex[:8]}",
+        )
+        assert inactive_model.provider_id is not None
+        await session.execute(
+            sa.update(ModelProviders)
+            .where(ModelProviders.id == inactive_model.provider_id)
+            .values(is_active=False)
+        )
+        await session.execute(
+            sa.update(Assistants)
+            .where(Assistants.id == seed.assistant_ids[0])
+            .values(completion_model_id=inactive_model.id)
+        )
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.published_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 2,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    assert {outcome["assistant_id"] for outcome in response.json()["outcomes"]} == {
+        str(assistant_id) for assistant_id in seed.assistant_ids
+    }
+    assert all(
+        outcome["outcome"] == "advanced" and outcome["reason"] is None
+        for outcome in response.json()["outcomes"]
+    )
+    async with db_container() as container:
+        pins = (
+            await container.session().scalars(
+                sa.select(AssistantSkillBindings.skill_revision_id).where(
+                    AssistantSkillBindings.assistant_id.in_(seed.assistant_ids),
+                    AssistantSkillBindings.skill_id == seed.skill_id,
+                )
+            )
+        ).all()
+    assert pins == [seed.published_revision_id, seed.published_revision_id]
 
 
 @pytest.mark.integration
