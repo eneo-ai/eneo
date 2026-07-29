@@ -20,9 +20,12 @@ plan against current source, not carried over blind).
   reasons.
 - Multi-tenancy will be retired later: preserve isolation (a security
   requirement today), never deepen tenancy machinery.
-- Working model: Codex workers implement frozen specs; Codex peer gates
-  challenge plans and diffs (green ≥8 to land); Claude orchestrates, judges
-  every diff against source, owns git.
+- Working model: the lead agent owns scope, source verification, validation,
+  final judgment, roadmap, and git. Workers implement only substantial frozen,
+  independently testable slices in separate worktrees; the lead handles small
+  or context-heavy corrections directly. One skeptical gate reviews a stable
+  candidate (green ≥8 to land); resume it only for a verified material finding,
+  never for routine polish or landing mechanics.
 - Evidence vocabulary: retrieved ≠ included-in-prompt ≠ material influence.
   Exports are complete-or-refuse; views narrow honestly and say what they
   left out.
@@ -31,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-29 | **Honest run token totals**: provider-call lifecycle rows now own live usage; retained attempts preserve typed totals and per-dimension completeness in identity-validated tombstones; superseded/rerun spend survives retention; invalid retained evidence makes recoverable totals explicitly incomplete; live and retained reads stream and fold with bounded application memory; the UI distinguishes zero, incomplete, and unrecorded usage in Swedish and English (`9f7d70165`, gate green 8/10, no findings) |
 | 2026-07-29 | **Slice 2**: every evidence section measured and bounded — serialized per-projection measurement with a per-row floor, ceiling+1 bounded preflight, memory-budget-derived aggregate ceilings with peak/leak proofs, complete-or-refuse exports with typed section/limit context, ordered admitted prefixes with one truthful typed omissions collection sv+en, frontend consuming the generated union (`b1ee9b7e5`, gate green 8/10 after five iterations, no blockers) |
 | 2026-07-29 | **Slice 2b**: three production defects fixed — unprivileged resolved-policy reader for all runtime consumers (service keys work on documented paths, both defense layers intact), resume returns the canonical persisted step result, audio critic invariant scoped to structured source readers. Full integration suite 439/0 for the first time (`69f242cdd`, gate green 8/10, no blockers) |
 | 2026-07-29 | Integration expectations realigned with their production owners (8 stale tests repaired; 5 left deliberately red exposing verified production defects — see item 2b) (`bc20307fa`, gate green 8/10) |
@@ -45,9 +49,9 @@ plan against current source, not carried over blind).
 
 ## Historical-ledger reconciliation (verified against source 2026-07-29)
 
-From the retired program's OPEN-WORK ledger: **A remains open** (public
-token totals still sum legacy attempt columns `NULL→0` with no completeness
-state — item 3). **B remains open** (the planning-state payload cap raises a
+From the retired program's OPEN-WORK ledger: **A is done** (`9f7d70165`:
+provider-call-owned totals, typed completeness, retention-safe summaries).
+**B remains open** (the planning-state payload cap raises a
 plain exception that the send lease converts into false
 `PROVIDER_OUTCOME_UNKNOWN` — item 4). **C is obsolete** under the no-compat
 pre-release policy (no data preflight, no tolerant reader). **D is done**
@@ -66,6 +70,11 @@ external release gate (item 10); BM0.2 is external (item 10).
 2. ~~Whole-bundle evidence bounds~~ — **LANDED** `b1ee9b7e5` (narrowed
    claim: attempt-admission window deliberately excluded, see 2c; the
    serialized-floor width assertion for attempts rides with 2c).
+2d. **Correct deterministic template-fill capability truth** *(small)* —
+   `requires_completion_model` currently classifies TEMPLATE_FILL as
+   model-backed although runtime rendering is deterministic and zero-call.
+   Correct the canonical capability manifest and prove proposal/runtime
+   agreement before 2c; do not add token estimates or a step-count policy.
 2c. **Bounded attempt admission** *(medium, contract redesign)* — the
    landed attempt window ranks/aggregates over the full history (bounded
    returned models, unbounded database work: ranking, cumulative sums,
@@ -76,19 +85,8 @@ external release gate (item 10); BM0.2 is external (item 10).
    on a materially over-limit attempt population that no scan node
    examines more than ceiling+1 rows.
 2b. ~~Fix the three verified production defects~~ — **LANDED** `69f242cdd`.
-3. **Honest run token totals, retention included** *(medium/large)* —
-   relational provider-call events own totals for LIVE runs with typed
-   input/output completeness; at provider-detail purge, retention writes
-   one typed usage summary (totals + known/incomplete) into the
-   tombstone; retained runs read the tombstone — never both, and never
-   silent zero (today retention deletes every provider-call row keeping
-   only a count, and the frontend hides zero totals entirely, erasing
-   real spend). Delete the attempt-derived `NULL→0` aggregation
-   (`flow_run_repo.list_token_usage_for_runs`). Superseded and rerun
-   attempts count — they incurred real spend. Reset unsupported
-   pre-release rows; no backfill. Frontend renders incompleteness
-   explicitly. Tests: before/after retention, superseded, reruns, mixed
-   reported/unreported, outcome-unknown.
+3. ~~Honest run token totals, retention included~~ — **LANDED**
+   `9f7d70165`.
 4. **Bounded Builder persistence and terminal behavior** *(large, two
    reviewable commits)* — (a) a locally detected oversized planning state
    becomes a typed, replayable terminal outcome preserving the last valid
@@ -98,6 +96,11 @@ external release gate (item 10); BM0.2 is external (item 10).
    top-level current-only schema version — do not wrap `content`, and do
    not break the draft-title JSON path (BM4.10). Max+1
    repository-level test proves retry replays without another provider call.
+4b. **Honest static execution shape** *(medium, after item 4)* — add critic
+   invariants for hard structural waste and one factual proposal projection:
+   model-backed versus deterministic steps, mapped upper bound, and
+   schema-constrained outputs. No token/currency estimates, numeric step-count
+   knob, or per-step rationale prose.
 5. **Operational attachment semantics** *(large)* — the conversion happens
    at the post-flow-creation materialization seam, inside the existing
    atomic apply transaction: the Builder carries one typed
@@ -132,16 +135,18 @@ external release gate (item 10); BM0.2 is external (item 10).
    retention purged it; the projection must reuse the attempt retention
    marker: missing + marker = `retention_purged`, missing without =
    `not_tracked`, malformed = `corrupt`.
-8. **Builder frontend/server contract closure** *(medium, three reviewed
+8. **Builder frontend/server contract closure** *(medium, four reviewed
    commits by owner)* — (a) stream/attachment/draft contract: validate
    known SSE payload shapes at runtime (parser currently casts parsed
    JSON), one explicit stream-failure state, KEEP fail-fast unknown-event
    behavior; attachment limits; explicit draft lifecycle. (b) vocabulary
-   neutrality: direct pre-release correction of `case_documents`,
-   `basic_case_metadata`, `case_like_flow` — no tolerant readers.
-   (c) serve RAG policy ceilings through the existing settings response
-   and delete the duplicated admin-page TS constants — no generic
-   constraints-discovery API.
+   neutrality: directly correct `case_documents`, `basic_case_metadata`,
+   `case_like_flow`, including the false use of generic `underlag` as a
+   case-domain marker — no tolerant readers. (c) delete another heuristic
+   family only after source evidence proves a canonical semantic owner and
+   behavior equivalence. (d) serve RAG policy ceilings through the existing
+   settings response and delete the duplicated admin-page TS constants — no
+   generic constraints-discovery API.
 9. **Docs-site contract correction** *(medium, per-slice from now on)* —
    the false "influenced the answer" claim is CORRECTED (2026-07-29, with
    this roadmap revision); each remaining correction lands with its owning
@@ -174,7 +179,7 @@ constructors stay local until a real contract emerges); any new snapshot
 coordinator/query-bus/per-repo-session machinery; a second aggregation
 service for token totals; a separate "official decision basis" store.
 
-## Builder-excellence track (added 2026-07-29, peer pass 1 verified; pass-2 tightening pending)
+## Builder-excellence track (source-verified 2026-07-29, peer pass 2)
 
 Source: xhigh peer review of Builder intent-understanding, attachments,
 HITL, and generated-flow efficiency against source at `10ccd6b94`.
@@ -188,45 +193,46 @@ example-output attachment derives bounded structure/style/schema
 constraints surfaced at confirmation — never exact-visual-fidelity
 claims. Checkpoint vocabulary freezes to FlowStepReviewMode (view/edit).
 
+Hard ordering constraints: B5a precedes item 2c; B5b follows B1; B2 runs
+evidence → interpretation → binding; B4 runs understanding/confirmation →
+compile/apply. The ranked plan above controls all other ordering.
+
 - **B1** (= item 4): terminal replayable Builder persistence. *(L)*
-- **B2** (= item 5 deepened, three slices): expected-result attachments
-  that actually affect the Flow — one-template binding at the
-  materialization seam; identical-schema dedup + conflicting-schema
-  question; full placeholder identity (display-only clipping); persisted
-  fully_seen/excerpted/unread/unsupported coverage reaching proposal and
-  confirmation; example-derived bounded sections/schema constraints
-  confirmed and compiled; proof reference/context material never resent
-  at runtime. *(L)*
-- **B3**: no silent guessing after question-budget exhaustion — every
-  material candidate ends asked, explicitly defaulted and surfaced at
-  confirmation, or rejected-as-irrelevant (verified: non-architecture
-  candidates are silently dropped today, only runtime_metadata_fields
-  gets a fallback; commit-grade defaults carry medium confidence). *(M)*
-- **B4**: exact user-requested HITL placement — typed cited checkpoint
-  intents in PlanningState from the existing understanding pass,
-  bijection between requested and compiled checkpoints enforced by
-  compiler/critic. *(M)*
-- **B5**: honest static execution efficiency — FIRST fix the verified
-  capability-truth bug: `requires_completion_model` treats TEMPLATE_FILL
-  as model-backed while it is deterministic zero-token rendering
-  (`flow_capability_manifest.py:637-647` vs `:692-700`); then critic
-  invariants for hard structural waste + a factual execution-shape
-  projection on proposals (model-backed vs deterministic steps, mapped
-  upper bound, schema-constrained outputs). No token/currency estimates,
-  no numeric step-count knob, no per-step rationale prose. *(M)*
-- **B6**: generated-flow contract proof — owner-level behavior tests:
-  form variables (inmatningsfalt), targeted underlag per step, JSON
-  input/output schemas enforced, unusual inputs non-brittle,
-  deterministic steps provably zero-call; measured economics stay in
-  item 10. *(M)*
-- **B7** (= item 8 deepened): vocabulary + semantic-owner convergence —
-  delete one proven-redundant heuristic family at a time (start:
-  case_like_flow treats "underlag" as a domain marker). *(M)*
+- **B2** (= item 5 deepened, three ordered owner slices): (a) preserve the
+  attachment owner's actual evidence contract —
+  `fully_seen/excerpt_truncated/inventory_only` plus readability — through
+  role selection, keep full placeholder identity with display-only clipping,
+  and stop selecting the first parseable schema; (b) derive and confirm bounded
+  structure/style/schema constraints, deduplicating identical schemas and asking
+  on conflicts; (c) bind exactly one selected template at the atomic
+  materialization seam and prove reference/context material is never resent at
+  runtime. Evidence, interpretation, then binding; do not invent richer coverage
+  states before their owner can produce them. *(L)*
+- **B3**: no silent guessing after question-budget exhaustion — preserve each
+  candidate's source-specific commit-grade policy; every material commit-grade
+  candidate ends asked, explicitly defaulted and surfaced at confirmation, or
+  rejected as irrelevant. Do not make the generic `ResolvedSlot.is_commit_grade`
+  default into a new global policy. *(M)*
+- **B4** (two ordered slices): (a) the existing understanding pass records typed,
+  cited checkpoint intents and confirmation exposes them; (b) compile/apply and
+  the critic share one canonical requested-versus-compiled checkpoint predicate.
+  No parallel HITL classifier or duplicate matching rule. *(M)*
+- **B5a** (= item 2d): correct deterministic TEMPLATE_FILL capability truth
+  before item 2c. *(S)*
+- **B5b** (= item 4b): after B1, add structural-waste invariants and the factual
+  execution-shape projection. *(M)*
+- Generated-flow proof is not a standalone B6 slice. Each owning slice carries
+  its behavior tests: form variables (inmatningsfält), targeted underlag per
+  step, enforced JSON input/output schemas, unusual-input resilience, and
+  deterministic zero-call behavior. Measured economics stay in item 10.
+- **B7** (= item 8b/8c): first correct the known vocabulary defects directly;
+  then delete one heuristic family at a time only after evidence proves the
+  canonical semantic owner and behavior equivalence. *(M)*
 - **B8** (deferred): skills value gate — offline comparative evaluation
   (same briefs with/without a curated playbook) before ANY coupling;
-  free-text admin guidance REJECTED (unversioned prompt ownership); if
-  lift is proven: one org-published revision selected through existing
-  settings, digest-pinned, token-budgeted. *(S, deferred)*
+  free-text admin guidance REJECTED (unversioned prompt ownership). This is an
+  evidence gate, not an implementation commitment; only proven lift may create
+  a later scoped roadmap item.
 
 **Rejected as overengineering**: a second assumption ledger (the
 ResolvedSlot -> action-policy -> confirmation surface already exists); a
