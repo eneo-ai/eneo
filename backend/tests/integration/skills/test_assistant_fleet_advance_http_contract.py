@@ -41,6 +41,7 @@ from eneo.database.tables.skill_table import (
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_repo import FileRepository
+from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.object_content.content import ContentFailureCode, ContentState, StorageKind
 from eneo.object_content.content_service import ObjectContentService
@@ -1329,9 +1330,11 @@ class _OwnerAttachmentFleetSeed:
     old_revision_id: UUID
     candidate_revision_id: UUID
     assistant_id: UUID
+    assistant_ids: tuple[UUID, ...]
     owner_user_id: UUID
     root_file_id: UUID
     derived_content_id: UUID
+    derived_content_ids: tuple[UUID, ...]
     derived_payload: bytes
 
 
@@ -1344,7 +1347,10 @@ async def _seed_owner_attachment_fleet(
     space_factory,
     derived_state: ContentState,
     vision: bool = True,
+    assistant_count: int = 1,
 ) -> _OwnerAttachmentFleetSeed:
+    if assistant_count < 1:
+        raise ValueError("assistant_count must be positive")
     async with db_container() as container:
         session = container.session()
         owner = await user_factory(session, tenant_id=admin_user.tenant_id)
@@ -1360,46 +1366,22 @@ async def _seed_owner_attachment_fleet(
             [model.id],
             user_id=owner.id,
         )
-        assistant = Assistants(
-            name="Owner vision Assistant",
-            user_id=owner.id,
-            completion_model_id=model.id,
-            completion_model_kwargs={},
-            logging_enabled=True,
-            is_default=False,
-            published=False,
-            space_id=personal_space.id,
-        )
-        session.add(assistant)
+        assistants = [
+            Assistants(
+                name=f"Owner vision Assistant {index + 1}",
+                user_id=owner.id,
+                completion_model_id=model.id,
+                completion_model_kwargs={},
+                logging_enabled=True,
+                is_default=False,
+                published=False,
+                space_id=personal_space.id,
+            )
+            for index in range(assistant_count)
+        ]
+        session.add_all(assistants)
         await session.flush()
 
-        root = Files(
-            name="owner-document.txt",
-            mimetype="text/plain",
-            file_type=FileType.TEXT.value,
-            tenant_id=admin_user.tenant_id,
-            user_id=owner.id,
-        )
-        session.add(root)
-        await session.flush()
-        derived = Files(
-            name="owner-page.png",
-            mimetype="image/png",
-            file_type=FileType.IMAGE.value,
-            tenant_id=admin_user.tenant_id,
-            user_id=owner.id,
-            parent_file_id=root.id,
-        )
-        session.add(derived)
-        await session.flush()
-        await _add_inline_file_content(
-            session,
-            file=root,
-            user_id=owner.id,
-            payload=b"short root attachment",
-            variant=FileContentVariant.ORIGINAL,
-            media_type="text/plain",
-        )
         derived_image = BytesIO()
         Image.new("RGB", (2_048, 1_024), color=(24, 95, 180)).save(
             derived_image,
@@ -1411,30 +1393,65 @@ async def _seed_owner_attachment_fleet(
             if derived_state is ContentState.AVAILABLE
             else _add_pending_file_content
         )
-        derived_content_id = await add_derived_content(
-            session,
-            file=derived,
-            user_id=owner.id,
-            payload=derived_payload,
-            variant=FileContentVariant.DERIVED_PAGE,
-            media_type="image/png",
-        )
+        roots: list[Files] = []
+        derived_content_ids: list[UUID] = []
+        for index, assistant in enumerate(assistants):
+            root = Files(
+                name=f"owner-document-{index + 1}.txt",
+                mimetype="text/plain",
+                file_type=FileType.TEXT.value,
+                tenant_id=admin_user.tenant_id,
+                user_id=owner.id,
+            )
+            session.add(root)
+            await session.flush()
+            roots.append(root)
+            derived = Files(
+                name=f"owner-page-{index + 1}.png",
+                mimetype="image/png",
+                file_type=FileType.IMAGE.value,
+                tenant_id=admin_user.tenant_id,
+                user_id=owner.id,
+                parent_file_id=root.id,
+            )
+            session.add(derived)
+            await session.flush()
+            await _add_inline_file_content(
+                session,
+                file=root,
+                user_id=owner.id,
+                payload=b"short root attachment",
+                variant=FileContentVariant.ORIGINAL,
+                media_type="text/plain",
+            )
+            derived_content_ids.append(
+                await add_derived_content(
+                    session,
+                    file=derived,
+                    user_id=owner.id,
+                    payload=derived_payload,
+                    variant=FileContentVariant.DERIVED_PAGE,
+                    media_type="image/png",
+                )
+            )
+            session.add(AssistantsFiles(assistant_id=assistant.id, file_id=root.id))
         if derived_state is ContentState.FAILED:
             await session.execute(
                 sa.update(ObjectContents)
-                .where(ObjectContents.id == derived_content_id)
+                .where(ObjectContents.id.in_(derived_content_ids))
                 .values(
                     state=ContentState.FAILED.value,
                     failure_code=ContentFailureCode.VERIFICATION_MISMATCH.value,
                     failure_detail="Terminal derivative failure for fleet validation",
                 )
             )
-        session.add(AssistantsFiles(assistant_id=assistant.id, file_id=root.id))
         await session.flush()
         personal_space_id = personal_space.id
-        assistant_id = assistant.id
+        assistant_ids = tuple(assistant.id for assistant in assistants)
+        assistant_id = assistant_ids[0]
         owner_user_id = owner.id
-        root_file_id = root.id
+        root_file_id = roots[0].id
+        derived_content_id = derived_content_ids[0]
 
     async with db_container() as container:
         session = container.session()
@@ -1462,7 +1479,7 @@ async def _seed_owner_attachment_fleet(
             skill_id=skill.id,
             expected_revision_id=old_revision.id,
         )
-        session.add(
+        session.add_all(
             AssistantSkillBindings(
                 assistant_id=assistant_id,
                 tenant_id=admin_user.tenant_id,
@@ -1473,6 +1490,7 @@ async def _seed_owner_attachment_fleet(
                 position=0,
                 activation_mode=SkillActivationMode.ALWAYS.value,
             )
+            for assistant_id in assistant_ids
         )
         change = await repo.create_revision(
             skill_id=skill.id,
@@ -1497,14 +1515,16 @@ async def _seed_owner_attachment_fleet(
         old_revision_id=old_revision_id,
         candidate_revision_id=candidate_revision_id,
         assistant_id=assistant_id,
+        assistant_ids=assistant_ids,
         owner_user_id=owner_user_id,
         root_file_id=root_file_id,
         derived_content_id=derived_content_id,
+        derived_content_ids=tuple(derived_content_ids),
         derived_payload=derived_payload,
     )
 
 
-async def _advance_owner_attachment_fleet_with_derived_query_count(
+async def _advance_owner_attachment_fleet_with_query_counts(
     *,
     client,
     admin_token: str,
@@ -1515,6 +1535,7 @@ async def _advance_owner_attachment_fleet_with_derived_query_count(
         bind = container.session().get_bind()
         engine = getattr(bind, "engine", bind)
         derived_selects = 0
+        content_reference_selects = 0
 
         def record_statement(
             _connection: object,
@@ -1524,8 +1545,13 @@ async def _advance_owner_attachment_fleet_with_derived_query_count(
             _context: object,
             _executemany: bool,
         ) -> None:
-            nonlocal derived_selects
+            nonlocal content_reference_selects, derived_selects
             normalized = statement.lower()
+            if (
+                normalized.lstrip().startswith("select")
+                and "from file_content_references" in normalized
+            ):
+                content_reference_selects += 1
             if (
                 normalized.lstrip().startswith("select")
                 and "left outer join files as" in normalized
@@ -1546,7 +1572,7 @@ async def _advance_owner_attachment_fleet_with_derived_query_count(
             )
         finally:
             sa.event.remove(engine, "before_cursor_execute", record_statement)
-    return response, derived_selects
+    return response, derived_selects, content_reference_selects
 
 
 @pytest.mark.integration
@@ -1572,7 +1598,8 @@ async def test_owner_derived_images_are_included_in_admin_fleet_validation(
     (
         response,
         derived_selects,
-    ) = await _advance_owner_attachment_fleet_with_derived_query_count(
+        _content_reference_selects,
+    ) = await _advance_owner_attachment_fleet_with_query_counts(
         client=client,
         admin_token=admin_token,
         db_container=db_container,
@@ -1605,6 +1632,102 @@ async def test_owner_derived_images_are_included_in_admin_fleet_validation(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_owner_derived_image_hydration_query_count_is_chunk_bounded(
+    monkeypatch,
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    space_factory,
+):
+    seed = await _seed_owner_attachment_fleet(
+        db_container,
+        admin_user=admin_user,
+        user_factory=user_factory,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        derived_state=ContentState.AVAILABLE,
+        assistant_count=25,
+    )
+    derived_batch_limit = len(seed.derived_payload) * 4
+    settings = get_settings().model_copy(
+        update={"attachment_max_size_bytes": derived_batch_limit}
+    )
+    monkeypatch.setattr(
+        "eneo.skills.application.organization_skill_service.get_settings",
+        lambda: settings,
+    )
+    original_read_content_bytes = ObjectContentService.read_content_bytes
+    derived_content_ids = frozenset(seed.derived_content_ids)
+    derived_payload_batch_sizes: list[int] = []
+    live_derived_payload_bytes = [0]
+    peak_live_derived_payload_bytes = [0]
+
+    class TrackedDerivedPayload(bytes):
+        def __del__(self):
+            live_derived_payload_bytes[0] -= len(self)
+
+    async def record_derived_payload_batch(service, grants):
+        derived_grant_ids = {
+            grant.content_id
+            for grant in grants
+            if grant.content_id in derived_content_ids
+        }
+        if derived_grant_ids:
+            assert live_derived_payload_bytes[0] == 0
+        payloads = await original_read_content_bytes(service, grants)
+        batch_size = 0
+        for content_id in derived_grant_ids:
+            tracked_payload = TrackedDerivedPayload(payloads[content_id])
+            payloads[content_id] = tracked_payload
+            batch_size += len(tracked_payload)
+        live_derived_payload_bytes[0] += batch_size
+        peak_live_derived_payload_bytes[0] = max(
+            peak_live_derived_payload_bytes[0],
+            live_derived_payload_bytes[0],
+        )
+        if batch_size:
+            derived_payload_batch_sizes.append(batch_size)
+        return payloads
+
+    monkeypatch.setattr(
+        ObjectContentService,
+        "read_content_bytes",
+        record_derived_payload_batch,
+    )
+
+    (
+        response,
+        derived_selects,
+        content_reference_selects,
+    ) = await _advance_owner_attachment_fleet_with_query_counts(
+        client=client,
+        admin_token=admin_token,
+        db_container=db_container,
+        seed=seed,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 0,
+        "concurrent_change": 0,
+        "incompatible": 25,
+    }
+    assert derived_selects == 1
+    assert content_reference_selects == 3
+    assert len(derived_payload_batch_sizes) == 7
+    assert max(derived_payload_batch_sizes) <= derived_batch_limit
+    assert sum(derived_payload_batch_sizes) == (
+        len(seed.derived_payload) * len(seed.derived_content_ids)
+    )
+    assert peak_live_derived_payload_bytes[0] <= derived_batch_limit
+    assert live_derived_payload_bytes[0] == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_non_vision_fleet_skips_derived_image_projection(
     client,
     admin_token,
@@ -1627,7 +1750,8 @@ async def test_non_vision_fleet_skips_derived_image_projection(
     (
         response,
         derived_selects,
-    ) = await _advance_owner_attachment_fleet_with_derived_query_count(
+        _content_reference_selects,
+    ) = await _advance_owner_attachment_fleet_with_query_counts(
         client=client,
         admin_token=admin_token,
         db_container=db_container,
