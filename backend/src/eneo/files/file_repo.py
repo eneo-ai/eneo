@@ -38,6 +38,12 @@ class FileContentReferenceRecord:
     access_class: ContentAccessClass
 
 
+@dataclass(frozen=True, slots=True)
+class AttachedDerivedImageProjection:
+    derived_images: tuple[FileMetadata, ...]
+    unstable_parent_ids: frozenset[UUID]
+
+
 _PRIMARY_VARIANTS = (
     FileContentVariant.ORIGINAL,
     FileContentVariant.GENERATED_ARTIFACT,
@@ -135,7 +141,7 @@ class FileRepository:
         self.session = session
 
     @staticmethod
-    def _visible_family(file: type[Files] = Files):
+    def _family_has_unavailable_content(file: type[Files] = Files):
         root_id = sa.case(
             (file.parent_file_id.is_(None), file.id),
             else_=file.parent_file_id,
@@ -152,7 +158,6 @@ class FileRepository:
             )
             .correlate(file)
         )
-        root_has_content = sa.exists().where(FileContentReferences.file_id == root_id)
         referenced_content_state = (
             sa.select(ObjectContents.state)
             .where(ObjectContents.id == family_reference.content_id)
@@ -167,7 +172,19 @@ class FileRepository:
             )
             .correlate(file)
         )
-        return sa.and_(root_has_content.correlate(file), ~unavailable_content)
+        return unavailable_content
+
+    @staticmethod
+    def _visible_family(file: type[Files] = Files):
+        root_id = sa.case(
+            (file.parent_file_id.is_(None), file.id),
+            else_=file.parent_file_id,
+        )
+        root_has_content = sa.exists().where(FileContentReferences.file_id == root_id)
+        return sa.and_(
+            root_has_content.correlate(file),
+            ~FileRepository._family_has_unavailable_content(file),
+        )
 
     def _visible_children_query(
         self,
@@ -269,22 +286,51 @@ class FileRepository:
         )
         return [FileMetadata.model_validate(row) for row in rows]
 
-    async def get_visible_derived_images_for_attached_roots(
+    async def project_derived_images_for_attached_roots(
         self,
         *,
         parent_ids: list[UUID],
         tenant_id: UUID,
-    ) -> list[FileMetadata]:
+    ) -> AttachedDerivedImageProjection:
         if not parent_ids:
-            return []
-        rows = await self.session.scalars(
-            self._visible_children_query(
-                parent_ids=parent_ids,
-                tenant_id=tenant_id,
-                file_type=FileType.IMAGE,
+            return AttachedDerivedImageProjection(
+                derived_images=(),
+                unstable_parent_ids=frozenset(),
             )
+        parent = aliased(Files)
+        child = aliased(Files)
+        family_unavailable = self._family_has_unavailable_content(parent)
+        rows = (
+            await self.session.execute(
+                sa.select(parent.id, child, family_unavailable)
+                .select_from(parent)
+                .outerjoin(
+                    child,
+                    sa.and_(
+                        child.parent_file_id == parent.id,
+                        child.user_id == parent.user_id,
+                        child.tenant_id == parent.tenant_id,
+                        child.file_type == FileType.IMAGE.value,
+                    ),
+                )
+                .where(
+                    parent.id.in_(parent_ids),
+                    parent.tenant_id == tenant_id,
+                )
+                .order_by(parent.id, child.created_at, child.id)
+            )
+        ).all()
+        unstable_parent_ids = frozenset(
+            parent_id for parent_id, _child, unstable in rows if unstable
         )
-        return [FileMetadata.model_validate(row) for row in rows]
+        return AttachedDerivedImageProjection(
+            derived_images=tuple(
+                FileMetadata.model_validate(child_row)
+                for parent_id, child_row, _unstable in rows
+                if child_row is not None and parent_id not in unstable_parent_ids
+            ),
+            unstable_parent_ids=unstable_parent_ids,
+        )
 
     async def get_by_id(self, file_id: UUID) -> FileMetadata:
         row = await self.session.scalar(

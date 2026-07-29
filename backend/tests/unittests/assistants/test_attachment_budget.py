@@ -9,8 +9,12 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant_repo import CompletionFileValidationProjection
 from eneo.assistants.assistant_service import AssistantService
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
+from eneo.completion_models.infrastructure.completion_service import (
+    SkillActivationPreflightAdapterLoad,
+)
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
@@ -77,6 +81,12 @@ def _service(file_service=None):
         )
     )
     completion_service = AsyncMock()
+    completion_service.load_skill_activation_preflight_adapters.side_effect = (
+        lambda models, **_kwargs: SkillActivationPreflightAdapterLoad(
+            adapters={model.id: MagicMock() for model in models},
+            unavailable_model_ids=frozenset(),
+        )
+    )
 
     async def prepare_activation_preflight(**kwargs):
         runtime = kwargs["skill_runtime"]
@@ -129,7 +139,13 @@ def _service(file_service=None):
         skill_service=skill_service,
     )
     service.repo.project_completion_file_metadata_for_validation.side_effect = (
-        lambda *, assistants, **_kwargs: {assistant.id: () for assistant in assistants}
+        lambda *, assistants, **_kwargs: {
+            assistant.id: CompletionFileValidationProjection(
+                derived_image_metadata=(),
+                is_stable=True,
+            )
+            for assistant in assistants
+        }
     )
     service.repo.hydrate_completion_files_for_validation.side_effect = (
         lambda *, assistant, **_kwargs: tuple(assistant.attachments)
@@ -1647,7 +1663,10 @@ async def test_governance_preflight_walks_every_page_of_personal_defaults():
     )
     service = _service()
     service.completion_service.load_skill_activation_preflight_adapters.side_effect = [
-        {first.completion_model.id: retained_adapter},
+        SkillActivationPreflightAdapterLoad(
+            adapters={first.completion_model.id: retained_adapter},
+            unavailable_model_ids=frozenset(),
+        ),
     ]
     cursor = ("2026-07-01", first.id)
     service.repo.get_personal_defaults_page.side_effect = [
@@ -1716,7 +1735,12 @@ async def test_governance_preflight_does_not_load_unused_page_model_adapter():
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service = _service()
-    service.completion_service.load_skill_activation_preflight_adapters.return_value = {}
+    service.completion_service.load_skill_activation_preflight_adapters.return_value = (
+        SkillActivationPreflightAdapterLoad(
+            adapters={},
+            unavailable_model_ids=frozenset(),
+        )
+    )
     service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
         items=[
             SimpleNamespace(
@@ -1816,8 +1840,14 @@ async def test_governance_preflight_hydrates_each_assistant_projection_separatel
     )
     service.repo.project_completion_file_metadata_for_validation.side_effect = None
     service.repo.project_completion_file_metadata_for_validation.return_value = {
-        first.id: (first_metadata,),
-        second.id: (second_metadata,),
+        first.id: CompletionFileValidationProjection(
+            derived_image_metadata=(first_metadata,),
+            is_stable=True,
+        ),
+        second.id: CompletionFileValidationProjection(
+            derived_image_metadata=(second_metadata,),
+            is_stable=True,
+        ),
     }
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_personal_default.return_value = (

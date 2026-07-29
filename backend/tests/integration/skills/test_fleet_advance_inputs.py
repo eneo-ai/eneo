@@ -194,7 +194,7 @@ async def test_preflight_adapter_batch_loads_one_shared_provider_once(
         sync_engine = session.bind.sync_engine
         sa.event.listen(sync_engine, "before_cursor_execute", count_provider_queries)
         try:
-            adapters = await container.completion_service().load_skill_activation_preflight_adapters(
+            adapter_load = await container.completion_service().load_skill_activation_preflight_adapters(
                 models
             )
         finally:
@@ -204,7 +204,8 @@ async def test_preflight_adapter_batch_loads_one_shared_provider_once(
                 count_provider_queries,
             )
 
-        assert set(adapters) == {model.id for model in models}
+        assert set(adapter_load.adapters) == {model.id for model in models}
+        assert adapter_load.unavailable_model_ids == frozenset()
         assert provider_queries == 1
 
 
@@ -374,9 +375,11 @@ async def test_candidate_pin_fit_matches_current_save_and_reports_candidate_refu
         assistant = loaded_space.get_assistant(assistant_record.id)
         assistant_service = container.assistant_service()
         assert assistant.completion_model is not None
-        preflight_adapters = await container.completion_service().load_skill_activation_preflight_adapters(
-            [assistant.completion_model]
-        )
+        preflight_adapters = (
+            await container.completion_service().load_skill_activation_preflight_adapters(
+                [assistant.completion_model]
+            )
+        ).adapters
         current_candidate_binding = next(
             binding for binding in resolution.eligible if binding.skill_id == skill.id
         )

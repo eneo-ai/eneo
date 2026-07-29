@@ -14,6 +14,7 @@ from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     AssistantFleetAdvanceCursor,
     AssistantFleetChunkOutcome,
+    AssistantPinAdvanceIncompatibleReason,
     AssistantPinAdvanceOutcome,
     AssistantPinAdvanceTarget,
     AssistantPinAdvanceTargetResult,
@@ -580,7 +581,11 @@ class OrganizationSkillService:
         for target in targets:
             validation_input = validation_inputs.get(target.assistant_id)
             resolution = resolutions.get(target.assistant_id)
-            if validation_input is None or resolution is None:
+            if (
+                validation_input is None
+                or resolution is None
+                or not validation_input.completion_files_stable
+            ):
                 continue
             source_binding_present = any(
                 binding.skill_id == skill_id
@@ -603,9 +608,11 @@ class OrganizationSkillService:
                 )
             ):
                 models[model.id] = cast("AICompletionModel", model)
-        preflight_adapters = await self.assistant_service.completion_service.load_skill_activation_preflight_adapters(
-            list(models.values())
+        adapter_load = await self.assistant_service.completion_service.load_skill_activation_preflight_adapters(
+            list(models.values()),
+            allow_inactive_providers=True,
         )
+        preflight_adapters = adapter_load.adapters
 
         validation_results: list[AssistantPinAdvanceTargetResult] = []
         write_targets: list[AssistantPinAdvanceTarget] = []
@@ -617,6 +624,16 @@ class OrganizationSkillService:
                     AssistantPinAdvanceTargetResult(
                         assistant_id=target.assistant_id,
                         outcome=AssistantPinAdvanceOutcome.CONCURRENT_CHANGE,
+                    )
+                )
+                continue
+            model = validation_input.assistant.completion_model
+            if model is not None and model.id in adapter_load.unavailable_model_ids:
+                validation_results.append(
+                    AssistantPinAdvanceTargetResult(
+                        assistant_id=target.assistant_id,
+                        outcome=AssistantPinAdvanceOutcome.INCOMPATIBLE,
+                        reason=AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE,
                     )
                 )
                 continue

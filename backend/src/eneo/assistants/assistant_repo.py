@@ -71,12 +71,19 @@ class PersonalDefaultValidationInput:
 
 
 @dataclass(frozen=True)
+class CompletionFileValidationProjection:
+    derived_image_metadata: tuple[FileMetadata, ...]
+    is_stable: bool
+
+
+@dataclass(frozen=True)
 class AssistantValidationInput:
     assistant: Assistant
     space_is_personal: bool
     configured_mcp_servers: tuple["MCPServer", ...]
     has_knowledge: bool
     derived_image_metadata: tuple[FileMetadata, ...]
+    completion_files_stable: bool
 
 
 def personal_defaults_page_query(
@@ -246,7 +253,7 @@ class AssistantRepository:
         assistants: Sequence[Assistant],
         models_by_assistant_id: Mapping[UUID, "CompletionModel | None"],
         tenant_id: UUID,
-    ) -> dict[UUID, tuple[FileMetadata, ...]]:
+    ) -> dict[UUID, CompletionFileValidationProjection]:
         """Batch-project visible derived-image metadata for validation."""
         metadata_by_assistant_id: dict[UUID, list[FileMetadata]] = {}
         present_ids_by_assistant_id: dict[UUID, set[UUID]] = {}
@@ -271,23 +278,32 @@ class AssistantRepository:
                     seen_parent_ids.add(file.id)
                     parent_ids.append(file.id)
 
+        unstable_assistant_ids: set[UUID] = set()
         if parent_ids:
-            derived_metadata = (
-                await self.file_repo.get_visible_derived_images_for_attached_roots(
+            derived_projection = (
+                await self.file_repo.project_derived_images_for_attached_roots(
                     parent_ids=parent_ids,
                     tenant_id=tenant_id,
                 )
             )
-            for metadata in derived_metadata:
+            for metadata in derived_projection.derived_images:
                 assert metadata.parent_file_id is not None
                 for assistant_id in assistant_ids_by_parent_id[metadata.parent_file_id]:
                     if metadata.id in present_ids_by_assistant_id[assistant_id]:
                         continue
                     metadata_by_assistant_id[assistant_id].append(metadata)
                     present_ids_by_assistant_id[assistant_id].add(metadata.id)
+            unstable_assistant_ids = {
+                assistant_id
+                for parent_id in derived_projection.unstable_parent_ids
+                for assistant_id in assistant_ids_by_parent_id[parent_id]
+            }
 
         return {
-            assistant_id: tuple(metadata)
+            assistant_id: CompletionFileValidationProjection(
+                derived_image_metadata=tuple(metadata),
+                is_stable=assistant_id not in unstable_assistant_ids,
+            )
             for assistant_id, metadata in metadata_by_assistant_id.items()
         }
 
@@ -886,7 +902,7 @@ class AssistantRepository:
             )
             for record in records
         }
-        derived_image_metadata = (
+        completion_file_projections = (
             await self.project_completion_file_metadata_for_validation(
                 assistants=list(assistants_by_id.values()),
                 models_by_assistant_id={
@@ -908,7 +924,12 @@ class AssistantRepository:
                 space_is_personal=space_is_personal,
                 configured_mcp_servers=configured_mcp_servers,
                 has_knowledge=record_has_knowledge,
-                derived_image_metadata=derived_image_metadata[record.id],
+                derived_image_metadata=completion_file_projections[
+                    record.id
+                ].derived_image_metadata,
+                completion_files_stable=completion_file_projections[
+                    record.id
+                ].is_stable,
             )
         return inputs
 

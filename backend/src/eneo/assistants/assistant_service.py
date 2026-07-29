@@ -920,7 +920,7 @@ class AssistantService:
                         for model in effective_config.available_models
                     ]
                 )
-            )
+            ).adapters
         if candidate_skill_ids:
             for model in effective_config.available_models:
                 await self._validate_skill_activation_fit(
@@ -1007,7 +1007,7 @@ class AssistantService:
                     effective_mcp_servers = projected_mcp_servers.get(assistant.id, [])
             effective_mcp_servers_by_assistant_id[assistant.id] = effective_mcp_servers
 
-        derived_image_metadata_by_assistant_id = (
+        completion_file_projections_by_assistant_id = (
             await self.repo.project_completion_file_metadata_for_validation(
                 assistants=[item.assistant for item in validation_inputs],
                 models_by_assistant_id=models_by_assistant_id,
@@ -1026,7 +1026,7 @@ class AssistantService:
             if requires_adapter and model.id not in preflight_adapters:
                 missing_models[model.id] = model
         if missing_models:
-            preflight_adapters.update(
+            adapter_load = (
                 await self.completion_service.load_skill_activation_preflight_adapters(
                     [
                         cast("AICompletionModel", model)
@@ -1034,6 +1034,7 @@ class AssistantService:
                     ]
                 )
             )
+            preflight_adapters.update(adapter_load.adapters)
 
         for validation_input in validation_inputs:
             assistant = validation_input.assistant
@@ -1052,9 +1053,9 @@ class AssistantService:
             completion_prompt_files = list(
                 await self.repo.hydrate_completion_files_for_validation(
                     assistant=assistant,
-                    derived_image_metadata=derived_image_metadata_by_assistant_id[
+                    derived_image_metadata=completion_file_projections_by_assistant_id[
                         assistant.id
-                    ],
+                    ].derived_image_metadata,
                 )
             )
             effective_mcp_servers = effective_mcp_servers_by_assistant_id[assistant.id]
