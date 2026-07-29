@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
@@ -319,6 +319,49 @@ class AssistantRepository:
             *assistant.attachments,
             *(derived_images[metadata.id] for metadata in derived_image_metadata),
         )
+
+    async def iter_completion_files_for_validation_batches(
+        self,
+        *,
+        validation_inputs: Sequence[AssistantValidationInput],
+        tenant_id: UUID,
+        max_batch_bytes: int,
+    ) -> AsyncIterator[dict[UUID, tuple[File, ...]]]:
+        """Hydrate projected derivatives in byte-bounded validation batches."""
+        groups: list[FileAttachmentGroup] = []
+        validation_input_by_assistant_id: dict[UUID, AssistantValidationInput] = {}
+        for validation_input in validation_inputs:
+            assistant_id = validation_input.assistant.id
+            assert assistant_id is not None
+            validation_input_by_assistant_id[assistant_id] = validation_input
+            groups.append(
+                FileAttachmentGroup(
+                    owner_kind="assistant",
+                    owner_id=assistant_id,
+                    tenant_id=tenant_id,
+                    files=validation_input.derived_image_metadata,
+                )
+            )
+        async for (
+            derived_images_by_assistant_id
+        ) in self.file_content_loader.load_attachment_groups_in_payload_batches(
+            groups,
+            max_batch_bytes=max_batch_bytes,
+        ):
+            completion_files_by_assistant_id = {
+                assistant_id: (
+                    *validation_input_by_assistant_id[
+                        assistant_id
+                    ].assistant.attachments,
+                    *derived_images,
+                )
+                for (_, assistant_id), derived_images in (
+                    derived_images_by_assistant_id.items()
+                )
+            }
+            yield completion_files_by_assistant_id
+            del completion_files_by_assistant_id
+            del derived_images_by_assistant_id
 
     @staticmethod
     def _options():

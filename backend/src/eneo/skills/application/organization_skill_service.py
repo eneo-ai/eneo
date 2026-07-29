@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -613,9 +614,20 @@ class OrganizationSkillService:
             allow_inactive_providers=True,
         )
         preflight_adapters = adapter_load.adapters
+        file_validation_inputs = [
+            validation_input
+            for assistant_id, validation_input in validation_inputs.items()
+            if assistant_id in validation_resolutions
+            and (
+                validation_input.assistant.completion_model is None
+                or validation_input.assistant.completion_model.id
+                not in adapter_load.unavailable_model_ids
+            )
+        ]
 
         validation_results: list[AssistantPinAdvanceTargetResult] = []
         write_targets: list[AssistantPinAdvanceTarget] = []
+        target_by_assistant_id = {target.assistant_id: target for target in targets}
         for target in targets:
             validation_input = validation_inputs.get(target.assistant_id)
             resolution = validation_resolutions.get(target.assistant_id)
@@ -637,35 +649,49 @@ class OrganizationSkillService:
                     )
                 )
                 continue
-            incompatible_reason = await self.assistant_service.assert_assistant_fits_candidate_pin(
-                assistant=validation_input.assistant,
-                space_is_personal=validation_input.space_is_personal,
-                candidate=PersonalChatPinOverride(
-                    skill_id=skill_id,
-                    from_revision_id=target.from_revision_id,
-                    to_revision_id=expected_published_revision_id,
-                ),
-                candidate_binding=candidate_binding,
-                resolution=resolution,
-                runtime_policy=runtime_policy_snapshot.policy,
-                preflight_adapters=preflight_adapters,
-                completion_prompt_files=(
-                    await self.assistant_service.repo.hydrate_completion_files_for_validation(
+
+        async for (
+            completion_files_by_assistant_id
+        ) in self.assistant_service.repo.iter_completion_files_for_validation_batches(
+            validation_inputs=file_validation_inputs,
+            tenant_id=self.user.tenant_id,
+            max_batch_bytes=get_settings().attachment_max_size_bytes,
+        ):
+            for (
+                assistant_id,
+                completion_files,
+            ) in completion_files_by_assistant_id.items():
+                validation_input = validation_inputs[assistant_id]
+                resolution = validation_resolutions[assistant_id]
+                target = target_by_assistant_id[assistant_id]
+                incompatible_reason = (
+                    await self.assistant_service.assert_assistant_fits_candidate_pin(
                         assistant=validation_input.assistant,
-                        derived_image_metadata=validation_input.derived_image_metadata,
-                    )
-                ),
-            )
-            if incompatible_reason is not None:
-                validation_results.append(
-                    AssistantPinAdvanceTargetResult(
-                        assistant_id=target.assistant_id,
-                        outcome=AssistantPinAdvanceOutcome.INCOMPATIBLE,
-                        reason=incompatible_reason,
+                        space_is_personal=validation_input.space_is_personal,
+                        candidate=PersonalChatPinOverride(
+                            skill_id=skill_id,
+                            from_revision_id=target.from_revision_id,
+                            to_revision_id=expected_published_revision_id,
+                        ),
+                        candidate_binding=candidate_binding,
+                        resolution=resolution,
+                        runtime_policy=runtime_policy_snapshot.policy,
+                        preflight_adapters=preflight_adapters,
+                        completion_prompt_files=completion_files,
                     )
                 )
-                continue
-            write_targets.append(target)
+                if incompatible_reason is not None:
+                    validation_results.append(
+                        AssistantPinAdvanceTargetResult(
+                            assistant_id=assistant_id,
+                            outcome=AssistantPinAdvanceOutcome.INCOMPATIBLE,
+                            reason=incompatible_reason,
+                        )
+                    )
+                else:
+                    write_targets.append(target)
+                del completion_files
+            del completion_files_by_assistant_id
 
         try:
             write_results = await self.repo.advance_assistant_skill_pins(
