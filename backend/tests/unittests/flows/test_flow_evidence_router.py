@@ -250,6 +250,7 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
     session = MagicMock()
     session._is_explicit_tx_test_session = True
     session.begin.return_value = _EvidenceTransaction(events)
+    session.connection = AsyncMock()
     container.session.return_value = session
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -321,6 +322,7 @@ async def test_list_flow_run_provider_calls_forwards_cursor_and_audits_page(
     session = MagicMock()
     session._is_explicit_tx_test_session = True
     session.begin.return_value = _EvidenceTransaction(events)
+    session.connection = AsyncMock()
     container.session.return_value = session
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -850,6 +852,7 @@ async def test_export_flow_run_evidence_returns_json_attachment(monkeypatch):
     session = MagicMock()
     session._is_explicit_tx_test_session = True
     session.begin.return_value = _EvidenceTransaction(events)
+    session.connection = AsyncMock()
     container.session.return_value = session
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -981,6 +984,7 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
         session.begin.return_value = _EvidenceTransaction(
             [], exit_error=RuntimeError("commit unavailable")
         )
+        session.connection = AsyncMock()
         container.session.return_value = session
 
     with pytest.raises(AuditLoggingUnavailableException) as exc_info:
@@ -1043,6 +1047,7 @@ async def test_export_flow_run_evidence_fails_closed_when_required_audit_is_unav
         session.begin.return_value = _EvidenceTransaction(
             [], exit_error=RuntimeError("commit unavailable")
         )
+        session.connection = AsyncMock()
         container.session.return_value = session
 
     with pytest.raises(AuditLoggingUnavailableException) as exc_info:

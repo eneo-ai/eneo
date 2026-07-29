@@ -388,6 +388,7 @@ def _enable_explicit_transaction(container, events: list[str] | None = None):
     session = SimpleNamespace(
         _is_explicit_tx_test_session=True,
         begin=MagicMock(return_value=_RecordingAsyncTransaction(events)),
+        connection=AsyncMock(),
     )
     container.session.return_value = session
     return session

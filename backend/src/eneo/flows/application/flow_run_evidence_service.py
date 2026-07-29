@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from typing import Any, cast
 from uuid import UUID
@@ -352,55 +351,17 @@ class FlowRunEvidenceService:
                 provenance_size,
                 detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
             )
-        async with asyncio.TaskGroup() as task_group:
-            step_results_task = task_group.create_task(
-                self.flow_run_repo.list_step_results(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-            step_attempts_task = task_group.create_task(
-                self.flow_run_repo.list_step_attempts(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                    limit=attempt_limit,
-                    history_byte_budget=history_byte_budget,
-                    passage_byte_budget=passage_byte_budget,
-                )
-            )
-            rerun_operations_task = task_group.create_task(
-                self.flow_run_rerun_repo.list_rerun_operations_for_run(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-            rerun_invalidated_steps_task = task_group.create_task(
-                self.flow_run_rerun_repo.list_rerun_invalidated_steps_for_run(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-            review_checkpoints_task = task_group.create_task(
-                self.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-            result_files_task = task_group.create_task(
-                self.flow_run_repo.list_result_files(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-            provider_calls_task = task_group.create_task(
-                self.provider_call_repo.list_evidence_page(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                    limit=provider_call_limit,
-                )
-            )
-        step_results = step_results_task.result()
-        attempt_page = step_attempts_task.result()
+        step_results = await self.flow_run_repo.list_step_results(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        attempt_page = await self.flow_run_repo.list_step_attempts(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+            limit=attempt_limit,
+            history_byte_budget=history_byte_budget,
+            passage_byte_budget=passage_byte_budget,
+        )
         step_attempts = withhold_attempt_passages(
             attempt_page.attempts,
             disclosure=await self.access_policy.passage_disclosure_for_run(
@@ -448,11 +409,31 @@ class FlowRunEvidenceService:
                 step_attempts,
                 detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
             )
-        rerun_operations = rerun_operations_task.result()
-        rerun_invalidated_steps = rerun_invalidated_steps_task.result()
-        review_checkpoints = review_checkpoints_task.result()
-        result_files = result_files_task.result()
-        provider_calls = provider_calls_task.result()
+        rerun_operations = await self.flow_run_rerun_repo.list_rerun_operations_for_run(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        rerun_invalidated_steps = (
+            await self.flow_run_rerun_repo.list_rerun_invalidated_steps_for_run(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+            )
+        )
+        review_checkpoints = (
+            await self.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+            )
+        )
+        result_files = await self.flow_run_repo.list_result_files(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        provider_calls = await self.provider_call_repo.list_evidence_page(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+            limit=provider_call_limit,
+        )
         webhook_deliveries = (
             await self.webhook_delivery_repo.list_run_delivery_statuses(
                 run_id=resolved_run.id,

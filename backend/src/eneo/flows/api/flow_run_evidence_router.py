@@ -11,8 +11,8 @@ from eneo.authentication.auth_models import (
 )
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
-    commit_flow_runtime_write_before_response,
     error_response,
+    flow_run_evidence_snapshot_transaction,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
@@ -147,7 +147,7 @@ async def get_flow_run_evidence(
 ):
     committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
     try:
-        async with commit_flow_runtime_write_before_response(container):
+        async with flow_run_evidence_snapshot_transaction(container):
             await flow_access_context.enforce_flow_scope(
                 request,
                 container,
@@ -286,7 +286,7 @@ async def list_flow_run_provider_calls(
 ) -> ProviderCallEvidencePage:
     committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
     try:
-        async with commit_flow_runtime_write_before_response(container):
+        async with flow_run_evidence_snapshot_transaction(container):
             await flow_access_context.enforce_flow_scope(
                 request,
                 container,
@@ -447,7 +447,7 @@ async def export_flow_run_evidence(
 ):
     committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
     try:
-        async with commit_flow_runtime_write_before_response(container):
+        async with flow_run_evidence_snapshot_transaction(container):
             await flow_access_context.enforce_flow_scope(
                 request,
                 container,
