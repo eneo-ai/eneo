@@ -30,27 +30,17 @@ class FlowMappedExecutionPolicy:
 
 
 class FlowMappedExecutionPolicySource(Protocol):
-    async def get_mapped_execution_policy(self) -> object: ...
+    async def get_mapped_execution_policy_resolved(
+        self,
+    ) -> FlowMappedExecutionPolicy: ...
 
 
 async def resolve_flow_mapped_execution_policy_from_source(
     source: FlowMappedExecutionPolicySource | None,
 ) -> FlowMappedExecutionPolicy:
-    if source is None:
-        return resolve_flow_mapped_execution_policy(None)
-    loader = getattr(source, "get_mapped_execution_policy", None)
-    if loader is None:
-        return resolve_flow_mapped_execution_policy(None)
-    policy = await loader()
-    return FlowMappedExecutionPolicy(
-        version=getattr(policy, "version", MAPPED_EXECUTION_STORAGE_VERSION),
-        max_provider_calls_per_mapped_step=getattr(
-            policy, MAPPED_EXECUTION_MAX_CALLS_KEY, None
-        ),
-        max_estimated_input_tokens_per_mapped_step=getattr(
-            policy, MAPPED_EXECUTION_MAX_INPUT_TOKENS_KEY, None
-        ),
-    )
+    if source is not None:
+        return await source.get_mapped_execution_policy_resolved()
+    return resolve_flow_mapped_execution_policy(None)
 
 
 def _parse_positive_int(value: object, field_name: str) -> int:

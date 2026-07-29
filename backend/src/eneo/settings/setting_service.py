@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     resolve_ai_builder_budget_policy,
 )
 from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
     apply_flow_mapped_execution_policy_patch,
     resolve_flow_mapped_execution_policy,
 )
@@ -407,12 +408,15 @@ class SettingService:
         )
         return updated
 
-    @validate_permissions(Permission.ADMIN)
-    async def get_mapped_execution_policy(self) -> FlowMappedExecutionPolicyPublic:
+    async def get_mapped_execution_policy_resolved(self) -> FlowMappedExecutionPolicy:
         tenant = await self._get_tenant_for_flow_settings()
-        policy = resolve_flow_mapped_execution_policy(
+        return resolve_flow_mapped_execution_policy(
             getattr(tenant, "flow_settings", None)
         )
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_mapped_execution_policy(self) -> FlowMappedExecutionPolicyPublic:
+        policy = await self.get_mapped_execution_policy_resolved()
         return FlowMappedExecutionPolicyPublic(
             version=policy.version,
             max_provider_calls_per_mapped_step=(

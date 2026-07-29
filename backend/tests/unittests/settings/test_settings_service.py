@@ -9,6 +9,7 @@ from eneo.data_retention.infrastructure.data_retention_service import (
     FlowRetentionOrganizationChangeDecision,
     FlowRetentionOrganizationProposal,
 )
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_evidence_policy import (
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY,
@@ -425,6 +426,39 @@ async def test_get_flow_input_limits_resolved_returns_domain_limits(monkeypatch)
     assert limits.audio_max_size_bytes == 29_000_000
     assert limits.max_files_per_run == 7
     assert limits.audio_max_files_per_run == 3
+
+
+async def test_get_mapped_execution_policy_resolved_returns_domain_policy():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "mapped_execution": {
+                    "version": 1,
+                    "max_provider_calls_per_mapped_step": 8,
+                    "max_estimated_input_tokens_per_mapped_step": 120_000,
+                }
+            }
+        }
+    )
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+    )
+
+    policy = await service.get_mapped_execution_policy_resolved()
+
+    assert policy == FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=8,
+        max_estimated_input_tokens_per_mapped_step=120_000,
+    )
 
 
 async def test_update_flow_input_limits_persists_and_audits(monkeypatch):

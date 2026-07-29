@@ -2074,7 +2074,7 @@ class FlowRunExecutor:
         )
         if commit:
             await self._commit()
-        return step_result
+        return saved_result
 
     async def _open_review_checkpoint_for_completed_step(
         self,

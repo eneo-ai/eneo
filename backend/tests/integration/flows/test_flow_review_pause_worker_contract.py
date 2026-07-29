@@ -15,6 +15,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
+    FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
     FlowSteps,
@@ -1245,6 +1246,16 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             .scalars()
             .all()
         )
+        downstream_resolved_inputs = await session.scalar(
+            sa.select(FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id
+                == FlowStepAttemptResolvedInputs.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id == context.run_id)
+            .where(FlowStepAttempts.step_id == context.second_step_id)
+        )
         checkpoint_row = await session.scalar(
             sa.select(FlowRunReviewCheckpoints).where(
                 FlowRunReviewCheckpoints.id == checkpoint.id
@@ -1290,6 +1301,8 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
     assert step_result_rows[1].output_payload_json == {
         "text": "Second step used edited answer.",
     }
+    assert downstream_resolved_inputs is not None
+    assert downstream_resolved_inputs["edges"][0]["source"]["source_attempt_no"] == 1
 
     questions = [
         call.kwargs["question"]

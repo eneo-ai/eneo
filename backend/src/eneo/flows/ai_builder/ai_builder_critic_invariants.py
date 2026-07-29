@@ -685,11 +685,18 @@ def _missing_source_reader_required_field_names(
     if not required_names:
         return ()
 
+    source_reader_contracts = tuple(
+        contract
+        for step in context.spec.steps
+        if _is_structured_source_reader(step)
+        and (contract := step.output_contract) is not None
+    )
+    if not source_reader_contracts:
+        return ()
+
     captured_names: set[str] = set()
-    for step in context.spec.steps:
-        if not _is_structured_source_reader(step) or step.output_contract is None:
-            continue
-        captured_names.update(schema_leaf_property_names(step.output_contract))
+    for contract in source_reader_contracts:
+        captured_names.update(schema_leaf_property_names(contract))
     return tuple(sorted(required_names - captured_names))
 
 

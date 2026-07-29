@@ -7,8 +7,7 @@ from uuid import UUID
 
 from eneo.flows.domain.flow import Flow, FlowVersion
 from eneo.flows.domain.mapped_execution_policy import (
-    FlowMappedExecutionPolicySource,
-    resolve_flow_mapped_execution_policy_from_source,
+    FlowMappedExecutionPolicy,
 )
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -40,10 +39,11 @@ class FlowRuntimeVersionSource(Protocol):
 
 class FlowRuntimeSettingsSource(
     FlowInputLimitsSource,
-    FlowMappedExecutionPolicySource,
     Protocol,
 ):
-    pass
+    async def get_mapped_execution_policy_resolved(
+        self,
+    ) -> FlowMappedExecutionPolicy: ...
 
 
 class FlowRuntimePublicationIntent(Enum):
@@ -125,9 +125,7 @@ async def load_published_runtime_inputs(
     )
     steps = tuple(definition.runtime_steps())
     limits = await resolve_flow_input_limits_from_source(settings_source)
-    mapped_policy = await resolve_flow_mapped_execution_policy_from_source(
-        settings_source
-    )
+    mapped_policy = await settings_source.get_mapped_execution_policy_resolved()
     input_specs = build_runtime_step_input_specs(
         steps=steps,
         limits=limits,

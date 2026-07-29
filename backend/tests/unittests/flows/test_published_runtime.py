@@ -9,6 +9,7 @@ import pytest
 
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import FlowInputLimits
@@ -164,6 +165,9 @@ async def test_load_published_runtime_inputs_builds_published_runtime_specs() ->
         max_files_per_run=5,
         audio_max_files_per_run=2,
     )
+    settings_service.get_mapped_execution_policy_resolved.return_value = (
+        FlowMappedExecutionPolicy()
+    )
 
     result = await load_published_runtime_inputs(
         flow_service=flow_service,
@@ -188,6 +192,7 @@ async def test_load_published_runtime_inputs_builds_published_runtime_specs() ->
         version=5,
         tenant_id=flow.tenant_id,
     )
+    settings_service.get_mapped_execution_policy_resolved.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
