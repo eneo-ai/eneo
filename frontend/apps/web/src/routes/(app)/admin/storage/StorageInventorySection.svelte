@@ -11,6 +11,7 @@
   type Props = {
     inventory: ObjectContentInventory | null;
     status: "idle" | "loading" | "error";
+    lastRefreshed: string | null;
     onRetry: () => void | Promise<void>;
     onRefresh: () => void | Promise<void>;
     storageTargetLabel: (target: StorageKind | null) => string;
@@ -23,6 +24,7 @@
   let {
     inventory,
     status,
+    lastRefreshed,
     onRetry,
     onRefresh,
     storageTargetLabel,
@@ -35,6 +37,11 @@
   let alertRef = $state<HTMLElement | null>(null);
 
   $effect(() => alertRef?.focus());
+
+  function refreshInventory(): void {
+    if (status === "loading") return;
+    void onRefresh();
+  }
 </script>
 
 <PolicySection
@@ -52,12 +59,18 @@
     <Boxes class="size-5" aria-hidden="true" />
   {/snippet}
 
-  <div class="flex justify-end">
+  <div class="flex flex-wrap items-center justify-end gap-3">
+    {#if lastRefreshed !== null}
+      <span class="text-muted text-xs">
+        {m.storage_last_refreshed({ time: lastRefreshed })}
+      </span>
+    {/if}
     <Button
       variant="outline"
-      disabled={status === "loading"}
+      aria-disabled={status === "loading"}
       aria-busy={status === "loading"}
-      onclick={() => void onRefresh()}
+      class={status === "loading" ? "pointer-events-none opacity-50" : undefined}
+      onclick={refreshInventory}
     >
       <RefreshCw
         data-icon="inline-start"
@@ -68,12 +81,7 @@
     </Button>
   </div>
 
-  {#if status === "loading"}
-    <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
-      <Loader2 class="size-4 animate-spin" />
-      {m.storage_inventory_loading()}
-    </p>
-  {:else if status === "error"}
+  {#if status === "error"}
     <Alert.Root
       bind:ref={alertRef}
       data-testid="inventory-recovery-alert"
@@ -90,7 +98,9 @@
         </Button>
       </Alert.Description>
     </Alert.Root>
-  {:else}
+  {/if}
+
+  {#if inventory}
     <Collapsible.Root bind:open>
       <Collapsible.Trigger
         class="hover:bg-hover-dimmer focus-visible:ring-ring flex w-full items-center gap-2 rounded-md px-3 py-2 text-left focus-visible:ring-2 focus-visible:outline-none [&[data-state=open]>svg]:rotate-180"
@@ -105,11 +115,11 @@
         />
       </Collapsible.Trigger>
       <Collapsible.Content id="storage-inventory-details" class="pt-3">
-        {#if inventory?.inventory.length === 0}
+        {#if inventory.inventory.length === 0}
           <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
             {m.storage_inventory_empty()}
           </p>
-        {:else if inventory}
+        {:else}
           <div class="border-default overflow-x-auto rounded-lg border">
             <Table.Root class="min-w-[640px]">
               <Table.Caption class="sr-only">
@@ -142,5 +152,10 @@
         {/if}
       </Collapsible.Content>
     </Collapsible.Root>
+  {:else if status === "loading"}
+    <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
+      <Loader2 class="size-4 animate-spin" />
+      {m.storage_inventory_loading()}
+    </p>
   {/if}
 </PolicySection>

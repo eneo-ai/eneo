@@ -299,6 +299,71 @@ describe("admin storage settings page", () => {
     expect(getInventory).toHaveBeenCalledTimes(2);
   });
 
+  test("keeps focus on the move refresh button through a completed refresh", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    let resolveMoves!: (value: ReturnType<typeof moves>) => void;
+    getMoves.mockResolvedValueOnce(moves()).mockImplementationOnce(
+      () =>
+        new Promise<ReturnType<typeof moves>>((resolve) => {
+          resolveMoves = resolve;
+        })
+    );
+
+    render(StoragePage);
+
+    await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
+    const movesSection = page.getByRole("region", { name: "storage_moves_title" });
+    await expect.element(movesSection.getByText(/^storage_last_refreshed/)).toBeVisible();
+    const refreshButton = movesSection.getByRole("button", { name: "storage_moves_refresh" });
+    const refresh = (async () => {
+      await refreshButton.click();
+    })();
+
+    await expect.element(refreshButton).toHaveAttribute("aria-busy", "true");
+    await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
+    resolveMoves(moves());
+    await refresh;
+    await expect.element(refreshButton).toHaveAttribute("aria-busy", "false");
+    await expect.element(refreshButton).toHaveFocus();
+  });
+
+  test("keeps focus on the inventory refresh button through a completed refresh", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    let resolveInventory!: (value: ReturnType<typeof inventory>) => void;
+    getInventory.mockResolvedValueOnce(inventory()).mockImplementationOnce(
+      () =>
+        new Promise<ReturnType<typeof inventory>>((resolve) => {
+          resolveInventory = resolve;
+        })
+    );
+
+    render(StoragePage);
+
+    const inventorySection = page.getByRole("region", { name: "storage_inventory_title" });
+    await expect.element(inventorySection.getByText(/^storage_last_refreshed/)).toBeVisible();
+    await inventorySection.getByRole("button", { name: "storage_inventory_caption" }).click();
+    const inventoryTable = inventorySection.getByRole("table", {
+      name: "storage_inventory_caption"
+    });
+    await expect.element(inventoryTable).toBeVisible();
+    const refreshButton = inventorySection.getByRole("button", {
+      name: "storage_inventory_refresh"
+    });
+    await expect.element(refreshButton).toBeVisible();
+    const refresh = (async () => {
+      await refreshButton.click();
+    })();
+
+    await expect.element(refreshButton).toHaveAttribute("aria-busy", "true");
+    await expect.element(inventoryTable).toBeVisible();
+    resolveInventory(inventory());
+    await refresh;
+    await expect.element(refreshButton).toHaveAttribute("aria-busy", "false");
+    await expect.element(refreshButton).toHaveFocus();
+  });
+
   test("formats storage counts and binary byte units with the active locale", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(policy());
@@ -445,7 +510,8 @@ describe("admin storage settings page", () => {
     })();
 
     await expect.element(queueButton).toBeDisabled();
-    await expect.element(pauseButton).toBeDisabled();
+    expect(pauseButton.element().hasAttribute("disabled")).toBe(false);
+    await expect.element(pauseButton).toHaveAttribute("aria-disabled", "true");
     await expect.element(queueButton).toHaveAttribute("aria-busy", "false");
     await expect.element(pauseButton).toHaveAttribute("aria-busy", "true");
     expect(queueButton.element().querySelector('[data-icon="inline-start"]')).toBeNull();
@@ -453,7 +519,9 @@ describe("admin storage settings page", () => {
 
     resolvePause({ policy_revision: 5, paused: true });
     await clickPause;
-    await expect.element(page.getByRole("button", { name: "storage_moves_resume" })).toBeEnabled();
+    const resumeButton = page.getByRole("button", { name: "storage_moves_resume" });
+    await expect.element(resumeButton).toBeEnabled();
+    await expect.element(resumeButton).toHaveFocus();
   });
 
   test("locks policy inputs while pause recovery is pending", async () => {
@@ -582,7 +650,7 @@ describe("admin storage settings page", () => {
       await queueButton.click();
     })();
 
-    await expect.element(page.getByText("storage_moves_loading")).toBeVisible();
+    await expect.element(page.getByText("storage_move_state_pending")).toBeVisible();
     await expect.element(queueButton).toHaveAttribute("aria-disabled", "true");
     await expect.element(pauseButton).toBeDisabled();
     resolveReload(
