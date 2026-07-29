@@ -386,7 +386,10 @@
         {#if (knowledgeEvidenceView.attempts_not_loaded ?? 0) > 0}
           <p>
             {m.flow_run_knowledge_view_attempts_not_loaded({
-              count: String(knowledgeEvidenceView.attempts_not_loaded)
+              count: omittedCountLabel(
+                knowledgeEvidenceView.attempts_not_loaded ?? 0,
+                knowledgeEvidenceView.count_truncated
+              )
             })}
           </p>
         {/if}
@@ -396,14 +399,20 @@
             data-testid="knowledge-evidence-corrupt-passage-aggregates"
           >
             {m.flow_run_knowledge_view_corrupt_passage_aggregates({
-              count: String(knowledgeEvidenceView.corrupt_passage_aggregates)
+              count: omittedCountLabel(
+                knowledgeEvidenceView.corrupt_passage_aggregates ?? 0,
+                knowledgeEvidenceView.count_truncated
+              )
             })}
           </p>
         {/if}
         {#if (knowledgeEvidenceView.current_attempts_not_loaded ?? 0) > 0}
           <p class="font-medium">
             {m.flow_run_knowledge_view_current_attempts_not_loaded({
-              count: String(knowledgeEvidenceView.current_attempts_not_loaded),
+              count: omittedCountLabel(
+                knowledgeEvidenceView.current_attempts_not_loaded ?? 0,
+                knowledgeEvidenceView.count_truncated
+              ),
               steps: (knowledgeEvidenceView.current_step_orders_not_loaded ?? []).join(", ")
             })}
           </p>

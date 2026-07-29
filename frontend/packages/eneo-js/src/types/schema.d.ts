@@ -16194,7 +16194,9 @@ export interface components {
      *     Counts cover attempts the bounded repository read did not load, including
      *     corruption-caused exclusions, and passage text trimmed from admitted
      *     attempts. The evidence remains retained; exports are never quietly narrowed
-     *     this way.
+     *     this way. When ``count_truncated`` is true, attempt-derived counts are lower
+     *     bounds and the step-order list is the known subset observed inside the
+     *     bounded candidate window.
      */
     FlowRunDebugKnowledgeEvidenceView: {
       /** Byte Budget */
@@ -16208,26 +16210,31 @@ export interface components {
       /** Attempts With Omitted Passages */
       attempts_with_omitted_passages: number;
       /**
+       * Count Truncated
+       * @description Whether the repository stopped after its limit-plus-one candidate sentinel. When true, attempts_not_loaded, corrupt_passage_aggregates, and current_attempts_not_loaded are lower bounds, and current_step_orders_not_loaded is only the known subset observed in that bounded window.
+       */
+      count_truncated: boolean;
+      /**
        * Attempts Not Loaded
-       * @description Attempts this bounded response did not load. Current attempts are prioritized; excluded evidence remains retained and available for export when export limits permit.
+       * @description Attempts this bounded response did not load. This count is a lower bound when count_truncated is true. Current attempts are prioritized; excluded evidence remains retained and available for export when export limits permit.
        * @default 0
        */
       attempts_not_loaded?: number;
       /**
        * Corrupt Passage Aggregates
-       * @description Attempts excluded from the budgeted view because their recorded passage-size evidence is unreadable; they are included in attempts_not_loaded, and exports refuse until the stored evidence is repaired.
+       * @description Attempts excluded from the budgeted view because their recorded passage-size evidence is unreadable; they are included in attempts_not_loaded. This count is a lower bound when count_truncated is true, and exports refuse until the stored evidence is repaired.
        * @default 0
        */
       corrupt_passage_aggregates?: number;
       /**
        * Current Attempts Not Loaded
-       * @description How many of those unloaded rows are a step's CURRENT attempt. Nonzero means some steps show no retrieval evidence in this response even though evidence is retained for them.
+       * @description How many of those unloaded rows are a step's CURRENT attempt. This count is a lower bound when count_truncated is true. Nonzero means some steps show no retrieval evidence in this response even though evidence is retained for them.
        * @default 0
        */
       current_attempts_not_loaded?: number;
       /**
        * Current Step Orders Not Loaded
-       * @description The step_order of every step whose CURRENT attempt this response did not load. An empty knowledge trace for these steps means 'not loaded here', never 'never retrieved'.
+       * @description Step orders whose CURRENT attempt this response did not load. When count_truncated is true, this is the known subset observed inside the bounded candidate window. An empty knowledge trace for these steps means 'not loaded here', never 'never retrieved'.
        */
       current_step_orders_not_loaded?: number[];
     };

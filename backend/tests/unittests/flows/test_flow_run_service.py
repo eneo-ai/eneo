@@ -130,6 +130,7 @@ def _attempts_page(attempts):
         total_count=len(items),
         current_total=0,
         current_admitted=0,
+        count_truncated=False,
     )
 
 

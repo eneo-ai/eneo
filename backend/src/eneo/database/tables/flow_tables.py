@@ -955,6 +955,11 @@ class FlowStepResults(BasePublic):
         Index(
             "ix_flow_step_results_run_flow_step", "flow_run_id", "flow_id", "step_id"
         ),
+        Index(
+            "ix_flow_step_results_run_step_order",
+            "flow_run_id",
+            "step_order",
+        ),
         Index("ix_flow_step_results_assistant_id", "assistant_id"),
     )
 
@@ -1211,6 +1216,12 @@ class FlowStepAttempts(BasePublic):
             "flow_run_id",
             "flow_id",
             "step_id",
+            "attempt_no",
+        ),
+        Index(
+            "ix_flow_step_attempts_run_step_order_attempt",
+            "flow_run_id",
+            "step_order",
             "attempt_no",
         ),
         Index("ix_flow_step_attempts_rerun_operation", "rerun_operation_id"),

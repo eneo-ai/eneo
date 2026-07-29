@@ -17,7 +17,9 @@ afterEach(() => {
   cleanup();
 });
 
-function evidenceWithCorruptPassageAggregates(): FlowRunEvidenceWithTypedSteps {
+function evidenceWithCorruptPassageAggregates(
+  countTruncated: boolean
+): FlowRunEvidenceWithTypedSteps {
   return {
     run: { error: null },
     definition_integrity: {},
@@ -40,7 +42,10 @@ function evidenceWithCorruptPassageAggregates(): FlowRunEvidenceWithTypedSteps {
             passage_bytes_omitted: 0,
             attempts_with_omitted_passages: 0,
             attempts_not_loaded: 2,
-            corrupt_passage_aggregates: 2
+            corrupt_passage_aggregates: 2,
+            current_attempts_not_loaded: 2,
+            current_step_orders_not_loaded: [3],
+            count_truncated: countTruncated
           }
         }
       }
@@ -49,7 +54,7 @@ function evidenceWithCorruptPassageAggregates(): FlowRunEvidenceWithTypedSteps {
 }
 
 function evidenceWithBoundedSections(): FlowRunEvidenceWithTypedSteps {
-  const evidence = evidenceWithCorruptPassageAggregates();
+  const evidence = evidenceWithCorruptPassageAggregates(false);
   evidence.debug_export!.run!.summary!.knowledge_evidence_view = undefined;
   evidence.debug_export!.run!.summary!.omissions = [
     {
@@ -85,11 +90,35 @@ function eneoReturning(evidence: FlowRunEvidenceWithTypedSteps): Eneo {
 }
 
 describe("FlowRunEvidence", () => {
-  it("reports corrupt attempts within the not-loaded total", async () => {
+  it("marks every attempt-derived count as a lower bound when truncated", async () => {
     render(FlowRunEvidence, {
       runId: "run-1",
       flowId: "flow-1",
-      eneo: eneoReturning(evidenceWithCorruptPassageAggregates()),
+      eneo: eneoReturning(evidenceWithCorruptPassageAggregates(true)),
+      runStatus: "completed"
+    });
+
+    expect(
+      await screen.findByText(m.flow_run_knowledge_view_attempts_not_loaded({ count: "≥2" }))
+    ).toBeTruthy();
+    expect(
+      screen.getByText(m.flow_run_knowledge_view_corrupt_passage_aggregates({ count: "≥2" }))
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        m.flow_run_knowledge_view_current_attempts_not_loaded({
+          count: "≥2",
+          steps: "3"
+        })
+      )
+    ).toBeTruthy();
+  });
+
+  it("renders exact attempt-derived counts without a lower-bound marker", async () => {
+    render(FlowRunEvidence, {
+      runId: "run-1",
+      flowId: "flow-1",
+      eneo: eneoReturning(evidenceWithCorruptPassageAggregates(false)),
       runStatus: "completed"
     });
 
@@ -98,6 +127,14 @@ describe("FlowRunEvidence", () => {
     ).toBeTruthy();
     expect(
       screen.getByText(m.flow_run_knowledge_view_corrupt_passage_aggregates({ count: "2" }))
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        m.flow_run_knowledge_view_current_attempts_not_loaded({
+          count: "2",
+          steps: "3"
+        })
+      )
     ).toBeTruthy();
   });
 

@@ -198,6 +198,35 @@ def test_runtime_step_attempt_step_id_is_snapshot_owned_not_draft_step_fk():
     assert not _references_flow_steps(step_id)
 
 
+@pytest.mark.parametrize(
+    ("table", "index_name", "columns"),
+    [
+        (
+            FlowStepAttempts,
+            "ix_flow_step_attempts_run_step_order_attempt",
+            ("flow_run_id", "step_order", "attempt_no"),
+        ),
+        (
+            FlowStepResults,
+            "ix_flow_step_results_run_step_order",
+            ("flow_run_id", "step_order"),
+        ),
+    ],
+)
+def test_attempt_admission_indexes_match_bounded_query_order(
+    table, index_name: str, columns: tuple[str, ...]
+) -> None:
+    index = next(
+        (index for index in table.__table__.indexes if index.name == index_name),
+        None,
+    )
+
+    assert index is not None
+    assert tuple(column.name for column in index.columns) == columns
+    assert index.unique is False
+    assert index.dialect_options["postgresql"].get("where") is None
+
+
 def test_resolved_input_edges_use_one_to_one_attempt_evidence_table() -> None:
     attempt_id = FlowStepAttemptResolvedInputs.__table__.columns["flow_step_attempt_id"]
     aggregate_column = FlowStepAttemptResolvedInputs.__table__.columns[

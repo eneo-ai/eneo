@@ -1633,7 +1633,9 @@ class FlowRunDebugKnowledgeEvidenceView(BaseModel):
     Counts cover attempts the bounded repository read did not load, including
     corruption-caused exclusions, and passage text trimmed from admitted
     attempts. The evidence remains retained; exports are never quietly narrowed
-    this way.
+    this way. When ``count_truncated`` is true, attempt-derived counts are lower
+    bounds and the step-order list is the known subset observed inside the
+    bounded candidate window.
     """
 
     byte_budget: int
@@ -1641,13 +1643,23 @@ class FlowRunDebugKnowledgeEvidenceView(BaseModel):
     passages_omitted: int
     passage_bytes_omitted: int
     attempts_with_omitted_passages: int
+    count_truncated: bool = Field(
+        description=(
+            "Whether the repository stopped after its limit-plus-one "
+            "candidate sentinel. When true, attempts_not_loaded, "
+            "corrupt_passage_aggregates, and current_attempts_not_loaded are "
+            "lower bounds, and current_step_orders_not_loaded is only the "
+            "known subset observed in that bounded window."
+        )
+    )
     attempts_not_loaded: int = Field(
         default=0,
         ge=0,
         description=(
-            "Attempts this bounded response did not load. Current attempts "
-            "are prioritized; excluded evidence remains retained and "
-            "available for export when export limits permit."
+            "Attempts this bounded response did not load. This count is a "
+            "lower bound when count_truncated is true. Current attempts are "
+            "prioritized; excluded evidence remains retained and available "
+            "for export when export limits permit."
         ),
     )
     corrupt_passage_aggregates: int = Field(
@@ -1656,7 +1668,8 @@ class FlowRunDebugKnowledgeEvidenceView(BaseModel):
         description=(
             "Attempts excluded from the budgeted view because their recorded "
             "passage-size evidence is unreadable; they are included in "
-            "attempts_not_loaded, and exports refuse until the stored "
+            "attempts_not_loaded. This count is a lower bound when "
+            "count_truncated is true, and exports refuse until the stored "
             "evidence is repaired."
         ),
     )
@@ -1665,6 +1678,7 @@ class FlowRunDebugKnowledgeEvidenceView(BaseModel):
         ge=0,
         description=(
             "How many of those unloaded rows are a step's CURRENT attempt. "
+            "This count is a lower bound when count_truncated is true. "
             "Nonzero means some steps show no retrieval evidence in this "
             "response even though evidence is retained for them."
         ),
@@ -1672,9 +1686,10 @@ class FlowRunDebugKnowledgeEvidenceView(BaseModel):
     current_step_orders_not_loaded: list[int] = Field(
         default_factory=_empty_int_list,
         description=(
-            "The step_order of every step whose CURRENT attempt this response "
-            "did not load. An empty knowledge trace for these steps means "
-            "'not loaded here', never 'never retrieved'."
+            "Step orders whose CURRENT attempt this response did not load. "
+            "When count_truncated is true, this is the known subset observed "
+            "inside the bounded candidate window. An empty knowledge trace "
+            "for these steps means 'not loaded here', never 'never retrieved'."
         ),
     )
 

@@ -5239,7 +5239,7 @@
   "audit_action_ai_builder_session_cancelled_description": "A Flow AI Builder session was cancelled.",
   "flow_run_knowledge_view_attempts_not_loaded": "{count} attempts were not loaded in this view. Current attempts are prioritized, and evidence for the remaining attempts is retained.",
   "flow_run_knowledge_view_corrupt_passage_aggregates": "Recorded passage-size evidence is unreadable for {count} attempts. Their retrieval evidence is not shown, and they are included in the not-loaded count. Evidence export is unavailable until the stored evidence is repaired.",
-  "flow_run_knowledge_view_current_attempts_not_loaded": "Current retrieval evidence for {count} steps ({steps}) could not be loaded within this view's limits. Their evidence is retained; an empty trace on those steps must not be read as them having none.",
+  "flow_run_knowledge_view_current_attempts_not_loaded": "Current retrieval evidence for {count} steps could not be loaded within this view's limits. Known affected steps include {steps}. Their evidence is retained; an empty trace on those steps must not be read as them having none.",
   "flow_run_evidence_view_rows_omitted": "{count} retained {section} rows are not shown because this view reached its row limit.",
   "flow_run_evidence_view_bytes_omitted": "{count} retained {section} rows are not shown because this view reached its size limit.",
   "flow_run_evidence_view_parent_omitted": "{count} retained {section} rows are not shown because their parent records were omitted.",

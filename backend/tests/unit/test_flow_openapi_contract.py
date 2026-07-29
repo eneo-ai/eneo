@@ -4098,6 +4098,20 @@ def test_openapi_evidence_export_query_params_are_documented(
     assert "explicit non-default reason" in reason_description
 
 
+def test_openapi_knowledge_evidence_view_requires_truncation_semantics(
+    openapi_spec: dict,
+) -> None:
+    schema = openapi_spec["components"]["schemas"]["FlowRunDebugKnowledgeEvidenceView"]
+    properties = schema["properties"]
+
+    assert "count_truncated" in schema["required"]
+    assert properties["count_truncated"]["type"] == "boolean"
+    assert "default" not in properties["count_truncated"]
+    description = properties["count_truncated"]["description"].lower()
+    assert "lower bound" in description
+    assert "known subset" in description
+
+
 def test_openapi_flow_authoring_docs_explain_owner_override_semantics(
     openapi_spec: dict,
 ) -> None:

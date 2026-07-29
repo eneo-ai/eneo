@@ -481,8 +481,11 @@ class RunViewPassageOmission(BaseModel):
     ``attempts_not_loaded``; ``corrupt_passage_aggregates`` identifies the
     subset excluded because its recorded passage-size aggregate is unreadable,
     and any excluded CURRENT attempt is named per step so its empty trace
-    cannot be read as the step never having retrieved. The loaded evidence is
-    then trimmed to the view byte budget — an output-size cap on the response.
+    cannot be read as the step never having retrieved. When
+    ``count_truncated`` is true, all three attempt-derived counts are lower
+    bounds and the named step orders are the known subset from the bounded
+    candidate window. The loaded evidence is then trimmed to the view byte
+    budget — an output-size cap on the response.
 
     It never applies to an evidence export: an export returns the evidence that
     is actually retained, or fails, but never a quiet subset.
@@ -495,6 +498,7 @@ class RunViewPassageOmission(BaseModel):
     passages_omitted: int
     passage_bytes_omitted: int
     attempts_with_omitted_passages: int
+    count_truncated: bool
     attempts_not_loaded: int = 0
     corrupt_passage_aggregates: int = 0
     current_attempts_not_loaded: int = 0
@@ -510,6 +514,7 @@ def omit_passages_beyond_view_budget(
     *,
     step_results: Sequence[FlowStepResult],
     byte_budget: int,
+    count_truncated: bool,
     attempts_not_loaded: int = 0,
     corrupt_passage_aggregates: int = 0,
     current_attempts_not_loaded: int = 0,
@@ -588,6 +593,7 @@ def omit_passages_beyond_view_budget(
             passages_omitted=passages_omitted,
             passage_bytes_omitted=bytes_omitted,
             attempts_with_omitted_passages=attempts_with_omitted_passages,
+            count_truncated=count_truncated,
             attempts_not_loaded=attempts_not_loaded,
             corrupt_passage_aggregates=corrupt_passage_aggregates,
             current_attempts_not_loaded=current_attempts_not_loaded,

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from time import monotonic
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,6 +25,10 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.flows import FlowRepository, FlowVersionRepository
+from eneo.flows.application.flow_run_evidence_bundle import _dump_attempt_record
+from eneo.flows.application.flow_run_evidence_service import (
+    EVIDENCE_EXPORT_SERIALIZED_ROW_FLOOR_BYTES,
+)
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
     Flow,
@@ -67,12 +74,45 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunDispatchRedriveGenerationConflict,
     FlowRunRepository,
+    _attempt_evidence_logical_bytes,
 )
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
 from eneo.flows.principal import FlowPrincipal
+from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
+    _capture_queries,
+    _decode_explain,
+    _json_object,
+)
+
+
+def _plan_nodes(plan: dict[str, object]) -> Iterator[dict[str, object]]:
+    yield plan
+    children = plan.get("Plans")
+    if not isinstance(children, list):
+        return
+    for child in children:
+        child_plan = _json_object(child, label="plan node")
+        yield from _plan_nodes(child_plan)
+
+
+def _rows_produced(node: dict[str, object]) -> int:
+    actual_rows = node.get("Actual Rows", 0)
+    actual_loops = node.get("Actual Loops", 0)
+    assert isinstance(actual_rows, (int, float))
+    assert isinstance(actual_loops, (int, float))
+    return int(actual_rows * actual_loops)
+
+
+def _scan_rows_examined(node: dict[str, object]) -> int:
+    examined = _rows_produced(node)
+    for key in ("Rows Removed by Filter", "Rows Removed by Index Recheck"):
+        removed = node.get(key, 0)
+        assert isinstance(removed, (int, float))
+        examined += int(removed)
+    return examined
 
 
 def _build_flow(
@@ -4022,6 +4062,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         assert narrowed.total_count == 4
         assert narrowed.current_total == 2
         assert narrowed.current_admitted == 2
+        assert narrowed.count_truncated is True
 
         # Currents consume the byte budget first. A one-byte budget excludes
         # every row because emitted attempt text, including celery_task_id, is
@@ -4037,9 +4078,9 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         assert tiny_budget.current_total == 2
         assert tiny_budget.current_admitted == 0
 
-        # Zero admission still reports every count from the same statement:
-        # a zero row limit admits nothing, and the totals do not fall back to
-        # a second query on a different snapshot.
+        # Zero admission still returns one sentinel from the same statement.
+        # Its counts are honest lower bounds and identify the known excluded
+        # current step without a second query on a different snapshot.
         nothing = await run_repo.list_step_attempts(
             run_id=run.id,
             tenant_id=tenant_id,
@@ -4047,9 +4088,11 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             logical_byte_budget=1,
         )
         assert nothing.attempts == []
-        assert nothing.total_count == 4
-        assert nothing.current_total == 2
+        assert nothing.total_count == 1
+        assert nothing.current_total == 1
         assert nothing.current_admitted == 0
+        assert nothing.current_step_orders_not_loaded == (2,)
+        assert nothing.count_truncated is True
 
         # The logical passage budget catches what compression hides: these
         # aggregates say 6000 passage bytes while TOAST stores them far
@@ -4067,6 +4110,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         # budget, so only the passage-free current fits.
         assert admitted_pairs == [(2, 1)]
         assert logical.total_count == 4
+        assert logical.count_truncated is False
 
         # Unlimited read is unchanged: every attempt, oldest first.
         # Corruption in the persisted aggregate must never crash a statement
@@ -4128,3 +4172,170 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             (2, 1),
         ]
         assert everything.total_count == 4
+        assert everything.count_truncated is False
+
+        # The fixed per-row export floor is conservative for a real minimal
+        # attempt, and every unbounded attempt field emitted by
+        # `_dump_attempt_record` is independently charged by the repository's
+        # logical-byte expression.
+        minimal_attempt_row = FlowStepAttempts(
+            flow_run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=tenant_id,
+            step_id=step_one,
+            step_order=1,
+            attempt_no=4,
+            status=FlowStepAttemptStatus.COMPLETED.value,
+            started_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(timezone.utc),
+        )
+        session.add(minimal_attempt_row)
+        await session.flush()
+        dumped_minimal, _ = _dump_attempt_record(
+            FlowStepAttempt.model_validate(minimal_attempt_row)
+        )
+        serialized_minimal_bytes = len(
+            json.dumps(
+                dumped_minimal,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        assert serialized_minimal_bytes < EVIDENCE_EXPORT_SERIALIZED_ROW_FLOOR_BYTES
+
+        logical_byte_query = sa.select(_attempt_evidence_logical_bytes()).where(
+            FlowStepAttempts.id == minimal_attempt_row.id
+        )
+        baseline_logical_bytes = int((await session.scalar(logical_byte_query)) or 0)
+        charged_fields = (
+            (FlowStepAttempts.provenance_json, {"value": "x"}),
+            (FlowStepAttempts.input_payload_json, {"value": "x"}),
+            (FlowStepAttempts.output_payload_json, {"value": "x"}),
+            (FlowStepAttempts.celery_task_id, "x"),
+            (FlowStepAttempts.error_code, "x"),
+            (FlowStepAttempts.error_message, "x"),
+            (FlowStepAttempts.requested_model, "x"),
+            (FlowStepAttempts.response_model, "x"),
+            (FlowStepAttempts.provider, "x"),
+            (FlowStepAttempts.finish_reason, "x"),
+            (FlowStepAttempts.provider_response_id, "x"),
+            (FlowStepAttempts.flow_step_execution_hash, "x"),
+        )
+        for column, value in charged_fields:
+            await session.execute(
+                sa.update(FlowStepAttempts)
+                .where(FlowStepAttempts.id == minimal_attempt_row.id)
+                .values({column: value})
+            )
+            charged_bytes = int((await session.scalar(logical_byte_query)) or 0)
+            assert charged_bytes > baseline_logical_bytes, column.key
+            await session.execute(
+                sa.update(FlowStepAttempts)
+                .where(FlowStepAttempts.id == minimal_attempt_row.id)
+                .values({column: None})
+            )
+
+        # Materially exceed the interactive ceiling and make the newest
+        # attempt current. Both bounded branches now contain the two current
+        # attempts, so the final candidate relation must deduplicate that
+        # overlap before admitting recent history.
+        last_attempt_no = 5_003
+        now = datetime.now(timezone.utc)
+        session.add_all(
+            [
+                FlowStepAttempts(
+                    flow_run_id=run.id,
+                    flow_id=flow.id,
+                    tenant_id=tenant_id,
+                    step_id=step_one,
+                    step_order=1,
+                    attempt_no=attempt_no,
+                    status=FlowStepAttemptStatus.COMPLETED.value,
+                    started_at=now,
+                    finished_at=now,
+                )
+                for attempt_no in range(5, last_attempt_no + 1)
+            ]
+        )
+        await session.flush()
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run.id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.step_id == step_one)
+            .values(current_attempt_no=last_attempt_no)
+        )
+        await session.execute(sa.text("ANALYZE flow_step_attempts"))
+        await session.execute(sa.text("ANALYZE flow_step_results"))
+
+        limit = 500
+        candidate_limit = limit + 1
+        bind = session.sync_session.bind
+        assert bind is not None
+        with _capture_queries(bind) as captured:
+            bounded = await run_repo.list_step_attempts(
+                run_id=run.id,
+                tenant_id=tenant_id,
+                limit=limit,
+            )
+        assert len(captured) == 1
+
+        bounded_pairs = [
+            (attempt.step_order, attempt.attempt_no) for attempt in bounded.attempts
+        ]
+        assert len(bounded_pairs) == limit
+        assert bounded_pairs[0] == (1, last_attempt_no - 498)
+        assert bounded_pairs[-2:] == [(1, last_attempt_no), (2, 1)]
+        assert (1, last_attempt_no - 499) not in bounded_pairs
+        assert bounded.total_count == candidate_limit
+        assert bounded.current_total == 2
+        assert bounded.current_admitted == 2
+        assert bounded.current_step_orders_not_loaded == ()
+        assert bounded.count_truncated is True
+
+        connection = await session.connection()
+        captured_statement = captured[0]
+        explain_result = await connection.exec_driver_sql(
+            f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {captured_statement.sql}",
+            captured_statement.parameters,
+        )
+        explain = _decode_explain(explain_result.scalar_one())
+        plan = _json_object(explain.get("Plan"), label="EXPLAIN Plan")
+        nodes = list(_plan_nodes(plan))
+
+        scan_rows = [
+            (
+                cast(str, node["Node Type"]),
+                node.get("Relation Name"),
+                node.get("Alias"),
+                node.get("Filter"),
+                node.get("Index Name"),
+                _scan_rows_examined(node),
+            )
+            for node in nodes
+            if isinstance(node.get("Node Type"), str)
+            and cast(str, node["Node Type"]).endswith("Scan")
+        ]
+        assert scan_rows
+        bad_scan_rows = [
+            scan_row for scan_row in scan_rows if scan_row[-1] > candidate_limit
+        ]
+        assert not bad_scan_rows, bad_scan_rows
+
+        bounded_inputs = [
+            (
+                cast(str, node["Node Type"]),
+                _rows_produced(child),
+            )
+            for node in nodes
+            if node.get("Node Type") in {"Aggregate", "WindowAgg"}
+            for child in (
+                _json_object(raw_child, label="bounded aggregate input")
+                for raw_child in cast(list[object], node.get("Plans", []))
+            )
+        ]
+        assert any(node_type == "WindowAgg" for node_type, _ in bounded_inputs)
+        assert any(node_type == "Aggregate" for node_type, _ in bounded_inputs)
+        assert all(rows <= candidate_limit for _, rows in bounded_inputs), (
+            bounded_inputs
+        )

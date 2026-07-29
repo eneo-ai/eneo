@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapper
+from sqlalchemy.orm import Mapper, aliased
 
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
@@ -190,13 +190,18 @@ class StepAttemptPage:
 
     `current_total` and `current_admitted` exist so a caller can say when a
     step's current attempt was excluded by a budget — silently missing current
-    evidence would read as the step never having retrieved anything.
+    evidence would read as the step never having retrieved anything. When
+    `count_truncated` is true, every count and
+    `current_step_orders_not_loaded` is conservative evidence from the bounded
+    candidate relation: counts are lower bounds and the step orders are a known
+    subset, not an exhaustive list.
     """
 
     attempts: list[FlowStepAttempt]
     total_count: int
     current_total: int
     current_admitted: int
+    count_truncated: bool
     current_step_orders_not_loaded: tuple[int, ...] = ()
     corrupt_passage_aggregates: int = 0
 
@@ -1309,13 +1314,13 @@ class FlowRunRepository:
     ) -> StepAttemptPage:
         """Attempts for a run, oldest first, with snapshot-consistent totals.
 
-        With `limit`, one statement ranks every attempt — each step's current
-        attempt first, then history newest first — and admits rows while the
-        row limit and both cumulative budgets hold: logical attempt JSON bytes
-        bound what materialization expands to, and exact recorded passage bytes
-        independently bound retained passage text. Current attempts consume the budgets
-        first; when one is excluded the page says so, because the totals ride
-        in the same statement — even when nothing is admitted at all.
+        With `limit`, one statement bounds current and recent candidates to
+        `limit + 1`, deduplicates their overlap, then ranks current attempts
+        first and history newest first. The extra candidate is a truncation
+        sentinel. Admitted rows must also fit both cumulative budgets: logical
+        attempt JSON bytes bound what materialization expands to, and exact
+        recorded passage bytes independently bound retained passage text.
+        Counts ride in the same statement even when nothing is admitted.
         """
         base = (
             sa.select(FlowStepAttempts)
@@ -1343,60 +1348,126 @@ class FlowRunRepository:
                 total_count=len(attempts),
                 current_total=0,
                 current_admitted=0,
+                count_truncated=False,
             )
 
-        current_pairs = (
-            sa.select(
-                FlowStepResults.step_id,
-                FlowStepResults.current_attempt_no,
-            )
-            .where(FlowStepResults.flow_run_id == run_id)
-            .where(FlowStepResults.tenant_id == tenant_id)
-            .where(FlowStepResults.current_attempt_no.is_not(None))
-        ).subquery()
-        is_current_flag = sa.case(
-            (
-                sa.exists(
-                    sa.select(sa.literal(1))
-                    .select_from(current_pairs)
-                    .where(current_pairs.c.step_id == FlowStepAttempts.step_id)
-                    .where(
-                        current_pairs.c.current_attempt_no
-                        == FlowStepAttempts.attempt_no
-                    )
-                ),
-                0,
-            ),
-            else_=1,
-        )
-        # Paired with `_dump_attempt_record`: the admission window includes
-        # every JSON value the attempt projection materializes, not only RAG
-        # provenance. Logical bytes catch expansion hidden by TOAST compression.
+        if limit < 0:
+            raise ValueError("Step attempt limit must be non-negative.")
+        candidate_limit = limit + 1
+        # Candidate branches project every value needed for admission while
+        # their index-backed LIMIT is active. No later aggregate or window may
+        # reopen the full attempt table merely to measure candidate evidence.
         logical_bytes = _attempt_evidence_logical_bytes()
         passage_bytes, is_corrupt = _recorded_passage_byte_expressions()
-        admission_order = (
-            is_current_flag.asc(),
-            FlowStepAttempts.step_order.desc(),
-            FlowStepAttempts.attempt_no.desc(),
-        )
-        ranked = (
+
+        current_candidates = (
             sa.select(
                 FlowStepAttempts.id.label("attempt_id"),
                 FlowStepAttempts.step_order.label("step_order"),
-                is_current_flag.label("is_current"),
-                sa.case((is_corrupt, 1), else_=0).label("is_corrupt"),
-                sa.func.row_number().over(order_by=admission_order).label("row_rank"),
-                sa.func.sum(logical_bytes)
-                .over(order_by=admission_order)
-                .label("cumulative_logical"),
-                sa.func.sum(passage_bytes)
-                .over(order_by=admission_order)
-                .label("cumulative_passages"),
+                FlowStepAttempts.attempt_no.label("attempt_no"),
+                sa.literal(0).label("is_current"),
+                logical_bytes.label("logical_bytes"),
+                passage_bytes.label("passage_bytes"),
+                is_corrupt.label("is_corrupt"),
+            )
+            .select_from(FlowStepResults)
+            .join(
+                FlowStepAttempts,
+                sa.and_(
+                    FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                    FlowStepAttempts.step_id == FlowStepResults.step_id,
+                    FlowStepAttempts.attempt_no == FlowStepResults.current_attempt_no,
+                ),
+            )
+            .where(
+                FlowStepResults.flow_run_id == run_id,
+                FlowStepResults.tenant_id == tenant_id,
+                FlowStepResults.current_attempt_no.is_not(None),
+                FlowStepAttempts.flow_run_id == run_id,
+                FlowStepAttempts.tenant_id == tenant_id,
+            )
+            .order_by(
+                FlowStepResults.step_order.desc(),
+                FlowStepAttempts.attempt_no.desc(),
+            )
+            .limit(candidate_limit)
+        )
+        recent_candidates = (
+            sa.select(
+                FlowStepAttempts.id.label("attempt_id"),
+                FlowStepAttempts.step_order.label("step_order"),
+                FlowStepAttempts.attempt_no.label("attempt_no"),
+                sa.literal(1).label("is_current"),
+                logical_bytes.label("logical_bytes"),
+                passage_bytes.label("passage_bytes"),
+                is_corrupt.label("is_corrupt"),
             )
             .where(
                 FlowStepAttempts.flow_run_id == run_id,
                 FlowStepAttempts.tenant_id == tenant_id,
             )
+            .order_by(
+                FlowStepAttempts.step_order.desc(),
+                FlowStepAttempts.attempt_no.desc(),
+            )
+            .limit(candidate_limit)
+        )
+        candidate_branches = current_candidates.union_all(recent_candidates).subquery()
+        deduplicated_candidates = (
+            sa.select(
+                candidate_branches.c.attempt_id,
+                candidate_branches.c.step_order,
+                candidate_branches.c.attempt_no,
+                candidate_branches.c.is_current,
+                candidate_branches.c.logical_bytes,
+                candidate_branches.c.passage_bytes,
+                candidate_branches.c.is_corrupt,
+            )
+            .distinct(candidate_branches.c.attempt_id)
+            .order_by(
+                candidate_branches.c.attempt_id,
+                candidate_branches.c.is_current.asc(),
+            )
+            .subquery()
+        )
+        candidates = (
+            sa.select(
+                deduplicated_candidates.c.attempt_id,
+                deduplicated_candidates.c.step_order,
+                deduplicated_candidates.c.attempt_no,
+                deduplicated_candidates.c.is_current,
+                deduplicated_candidates.c.logical_bytes,
+                deduplicated_candidates.c.passage_bytes,
+                deduplicated_candidates.c.is_corrupt,
+            )
+            .order_by(
+                deduplicated_candidates.c.is_current.asc(),
+                deduplicated_candidates.c.step_order.desc(),
+                deduplicated_candidates.c.attempt_no.desc(),
+            )
+            .limit(candidate_limit)
+            .subquery()
+        )
+        admission_order = (
+            candidates.c.is_current.asc(),
+            candidates.c.step_order.desc(),
+            candidates.c.attempt_no.desc(),
+        )
+        ranked = (
+            sa.select(
+                candidates.c.attempt_id,
+                candidates.c.step_order,
+                candidates.c.is_current,
+                sa.case((candidates.c.is_corrupt, 1), else_=0).label("is_corrupt"),
+                sa.func.row_number().over(order_by=admission_order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=admission_order)
+                .label("cumulative_logical"),
+                sa.func.sum(candidates.c.passage_bytes)
+                .over(order_by=admission_order)
+                .label("cumulative_passages"),
+            )
+            .select_from(candidates)
             .subquery()
         )
         admitted = sa.select(ranked.c.attempt_id, ranked.c.is_current).where(
@@ -1444,6 +1515,15 @@ class FlowRunRepository:
             .select_from(ranked)
             .subquery()
         )
+        admitted_attempt_lookup = (
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.id == admitted_sq.c.attempt_id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .limit(1)
+            .lateral("admitted_attempt")
+        )
+        admitted_attempt = aliased(FlowStepAttempts, admitted_attempt_lookup)
         # The totals row always exists, so zero admission still reports the
         # run's counts from the same statement and snapshot.
         rows = (
@@ -1453,15 +1533,15 @@ class FlowRunRepository:
                     totals.c.current_total,
                     totals.c.corrupt_aggregates,
                     excluded_currents.c.step_orders,
-                    FlowStepAttempts,
+                    admitted_attempt,
                     admitted_sq.c.is_current,
                 )
                 .select_from(totals)
                 .outerjoin(excluded_currents, sa.literal(True))
                 .outerjoin(admitted_sq, sa.literal(True))
                 .outerjoin(
-                    FlowStepAttempts,
-                    FlowStepAttempts.id == admitted_sq.c.attempt_id,
+                    admitted_attempt_lookup,
+                    sa.literal(True),
                 )
             )
         ).all()
@@ -1487,6 +1567,7 @@ class FlowRunRepository:
             total_count=total_count,
             current_total=current_total,
             current_admitted=current_admitted,
+            count_truncated=total_count > limit,
             current_step_orders_not_loaded=excluded_current_orders,
             corrupt_passage_aggregates=corrupt_aggregates,
         )

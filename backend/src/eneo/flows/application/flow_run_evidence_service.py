@@ -558,8 +558,9 @@ class FlowRunEvidenceService:
                 byte_budget=(
                     self._rag_evidence_policy().max_recorded_passage_bytes_per_run_view
                 ),
+                count_truncated=attempt_page.count_truncated,
                 # The totals and the admitted set come from one statement, so
-                # these counts describe one snapshot and are always true.
+                # these exact or lower-bound counts describe one snapshot.
                 attempts_not_loaded=max(
                     0, attempt_page.total_count - len(step_attempts)
                 ),
@@ -577,6 +578,7 @@ class FlowRunEvidenceService:
                 and knowledge_evidence_view.attempts_not_loaded == 0
                 and knowledge_evidence_view.corrupt_passage_aggregates == 0
                 and knowledge_evidence_view.current_attempts_not_loaded == 0
+                and not knowledge_evidence_view.count_truncated
             ):
                 # The public contract says this summary is absent when the
                 # view returned everything; an all-zero object would read as

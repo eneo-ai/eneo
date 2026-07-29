@@ -5239,7 +5239,7 @@
   "audit_action_ai_builder_session_cancelled_description": "En Flow AI Builder-session avbröts.",
   "flow_run_knowledge_view_attempts_not_loaded": "{count} försök lästes inte in i den här vyn. Aktuella försök prioriteras, och underlaget för de övriga försöken finns kvar.",
   "flow_run_knowledge_view_corrupt_passage_aggregates": "Storleksuppgifterna för textavsnitt går inte att läsa för {count} försök. Försökens kunskapsunderlag visas inte, och de ingår i antalet försök som inte lästes in. Underlaget kan inte exporteras förrän de lagrade uppgifterna har reparerats.",
-  "flow_run_knowledge_view_current_attempts_not_loaded": "Aktuellt kunskapsunderlag för {count} steg ({steps}) kunde inte läsas in inom vyns gränser. Underlaget finns kvar; ett tomt spår för dessa steg får inte tolkas som att de saknar underlag.",
+  "flow_run_knowledge_view_current_attempts_not_loaded": "Aktuellt kunskapsunderlag för {count} steg kunde inte läsas in inom vyns gränser. Bland de kända berörda stegen finns {steps}. Underlaget finns kvar; ett tomt spår för dessa steg får inte tolkas som att de saknar underlag.",
   "flow_run_evidence_view_rows_omitted": "{count} sparade rader med {section} visas inte eftersom vyn nådde sin radgräns.",
   "flow_run_evidence_view_bytes_omitted": "{count} sparade rader med {section} visas inte eftersom vyn nådde sin storleksgräns.",
   "flow_run_evidence_view_parent_omitted": "{count} sparade rader med {section} visas inte eftersom deras överordnade poster utelämnades.",

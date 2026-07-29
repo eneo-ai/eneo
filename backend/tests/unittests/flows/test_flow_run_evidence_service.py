@@ -1328,6 +1328,7 @@ async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> N
         total_count=8,
         current_total=2,
         current_admitted=1,
+        count_truncated=True,
     )
 
     bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
@@ -1338,6 +1339,7 @@ async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> N
     assert call_kwargs["passage_byte_budget"] == RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
     omission = bundle.debug_export["run"]["summary"]["knowledge_evidence_view"]
     assert omission["attempts_not_loaded"] == 7
+    assert omission["count_truncated"] is True
     # One of the two current attempts did not fit: the response says so
     # instead of letting that step read as having no retrieval evidence.
     assert omission["current_attempts_not_loaded"] == 1
@@ -1359,6 +1361,7 @@ async def test_view_reports_corrupt_passage_aggregates(user) -> None:
         total_count=2,
         current_total=0,
         current_admitted=0,
+        count_truncated=False,
         corrupt_passage_aggregates=2,
     )
 
@@ -1372,6 +1375,7 @@ async def test_view_reports_corrupt_passage_aggregates(user) -> None:
     assert omission is not None
     assert omission["attempts_not_loaded"] == 2
     assert omission["corrupt_passage_aggregates"] == 2
+    assert omission["count_truncated"] is False
 
 
 async def test_redacted_export_is_not_charged_for_withheld_text(

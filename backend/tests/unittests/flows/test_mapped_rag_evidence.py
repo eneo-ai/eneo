@@ -322,6 +322,7 @@ def test_a_run_view_bounds_total_passage_bytes_across_attempts() -> None:
         attempts,
         step_results=[_step_result(step_order=1, current_attempt_no=3)],
         byte_budget=150,
+        count_truncated=False,
     )
 
     assert summary.byte_budget == 150
@@ -329,6 +330,7 @@ def test_a_run_view_bounds_total_passage_bytes_across_attempts() -> None:
     assert summary.passages_omitted == 2
     assert summary.passage_bytes_omitted == 200
     assert summary.attempts_with_omitted_passages == 2
+    assert summary.count_truncated is False
     # The step view renders the current attempt, so that is the one admitted.
     current = next(item for item in bounded if item.attempt_no == 3)
     assert current.provenance_json is not None
@@ -358,6 +360,7 @@ def test_a_run_view_within_budget_releases_nothing() -> None:
         attempts,
         step_results=[_step_result(step_order=1, current_attempt_no=1)],
         byte_budget=1024,
+        count_truncated=False,
     )
 
     assert summary.omitted_any is False
