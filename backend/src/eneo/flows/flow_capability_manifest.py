@@ -35,6 +35,7 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
+    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
@@ -637,14 +638,11 @@ def supports_step_io_tuple(
 def requires_completion_model(output_mode: FlowOutputMode) -> bool:
     """True when this output mode runs a completion model at runtime.
 
-    Non-LLM modes route through dedicated runtime handlers instead of an
-    assistant completion model.
+    Other modes route through dedicated runtime handlers instead of an
+    assistant completion model. The canonical mode classification lives with
+    ``FlowOutputMode``.
     """
-    return output_mode not in {
-        FlowOutputMode.COMPOSE_TEXT,
-        FlowOutputMode.TRANSCRIBE_ONLY,
-        FlowOutputMode.RENDER_VERBATIM,
-    }
+    return flow_output_mode_uses_completion_model(output_mode)
 
 
 def resolve_document_generation_mode(

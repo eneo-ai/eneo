@@ -5,17 +5,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from eneo.flows.domain.flow import (
-    FlowStepResult,
-    FlowStepRetrievalPolicy,
-    flow_output_mode_uses_retrieval_completion,
-)
+from eneo.flows.domain.flow import FlowStepResult, FlowStepRetrievalPolicy
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
     StepOutputMetadataError,
     interpret_step_text,
 )
+from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
@@ -81,7 +78,7 @@ class RuntimeStep:
 
     @property
     def may_call_completion_provider(self) -> bool:
-        return flow_output_mode_uses_retrieval_completion(self.output_mode)
+        return flow_output_mode_uses_completion_model(self.output_mode)
 
 
 @dataclass(frozen=True)

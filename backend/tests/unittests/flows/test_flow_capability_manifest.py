@@ -23,6 +23,7 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
+    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_authoring_spec import _VALID_FORM_FIELD_TYPES
 from eneo.flows.flow_capability_manifest import (
@@ -267,16 +268,12 @@ def test_input_capability_rejects_missing_channel() -> None:
     "output_mode",
     list(FlowOutputMode),
 )
-def test_requires_completion_model_rejects_transcribe_only(
+def test_requires_completion_model_uses_canonical_output_mode_capability(
     output_mode: FlowOutputMode,
 ) -> None:
-    expected = output_mode not in {
-        FlowOutputMode.COMPOSE_TEXT,
-        FlowOutputMode.TRANSCRIBE_ONLY,
-        FlowOutputMode.RENDER_VERBATIM,
-    }
-
-    assert requires_completion_model(output_mode) is expected
+    assert requires_completion_model(
+        output_mode
+    ) is flow_output_mode_uses_completion_model(output_mode)
 
 
 def test_input_text_has_no_absorbed_invariants() -> None:

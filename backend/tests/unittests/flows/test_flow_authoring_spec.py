@@ -157,8 +157,19 @@ def test_stale_document_body_writer_refs_are_dropped_on_rehydrate() -> None:
     ]
 
 
-def test_step_spec_strips_completion_model_ref_for_transcribe_only() -> None:
-    step = _step(output_mode=OutputMode.TRANSCRIBE_ONLY, model_ref="model.default")
+@pytest.mark.parametrize(
+    "output_mode",
+    [
+        OutputMode.COMPOSE_TEXT,
+        OutputMode.TEMPLATE_FILL,
+        OutputMode.TRANSCRIBE_ONLY,
+        OutputMode.RENDER_VERBATIM,
+    ],
+)
+def test_step_spec_strips_completion_model_ref_for_non_completion_output_modes(
+    output_mode: OutputMode,
+) -> None:
+    step = _step(output_mode=output_mode, model_ref="model.default")
 
     assert step.assistant_spec.model_ref is None
 
@@ -221,13 +232,10 @@ def test_source_refs_forward_references_fail_authoring_validation_path() -> None
     ]
 
 
-@pytest.mark.parametrize(
-    "output_mode", [OutputMode.PASS_THROUGH, OutputMode.TEMPLATE_FILL]
-)
-def test_step_spec_keeps_completion_model_ref_when_runtime_uses_completion_model(
-    output_mode: OutputMode,
-) -> None:
-    step = _step(output_mode=output_mode, model_ref="model.default")
+def test_step_spec_keeps_completion_model_ref_when_runtime_uses_completion_model() -> (
+    None
+):
+    step = _step(output_mode=OutputMode.PASS_THROUGH, model_ref="model.default")
 
     assert step.assistant_spec.model_ref == "model.default"
 

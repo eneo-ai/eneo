@@ -54,6 +54,7 @@ def _compiled_step(
     change_kind: FlowDraftStepChangeKind = FlowDraftStepChangeKind.ADDED,
     assistant_id: UUID | None = None,
     output_mode: str = "pass_through",
+    output_type: str = "text",
 ) -> FlowDraftCompiledStep:
     return FlowDraftCompiledStep(
         plan_step_ref=plan_step_ref,
@@ -64,7 +65,7 @@ def _compiled_step(
         input_source="flow_input",
         input_type="text",
         output_mode=output_mode,
-        output_type="text",
+        output_type=output_type,
     )
 
 
@@ -328,9 +329,14 @@ async def test_step_without_knowledge_clears_resource_lists() -> None:
 
 
 @pytest.mark.asyncio
-async def test_materializer_clears_completion_model_for_transcribe_only_create_changeset() -> (
-    None
-):
+@pytest.mark.parametrize(
+    ("output_mode", "output_type"),
+    [("transcribe_only", "text"), ("template_fill", "docx")],
+)
+async def test_materializer_clears_completion_model_for_non_completion_create_changeset(
+    output_mode: str,
+    output_type: str,
+) -> None:
     flow_id = uuid4()
     service = _flow_service()
     service.create_flow.return_value = _flow(flow_id=flow_id)
@@ -340,21 +346,22 @@ async def test_materializer_clears_completion_model_for_transcribe_only_create_c
 
     await FlowDraftMaterializer().execute(
         changeset=FlowDraftChangeSet(
-            flow_name="Transcription flow",
+            flow_name="Non-completion flow",
             flow_description="",
             assistants_to_create=[
                 FlowDraftAssistantToCreate(
-                    plan_step_ref="transcribe",
+                    plan_step_ref="non_completion_step",
                     assistant_spec=AssistantSpec(
-                        instructions="Transcribe.",
+                        instructions="Run the step.",
                         model_ref="model.default",
                     ),
                 )
             ],
             compiled_steps=[
                 _compiled_step(
-                    plan_step_ref="transcribe",
-                    output_mode="transcribe_only",
+                    plan_step_ref="non_completion_step",
+                    output_mode=output_mode,
+                    output_type=output_type,
                 )
             ],
         ),
@@ -371,32 +378,38 @@ async def test_materializer_clears_completion_model_for_transcribe_only_create_c
 
 
 @pytest.mark.asyncio
-async def test_materializer_clears_completion_model_for_transcribe_only_update_changeset() -> (
-    None
-):
+@pytest.mark.parametrize(
+    ("output_mode", "output_type"),
+    [("transcribe_only", "text"), ("template_fill", "docx")],
+)
+async def test_materializer_clears_completion_model_for_non_completion_update_changeset(
+    output_mode: str,
+    output_type: str,
+) -> None:
     flow_id = uuid4()
     assistant_id = uuid4()
     service = _flow_service()
 
     await FlowDraftMaterializer().execute(
         changeset=FlowDraftChangeSet(
-            flow_name="Transcription flow",
+            flow_name="Non-completion flow",
             flow_description="",
             assistants_to_update=[
                 FlowDraftAssistantToUpdate(
                     existing_assistant_id=assistant_id,
                     assistant_spec=AssistantSpec(
-                        instructions="Transcribe.",
+                        instructions="Run the step.",
                         model_ref="model.default",
                     ),
                 )
             ],
             compiled_steps=[
                 _compiled_step(
-                    plan_step_ref="transcribe",
+                    plan_step_ref="non_completion_step",
                     change_kind=FlowDraftStepChangeKind.MODIFIED,
                     assistant_id=assistant_id,
-                    output_mode="transcribe_only",
+                    output_mode=output_mode,
+                    output_type=output_type,
                 )
             ],
         ),

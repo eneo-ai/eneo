@@ -36,6 +36,7 @@ from eneo.flows.enums import (
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
     RerunDependencyKind,
+    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.flow_run_error import (
@@ -51,21 +52,6 @@ FlowPersistedJsonObject: TypeAlias = dict[str, Any]
 RuntimeInputExecutionMode: TypeAlias = Literal["single_call", "per_source"]
 FlowStepRetrievalPolicyMode: TypeAlias = Literal["best_effort", "fail_closed"]
 FLOW_STEP_RETRIEVAL_POLICY_KEY = "retrieval_policy"
-FLOW_RETRIEVAL_COMPLETION_OUTPUT_MODES: frozenset[FlowOutputMode] = frozenset(
-    {FlowOutputMode.PASS_THROUGH, FlowOutputMode.HTTP_POST}
-)
-
-
-def flow_output_mode_uses_retrieval_completion(
-    output_mode: FlowOutputMode | str,
-) -> bool:
-    """Whether the runtime handler retrieves knowledge before completion I/O."""
-
-    try:
-        mode = FlowOutputMode(output_mode)
-    except ValueError:
-        return False
-    return mode in FLOW_RETRIEVAL_COMPLETION_OUTPUT_MODES
 
 
 class FlowStepRetrievalPolicy(BaseModel):
@@ -99,7 +85,7 @@ def parse_flow_step_retrieval_policy(
         policy = FlowStepRetrievalPolicy.model_validate(raw_policy)
     except ValidationError as exc:
         raise ValueError("output_config.retrieval_policy is invalid.") from exc
-    if output_mode is not None and not flow_output_mode_uses_retrieval_completion(
+    if output_mode is not None and not flow_output_mode_uses_completion_model(
         output_mode
     ):
         raise ValueError(

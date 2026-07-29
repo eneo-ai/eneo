@@ -69,6 +69,23 @@ class FlowOutputMode(str, Enum):
     RENDER_VERBATIM = "render_verbatim"
 
 
+FLOW_COMPLETION_MODEL_OUTPUT_MODES: frozenset[FlowOutputMode] = frozenset(
+    {FlowOutputMode.PASS_THROUGH, FlowOutputMode.HTTP_POST}
+)
+
+
+def flow_output_mode_uses_completion_model(
+    mode: FlowOutputMode | str,
+) -> bool:
+    """Whether the output mode invokes an assistant completion model."""
+
+    try:
+        output_mode = FlowOutputMode(mode)
+    except ValueError:
+        return False
+    return output_mode in FLOW_COMPLETION_MODEL_OUTPUT_MODES
+
+
 def flow_output_mode_has_outbound_delivery(mode: FlowOutputMode) -> bool:
     return mode == FlowOutputMode.HTTP_POST
 

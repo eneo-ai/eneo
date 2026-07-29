@@ -32,6 +32,7 @@ from eneo.flows.enums import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
+    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -78,6 +79,21 @@ def test_flow_and_ai_builder_enums_are_exported_from_shared_module() -> None:
     assert FlowOutputType.__module__ == "eneo.flows.enums"
     assert InputSource.__module__ == "eneo.flows.enums"
     assert InputType.__module__ == "eneo.flows.enums"
+
+
+def test_output_mode_completion_model_capability_covers_every_mode() -> None:
+    actual = {
+        mode: flow_output_mode_uses_completion_model(mode) for mode in FlowOutputMode
+    }
+
+    assert actual == {
+        FlowOutputMode.PASS_THROUGH: True,
+        FlowOutputMode.HTTP_POST: True,
+        FlowOutputMode.COMPOSE_TEXT: False,
+        FlowOutputMode.TRANSCRIBE_ONLY: False,
+        FlowOutputMode.TEMPLATE_FILL: False,
+        FlowOutputMode.RENDER_VERBATIM: False,
+    }
 
 
 def test_review_expiry_reconciles_only_unresolved_review_states() -> None:
