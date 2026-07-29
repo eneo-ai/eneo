@@ -62,21 +62,28 @@ external release gate (item 10); BM0.2 is external (item 10).
 1. ~~One consistent evidence snapshot~~ — **LANDED** `f38354342`. The
    retention-purge race variant of the mutation-barrier proof carries into
    item 7's acceptance (where purged-state semantics are implemented).
-2. **Whole-bundle evidence bounds** *(large)* — within that snapshot,
-   preflight EVERY emitted section before materialization: run row +
-   definition snapshot JSON, step results (incl. payload columns),
-   attempts (`limit is None` on export today; payload columns invisible to
-   the provenance-only measurement), result files, rerun operations +
-   revisions, invalidated steps, checkpoints, webhook deliveries, provider
-   calls, runtime-input metadata, and the debug projection's duplication —
-   under per-section limits PLUS one aggregate whole-bundle
-   row/stored-byte/logical-byte ceiling. Export refuses before loading an
-   incomplete bundle; the view reports narrowing as one bounded typed
-   discriminated `omissions[]` collection so multiple sections can narrow
-   honestly at once. Keep the existing export error code; add stable
-   `section`/`limit` identifiers instead of new error codes. Fixed
-   ceilings. Tests: aggregate max+1, per-section max+1, compressible JSON
-   (stored vs logical), simultaneous omissions in two sections.
+2. **Whole-bundle evidence bounds** *(large, at final gate)* — within that
+   snapshot, preflight every emitted section before materialization (JSON
+   columns, emitted text via serialized measurement, nested children, a
+   per-row serialized floor) under per-section limits PLUS aggregate
+   stored/logical ceilings derived from a measured per-request memory
+   budget; complete-or-refuse exports with typed `section`/`limit`
+   context; views return ordered admitted prefixes and report narrowing
+   as one typed discriminated `omissions[]` collection with truthful
+   causes and `count_truncated` honesty. **Deliberate exception**: the
+   pre-existing attempt-admission window (landed knowledge-evidence
+   contract with exact totals) is unchanged by this slice — its
+   boundedness is item 2c below, because converting exact totals to
+   truncated counts is a public-contract redesign.
+2c. **Bounded attempt admission** *(medium, contract redesign)* — the
+   landed attempt window ranks/aggregates over the full history (bounded
+   returned models, unbounded database work: ranking, cumulative sums,
+   exact totals, `array_agg` over every attempt). Bound the current-first
+   candidate relation before windowing; exact totals become explicitly
+   truncated/lower-bound counts (public change to the knowledge-evidence
+   totals semantics). Acceptance: `EXPLAIN (ANALYZE, FORMAT JSON)` proof
+   on a materially over-limit attempt population that no scan node
+   examines more than ceiling+1 rows.
 2b. ~~Fix the three verified production defects~~ — **LANDED** `69f242cdd`.
 3. **Honest run token totals, retention included** *(medium/large)* —
    relational provider-call events own totals for LIVE runs with typed
