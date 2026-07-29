@@ -40,8 +40,9 @@ from eneo.database.tables.skill_table import (
 )
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_repo import FileRepository
 from eneo.main.exceptions import BadRequestException
-from eneo.object_content.content import ContentState, StorageKind
+from eneo.object_content.content import ContentFailureCode, ContentState, StorageKind
 from eneo.object_content.content_service import ObjectContentService
 from eneo.skills.domain.skill import (
     AssistantFleetAdvanceCursor,
@@ -1328,6 +1329,8 @@ class _OwnerAttachmentFleetSeed:
     old_revision_id: UUID
     candidate_revision_id: UUID
     assistant_id: UUID
+    owner_user_id: UUID
+    root_file_id: UUID
     derived_content_id: UUID
     derived_payload: bytes
 
@@ -1339,7 +1342,7 @@ async def _seed_owner_attachment_fleet(
     user_factory,
     completion_model_factory,
     space_factory,
-    derived_available: bool,
+    derived_state: ContentState,
     vision: bool = True,
 ) -> _OwnerAttachmentFleetSeed:
     async with db_container() as container:
@@ -1404,7 +1407,9 @@ async def _seed_owner_attachment_fleet(
         )
         derived_payload = derived_image.getvalue()
         add_derived_content = (
-            _add_inline_file_content if derived_available else _add_pending_file_content
+            _add_inline_file_content
+            if derived_state is ContentState.AVAILABLE
+            else _add_pending_file_content
         )
         derived_content_id = await add_derived_content(
             session,
@@ -1414,10 +1419,22 @@ async def _seed_owner_attachment_fleet(
             variant=FileContentVariant.DERIVED_PAGE,
             media_type="image/png",
         )
+        if derived_state is ContentState.FAILED:
+            await session.execute(
+                sa.update(ObjectContents)
+                .where(ObjectContents.id == derived_content_id)
+                .values(
+                    state=ContentState.FAILED.value,
+                    failure_code=ContentFailureCode.VERIFICATION_MISMATCH.value,
+                    failure_detail="Terminal derivative failure for fleet validation",
+                )
+            )
         session.add(AssistantsFiles(assistant_id=assistant.id, file_id=root.id))
         await session.flush()
         personal_space_id = personal_space.id
         assistant_id = assistant.id
+        owner_user_id = owner.id
+        root_file_id = root.id
 
     async with db_container() as container:
         session = container.session()
@@ -1480,6 +1497,8 @@ async def _seed_owner_attachment_fleet(
         old_revision_id=old_revision_id,
         candidate_revision_id=candidate_revision_id,
         assistant_id=assistant_id,
+        owner_user_id=owner_user_id,
+        root_file_id=root_file_id,
         derived_content_id=derived_content_id,
         derived_payload=derived_payload,
     )
@@ -1547,7 +1566,7 @@ async def test_owner_derived_images_are_included_in_admin_fleet_validation(
         user_factory=user_factory,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
-        derived_available=True,
+        derived_state=ContentState.AVAILABLE,
     )
 
     (
@@ -1601,7 +1620,7 @@ async def test_non_vision_fleet_skips_derived_image_projection(
         user_factory=user_factory,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
-        derived_available=True,
+        derived_state=ContentState.AVAILABLE,
         vision=False,
     )
 
@@ -1650,7 +1669,7 @@ async def test_unavailable_owner_derivative_matches_owner_time_fleet_validation(
         user_factory=user_factory,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
-        derived_available=False,
+        derived_state=ContentState.PENDING,
     )
 
     validation_finished = asyncio.Event()
@@ -1754,6 +1773,65 @@ async def test_unavailable_owner_derivative_matches_owner_time_fleet_validation(
             "reason": "context_window",
         }
     ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_failed_owner_derivative_is_a_stable_runtime_omission(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    space_factory,
+):
+    seed = await _seed_owner_attachment_fleet(
+        db_container,
+        admin_user=admin_user,
+        user_factory=user_factory,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        derived_state=ContentState.FAILED,
+    )
+
+    async with db_container() as container:
+        runtime_derived = await FileRepository(container.session()).get_by_parent_ids(
+            parent_ids=[seed.root_file_id],
+            user_id=seed.owner_user_id,
+        )
+    assert runtime_derived == []
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/assistants/advance/",
+        json={
+            "expected_published_revision_id": str(seed.candidate_revision_id),
+            "cursor": None,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 1,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    assert response.json()["outcomes"] == [
+        {
+            "assistant_id": str(seed.assistant_id),
+            "outcome": "advanced",
+            "reason": None,
+        }
+    ]
+    async with db_container() as container:
+        pin = await container.session().scalar(
+            sa.select(AssistantSkillBindings.skill_revision_id).where(
+                AssistantSkillBindings.assistant_id == seed.assistant_id,
+                AssistantSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+    assert pin == seed.candidate_revision_id
 
 
 @pytest.mark.integration

@@ -141,7 +141,12 @@ class FileRepository:
         self.session = session
 
     @staticmethod
-    def _family_has_unavailable_content(file: type[Files] = Files):
+    def _family_has_content_state(
+        file: type[Files],
+        *,
+        state: ContentState,
+        matches: bool,
+    ):
         root_id = sa.case(
             (file.parent_file_id.is_(None), file.id),
             else_=file.parent_file_id,
@@ -164,15 +169,35 @@ class FileRepository:
             .correlate(family_reference)
             .scalar_subquery()
         )
-        unavailable_content = (
+        state_condition = (
+            referenced_content_state == state.value
+            if matches
+            else referenced_content_state != state.value
+        )
+        return (
             sa.exists()
             .where(
                 family_reference.file_id.in_(family_ids),
-                referenced_content_state != ContentState.AVAILABLE.value,
+                state_condition,
             )
             .correlate(file)
         )
-        return unavailable_content
+
+    @staticmethod
+    def _family_has_unavailable_content(file: type[Files] = Files):
+        return FileRepository._family_has_content_state(
+            file,
+            state=ContentState.AVAILABLE,
+            matches=False,
+        )
+
+    @staticmethod
+    def _family_has_pending_content(file: type[Files] = Files):
+        return FileRepository._family_has_content_state(
+            file,
+            state=ContentState.PENDING,
+            matches=True,
+        )
 
     @staticmethod
     def _visible_family(file: type[Files] = Files):
@@ -300,9 +325,10 @@ class FileRepository:
         parent = aliased(Files)
         child = aliased(Files)
         family_unavailable = self._family_has_unavailable_content(parent)
+        family_pending = self._family_has_pending_content(parent)
         rows = (
             await self.session.execute(
-                sa.select(parent.id, child, family_unavailable)
+                sa.select(parent.id, child, family_unavailable, family_pending)
                 .select_from(parent)
                 .outerjoin(
                     child,
@@ -320,14 +346,19 @@ class FileRepository:
                 .order_by(parent.id, child.created_at, child.id)
             )
         ).all()
+        unavailable_parent_ids = frozenset(
+            parent_id
+            for parent_id, _child, unavailable, _pending in rows
+            if unavailable
+        )
         unstable_parent_ids = frozenset(
-            parent_id for parent_id, _child, unstable in rows if unstable
+            parent_id for parent_id, _child, _unavailable, pending in rows if pending
         )
         return AttachedDerivedImageProjection(
             derived_images=tuple(
                 FileMetadata.model_validate(child_row)
-                for parent_id, child_row, _unstable in rows
-                if child_row is not None and parent_id not in unstable_parent_ids
+                for parent_id, child_row, _unavailable, _pending in rows
+                if child_row is not None and parent_id not in unavailable_parent_ids
             ),
             unstable_parent_ids=unstable_parent_ids,
         )
