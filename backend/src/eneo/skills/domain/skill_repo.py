@@ -1,7 +1,10 @@
+from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
 from eneo.skills.domain.skill import (
+    AssistantPinAdvanceTarget,
+    AssistantPinAdvanceTargetResult,
     PersonalChatPinAdvanceStage,
     PersonalChatPinConfirmOutcome,
     PersonalDefaultsSnapshot,
@@ -21,6 +24,7 @@ from eneo.skills.domain.skill import (
     SkillRevisionSummary,
     SkillRuntimePolicy,
     SkillRuntimePolicyChange,
+    SkillRuntimePolicySnapshot,
     SkillStatusChange,
     SkillSummary,
 )
@@ -82,6 +86,34 @@ class SkillRepo(Protocol):
         limit: int,
         after: SkillAdoptionCursor | None,
     ) -> SkillAdoptionProjectionPage | None: ...
+
+    async def list_assistant_pin_advance_targets(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        after_assistant_id: UUID | None,
+        limit: int,
+    ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]: ...
+
+    async def get_assistant_fleet_advance_candidate(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+    ) -> Skill | None: ...
+
+    async def advance_assistant_skill_pins(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        expected_runtime_policy_version: str,
+        targets: Sequence[AssistantPinAdvanceTarget],
+    ) -> list[AssistantPinAdvanceTargetResult]: ...
 
     async def list_published_for_tenant(
         self,
@@ -211,6 +243,10 @@ class SkillRepo(Protocol):
         self, *, tenant_id: UUID, shared_lock: bool = False
     ) -> SkillRuntimePolicy: ...
 
+    async def get_runtime_policy_snapshot(
+        self, *, tenant_id: UUID
+    ) -> SkillRuntimePolicySnapshot: ...
+
     async def update_runtime_policy(
         self,
         *,
@@ -257,6 +293,10 @@ class SkillRepo(Protocol):
     async def list_assistant_bindings(
         self, *, assistant_id: UUID
     ) -> list[ResolvedSkillBinding]: ...
+
+    async def list_assistant_bindings_batch(
+        self, *, assistant_ids: Sequence[UUID]
+    ) -> dict[UUID, list[ResolvedSkillBinding]]: ...
 
     async def has_assistant_bindings(self, *, assistant_id: UUID) -> bool: ...
 

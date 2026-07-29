@@ -526,15 +526,22 @@ all unrelated parent fields. Missing bindings are never attached, concurrent
 edits are skipped rather than overwritten, and rollout never calls the
 user-bound parent-save command.
 
-An exact preview across thousands of heterogeneous resources requires durable,
-bounded work because selected model, policy, prompt/files, and Skill-context fit
-are target-specific. The Skills owner therefore gets one concrete, resumable
-operation with an idempotency key, closed lifecycle, bounded aggregate counts,
-stable cursor, and body-free target outcomes. It is not a generic jobs SDK. The
-first slice covers Assistants and Governance Policy for Personal Chat; a second
-slice adds Apps with explicit acknowledgement and queued-snapshot
+An exact ready-to-apply preview across thousands of heterogeneous resources
+would require durable, bounded work because selected model, policy,
+prompt/files, and Skill-context fit are target-specific. The rollout instead
+deliberately trades the exact preview for a provisional count from the
+adoption projection plus per-chunk validated application: a stateless chunked
+pass whose every write is guarded by the expected old pin and the captured
+parent row version, so re-running a pass is equivalent to resuming it and no
+durable operation rows, idempotency keys, or lifecycle states are stored.
+Each chunk returns bounded, body-free target outcomes behind a stable cursor
+and commits atomically with its audit receipt. It is not a generic jobs SDK.
+The first slice covers Assistants and Governance Policy for Personal Chat; a
+second slice adds Apps with explicit acknowledgement and queued-snapshot
 non-interference. Publication change, unpublication, or execution block stops
 future chunks with a typed terminal failure and requires a fresh preview.
+Durable operation rows return only if scale, compliance, or operator evidence
+disproves the stateless design.
 
 ### Deterministic composition and retained evidence
 

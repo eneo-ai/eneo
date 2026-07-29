@@ -32,6 +32,7 @@ from eneo.skills.domain.skill import (
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillNotPublishedForBindingError,
+    SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
 
@@ -160,7 +161,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ),
     SkillNotPublishedForBindingError: (
         400,
-        "Personal Chat can only use published organisation Skill versions",
+        "Bindings can only move to published organisation Skill versions",
         ErrorCodes.SKILL_NOT_PUBLISHED_FOR_BINDING,
     ),
     SkillBlockedForBindingError: (
@@ -173,6 +174,12 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "This execution block changed after you reviewed it. "
         "Reload the Skill before unblocking.",
         ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
+    ),
+    SkillRuntimePolicyChangedError: (
+        409,
+        "The organisation's Skill policy changed while this move was being "
+        "validated. Run the update again against the current policy.",
+        ErrorCodes.SKILL_RUNTIME_POLICY_CHANGED,
     ),
 }
 

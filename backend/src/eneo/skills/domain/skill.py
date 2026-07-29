@@ -113,6 +113,81 @@ class SkillAdoptionCursor:
             raise BadRequestException("Invalid Skill adoption cursor") from error
 
 
+class AssistantPinAdvanceOutcome(str, Enum):
+    ADVANCED = "advanced"
+    CONCURRENT_CHANGE = "concurrent_change"
+    INCOMPATIBLE = "incompatible"
+
+
+class AssistantPinAdvanceIncompatibleReason(str, Enum):
+    ACTIVATION_UNAVAILABLE = "activation_unavailable"
+    CONTEXT_WINDOW = "context_window"
+
+
+@dataclass(frozen=True)
+class AssistantPinAdvanceTarget:
+    assistant_id: UUID
+    from_revision_id: UUID
+    from_revision_number: int
+    assistant_row_version: str
+
+
+@dataclass(frozen=True)
+class AssistantPinAdvanceTargetResult:
+    assistant_id: UUID
+    outcome: AssistantPinAdvanceOutcome
+    reason: AssistantPinAdvanceIncompatibleReason | None = None
+
+
+@dataclass(frozen=True)
+class AssistantFleetAdvanceCursor:
+    skill_id: UUID
+    expected_published_revision_id: UUID
+    run_id: UUID
+    after_assistant_id: UUID | None
+
+    def serialize(self) -> str:
+        after = str(self.after_assistant_id) if self.after_assistant_id else ""
+        payload = (
+            f"{self.skill_id}:{self.expected_published_revision_id}:"
+            f"{self.run_id}:{after}"
+        ).encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+    @classmethod
+    def parse(cls, cursor: str | None) -> "AssistantFleetAdvanceCursor | None":
+        if cursor is None:
+            return None
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            decoded = base64.b64decode(
+                cursor + padding,
+                altchars=b"-_",
+                validate=True,
+            ).decode()
+            skill_id, revision_id, run_id, after_assistant_id = decoded.split(":")
+            return cls(
+                skill_id=UUID(skill_id),
+                expected_published_revision_id=UUID(revision_id),
+                run_id=UUID(run_id),
+                after_assistant_id=(
+                    UUID(after_assistant_id) if after_assistant_id else None
+                ),
+            )
+        except (binascii.Error, UnicodeDecodeError, ValueError) as error:
+            raise BadRequestException("Invalid Assistant fleet cursor") from error
+
+
+@dataclass(frozen=True)
+class AssistantFleetChunkOutcome:
+    run_id: UUID
+    cursor: AssistantFleetAdvanceCursor | None
+    results: tuple[AssistantPinAdvanceTargetResult, ...]
+    advanced_count: int
+    concurrent_change_count: int
+    incompatible_count: int
+
+
 def normalize_skill_content(
     *, display_name: str, description: str, instructions: str
 ) -> tuple[str, str, str]:
@@ -538,6 +613,10 @@ class SkillRevisionConflictError(Exception):
     pass
 
 
+class SkillRuntimePolicyChangedError(Exception):
+    pass
+
+
 class SkillNotPublishedForBindingError(Exception):
     """A binding change targeted a Skill with no published revision."""
 
@@ -664,6 +743,12 @@ class SkillRuntimePolicy:
                 f"{MIN_SKILL_ACTIVATIONS_PER_TURN} and "
                 f"{MAX_SKILL_ACTIVATIONS_PER_TURN}"
             )
+
+
+@dataclass(frozen=True)
+class SkillRuntimePolicySnapshot:
+    policy: SkillRuntimePolicy
+    row_version: str
 
 
 # Product-standard seeds. Reset restores these values, not a deployment's
@@ -817,6 +902,10 @@ class SkillActivationFallbackReason(str, Enum):
     CATALOG_BUDGET_EXCEEDED = "catalog_budget_exceeded"
     TOKEN_MEASUREMENT_UNAVAILABLE = "token_measurement_unavailable"
     SELECTIVE_ACTIVATION_DISABLED = "selective_activation_disabled"
+
+
+class SkillActivationUnavailableException(BadRequestException):
+    pass
 
 
 class SkillActivationRejectionReason(str, Enum):

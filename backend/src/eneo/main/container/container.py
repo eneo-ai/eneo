@@ -759,6 +759,7 @@ class Container(containers.DeclarativeContainer):
         AssistantRepository,
         session=session,
         factory=assistant_factory,
+        file_repo=file_repo,
         file_content_loader=file_content_loader,
         completion_model_repo=completion_model_repo2,
         user=user,
@@ -1281,6 +1282,7 @@ class Container(containers.DeclarativeContainer):
         repo=skill_repo,
         space_service=space_service,
         assistant_service=assistant_service,
+        audit_service=audit_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,

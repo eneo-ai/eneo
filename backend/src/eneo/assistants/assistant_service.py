@@ -1,7 +1,7 @@
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
 from uuid import UUID
@@ -68,16 +68,20 @@ from eneo.roles.permissions import (
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
 from eneo.skills.domain.skill import (
+    AssistantPinAdvanceIncompatibleReason,
     AssistantSkillConfigurationProjection,
     AssistantSkillRuntimeProjection,
     PersonalChatPinOverride,
+    ResolvedSkillBinding,
     SkillActivationEvidenceV1,
     SkillActivationFallbackReason,
     SkillActivationMode,
     SkillActivationRejectionReason,
+    SkillActivationUnavailableException,
     SkillBindingIntent,
     SkillComposition,
     SkillExecutionReference,
+    SkillRuntimePolicy,
     SkillRuntimeResolution,
     SkillTurnEffectiveMode,
     SkillTurnPlan,
@@ -91,7 +95,7 @@ from eneo.spaces.space_service import SpaceService
 from eneo.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
-from eneo.tokens.token_utils import log_token_count_drift
+from eneo.tokens.token_utils import log_token_count_drift, measure_provider_input_tokens
 from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
@@ -132,6 +136,7 @@ _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES: dict[
         "does not fit the selected completion model context"
     ),
 }
+
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
@@ -600,7 +605,7 @@ class AssistantService:
                 if snapshot.fallback_reason is not None
                 else _ON_DEMAND_REJECTION_DEFAULT
             )
-            raise BadRequestException(message)
+            raise SkillActivationUnavailableException(message)
 
         assessments = runtime.assess_on_demand_candidates(candidate_skill_ids)
         rejected_assessment = next(
@@ -629,7 +634,7 @@ class AssistantService:
             files=completion_prompt_files,
         )
 
-        if not candidate_skill_ids:
+        if not candidate_skill_ids and not effective_mcp_servers:
             return
 
         provider_input = (
@@ -642,11 +647,22 @@ class AssistantService:
                 adapter=preflight_adapter,
             )
         )
+        provider_input_token_limit = attachment_token_ceiling(model.max_input_tokens)
+        baseline_measurement = measure_provider_input_tokens(
+            provider_input.messages,
+            provider_input.tools,
+            model.get_model_route(),
+        )
+        if baseline_measurement.tokens > provider_input_token_limit:
+            raise BadRequestException(
+                "The Assistant prompt, files, and tools exceed the completion "
+                "model context window"
+            )
         provider_assessments = runtime.assess_provider_payload_candidates(
             candidate_skill_ids,
             messages=provider_input.messages,
             provider_tools=provider_input.tools,
-            provider_input_token_limit=attachment_token_ceiling(model.max_input_tokens),
+            provider_input_token_limit=provider_input_token_limit,
         )
         rejected_provider_assessment = next(
             (
@@ -734,16 +750,14 @@ class AssistantService:
             persistent_attachments=assistant.attachments,
             completion_model=model,
         )
-        effective_mcp_servers: list["MCPServer"] = []
-        if candidate_skill_ids:
-            if effective_config is not None and effective_config.mcp_enforced:
-                effective_mcp_servers = effective_config.available_mcp_servers
-            elif mcp_servers_override is not None:
-                effective_mcp_servers = mcp_servers_override
-            else:
-                effective_mcp_servers = assistant.mcp_servers
-            if assistant.has_knowledge():
-                effective_mcp_servers = []
+        if effective_config is not None and effective_config.mcp_enforced:
+            effective_mcp_servers = effective_config.available_mcp_servers
+        elif mcp_servers_override is not None:
+            effective_mcp_servers = mcp_servers_override
+        else:
+            effective_mcp_servers = assistant.mcp_servers
+        if assistant.has_knowledge():
+            effective_mcp_servers = []
         await self._validate_skill_activation_fit(
             validation_plan=validation_plan,
             candidate_skill_ids=candidate_skill_ids,
@@ -751,6 +765,85 @@ class AssistantService:
             completion_prompt_files=completion_prompt_files,
             effective_mcp_servers=effective_mcp_servers,
         )
+
+    async def assert_assistant_fits_candidate_pin(
+        self,
+        *,
+        assistant: Assistant,
+        space_is_personal: bool,
+        candidate: PersonalChatPinOverride,
+        candidate_binding: ResolvedSkillBinding,
+        resolution: SkillRuntimeResolution,
+        runtime_policy: SkillRuntimePolicy,
+        preflight_adapters: dict[UUID, "CompletionModelAdapter"],
+        completion_prompt_files: Sequence[File],
+    ) -> AssistantPinAdvanceIncompatibleReason | None:
+        """Return the stable fleet reason when the candidate cannot be activated."""
+        assert not (space_is_personal and assistant.is_default)
+        assert candidate_binding.skill_id == candidate.skill_id
+        assert candidate_binding.skill_revision_id == candidate.to_revision_id
+
+        current_binding = next(
+            (
+                binding
+                for binding in (*resolution.eligible, *resolution.blocked)
+                if binding.skill_id == candidate.skill_id
+                and binding.skill_revision_id == candidate.from_revision_id
+            ),
+            None,
+        )
+        assert current_binding is not None
+        resolved_candidate = replace(
+            candidate_binding,
+            position=current_binding.position,
+            activation_mode=current_binding.activation_mode,
+        )
+        candidate_resolution = SkillRuntimeResolution(
+            eligible=tuple(
+                resolved_candidate if binding is current_binding else binding
+                for binding in resolution.eligible
+            ),
+            blocked=tuple(
+                resolved_candidate if binding is current_binding else binding
+                for binding in resolution.blocked
+            ),
+        )
+        validation_plan = SkillTurnPlan.create(
+            base_instructions=assistant.get_prompt_text(),
+            resolution=candidate_resolution,
+            policy=runtime_policy,
+        ).for_full_save_validation()
+        candidate_skill_ids = frozenset(
+            binding.binding.skill_id
+            for binding in validation_plan.available
+            if binding.binding.activation_mode is SkillActivationMode.ON_DEMAND
+        )
+        model = assistant.completion_model
+        if model is None:
+            if candidate_skill_ids:
+                return AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
+            return None
+        effective_mcp_servers = (
+            [] if assistant.has_knowledge() else assistant.mcp_servers
+        )
+        try:
+            await self._validate_skill_activation_fit(
+                validation_plan=validation_plan,
+                candidate_skill_ids=candidate_skill_ids,
+                model=model,
+                completion_prompt_files=list(completion_prompt_files),
+                effective_mcp_servers=effective_mcp_servers,
+                preflight_adapter=(
+                    preflight_adapters[model.id]
+                    if candidate_skill_ids or effective_mcp_servers
+                    else None
+                ),
+            )
+        except SkillActivationUnavailableException:
+            return AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
+        except BadRequestException:
+            return AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+        return None
 
     @staticmethod
     def _context_model(
@@ -812,8 +905,14 @@ class AssistantService:
                 "provider-wide or unrestricted model access cannot be validated safely"
             )
 
+        requires_allowlist_adapters = bool(
+            candidate_skill_ids
+            or (
+                effective_config.mcp_enforced and effective_config.available_mcp_servers
+            )
+        )
         preflight_adapters: dict[UUID, CompletionModelAdapter] = {}
-        if candidate_skill_ids:
+        if requires_allowlist_adapters:
             preflight_adapters = (
                 await self.completion_service.load_skill_activation_preflight_adapters(
                     [
@@ -821,7 +920,8 @@ class AssistantService:
                         for model in effective_config.available_models
                     ]
                 )
-            )
+            ).adapters
+        if candidate_skill_ids:
             for model in effective_config.available_models:
                 await self._validate_skill_activation_fit(
                     validation_plan=policy_validation_plan,
@@ -867,8 +967,17 @@ class AssistantService:
         preflight_adapters: dict[UUID, "CompletionModelAdapter"],
     ) -> None:
         """Validate one page of personal defaults against the governed plan."""
+        models_by_assistant_id: dict[UUID, CompletionModel] = {}
+        for validation_input in validation_inputs:
+            assistant = validation_input.assistant
+            assert assistant.id is not None
+            model = self._context_model(assistant, effective_config=effective_config)
+            if model is None:
+                continue
+            models_by_assistant_id[assistant.id] = model
+
         projected_mcp_servers: dict[UUID, list[MCPServer]] = {}
-        if candidate_skill_ids and not effective_config.mcp_enforced:
+        if not effective_config.mcp_enforced:
             mcp_projections = [
                 AssistantMCPServerProjection(
                     space_id=validation_input.assistant.space_id,
@@ -886,6 +995,47 @@ class AssistantService:
                     )
                 )
 
+        effective_mcp_servers_by_assistant_id: dict[UUID, list[MCPServer]] = {}
+        for validation_input in validation_inputs:
+            assistant = validation_input.assistant
+            assert assistant.id is not None
+            effective_mcp_servers: list[MCPServer] = []
+            if not validation_input.has_knowledge:
+                if effective_config.mcp_enforced:
+                    effective_mcp_servers = effective_config.available_mcp_servers
+                elif validation_input.configured_mcp_servers:
+                    effective_mcp_servers = projected_mcp_servers.get(assistant.id, [])
+            effective_mcp_servers_by_assistant_id[assistant.id] = effective_mcp_servers
+
+        completion_file_projections_by_assistant_id = (
+            await self.repo.project_completion_file_metadata_for_validation(
+                assistants=[item.assistant for item in validation_inputs],
+                models_by_assistant_id=models_by_assistant_id,
+                tenant_id=self.user.tenant_id,
+            )
+        )
+
+        requires_adapter_by_assistant_id: dict[UUID, bool] = {}
+        missing_models: dict[UUID, CompletionModel] = {}
+        for assistant_id, model in models_by_assistant_id.items():
+            requires_adapter = bool(
+                candidate_skill_ids
+                or effective_mcp_servers_by_assistant_id[assistant_id]
+            )
+            requires_adapter_by_assistant_id[assistant_id] = requires_adapter
+            if requires_adapter and model.id not in preflight_adapters:
+                missing_models[model.id] = model
+        if missing_models:
+            adapter_load = (
+                await self.completion_service.load_skill_activation_preflight_adapters(
+                    [
+                        cast("AICompletionModel", model)
+                        for model in missing_models.values()
+                    ]
+                )
+            )
+            preflight_adapters.update(adapter_load.adapters)
+
         for validation_input in validation_inputs:
             assistant = validation_input.assistant
             # Reuse the policy loaded above; the service wrapper would fetch it again.
@@ -896,22 +1046,23 @@ class AssistantService:
                 resolution=effective_config.governance_skill_resolution,
                 policy=policy_plan.policy,
             )
-            model = self._context_model(assistant, effective_config=effective_config)
+            assert assistant.id is not None
+            model = models_by_assistant_id.get(assistant.id)
             if model is None:
                 continue
-            completion_prompt_files = await self._completion_prompt_files_for_model(
-                persistent_attachments=assistant.attachments,
-                completion_model=model,
+            completion_prompt_files = list(
+                await self.repo.hydrate_completion_files_for_validation(
+                    assistant=assistant,
+                    derived_image_metadata=completion_file_projections_by_assistant_id[
+                        assistant.id
+                    ].derived_image_metadata,
+                )
             )
-            effective_mcp_servers: list["MCPServer"] = []
-            if candidate_skill_ids and not validation_input.has_knowledge:
-                if effective_config.mcp_enforced:
-                    effective_mcp_servers = effective_config.available_mcp_servers
-                elif validation_input.configured_mcp_servers:
-                    assert assistant.id is not None
-                    effective_mcp_servers = projected_mcp_servers[assistant.id]
+            effective_mcp_servers = effective_mcp_servers_by_assistant_id[assistant.id]
             preflight_adapter = (
-                preflight_adapters[model.id] if candidate_skill_ids else None
+                preflight_adapters[model.id]
+                if requires_adapter_by_assistant_id[assistant.id]
+                else None
             )
             await self._validate_skill_activation_fit(
                 validation_plan=assistant_plan.for_full_save_validation(),
@@ -921,6 +1072,7 @@ class AssistantService:
                 effective_mcp_servers=effective_mcp_servers,
                 preflight_adapter=preflight_adapter,
             )
+            del completion_prompt_files
 
     async def _assert_message_attachments_fit(
         self,

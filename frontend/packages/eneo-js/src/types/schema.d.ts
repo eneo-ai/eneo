@@ -6353,6 +6353,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/skills/organization/{skill_id}/assistants/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance Assistant Bindings
+     * @description Move one bounded chunk of Assistant bindings to the reviewed published Skill revision.
+     */
+    post: operations["advance_assistant_bindings_api_v1_skills_organization__skill_id__assistants_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/skills/organization/{skill_id}/unpublish/": {
     parameters: {
       query?: never;
@@ -9246,6 +9266,38 @@ export interface components {
        */
       completion_model?: components["schemas"]["ModelId"] | null;
     };
+    /** AssistantFleetAdvanceCountsPublic */
+    AssistantFleetAdvanceCountsPublic: {
+      /** Advanced */
+      advanced: number;
+      /** Concurrent Change */
+      concurrent_change: number;
+      /** Incompatible */
+      incompatible: number;
+    };
+    /** AssistantFleetAdvancePublic */
+    AssistantFleetAdvancePublic: {
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Next Cursor */
+      next_cursor: string | null;
+      counts: components["schemas"]["AssistantFleetAdvanceCountsPublic"];
+      /** Outcomes */
+      outcomes: components["schemas"]["AssistantPinAdvanceOutcomePublic"][];
+    };
+    /** AssistantFleetAdvanceRequest */
+    AssistantFleetAdvanceRequest: {
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       */
+      expected_published_revision_id: string;
+      /** Cursor */
+      cursor?: string | null;
+    };
     /** AssistantGuard */
     AssistantGuard: {
       /**
@@ -9307,6 +9359,26 @@ export interface components {
        * Format: date-time
        */
       created_at: string;
+    };
+    /**
+     * AssistantPinAdvanceIncompatibleReason
+     * @enum {string}
+     */
+    AssistantPinAdvanceIncompatibleReason: "activation_unavailable" | "context_window";
+    /**
+     * AssistantPinAdvanceOutcome
+     * @enum {string}
+     */
+    AssistantPinAdvanceOutcome: "advanced" | "concurrent_change" | "incompatible";
+    /** AssistantPinAdvanceOutcomePublic */
+    AssistantPinAdvanceOutcomePublic: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      outcome: components["schemas"]["AssistantPinAdvanceOutcome"];
+      reason?: components["schemas"]["AssistantPinAdvanceIncompatibleReason"] | null;
     };
     /** AssistantPublic */
     AssistantPublic: {
@@ -11885,7 +11957,8 @@ export interface components {
       | 9051
       | 9052
       | 9053
-      | 9054;
+      | 9054
+      | 9055;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -41938,6 +42011,77 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PersonalChatPinAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_assistant_bindings_api_v1_skills_organization__skill_id__assistants_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssistantFleetAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantFleetAdvancePublic"];
         };
       };
       /** @description Bad Request */
