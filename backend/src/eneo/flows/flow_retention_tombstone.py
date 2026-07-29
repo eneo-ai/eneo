@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal, Self, TypeAlias, cast
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, model_validator
+
+from eneo.flows.domain.flow import FlowRunTokenUsage
 
 FLOW_RETENTION_TOMBSTONE_SCHEMA_VERSION: Literal["flow-retention-tombstone.v1"] = (
     "flow-retention-tombstone.v1"
@@ -35,6 +38,16 @@ class RunDebugAttemptRetentionCounts(BaseModel):
     provider_call_count: int
     resolved_input_aggregate_count: int
     resolved_input_edge_count: int
+    token_usage_state: Literal["recorded", "not_recorded", "unknown"] = "unknown"
+    token_usage: FlowRunTokenUsage | None = None
+
+    @model_validator(mode="after")
+    def validate_token_usage_state(self) -> Self:
+        if (self.token_usage_state == "recorded") != (self.token_usage is not None):
+            raise ValueError(
+                "Recorded token usage state must carry exactly one usage summary."
+            )
+        return self
 
 
 class GeneratedArtifactRetentionCounts(BaseModel):
@@ -113,7 +126,34 @@ class FlowAttemptRetentionMarker(BaseModel):
     tombstone: FlowRetentionTombstone
 
     def to_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json")
+        return self.model_dump(mode="json", exclude_none=True)
+
+
+def parse_attempt_retention_counts(
+    payload: object,
+    *,
+    tenant_id: UUID,
+    run_id: UUID,
+    attempt_id: UUID,
+) -> RunDebugAttemptRetentionCounts | None:
+    """Return counts only when a marker belongs to the requested attempt row."""
+    if not isinstance(payload, dict):
+        return None
+    try:
+        marker = FlowAttemptRetentionMarker.model_validate(
+            cast(dict[str, Any], payload)
+        )
+    except ValueError:
+        return None
+    tombstone = marker.tombstone
+    if (
+        tombstone.tenant_id != str(tenant_id)
+        or tombstone.run_id != str(run_id)
+        or tombstone.object_id != str(attempt_id)
+    ):
+        return None
+    counts = tombstone.counts
+    return counts if isinstance(counts, RunDebugAttemptRetentionCounts) else None
 
 
 def append_retention_tombstone(

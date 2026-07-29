@@ -27,7 +27,6 @@ from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunStatus,
-    FlowRunTokenUsage,
     FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
@@ -527,47 +526,6 @@ class FlowRunRepository:
 
         rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowRun.model_validate(row) for row in rows]
-
-    async def list_token_usage_for_runs(
-        self,
-        *,
-        run_ids: Sequence[UUID],
-        tenant_id: UUID,
-    ) -> dict[UUID, FlowRunTokenUsage]:
-        if not run_ids:
-            return {}
-
-        input_tokens = sa.func.coalesce(
-            sa.func.sum(sa.func.coalesce(FlowStepAttempts.num_tokens_input, 0)),
-            0,
-        )
-        output_tokens = sa.func.coalesce(
-            sa.func.sum(sa.func.coalesce(FlowStepAttempts.num_tokens_output, 0)),
-            0,
-        )
-        total_tokens = input_tokens + output_tokens
-        stmt = (
-            sa.select(
-                FlowStepAttempts.flow_run_id,
-                input_tokens.label("num_tokens_input"),
-                output_tokens.label("num_tokens_output"),
-            )
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(FlowStepAttempts.flow_run_id.in_(tuple(run_ids)))
-            .group_by(FlowStepAttempts.flow_run_id)
-            .having(total_tokens > 0)
-        )
-
-        rows = await self.session.execute(stmt)
-        usage_by_run_id: dict[UUID, FlowRunTokenUsage] = {}
-        for row in rows:
-            run_input_tokens = int(row.num_tokens_input or 0)
-            run_output_tokens = int(row.num_tokens_output or 0)
-            usage_by_run_id[row.flow_run_id] = FlowRunTokenUsage.from_counts(
-                num_tokens_input=run_input_tokens,
-                num_tokens_output=run_output_tokens,
-            )
-        return usage_by_run_id
 
     async def list_dispatchable_queued_runs(
         self,

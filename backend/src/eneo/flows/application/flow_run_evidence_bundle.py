@@ -16,6 +16,7 @@ from eneo.flows.domain.flow import (
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
+    FlowRunTokenUsage,
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
@@ -195,6 +196,7 @@ def build_evidence_bundle(
     review_checkpoints: Sequence[FlowRunReviewCheckpoint] = (),
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
     provider_calls: ProviderCallEvidencePage | None = None,
+    token_usage: FlowRunTokenUsage | None = None,
     runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
     | None = None,
     runtime_input_file_metadata_by_step_result_id: Mapping[
@@ -263,6 +265,7 @@ def build_evidence_bundle(
             result_files=list(result_files),
             rerun_operations=list(rerun_operations),
             rerun_invalidated_steps=list(rerun_invalidated_steps),
+            token_usage=token_usage,
             knowledge_evidence_view=knowledge_evidence_view,
             omissions=omissions,
         ),

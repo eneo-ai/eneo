@@ -16690,7 +16690,7 @@ export interface components {
         | null;
       /** Result Files */
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
-      /** @description Aggregated provider-reported token usage for model attempts in this run. Null when the run has not produced token-metered model usage. */
+      /** @description Aggregated recorded token usage for every model attempt in this run. Null when no token-metered call exists or retention left no recoverable count. */
       token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
       /** @description Structured terminal run error. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
       error?: components["schemas"]["FlowRunError"] | null;
@@ -18128,7 +18128,7 @@ export interface components {
         | null;
       /** Result Files */
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
-      /** @description Aggregated provider-reported token usage for model attempts in this run. Null when the run has not produced token-metered model usage. */
+      /** @description Aggregated recorded token usage for every model attempt in this run. Null when no token-metered call exists or retention left no recoverable count. */
       token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
       /** @description Structured terminal run error. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
       error?: components["schemas"]["FlowRunError"] | null;
@@ -19458,19 +19458,31 @@ export interface components {
     FlowRunTokenUsagePublic: {
       /**
        * Num Tokens Input
-       * @description Provider-reported input tokens consumed by the run.
+       * @description Recorded input tokens consumed by the run, including provider-reported and estimated counts.
        */
       num_tokens_input: number;
       /**
        * Num Tokens Output
-       * @description Provider-reported output tokens consumed by the run.
+       * @description Recorded output tokens consumed by the run, including provider-reported and estimated counts.
        */
       num_tokens_output: number;
       /**
        * Num Tokens Total
-       * @description Total provider-reported tokens consumed by the run.
+       * @description Total recorded input and output tokens consumed by the run.
        */
       num_tokens_total: number;
+      /**
+       * Input Completeness
+       * @description Whether every contributing provider call has a recorded input token count.
+       * @enum {string}
+       */
+      input_completeness: "complete" | "incomplete";
+      /**
+       * Output Completeness
+       * @description Whether every contributing provider call has a recorded output token count.
+       * @enum {string}
+       */
+      output_completeness: "complete" | "incomplete";
     };
     /**
      * FlowRunWebhookDeliveryPublic

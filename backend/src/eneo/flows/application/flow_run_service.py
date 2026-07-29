@@ -62,6 +62,9 @@ from eneo.flows.flow_run_step_inputs import (
 )
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+)
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
@@ -176,6 +179,7 @@ class FlowRunService:
         user: UserInDB,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
+        provider_call_repo: FlowProviderCallRepository,
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         flow_version_repo: FlowVersionRepository,
         runtime_upload_repo: FlowRuntimeUploadRepository,
@@ -189,6 +193,7 @@ class FlowRunService:
         self.user = user
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
+        self.provider_call_repo = provider_call_repo
         self.flow_run_terminalizer = flow_run_terminalizer
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
@@ -674,7 +679,7 @@ class FlowRunService:
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
         )
-        token_usage_by_run_id = await self.flow_run_repo.list_token_usage_for_runs(
+        token_usage_by_run_id = await self.provider_call_repo.list_token_usage_for_runs(
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
         )

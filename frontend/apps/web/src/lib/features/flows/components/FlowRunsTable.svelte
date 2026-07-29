@@ -550,7 +550,7 @@
                     class="hidden px-4 py-3 align-middle lg:table-cell"
                     onclick={(e: MouseEvent) => e.stopPropagation()}
                   >
-                    <FlowRunTokenUsageBadge tokenUsage={run.token_usage} emptyPlaceholder />
+                    <FlowRunTokenUsageBadge tokenUsage={run.token_usage} />
                   </Table.Cell>
                 {/if}
                 <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

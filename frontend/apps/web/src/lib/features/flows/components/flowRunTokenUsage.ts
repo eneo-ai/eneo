@@ -2,28 +2,37 @@ import type { FlowRunTokenUsage } from "@eneo/eneo-js";
 
 export type FlowRunTokenUsagePayload = FlowRunTokenUsage;
 
-export interface FlowRunTokenUsageView {
+export interface FlowRunTokenUsageRecordedView {
+  kind: "recorded";
   total: number;
   input: number;
   output: number;
+  incomplete: boolean;
+  inputIncomplete: boolean;
+  outputIncomplete: boolean;
 }
+
+export type FlowRunTokenUsageView = FlowRunTokenUsageRecordedView | { kind: "not_recorded" };
 
 export function buildFlowRunTokenUsageView(
   tokenUsage: FlowRunTokenUsagePayload | null | undefined
-): FlowRunTokenUsageView | null {
+): FlowRunTokenUsageView {
   if (!tokenUsage) {
-    return null;
+    return { kind: "not_recorded" };
   }
 
   const total = positiveInteger(tokenUsage.num_tokens_total);
-  if (total <= 0) {
-    return null;
-  }
+  const inputIncomplete = tokenUsage.input_completeness === "incomplete";
+  const outputIncomplete = tokenUsage.output_completeness === "incomplete";
 
   return {
+    kind: "recorded",
     total,
     input: positiveInteger(tokenUsage.num_tokens_input),
-    output: positiveInteger(tokenUsage.num_tokens_output)
+    output: positiveInteger(tokenUsage.num_tokens_output),
+    incomplete: inputIncomplete || outputIncomplete,
+    inputIncomplete,
+    outputIncomplete
   };
 }
 

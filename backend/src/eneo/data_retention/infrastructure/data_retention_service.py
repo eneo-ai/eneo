@@ -42,6 +42,7 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus
+from eneo.flows.domain.flow import FlowProviderCallTokenUsage, FlowRunTokenUsage
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.flow_retention_tombstone import (
@@ -56,6 +57,7 @@ from eneo.flows.flow_retention_tombstone import (
     RunDebugStepResultRetentionCounts,
     append_retention_tombstone,
     has_retention_tombstone,
+    parse_attempt_retention_counts,
 )
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeRepository,
@@ -2281,18 +2283,57 @@ class DataRetentionService:
         attempt_ids = [row.id for row in locked_attempts]
 
         provider_call_counts: dict[UUID, int] = {}
+        provider_call_usage: dict[UUID, FlowRunTokenUsage] = {}
         resolved_input_counts: dict[UUID, tuple[int, int]] = {}
         if attempt_ids:
             # Provider calls reference the resolved-input row; delete them first.
-            provider_delete_result = await self.session.execute(
+            deleted_provider_calls = (
                 sa.delete(FlowProviderCalls)
                 .where(FlowProviderCalls.flow_step_attempt_id.in_(attempt_ids))
-                .returning(FlowProviderCalls.flow_step_attempt_id)
+                .returning(
+                    FlowProviderCalls.flow_step_attempt_id,
+                    FlowProviderCalls.status,
+                    FlowProviderCalls.num_tokens_input,
+                    FlowProviderCalls.num_tokens_output,
+                    FlowProviderCalls.input_source,
+                    FlowProviderCalls.output_source,
+                )
+                .cte("deleted_flow_provider_calls")
             )
-            for attempt_id in provider_delete_result.scalars():
+            provider_call_rows = await self.session.stream(
+                sa.select(
+                    deleted_provider_calls.c.flow_step_attempt_id,
+                    deleted_provider_calls.c.status,
+                    deleted_provider_calls.c.num_tokens_input,
+                    deleted_provider_calls.c.num_tokens_output,
+                    deleted_provider_calls.c.input_source,
+                    deleted_provider_calls.c.output_source,
+                ).execution_options(yield_per=RETENTION_BATCH_SIZE)
+            )
+            async for provider_call in provider_call_rows:
+                attempt_id = provider_call.flow_step_attempt_id
                 provider_call_counts[attempt_id] = (
                     provider_call_counts.get(attempt_id, 0) + 1
                 )
+                call_usage = FlowRunTokenUsage.from_provider_calls(
+                    (
+                        FlowProviderCallTokenUsage(
+                            status=provider_call.status,
+                            num_tokens_input=provider_call.num_tokens_input,
+                            num_tokens_output=provider_call.num_tokens_output,
+                            input_source=provider_call.input_source,
+                            output_source=provider_call.output_source,
+                        ),
+                    )
+                )
+                if call_usage is not None:
+                    combined_usage = FlowRunTokenUsage.combine(
+                        usage
+                        for usage in (provider_call_usage.get(attempt_id), call_usage)
+                        if usage is not None
+                    )
+                    assert combined_usage is not None
+                    provider_call_usage[attempt_id] = combined_usage
 
             resolved_input_delete_result = await self.session.execute(
                 sa.delete(FlowStepAttemptResolvedInputs)
@@ -2316,7 +2357,12 @@ class DataRetentionService:
         debug_step_attempts = 0
         for row in locked_attempts:
             action = actions_by_run_id[row.flow_run_id]
-            previous_counts = _current_attempt_retention_counts(row.provenance_json)
+            previous_counts = parse_attempt_retention_counts(
+                row.provenance_json,
+                tenant_id=action.tenant_id,
+                run_id=row.flow_run_id,
+                attempt_id=row.id,
+            )
             provenance_to_clear = (
                 None if previous_counts is not None else row.provenance_json
             )
@@ -2359,6 +2405,30 @@ class DataRetentionService:
                 if previous_counts is not None
                 else 0
             )
+            new_token_usage = provider_call_usage.get(row.id)
+            previous_token_usage = (
+                previous_counts.token_usage if previous_counts is not None else None
+            )
+            previous_token_usage_state = (
+                previous_counts.token_usage_state
+                if previous_counts is not None
+                else "not_recorded"
+            )
+            if (
+                previous_provider_call_count > 0
+                and previous_token_usage_state == "unknown"
+            ):
+                token_usage = None
+                token_usage_state = "unknown"
+            else:
+                token_usage = FlowRunTokenUsage.combine(
+                    usage
+                    for usage in (previous_token_usage, new_token_usage)
+                    if usage is not None
+                )
+                token_usage_state = (
+                    "recorded" if token_usage is not None else "not_recorded"
+                )
             marker = _build_attempt_retention_marker(
                 action=action,
                 object_id=str(row.id),
@@ -2376,6 +2446,8 @@ class DataRetentionService:
                     resolved_input_edge_count=(
                         previous_resolved_input_edge_count + resolved_input_edge_count
                     ),
+                    token_usage_state=token_usage_state,
+                    token_usage=token_usage,
                 ),
             )
             attempt_result = await self.session.execute(
@@ -2646,18 +2718,3 @@ def _build_attempt_retention_marker(
             counts=counts,
         )
     ).to_payload()
-
-
-def _current_attempt_retention_counts(
-    payload: Any,
-) -> RunDebugAttemptRetentionCounts | None:
-    if not isinstance(payload, dict):
-        return None
-    try:
-        marker = FlowAttemptRetentionMarker.model_validate(
-            cast(dict[str, Any], payload)
-        )
-    except ValueError:
-        return None
-    counts = marker.tombstone.counts
-    return counts if isinstance(counts, RunDebugAttemptRetentionCounts) else None

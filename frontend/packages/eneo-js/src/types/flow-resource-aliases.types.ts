@@ -451,7 +451,9 @@ const validFlowRunOutputPayload: FlowRunOutputPayload = {
 const validFlowRunTokenUsage: FlowRunTokenUsage = {
   num_tokens_input: 120,
   num_tokens_output: 30,
-  num_tokens_total: 150
+  num_tokens_total: 150,
+  input_completeness: "complete",
+  output_completeness: "complete"
 };
 const validFlowRunError: FlowRunError = {
   schema_version: 1,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,13 +15,26 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowProviderCalls,
     FlowStepAttemptResolvedInputs,
+    FlowStepAttempts,
 )
-from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowProviderCallTokenUsage,
+    FlowRunTokenUsage,
+    FlowStep,
+)
 from eneo.flows.domain.provider_call import (
     ProviderCall,
     ProviderCallCompletion,
     ProviderCallRequest,
     ProviderCallResponseFormat,
+)
+from eneo.flows.enums import FlowStepAttemptStatus
+from eneo.flows.flow_retention_tombstone import (
+    FLOW_RETENTION_ACTOR_SOURCE,
+    FlowAttemptRetentionMarker,
+    FlowRetentionTombstone,
+    RunDebugAttemptRetentionCounts,
 )
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgeIndexes,
@@ -48,6 +62,7 @@ from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 class _StartedAttempt:
     attempt_id: UUID
     run_id: UUID
+    flow_id: UUID
     step_id: UUID
     attempt_no: int
     tenant_id: UUID
@@ -202,6 +217,7 @@ async def _create_started_attempt(
     context = _StartedAttempt(
         attempt_id=attempt.id,
         run_id=run.id,
+        flow_id=flow.id,
         step_id=step.id,
         attempt_no=attempt.attempt_no,
         tenant_id=admin_user.tenant_id,
@@ -584,7 +600,7 @@ async def test_provider_call_completion_is_idempotent_and_rejects_conflicts(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_provider_call_known_rejection_and_unknown_outcome_are_distinct(
+async def test_run_token_usage_marks_mixed_reported_and_unreported_calls_incomplete(
     db_container,
     completion_model_factory,
     space_factory,
@@ -601,6 +617,498 @@ async def test_provider_call_known_rejection_and_unknown_outcome_are_distinct(
             assistant_factory=assistant_factory,
         )
         repo = FlowProviderCallRepository(session)
+        reported = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=ProviderCallRequest(
+                provider_request_hash="1" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=reported.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="provider-response-reported",
+                num_tokens_input=21,
+                num_tokens_output=8,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        unreported = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=ProviderCallRequest(
+                provider_request_hash="2" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=unreported.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="provider-response-unreported",
+                num_tokens_input=None,
+                num_tokens_output=None,
+                input_source="not_reported",
+                output_source="not_reported",
+            ),
+        )
+
+        usage_by_run_id = await repo.list_token_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    usage = usage_by_run_id[context.run_id]
+    assert usage.num_tokens_input == 21
+    assert usage.num_tokens_output == 8
+    assert usage.num_tokens_total == 29
+    assert usage.input_completeness == "incomplete"
+    assert usage.output_completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_token_usage_distinguishes_unknown_only_from_no_provider_calls(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        assert (
+            await repo.list_token_usage_for_runs(
+                run_ids=[context.run_id],
+                tenant_id=context.tenant_id,
+            )
+            == {}
+        )
+
+        started = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=ProviderCallRequest(
+                provider_request_hash="3" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.mark_outcome_unknown(
+            call_id=started.id,
+            reason="request_timeout",
+        )
+
+        usage_by_run_id = await repo.list_token_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    usage = usage_by_run_id[context.run_id]
+    assert usage.num_tokens_total == 0
+    assert usage.input_completeness == "incomplete"
+    assert usage.output_completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_token_usage_is_absent_when_retained_calls_lack_a_summary(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        now = datetime.now(timezone.utc)
+        marker = FlowAttemptRetentionMarker(
+            tombstone=FlowRetentionTombstone(
+                tenant_id=str(context.tenant_id),
+                run_id=str(context.run_id),
+                trace_id=str(uuid4()),
+                data_class="run_debug_evidence",
+                object_type="flow_step_attempt",
+                object_id=str(context.attempt_id),
+                policy_source="test",
+                cutoff=now,
+                actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+                counts=RunDebugAttemptRetentionCounts(
+                    cleared_field_count=3,
+                    provider_call_count=1,
+                    resolved_input_aggregate_count=0,
+                    resolved_input_edge_count=0,
+                ),
+                timestamp=now,
+                retention_state="retention_purged",
+            )
+        ).to_payload()
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == context.attempt_id)
+            .values(provenance_json=marker)
+        )
+
+        usage_by_run_id = await FlowProviderCallRepository(
+            session
+        ).list_token_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    assert marker["tombstone"]["counts"]["token_usage_state"] == "unknown"
+    assert usage_by_run_id == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_token_usage_rejects_retained_summary_for_a_different_attempt(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        now = datetime.now(timezone.utc)
+        marker = FlowAttemptRetentionMarker(
+            tombstone=FlowRetentionTombstone(
+                tenant_id=str(context.tenant_id),
+                run_id=str(context.run_id),
+                trace_id=str(uuid4()),
+                data_class="run_debug_evidence",
+                object_type="flow_step_attempt",
+                object_id=str(uuid4()),
+                policy_source="test",
+                cutoff=now,
+                actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+                counts=RunDebugAttemptRetentionCounts(
+                    cleared_field_count=3,
+                    provider_call_count=1,
+                    resolved_input_aggregate_count=0,
+                    resolved_input_edge_count=0,
+                    token_usage_state="recorded",
+                    token_usage=FlowRunTokenUsage.from_counts(
+                        num_tokens_input=10,
+                        num_tokens_output=4,
+                        input_completeness="complete",
+                        output_completeness="complete",
+                    ),
+                ),
+                timestamp=now,
+                retention_state="retention_purged",
+            )
+        ).to_payload()
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == context.attempt_id)
+            .values(provenance_json=marker)
+        )
+        run_repo = FlowRunRepository(session)
+        await run_repo.finish_attempt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            tenant_id=context.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            num_tokens_input=None,
+            num_tokens_output=None,
+        )
+        second_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=2,
+            celery_task_id="mismatched-retention-rerun",
+            predecessor_attempt_id=context.attempt_id,
+        )
+        second = _StartedAttempt(
+            attempt_id=second_attempt.id,
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            step_id=context.step_id,
+            attempt_no=2,
+            tenant_id=context.tenant_id,
+        )
+        await _activate_resolved_inputs(
+            repo=run_repo,
+            context=second,
+            aggregate=FlowResolvedInputEdges(schema_version=1, edges=()),
+        )
+        second_call = await _start_provider_call(
+            repo=FlowProviderCallRepository(session),
+            context=second,
+            request=ProviderCallRequest(
+                provider_request_hash="6" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await FlowProviderCallRepository(session).complete_call(
+            call_id=second_call.id,
+            receipt=ProviderCallCompletion(
+                num_tokens_input=20,
+                num_tokens_output=6,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+
+        usage_by_run_id = await FlowProviderCallRepository(
+            session
+        ).list_token_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    usage = usage_by_run_id[context.run_id]
+    assert usage.num_tokens_input == 20
+    assert usage.num_tokens_output == 6
+    assert usage.num_tokens_total == 26
+    assert usage.input_completeness == "incomplete"
+    assert usage.output_completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("retain_first_attempt", [False, True])
+async def test_run_token_usage_includes_superseded_attempt_before_and_after_retention(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    retain_first_attempt: bool,
+):
+    async with db_container() as container:
+        session = container.session()
+        first = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+        first_call = await _start_provider_call(
+            repo=repo,
+            context=first,
+            request=ProviderCallRequest(
+                provider_request_hash="4" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=first_call.id,
+            receipt=ProviderCallCompletion(
+                num_tokens_input=10,
+                num_tokens_output=4,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        run_repo = FlowRunRepository(session)
+        await run_repo.finish_attempt(
+            run_id=first.run_id,
+            step_id=first.step_id,
+            attempt_no=first.attempt_no,
+            tenant_id=first.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            num_tokens_input=None,
+            num_tokens_output=None,
+        )
+        if retain_first_attempt:
+            first_usage = await repo.list_token_usage_for_runs(
+                run_ids=[first.run_id],
+                tenant_id=first.tenant_id,
+            )
+            now = datetime.now(timezone.utc)
+            marker = FlowAttemptRetentionMarker(
+                tombstone=FlowRetentionTombstone(
+                    tenant_id=str(first.tenant_id),
+                    run_id=str(first.run_id),
+                    trace_id=str(uuid4()),
+                    data_class="run_debug_evidence",
+                    object_type="flow_step_attempt",
+                    object_id=str(first.attempt_id),
+                    policy_source="test",
+                    cutoff=now,
+                    actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+                    counts=RunDebugAttemptRetentionCounts(
+                        cleared_field_count=3,
+                        provider_call_count=1,
+                        resolved_input_aggregate_count=0,
+                        resolved_input_edge_count=0,
+                        token_usage_state="recorded",
+                        token_usage=first_usage[first.run_id],
+                    ),
+                    timestamp=now,
+                    retention_state="retention_purged",
+                )
+            ).to_payload()
+            await session.execute(
+                sa.delete(FlowProviderCalls).where(
+                    FlowProviderCalls.flow_step_attempt_id == first.attempt_id
+                )
+            )
+            await session.execute(
+                sa.update(FlowStepAttempts)
+                .where(FlowStepAttempts.id == first.attempt_id)
+                .values(provenance_json=marker)
+            )
+        second_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=first.run_id,
+            flow_id=first.flow_id,
+            tenant_id=first.tenant_id,
+            step_id=first.step_id,
+            step_order=1,
+            attempt_no=2,
+            celery_task_id="provider-call-rerun-test",
+            predecessor_attempt_id=first.attempt_id,
+        )
+        second = _StartedAttempt(
+            attempt_id=second_attempt.id,
+            run_id=first.run_id,
+            flow_id=first.flow_id,
+            step_id=first.step_id,
+            attempt_no=2,
+            tenant_id=first.tenant_id,
+        )
+        await _activate_resolved_inputs(
+            repo=run_repo,
+            context=second,
+            aggregate=FlowResolvedInputEdges(schema_version=1, edges=()),
+        )
+        second_call = await _start_provider_call(
+            repo=repo,
+            context=second,
+            request=ProviderCallRequest(
+                provider_request_hash="5" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=second_call.id,
+            receipt=ProviderCallCompletion(
+                num_tokens_input=20,
+                num_tokens_output=6,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        await run_repo.finish_attempt(
+            run_id=second.run_id,
+            step_id=second.step_id,
+            attempt_no=second.attempt_no,
+            tenant_id=second.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            num_tokens_input=None,
+            num_tokens_output=None,
+        )
+
+        usage_by_run_id = await repo.list_token_usage_for_runs(
+            run_ids=[first.run_id],
+            tenant_id=first.tenant_id,
+        )
+
+    usage = usage_by_run_id[first.run_id]
+    assert usage.num_tokens_input == 30
+    assert usage.num_tokens_output == 10
+    assert usage.num_tokens_total == 40
+    assert usage.input_completeness == "complete"
+    assert usage.output_completeness == "complete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_live_token_aggregation_matches_the_provider_call_contract(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+        completed_start = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=ProviderCallRequest(
+                provider_request_hash="c" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        completed = await repo.complete_call(
+            call_id=completed_start.id,
+            receipt=ProviderCallCompletion(
+                num_tokens_input=7,
+                num_tokens_output=None,
+                input_source="provider",
+                output_source="not_reported",
+            ),
+        )
+        completed_only_usage = await repo.list_token_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+        expected_completed_only = FlowRunTokenUsage.from_provider_calls(
+            (
+                FlowProviderCallTokenUsage(
+                    status=completed.status.value,
+                    num_tokens_input=completed.num_tokens_input,
+                    num_tokens_output=completed.num_tokens_output,
+                    input_source=completed.input_source,
+                    output_source=completed.output_source,
+                ),
+            )
+        )
+        assert expected_completed_only is not None
+        assert completed_only_usage == {context.run_id: expected_completed_only}
+        assert expected_completed_only.input_completeness == "complete"
+        assert expected_completed_only.output_completeness == "incomplete"
+
         rejected_start = await _start_provider_call(
             repo=repo,
             context=context,
@@ -624,9 +1132,30 @@ async def test_provider_call_known_rejection_and_unknown_outcome_are_distinct(
             call_id=rejected_start.id,
             reason="response_format_rejected",
         )
+        started_usage = await repo.list_token_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+        expected_started = FlowRunTokenUsage.from_provider_calls(
+            FlowProviderCallTokenUsage(
+                status=call.status.value,
+                num_tokens_input=call.num_tokens_input,
+                num_tokens_output=call.num_tokens_output,
+                input_source=call.input_source,
+                output_source=call.output_source,
+            )
+            for call in (completed, rejected, unknown_start)
+        )
+        assert expected_started is not None
+        assert started_usage == {context.run_id: expected_started}
+
         unknown = await repo.mark_outcome_unknown(
             call_id=unknown_start.id,
             reason="request_timeout",
+        )
+        usage_by_run_id = await repo.list_token_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
         )
 
         assert rejected.status == "rejected"
@@ -635,6 +1164,19 @@ async def test_provider_call_known_rejection_and_unknown_outcome_are_distinct(
         assert unknown.status == "outcome_unknown"
         assert unknown.outcome_reason == "request_timeout"
         assert unknown.finished_at is not None
+
+    expected = FlowRunTokenUsage.from_provider_calls(
+        FlowProviderCallTokenUsage(
+            status=call.status.value,
+            num_tokens_input=call.num_tokens_input,
+            num_tokens_output=call.num_tokens_output,
+            input_source=call.input_source,
+            output_source=call.output_source,
+        )
+        for call in (completed, rejected, unknown)
+    )
+    assert expected is not None
+    assert usage_by_run_id == {context.run_id: expected}
 
 
 @pytest.mark.asyncio

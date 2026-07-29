@@ -12,6 +12,7 @@ from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
+    FlowRunTokenUsage,
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
@@ -128,14 +129,6 @@ class DebugStepProjection(BaseModel):
     attempts: list[DebugAttemptProjection]
 
 
-class DebugRunTokenUsageProjection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    num_tokens_input: int
-    num_tokens_output: int
-    num_tokens_total: int
-
-
 class DebugRunSummaryProjection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -146,7 +139,7 @@ class DebugRunSummaryProjection(BaseModel):
     artifacts_count: int
     duration_ms: int | None
     models_used: list[str]
-    token_usage: DebugRunTokenUsageProjection | None = None
+    token_usage: FlowRunTokenUsage | None = None
     knowledge_evidence_view: RunViewPassageOmission | None = None
     omissions: list[RunViewEvidenceOmission] = Field(
         default_factory=_empty_run_view_evidence_omissions
@@ -162,6 +155,7 @@ def build_debug_export(
     result_files: list[FlowRunStepResultFile] | None = None,
     rerun_operations: list[FlowRunRerunOperation] | None = None,
     rerun_invalidated_steps: list[FlowRunRerunInvalidatedStep] | None = None,
+    token_usage: FlowRunTokenUsage | None = None,
     knowledge_evidence_view: RunViewPassageOmission | None = None,
     omissions: Sequence[RunViewEvidenceOmission] = (),
 ) -> dict[str, Any]:
@@ -222,7 +216,7 @@ def build_debug_export(
         artifacts_count=len({str(item.file_id) for item in result_files or []}),
         duration_ms=_calculate_duration_ms(run.created_at, run.updated_at),
         models_used=_collect_models_used(step_attempts or []),
-        token_usage=_build_run_token_usage_summary(step_attempts or []),
+        token_usage=token_usage,
         knowledge_evidence_view=knowledge_evidence_view,
         omissions=list(omissions),
     )
@@ -268,21 +262,6 @@ def _latest_evidence_timestamp(
     timestamps.extend(operation.updated_at for operation in rerun_operations)
     timestamps.extend(step.updated_at for step in rerun_invalidated_steps)
     return max(timestamps)
-
-
-def _build_run_token_usage_summary(
-    step_attempts: list[FlowStepAttempt],
-) -> DebugRunTokenUsageProjection | None:
-    num_tokens_input = sum(attempt.num_tokens_input or 0 for attempt in step_attempts)
-    num_tokens_output = sum(attempt.num_tokens_output or 0 for attempt in step_attempts)
-    num_tokens_total = num_tokens_input + num_tokens_output
-    if num_tokens_total == 0:
-        return None
-    return DebugRunTokenUsageProjection(
-        num_tokens_input=num_tokens_input,
-        num_tokens_output=num_tokens_output,
-        num_tokens_total=num_tokens_total,
-    )
 
 
 def parse_step_order(value: Any, *, default: int | None = None) -> int | None:

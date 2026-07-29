@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal, Optional, Self, TypeAlias, cast
@@ -352,11 +352,13 @@ class FlowRun(BaseModel):
 
 
 class FlowRunTokenUsage(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     num_tokens_input: int = Field(ge=0)
     num_tokens_output: int = Field(ge=0)
     num_tokens_total: int = Field(ge=0)
+    input_completeness: Literal["complete", "incomplete"]
+    output_completeness: Literal["complete", "incomplete"]
 
     @classmethod
     def from_counts(
@@ -364,11 +366,70 @@ class FlowRunTokenUsage(BaseModel):
         *,
         num_tokens_input: int,
         num_tokens_output: int,
+        input_completeness: Literal["complete", "incomplete"],
+        output_completeness: Literal["complete", "incomplete"],
     ) -> Self:
         return cls(
             num_tokens_input=num_tokens_input,
             num_tokens_output=num_tokens_output,
             num_tokens_total=num_tokens_input + num_tokens_output,
+            input_completeness=input_completeness,
+            output_completeness=output_completeness,
+        )
+
+    @classmethod
+    def from_provider_calls(
+        cls,
+        calls: Iterable["FlowProviderCallTokenUsage"],
+    ) -> Self | None:
+        contributing_calls = tuple(call for call in calls if call.status != "rejected")
+        if not contributing_calls:
+            return None
+        return cls.from_counts(
+            num_tokens_input=sum(
+                call.num_tokens_input or 0 for call in contributing_calls
+            ),
+            num_tokens_output=sum(
+                call.num_tokens_output or 0 for call in contributing_calls
+            ),
+            input_completeness=(
+                "incomplete"
+                if any(
+                    call.status in {"started", "outcome_unknown"}
+                    or call.input_source == "not_reported"
+                    for call in contributing_calls
+                )
+                else "complete"
+            ),
+            output_completeness=(
+                "incomplete"
+                if any(
+                    call.status in {"started", "outcome_unknown"}
+                    or call.output_source == "not_reported"
+                    for call in contributing_calls
+                )
+                else "complete"
+            ),
+        )
+
+    @classmethod
+    def combine(cls, usages: Iterable["FlowRunTokenUsage"]) -> Self | None:
+        items = tuple(usages)
+        if not items:
+            return None
+        return cls.from_counts(
+            num_tokens_input=sum(item.num_tokens_input for item in items),
+            num_tokens_output=sum(item.num_tokens_output for item in items),
+            input_completeness=(
+                "incomplete"
+                if any(item.input_completeness == "incomplete" for item in items)
+                else "complete"
+            ),
+            output_completeness=(
+                "incomplete"
+                if any(item.output_completeness == "incomplete" for item in items)
+                else "complete"
+            ),
         )
 
     @model_validator(mode="after")
@@ -377,6 +438,21 @@ class FlowRunTokenUsage(BaseModel):
         if self.num_tokens_total != expected_total:
             raise ValueError("num_tokens_total must equal input plus output tokens.")
         return self
+
+
+@dataclass(frozen=True, slots=True)
+class FlowProviderCallTokenUsage:
+    status: Literal["started", "completed", "rejected", "outcome_unknown"]
+    num_tokens_input: int | None
+    num_tokens_output: int | None
+    input_source: (
+        Literal["provider", "estimated", "mixed", "not_reported", "not_applicable"]
+        | None
+    )
+    output_source: (
+        Literal["provider", "estimated", "mixed", "not_reported", "not_applicable"]
+        | None
+    )
 
 
 class FlowStepResult(BaseModel):

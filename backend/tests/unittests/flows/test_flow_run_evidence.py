@@ -35,6 +35,7 @@ from eneo.flows.domain.flow import (
     FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
+    FlowRunTokenUsage,
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
@@ -1248,33 +1249,27 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
     assert export["steps"][0]["rag"]["has_named_sources"] is True
 
 
-def test_build_debug_export_adds_run_token_usage_summary() -> None:
+def test_build_debug_export_uses_provider_call_token_usage_summary() -> None:
     run, version = _evidence_run_and_version()
-    first_attempt = _attempt_with_provenance(run, None).model_copy(
-        update={
-            "num_tokens_input": 10,
-            "num_tokens_output": 4,
-        }
-    )
-    second_attempt = _attempt_with_provenance(run, None).model_copy(
-        update={
-            "id": uuid4(),
-            "attempt_no": 2,
-            "num_tokens_input": None,
-            "num_tokens_output": 6,
-        }
+    usage = FlowRunTokenUsage.from_counts(
+        num_tokens_input=10,
+        num_tokens_output=10,
+        input_completeness="incomplete",
+        output_completeness="complete",
     )
 
     export = build_debug_export(
         run=run,
         version=version,
-        step_attempts=[first_attempt, second_attempt],
+        token_usage=usage,
     )
 
     assert export["run"]["summary"]["token_usage"] == {
         "num_tokens_input": 10,
         "num_tokens_output": 10,
         "num_tokens_total": 20,
+        "input_completeness": "incomplete",
+        "output_completeness": "complete",
     }
 
 
@@ -1753,6 +1748,7 @@ def test_evidence_export_redacted_preserves_retention_marker_fields() -> None:
         "provider_call_count": 0,
         "resolved_input_aggregate_count": 0,
         "resolved_input_edge_count": 0,
+        "token_usage_state": "unknown",
     }
     assert not any(
         path.startswith("bundle.step_attempts.0.provenance_json.tombstone")

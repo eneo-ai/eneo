@@ -895,15 +895,32 @@ class FlowRunTokenUsagePublic(BaseModel):
 
     num_tokens_input: int = Field(
         ge=0,
-        description="Provider-reported input tokens consumed by the run.",
+        description=(
+            "Recorded input tokens consumed by the run, including provider-reported "
+            "and estimated counts."
+        ),
     )
     num_tokens_output: int = Field(
         ge=0,
-        description="Provider-reported output tokens consumed by the run.",
+        description=(
+            "Recorded output tokens consumed by the run, including provider-reported "
+            "and estimated counts."
+        ),
     )
     num_tokens_total: int = Field(
         ge=0,
-        description="Total provider-reported tokens consumed by the run.",
+        description="Total recorded input and output tokens consumed by the run.",
+    )
+    input_completeness: Literal["complete", "incomplete"] = Field(
+        description=(
+            "Whether every contributing provider call has a recorded input token count."
+        ),
+    )
+    output_completeness: Literal["complete", "incomplete"] = Field(
+        description=(
+            "Whether every contributing provider call has a recorded output token "
+            "count."
+        ),
     )
 
 
@@ -989,8 +1006,9 @@ class FlowRunPublic(BaseModel):
     token_usage: FlowRunTokenUsagePublic | None = Field(
         default=None,
         description=(
-            "Aggregated provider-reported token usage for model attempts in this "
-            "run. Null when the run has not produced token-metered model usage."
+            "Aggregated recorded token usage for every model attempt in this run. "
+            "Null when no token-metered call exists or retention left no recoverable "
+            "count."
         ),
     )
     error: FlowRunError | None = Field(

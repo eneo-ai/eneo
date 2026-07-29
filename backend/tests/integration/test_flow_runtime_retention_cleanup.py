@@ -50,7 +50,7 @@ from eneo.flows.application.flow_run_audit_outbox_delivery import (
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowRunTokenUsage
 from eneo.flows.enums import (
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
@@ -59,11 +59,15 @@ from eneo.flows.enums import (
 from eneo.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
     FlowAttemptRetentionMarker,
+    FlowRetentionTombstone,
     RunDebugAttemptRetentionCounts,
     extract_retention_tombstones,
 )
 from eneo.flows.infrastructure import (
     flow_run_history_purge_repo as flow_run_history_purge_repo_module,
+)
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
@@ -2735,12 +2739,77 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
     async_session.add(resolved_inputs)
     await async_session.flush()
     async_session.add(provider_call)
+    async_session.add(
+        FlowProviderCalls(
+            flow_step_attempt_id=fixture.step_attempt.id,
+            ordinal=2,
+            status="completed",
+            request_schema_version=2,
+            provider_request_hash="c" * 64,
+            requested_model="openai/gpt-5-mini",
+            provider="openai",
+            response_format="none",
+            requested_capabilities=[],
+            resolved_input_edge_indexes=[],
+            call_reason="tool_round",
+            mapped_execution_mode=None,
+            mapped_item_index=None,
+            mapped_source_index=None,
+            mapped_source_id=None,
+            response_model="gpt-5-mini-2026-07-01",
+            provider_response_id="response-retention-2",
+            num_tokens_input=None,
+            num_tokens_output=None,
+            input_source="not_reported",
+            output_source="not_reported",
+            outcome_reason=None,
+            requested_at=fixture.step_attempt.started_at,
+            finished_at=fixture.step_attempt.finished_at,
+        )
+    )
+    await async_session.flush()
+
+    usage_before_purge = await FlowProviderCallRepository(
+        async_session
+    ).list_token_usage_for_runs(
+        run_ids=[fixture.run.id],
+        tenant_id=test_tenant.id,
+    )
+    now = datetime.now(timezone.utc)
+    fixture.step_attempt.provenance_json = FlowAttemptRetentionMarker(
+        tombstone=FlowRetentionTombstone(
+            tenant_id=str(test_tenant.id),
+            run_id=str(fixture.run.id),
+            trace_id=str(fixture.run.trace_id),
+            data_class="run_debug_evidence",
+            object_type="flow_step_attempt",
+            object_id=str(uuid4()),
+            policy_source="test_foreign_marker",
+            cutoff=now,
+            actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+            counts=RunDebugAttemptRetentionCounts(
+                cleared_field_count=99,
+                provider_call_count=9,
+                resolved_input_aggregate_count=9,
+                resolved_input_edge_count=9,
+                token_usage_state="recorded",
+                token_usage=FlowRunTokenUsage.from_counts(
+                    num_tokens_input=999,
+                    num_tokens_output=999,
+                    input_completeness="complete",
+                    output_completeness="complete",
+                ),
+            ),
+            timestamp=now,
+            retention_state="retention_purged",
+        )
+    ).to_payload()
     await async_session.flush()
 
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["debug_provider_calls"] == 1
+    assert counts["debug_provider_calls"] == 2
     assert counts["debug_resolved_input_aggregates"] == 1
     assert counts["debug_resolved_input_edges"] == resolved_input_edge_count
     assert await async_session.get(FlowProviderCalls, provider_call.id) is None
@@ -2761,9 +2830,21 @@ async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evide
     attempt_counts = attempt_marker.tombstone.counts
     assert isinstance(attempt_counts, RunDebugAttemptRetentionCounts)
     assert attempt_counts.cleared_field_count == 3
-    assert attempt_counts.provider_call_count == 1
+    assert attempt_counts.provider_call_count == 2
     assert attempt_counts.resolved_input_aggregate_count == 1
     assert attempt_counts.resolved_input_edge_count == resolved_input_edge_count
+    assert attempt_counts.token_usage_state == "recorded"
+    assert attempt_counts.token_usage == usage_before_purge[fixture.run.id]
+    assert attempt_counts.token_usage.input_completeness == "incomplete"
+    assert attempt_counts.token_usage.output_completeness == "incomplete"
+
+    usage_after_purge = await FlowProviderCallRepository(
+        async_session
+    ).list_token_usage_for_runs(
+        run_ids=[fixture.run.id],
+        tenant_id=test_tenant.id,
+    )
+    assert usage_after_purge == usage_before_purge
 
     first_marker = refreshed_attempt.provenance_json
     repeated_counts = await flow_retention_service.cleanup_old_flow_runtime_data()

@@ -1446,6 +1446,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        provider_call_repo=flow_provider_call_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_run_terminalizer=flow_run_terminalizer,
         flow_version_repo=flow_version_repo,

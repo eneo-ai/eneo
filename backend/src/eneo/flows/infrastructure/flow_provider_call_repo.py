@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
@@ -14,6 +15,7 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
 )
+from eneo.flows.domain.flow import FlowRunTokenUsage
 from eneo.flows.domain.provider_call import (
     ProviderCall,
     ProviderCallCompletion,
@@ -25,6 +27,10 @@ from eneo.flows.domain.provider_call import (
     ProviderCallUnknownReason,
 )
 from eneo.flows.enums import FlowStepAttemptStatus
+from eneo.flows.flow_retention_tombstone import (
+    FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
+    parse_attempt_retention_counts,
+)
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgeIndexes,
     parse_resolved_input_edges,
@@ -33,6 +39,7 @@ from eneo.flows.flow_run_provenance import (
 _RESOLVED_INPUT_EDGE_INDEXES_ADAPTER: TypeAdapter[FlowResolvedInputEdgeIndexes] = (
     TypeAdapter(FlowResolvedInputEdgeIndexes)
 )
+_TOKEN_USAGE_STREAM_BATCH_SIZE = 1000
 
 
 class FlowProviderCallAttemptNotOpenError(RuntimeError):
@@ -77,6 +84,156 @@ class FlowProviderCallRepository:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def list_token_usage_for_runs(
+        self,
+        *,
+        run_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, FlowRunTokenUsage]:
+        if not run_ids:
+            return {}
+        # Keep live calls and retained summaries separate. This makes the source
+        # choice attempt-scoped without materializing live attempts' debug JSON.
+        # UNION ALL preserves that boundary in one database round trip.
+        contributing_call = FlowProviderCalls.status != "rejected"
+        contributing_call_count = sa.func.count(FlowProviderCalls.id).filter(
+            contributing_call
+        )
+        live_stmt = (
+            sa.select(
+                FlowStepAttempts.flow_run_id.label("run_id"),
+                sa.literal("live").label("usage_source"),
+                sa.null().label("attempt_id"),
+                sa.null().label("provenance_json"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.num_tokens_input).filter(
+                        contributing_call
+                    ),
+                    0,
+                ).label("num_tokens_input"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.num_tokens_output).filter(
+                        contributing_call
+                    ),
+                    0,
+                ).label("num_tokens_output"),
+                sa.func.coalesce(
+                    sa.func.bool_or(
+                        sa.or_(
+                            FlowProviderCalls.status.in_(
+                                ("started", "outcome_unknown")
+                            ),
+                            FlowProviderCalls.input_source == "not_reported",
+                        )
+                    ).filter(contributing_call),
+                    False,
+                ).label("input_incomplete"),
+                sa.func.coalesce(
+                    sa.func.bool_or(
+                        sa.or_(
+                            FlowProviderCalls.status.in_(
+                                ("started", "outcome_unknown")
+                            ),
+                            FlowProviderCalls.output_source == "not_reported",
+                        )
+                    ).filter(contributing_call),
+                    False,
+                ).label("output_incomplete"),
+            )
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id.in_(tuple(run_ids)))
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .group_by(FlowStepAttempts.flow_run_id)
+            .having(contributing_call_count > 0)
+        )
+        retained_stmt = (
+            sa.select(
+                FlowStepAttempts.flow_run_id.label("run_id"),
+                sa.literal("retained").label("usage_source"),
+                FlowStepAttempts.id.label("attempt_id"),
+                FlowStepAttempts.provenance_json,
+                sa.literal(0).label("num_tokens_input"),
+                sa.literal(0).label("num_tokens_output"),
+                sa.literal(False).label("input_incomplete"),
+                sa.literal(False).label("output_incomplete"),
+            )
+            .where(FlowStepAttempts.flow_run_id.in_(tuple(run_ids)))
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(
+                FlowStepAttempts.provenance_json["schema_version"].as_string()
+                == FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION
+            )
+            .where(
+                ~sa.exists().where(
+                    FlowProviderCalls.flow_step_attempt_id == FlowStepAttempts.id
+                )
+            )
+        )
+        rows = await self.session.stream(
+            retained_stmt.union_all(live_stmt).execution_options(
+                yield_per=_TOKEN_USAGE_STREAM_BATCH_SIZE
+            )
+        )
+
+        known_usage_by_run_id: dict[UUID, FlowRunTokenUsage] = {}
+        retained_usage_unknown: set[UUID] = set()
+        async for row in rows:
+            run_id: UUID = row.run_id
+            if row.usage_source == "live":
+                row_usage = FlowRunTokenUsage.from_counts(
+                    num_tokens_input=int(row.num_tokens_input),
+                    num_tokens_output=int(row.num_tokens_output),
+                    input_completeness=(
+                        "incomplete" if row.input_incomplete else "complete"
+                    ),
+                    output_completeness=(
+                        "incomplete" if row.output_incomplete else "complete"
+                    ),
+                )
+            else:
+                counts = parse_attempt_retention_counts(
+                    row.provenance_json,
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    attempt_id=row.attempt_id,
+                )
+                if counts is None:
+                    # This row claims to be a retained attempt, but its summary is
+                    # not trustworthy. Preserve any live totals while making their
+                    # incompleteness explicit.
+                    retained_usage_unknown.add(run_id)
+                    continue
+                if (
+                    counts.provider_call_count > 0
+                    and counts.token_usage_state == "unknown"
+                ):
+                    retained_usage_unknown.add(run_id)
+                row_usage = counts.token_usage
+            if row_usage is None:
+                continue
+            previous_usage = known_usage_by_run_id.get(run_id)
+            if previous_usage is None:
+                known_usage_by_run_id[run_id] = row_usage
+                continue
+            combined_usage = FlowRunTokenUsage.combine((previous_usage, row_usage))
+            assert combined_usage is not None
+            known_usage_by_run_id[run_id] = combined_usage
+
+        for run_id in retained_usage_unknown:
+            usage = known_usage_by_run_id.get(run_id)
+            if usage is not None:
+                known_usage_by_run_id[run_id] = FlowRunTokenUsage.from_counts(
+                    num_tokens_input=usage.num_tokens_input,
+                    num_tokens_output=usage.num_tokens_output,
+                    input_completeness="incomplete",
+                    output_completeness="incomplete",
+                )
+        return known_usage_by_run_id
 
     async def measure_evidence_row_count(
         self, *, run_id: UUID, tenant_id: UUID, ceiling: int
