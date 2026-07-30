@@ -511,6 +511,10 @@
       return;
     }
     if (!isCurrentSkill(skill.id)) return;
+    if (action === "unpublish") {
+      rolloutGeneration += 1;
+      rollout = null;
+    }
     publicationAction = null;
     publicationSaving = false;
     if (updateBindings) {

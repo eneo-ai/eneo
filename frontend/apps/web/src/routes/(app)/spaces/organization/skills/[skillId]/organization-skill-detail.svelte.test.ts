@@ -127,7 +127,8 @@ function publicationLifecycleData({
   advanceAssistants = vi.fn(),
   advancePersonalChat = vi.fn(),
   getAdoption = vi.fn(),
-  publish = vi.fn(async () => {})
+  publish = vi.fn(async () => {}),
+  unpublish = vi.fn(async () => {})
 }: {
   skill?: OrganizationSkillPublic;
   adoption?: Promise<unknown>;
@@ -135,6 +136,7 @@ function publicationLifecycleData({
   advancePersonalChat?: unknown;
   getAdoption?: unknown;
   publish?: unknown;
+  unpublish?: unknown;
 } = {}) {
   return {
     skill,
@@ -163,7 +165,7 @@ function publicationLifecycleData({
           listRevisionSummaries: vi.fn(),
           publish,
           restoreRevision: vi.fn(),
-          unpublish: vi.fn()
+          unpublish
         }
       }
     }
@@ -1525,6 +1527,105 @@ describe("organisation Skill detail page", () => {
         )
       )
       .toBeVisible();
+  });
+
+  test("does not restart a first-publication rollout after that publication is withdrawn", async () => {
+    const firstChunk = deferred<AssistantFleetAdvancePublic>();
+    const advanceAssistants = vi.fn(() => firstChunk.promise);
+    const publish = vi.fn(async () => {});
+    const unpublish = vi.fn(async () => {});
+    const firstPublicationSkill: OrganizationSkillPublic = {
+      ...updatePendingSkill(),
+      published_revision_number: null,
+      first_published_at: null,
+      publication_state: "draft"
+    };
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 2,
+        revision_counts: []
+      }
+    };
+    const lifecycle = {
+      skill: firstPublicationSkill,
+      adoption: Promise.resolve(reviewedAdoption),
+      advanceAssistants,
+      publish,
+      unpublish
+    };
+    const rendered = render(OrganizationSkillDetailPage, {
+      data: {
+        ...publicationLifecycleData(lifecycle),
+        published: null
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .first()
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledOnce());
+    await page.getByRole("button", { name: m.organization_skills_rollout_stop() }).click();
+
+    firstChunk.resolve({
+      run_id: "run-1",
+      next_cursor: "cursor-2",
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_stopped(), { exact: true }))
+      .toBeVisible();
+
+    const publishedSkillState: OrganizationSkillPublic = {
+      ...firstPublicationSkill,
+      published_revision_number: 2,
+      first_published_at: "2026-07-20T09:00:00Z",
+      publication_state: "published"
+    };
+    await rendered.rerender({
+      data: {
+        ...publicationLifecycleData({ ...lifecycle, skill: publishedSkillState }),
+        published: publishedSkillAt(2)
+      } as never
+    });
+    await page
+      .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
+      .last()
+      .click();
+    await vi.waitFor(() => expect(unpublish).toHaveBeenCalledOnce());
+
+    await rendered.rerender({
+      data: {
+        ...publicationLifecycleData({
+          ...lifecycle,
+          skill: {
+            ...publishedSkillState,
+            published_revision_number: null,
+            publication_state: "unpublished"
+          }
+        }),
+        published: null
+      } as never
+    });
+
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .not.toBeInTheDocument();
+    expect(advanceAssistants).toHaveBeenCalledTimes(1);
   });
 
   test("discards a running receipt and ignores its late response after navigation", async () => {
