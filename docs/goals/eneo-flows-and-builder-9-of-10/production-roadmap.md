@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-30 | **Model-aware Builder resource policy**: attachment text now shares the selected model's declared input window after output, safety, and conversation reserves instead of using fixed character quotas; admins own effective attachment, message, aggregate DOCX-inspection, placeholder, and token-reserve policy; fixed API, parser, and planning-state safety ceilings are returned through the typed settings contract and explained in Swedish/English; frontend/backend admission agrees, template failures are explicit before provider work, and shared settings writes are serialized with a lost-update regression proof (`478dfeb1c`, gate green 8/10 after three same-session passes, no findings) |
 | 2026-07-30 | **Atomic Builder template attachment binding**: exactly one confirmed DOCX is compiled into required, runtime-provable placeholder bindings before proposal hashing; transcription-dependent templates make audio input required; apply reuses the same uploaded File and atomically creates the Flow asset and normal resource binding; authorization, bounded inspection, rollback, retry, replay, deletion races, publish pinning, real DOCX rendering, and deterministic zero-token execution are proven, while reference/context/example attachments remain planning-only (`2d608b309`, gate green 9/10 after six same-session passes, no findings) |
 | 2026-07-30 | **Reliable Builder attachment interpretation**: canonically equal explicit schemas now merge with complete provenance, distinct schemas ask one replay-safe bounded question before provider work, and selected example outputs contribute cited structure/style guidance plus deliberately open inferred JSON shape without exact-fidelity or closed-world claims; one focused schema-evidence owner enforces strict JSON, byte/depth/field bounds, conservative inference, and shared field projection, while `PlanningState` owns one atomic attachment-interpretation transition (`f25b029e6`, gate green 8/10 after four same-session passes, no findings) |
 | 2026-07-30 | **Honest Builder attachment evidence**: persisted file-role evidence now retains independent readability and exact coverage through live refresh and classifier replay; inventory-only files cannot promote semantic roles; full placeholder identity survives persistence and compilation while shared prompt rendering is safely bounded; deterministic discovery records every valid schema candidate and refuses multiple candidates before provider work; a private full-evidence fingerprint invalidates confirmation even for omitted or display-colliding attachments, while Swedish/English summaries stay bounded (`caa17c3ef`, gate green 8/10 after four same-session passes, no findings) |
@@ -134,10 +135,11 @@ external release gate (item 10); BM0.2 is external (item 10).
    marker: missing + marker = `retention_purged`, missing without =
    `not_tracked`, malformed = `corrupt`.
 8. **Builder frontend/server contract closure** *(medium, four reviewed
-   commits by owner)* — (a) stream/attachment/draft contract: validate
-   known SSE payload shapes at runtime (parser currently casts parsed
-   JSON), one explicit stream-failure state, KEEP fail-fast unknown-event
-   behavior; attachment limits; explicit draft lifecycle. (b) vocabulary
+   commits by owner)* — (a) stream/attachment/draft contract: attachment-limit
+   ownership is **LANDED** `478dfeb1c`; remaining work validates known SSE
+   payload shapes at runtime (parser currently casts parsed JSON), adds one
+   explicit stream-failure state, preserves fail-fast handling for unknown
+   events, and makes the draft lifecycle explicit. (b) vocabulary
    neutrality: directly correct `case_documents`, `basic_case_metadata`,
    `case_like_flow`, including the false use of generic `underlag` as a
    case-domain marker — no tolerant readers. (c) delete another heuristic
@@ -157,7 +159,11 @@ external release gate (item 10); BM0.2 is external (item 10).
     route/model identity, and numeric p50/p95 latency + token/call
     ceilings (the harness today has none of these and only
     municipal-domain cases; thresholds must never be chosen after
-    observing results). Preserve raw receipts. Then: server build
+    observing results). Benchmark and freeze the Builder platform ceilings
+    for attachment count, message length, per-file and aggregate DOCX
+    inspection, placeholder evidence, and synchronous parser capacity before
+    production; the current safety values are conservative bounds, not
+    certified best-practice capacity. Preserve raw receipts. Then: server build
     identity, structural goldens (BM5.2–5.4), HTTP-secret deployment
     inventory (M2.9 operational half; with zero users any hit means
     reset/delete), branch-protection evidence (BM0.2).
@@ -231,6 +237,13 @@ controls all other ordering.
 - **B7** (= item 8b/8c): first correct the known vocabulary defects directly;
   then delete one heuristic family at a time only after evidence proves the
   canonical semantic owner and behavior equivalence. *(M)*
+- The resource-limit audit leaves bounded follow-ups with existing owners:
+  B3 evaluates discovery question and transcript exhaustion; B7 evaluates
+  source/output compaction heuristics only with their semantic-owner work; item
+  10 measures attachment/parser budgets and the four-call proposal
+  spend/reliability guard before any policy change. Planning/proposal
+  persistence and run-evidence/export bounds remain fixed backend invariants
+  unless storage or runtime measurements justify changing their owners.
 - **B8** (deferred): skills value gate — offline comparative evaluation
   (same briefs with/without a curated playbook) before ANY coupling;
   free-text admin guidance REJECTED (unversioned prompt ownership). This is an
