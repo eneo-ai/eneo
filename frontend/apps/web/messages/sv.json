@@ -112,6 +112,7 @@
   "governance_prompts_delete_label": "Ta bort {name}",
   "governance_prompts_delete_named": "Ta bort ”{name}”? Detta kan inte ångras. Om prompten är aktiv i styrningen för personlig assistent måste den inaktiveras där först.",
   "admin_nav_aria": "Administrationssektioner",
+  "admin_nav_toggle": "Öppna administrationsmenyn",
   "admin_section_organisation": "Organisation",
   "admin_section_overview": "Översikt",
   "admin_section_governance": "Styrning",
