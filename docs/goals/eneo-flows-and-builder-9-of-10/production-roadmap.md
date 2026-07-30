@@ -117,7 +117,14 @@ external release gate (item 10); BM0.2 is external (item 10).
    rollback, retry, replay, publish pinning, session deletion, real DOCX render,
    and deterministic zero-token template fill.
 6. **One canonical attempt-evidence projection** *(medium/large)* —
-   ownership boundary: the immutable attempt input owns the exact execution
+   **DELETION BOUNDARY LANDED** `a3d2ba41d`. Attempt provenance v2 rejects
+   duplicate artifact, template, runtime-input, transcription, guard, HTTP,
+   token-receipt, and agentic projections; relational provider calls and result
+   files remain canonical, original attempt payloads remain immutable, and
+   `step_result_builder` owns terminal evidence construction. Remaining work:
+   converge prompt, model-parameter, and attempt-start scalars on a typed
+   immutable attempt input, then type the surviving provenance envelopes.
+   Target ownership boundary: the immutable attempt input owns the exact execution
    snapshot; relational result files own artifacts; attempt provenance owns
    only what cannot be reconstructed (verbatim RAG, provider-call facts);
    the mutable step result is a runtime projection, not a parallel forensic
