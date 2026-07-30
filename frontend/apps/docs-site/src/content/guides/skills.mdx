@@ -179,8 +179,9 @@ The run works through the fleet in chunks:
   already-moved bindings are no longer behind;
 - unpublishing, publishing a different version, or blocking the Skill during
   the run ends it with a clear failure, and a fresh run is required;
-- each chunk that changes anything writes one audit event with the run
-  identity and the counts of moved, skipped, and excluded Assistants.
+- when audit logging for Skill binding updates is enabled, each chunk that
+  changes anything writes one audit event with the run identity and the counts
+  of moved, skipped, and excluded Assistants.
 
 ### Moving App bindings to the published version
 
