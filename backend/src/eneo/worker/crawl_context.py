@@ -167,6 +167,11 @@ class PreparedPage:
     chunks: list[str]  # Text chunks
     embeddings: list[list[float]]  # Embedding vectors per chunk
 
+    # Effective chunking used to produce ``chunks``, after defaults and capping.
+    # Stamped on the info blob so a later crawl can detect a configuration change.
+    chunk_size: int
+    chunk_overlap: int
+
     # Context for persistence
     tenant_id: UUID
     website_id: UUID

@@ -45,6 +45,11 @@ class InfoBlobs(BasePublic):
     )
     source_id: Mapped[UUID] = mapped_column(nullable=False)
     version_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Effective chunking these chunks were produced with, after defaults and
+    # capping were applied. NULL means the blob predates this column; the crawl
+    # stale check treats that as "unknown" rather than as a mismatch.
+    chunk_size: Mapped[Optional[int]] = mapped_column(nullable=True)
+    chunk_overlap: Mapped[Optional[int]] = mapped_column(nullable=True)
 
     # Foreign keys
     user_id: Mapped[UUID] = mapped_column(

@@ -28,7 +28,11 @@ from eneo.database.tables.info_blobs_table import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
-from eneo.embedding_models.domain.chunking import build_text_splitter
+from eneo.embedding_models.domain.chunking import (
+    build_text_splitter,
+    chunking_is_unchanged,
+    resolve_chunk_config,
+)
 from eneo.info_blobs.info_blob import InfoBlobChunk
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import get_settings
@@ -88,7 +92,9 @@ async def persist_batch(
     ctx: CrawlContext,
     embedding_model: EmbeddingModelSpec | None,
     container: "Container",
-    existing_publications: dict[str, tuple[bytes, UUID]] | None = None,
+    existing_publications: (
+        dict[str, tuple[bytes, UUID, int | None, int | None]] | None
+    ) = None,
 ) -> tuple[int, int, list[str], dict[str, list[str]]]:
     """
     Persist a batch of pages using the TWO-PHASE pattern.
@@ -198,6 +204,9 @@ async def persist_batch(
         return 0, len(page_buffer), [], failures_by_reason
 
     splitter = build_text_splitter(ctx.chunk_size, ctx.chunk_overlap)
+    effective_chunk_size, effective_chunk_overlap = resolve_chunk_config(
+        ctx.chunk_size, ctx.chunk_overlap
+    )
 
     # PHASE 1: Compute embeddings (uses embedding_session for provider credentials)
     # The embedding session is used to load API credentials from DB, but the actual
@@ -233,13 +242,27 @@ async def persist_batch(
             try:
                 # 1. Compute content hash (local operation)
                 content_hash = hashlib.sha256(content.encode("utf-8")).digest()
-                if (existing_publications or {}).get(url) == (
-                    content_hash,
-                    embedding_model.id,
-                ):
-                    success_count += 1
-                    successful_urls.append(url)
-                    continue
+                existing_publication = (existing_publications or {}).get(url)
+                if existing_publication is not None:
+                    (
+                        stored_hash,
+                        stored_model_id,
+                        stored_chunk_size,
+                        stored_chunk_overlap,
+                    ) = existing_publication
+                    if (
+                        stored_hash == content_hash
+                        and stored_model_id == embedding_model.id
+                        and chunking_is_unchanged(
+                            stored_chunk_size=stored_chunk_size,
+                            stored_chunk_overlap=stored_chunk_overlap,
+                            effective_chunk_size=effective_chunk_size,
+                            effective_chunk_overlap=effective_chunk_overlap,
+                        )
+                    ):
+                        success_count += 1
+                        successful_urls.append(url)
+                        continue
 
                 # 2. Chunk the text (local operation)
                 raw_chunks = splitter.split_text(content)
@@ -323,6 +346,8 @@ async def persist_batch(
                     content_hash=content_hash,
                     chunks=chunks,
                     embeddings=embeddings,
+                    chunk_size=effective_chunk_size,
+                    chunk_overlap=effective_chunk_overlap,
                     tenant_id=ctx.tenant_id,
                     website_id=ctx.website_id,
                     user_id=ctx.user_id,
@@ -433,6 +458,8 @@ async def persist_batch(
                                     InfoBlobs.source_id,
                                     InfoBlobs.content_hash,
                                     InfoBlobs.embedding_model_id,
+                                    InfoBlobs.chunk_size,
+                                    InfoBlobs.chunk_overlap,
                                 )
                                 .where(
                                     InfoBlobs.title == prepared.title,
@@ -447,6 +474,12 @@ async def persist_batch(
                             and existing.content_hash == prepared.content_hash
                             and existing.embedding_model_id
                             == prepared.embedding_model_id
+                            and chunking_is_unchanged(
+                                stored_chunk_size=existing.chunk_size,
+                                stored_chunk_overlap=existing.chunk_overlap,
+                                effective_chunk_size=prepared.chunk_size,
+                                effective_chunk_overlap=prepared.chunk_overlap,
+                            )
                         ):
                             await savepoint.commit()
                             success_count += 1
@@ -493,6 +526,8 @@ async def persist_batch(
                             "url": prepared.url,
                             "size": stored_size,
                             "content_hash": prepared.content_hash,
+                            "chunk_size": prepared.chunk_size,
+                            "chunk_overlap": prepared.chunk_overlap,
                             "user_id": prepared.user_id,
                             "tenant_id": prepared.tenant_id,
                             "website_id": prepared.website_id,

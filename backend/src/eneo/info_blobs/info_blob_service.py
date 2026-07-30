@@ -4,6 +4,10 @@ from uuid import UUID
 
 from eneo.actors import SpaceAction
 from eneo.admin.quota_service import QuotaService
+from eneo.embedding_models.domain.chunking import (
+    chunking_is_unchanged,
+    resolve_chunk_config,
+)
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob import (
     InfoBlobAdd,
@@ -130,6 +134,14 @@ class InfoBlobService:
         if info_blob.content_hash is None:
             info_blob.content_hash = sha256(info_blob.text.encode("utf-8")).digest()
 
+        # Record what the text is actually split with, not what was requested, so a
+        # later publish can tell whether the chunking in force has changed.
+        effective_chunk_size, effective_chunk_overlap = resolve_chunk_config(
+            chunk_size, chunk_overlap
+        )
+        info_blob.chunk_size = effective_chunk_size
+        info_blob.chunk_overlap = effective_chunk_overlap
+
         async with self.repo.session.begin_nested():
             await self.repo.lock_publication_identity(info_blob)
             active = await self.repo.get_active_for_publication(info_blob)
@@ -137,6 +149,12 @@ class InfoBlobService:
                 active is not None
                 and active.content_hash == info_blob.content_hash
                 and active.embedding_model_id == embedding_model.id
+                and chunking_is_unchanged(
+                    stored_chunk_size=active.chunk_size,
+                    stored_chunk_overlap=active.chunk_overlap,
+                    effective_chunk_size=effective_chunk_size,
+                    effective_chunk_overlap=effective_chunk_overlap,
+                )
             ):
                 return await self.repo.refresh_publication_metadata(
                     active.id,
