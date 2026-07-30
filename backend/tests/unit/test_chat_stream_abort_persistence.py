@@ -857,6 +857,11 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
             response_type=ResponseType.TEXT,
             text="ok",
         )
+        yield Completion(
+            stop=True,
+            output_token_estimate=13,
+            context_output_token_estimate=11,
+        )
 
     response = SimpleNamespace(
         completion=fake_completion_stream(),
@@ -893,6 +898,8 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
     update_kwargs = session_service_mock.complete_question_with_answer.call_args.kwargs
     assert update_kwargs["answer"] == "ok"
     assert update_kwargs["reasoning"] == "let me think"
+    assert update_kwargs["num_tokens_answer"] == 13
+    assert update_kwargs["context_completion_tokens"] == 11
 
 
 @pytest.mark.asyncio

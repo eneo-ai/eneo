@@ -238,6 +238,22 @@ def _text_chunk(text: str) -> object:
     )
 
 
+def _reasoning_chunk(reasoning: str) -> object:
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(
+                    content=None,
+                    reasoning_content=reasoning,
+                    tool_calls=None,
+                ),
+                finish_reason=None,
+            )
+        ],
+        usage=None,
+    )
+
+
 @pytest.mark.asyncio
 async def test_non_streaming_activates_skill_before_follow_up() -> None:
     adapter = _adapter()
@@ -454,6 +470,36 @@ async def test_non_streaming_estimates_every_request_when_provider_omits_usage()
         ).tokens
     )
     assert completion.usage is None or completion.usage.prompt_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_estimates_final_reasoning_output_when_usage_is_omitted() -> (
+    None
+):
+    adapter = _adapter()
+    response = _response(content="Final answer")
+    response.choices[0].message.reasoning_content = "private reasoning"
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(return_value=response),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.count_tokens",
+            side_effect=lambda text, _model: len(text),
+        ),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            skill_runtime=_always_only_runtime(),
+        )
+
+    expected = len("private reasoning") + len("Final answer")
+    assert completion.output_token_estimate == expected
+    assert completion.context_output_token_estimate == expected
+    assert completion.usage is None
 
 
 @pytest.mark.asyncio
@@ -823,6 +869,49 @@ async def test_streaming_estimates_every_request_when_provider_omits_usage() -> 
             adapter.litellm_model,
         ).tokens
     )
+    assert output[-1].usage is None
+
+
+@pytest.mark.asyncio
+async def test_streaming_estimates_final_reasoning_output_when_usage_is_omitted() -> (
+    None
+):
+    adapter = _adapter()
+    runtime = _always_only_runtime()
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(
+                return_value=_AsyncChunkStream(
+                    [
+                        _reasoning_chunk("private reasoning"),
+                        _text_chunk("Final answer"),
+                    ]
+                )
+            ),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.count_tokens",
+            side_effect=lambda text, _model: len(text),
+        ),
+    ):
+        prepared = await adapter.prepare_streaming(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            skill_runtime=runtime,
+        )
+        output = [
+            completion
+            async for completion in adapter.iterate_stream(
+                stream=prepared,
+                model_kwargs={},
+            )
+        ]
+
+    expected = len("private reasoning") + len("Final answer")
+    assert output[-1].output_token_estimate == expected
+    assert output[-1].context_output_token_estimate == expected
     assert output[-1].usage is None
 
 

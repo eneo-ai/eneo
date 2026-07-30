@@ -151,6 +151,12 @@ class Completion:
     # Final request only, for context-window headroom when the provider omits
     # prompt usage.
     context_input_token_estimate: Optional[int] = None
+    # Cumulative generated-output count when at least one provider round omitted
+    # completion usage. Provider-reported usage remains separate and authoritative.
+    output_token_estimate: Optional[int] = None
+    # Final response only, for context-window headroom when the provider omits
+    # completion usage.
+    context_output_token_estimate: Optional[int] = None
     # LiteLLM-measured Skill-owned subset of the final provider prompt.
     skill_context_tokens: Optional[int] = None
 

@@ -1919,6 +1919,8 @@ class AssistantService:
                 stream_usage: TokenUsage | None = None
                 stream_input_token_estimate: int | None = None
                 stream_context_input_token_estimate: int | None = None
+                stream_output_token_estimate: int | None = None
+                stream_context_output_token_estimate: int | None = None
                 completed = False
 
                 try:
@@ -1935,6 +1937,12 @@ class AssistantService:
                         if chunk.context_input_token_estimate is not None:
                             stream_context_input_token_estimate = (
                                 chunk.context_input_token_estimate
+                            )
+                        if chunk.output_token_estimate is not None:
+                            stream_output_token_estimate = chunk.output_token_estimate
+                        if chunk.context_output_token_estimate is not None:
+                            stream_context_output_token_estimate = (
+                                chunk.context_output_token_estimate
                             )
 
                         if chunk.response_type == ResponseType.TEXT:
@@ -2138,6 +2146,9 @@ class AssistantService:
                     if stream_usage and stream_usage.completion_tokens is not None:
                         num_tokens_answer = stream_usage.completion_tokens
                         output_source = "provider"
+                    elif stream_output_token_estimate is not None:
+                        num_tokens_answer = stream_output_token_estimate
+                        output_source = "litellm"
                     else:
                         assert completion_model is not None
                         num_tokens_answer = (
@@ -2159,6 +2170,8 @@ class AssistantService:
                         stream_usage.context_completion_tokens
                         if stream_usage
                         and stream_usage.context_completion_tokens is not None
+                        else stream_context_output_token_estimate
+                        if stream_context_output_token_estimate is not None
                         else count_tokens(response_string, completion_model.name)
                         + reasoning_token_count
                     )
@@ -2294,6 +2307,15 @@ class AssistantService:
             if response.usage and response.usage.completion_tokens is not None:
                 num_tokens_answer = response.usage.completion_tokens
                 output_source = "provider"
+            elif (
+                output_token_estimate := getattr(
+                    response.completion,
+                    "output_token_estimate",
+                    None,
+                )
+            ) is not None:
+                num_tokens_answer = output_token_estimate
+                output_source = "litellm"
             else:
                 assert completion_model is not None
                 num_tokens_answer = (
@@ -2308,6 +2330,11 @@ class AssistantService:
                 "context_input_token_estimate",
                 None,
             )
+            context_output_token_estimate = getattr(
+                response.completion,
+                "context_output_token_estimate",
+                None,
+            )
             context_prompt_tokens = (
                 response.usage.context_prompt_tokens
                 if response.usage and response.usage.context_prompt_tokens is not None
@@ -2319,6 +2346,8 @@ class AssistantService:
                 response.usage.context_completion_tokens
                 if response.usage
                 and response.usage.context_completion_tokens is not None
+                else context_output_token_estimate
+                if context_output_token_estimate is not None
                 else count_tokens(final_answer, completion_model.name)
                 + reasoning_token_count
             )
