@@ -18,12 +18,14 @@ Run with: pytest tests/unittests/worker/test_persist_batch_logic.py -v
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from hashlib import sha256
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
+from eneo.embedding_models.domain.chunking import resolve_chunk_config
 from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec
 
 # =============================================================================
@@ -899,6 +901,9 @@ class TestPhaseIsolation:
                     url: (
                         sha256(content.encode("utf-8")).digest(),
                         embedding_model_spec.id,
+                        *resolve_chunk_config(
+                            crawl_context.chunk_size, crawl_context.chunk_overlap
+                        ),
                     )
                 },
             )
@@ -935,12 +940,87 @@ class TestPhaseIsolation:
                     url: (
                         sha256(content.encode("utf-8")).digest(),
                         uuid4(),
+                        *resolve_chunk_config(
+                            crawl_context.chunk_size, crawl_context.chunk_overlap
+                        ),
                     )
                 },
             )
 
         assert (success, failed, persisted_urls, failures) == (1, 0, [url], {})
         mock_embeddings_service.get_embeddings.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_matching_content_with_new_chunking_is_reembedded(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        """Changed chunk config must re-chunk, or the source keeps mixed granularity."""
+        url = "https://example.com/chunking-change"
+        content = "Content published with a different chunk size"
+        crawl_context = replace(crawl_context, chunk_size=1000, chunk_overlap=100)
+        mock_session = create_mock_session()
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("eneo.database.database.sessionmanager", mock_sm),
+        ):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, persisted_urls, failures = await persist_batch(
+                page_buffer=[{"url": url, "content": content}],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+                existing_publications={
+                    url: (
+                        sha256(content.encode("utf-8")).digest(),
+                        embedding_model_spec.id,
+                        200,  # stored with the old chunking
+                        40,
+                    )
+                },
+            )
+
+        assert (success, failed, persisted_urls, failures) == (1, 0, [url], {})
+        mock_embeddings_service.get_embeddings.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_unrecorded_chunking_does_not_trigger_reembedding(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        """Blobs from before chunking was recorded must not cause a mass re-embed."""
+        url = "https://example.com/legacy"
+        content = "Content published before chunking was stamped"
+        crawl_context = replace(crawl_context, chunk_size=1000, chunk_overlap=100)
+        mock_session = create_mock_session()
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with patch("eneo.database.database.sessionmanager", mock_sm):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, persisted_urls, failures = await persist_batch(
+                page_buffer=[{"url": url, "content": content}],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+                existing_publications={
+                    url: (
+                        sha256(content.encode("utf-8")).digest(),
+                        embedding_model_spec.id,
+                        None,  # unknown: predates the columns
+                        None,
+                    )
+                },
+            )
+
+        assert (success, failed, persisted_urls, failures) == (1, 0, [url], {})
+        mock_embeddings_service.get_embeddings.assert_not_awaited()
+        mock_sm.session.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_session_opened_during_phase_1(

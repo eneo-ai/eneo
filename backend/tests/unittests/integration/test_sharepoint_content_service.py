@@ -533,7 +533,9 @@ class TestProcessInfoBlobSizeAccounting:
         ).digest()
         upserted: list = []
 
-        async def publish(info_blob, *, embedding_model):
+        async def publish(
+            info_blob, *, embedding_model, chunk_size=None, chunk_overlap=None
+        ):
             upserted.append(info_blob)
             return updated_blob
 
