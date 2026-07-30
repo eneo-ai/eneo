@@ -10974,12 +10974,12 @@ export interface components {
       embedding_model: components["schemas"]["ModelId"];
       /** Wrapper Name */
       wrapper_name?: string | null;
-      /** Items */
-      items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchItem"][];
       /** Chunk Size */
       chunk_size?: number | null;
       /** Chunk Overlap */
       chunk_overlap?: number | null;
+      /** Items */
+      items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchItem"][];
     };
     /** CreateSpaceIntegrationKnowledgeBatchResponse */
     CreateSpaceIntegrationKnowledgeBatchResponse: {
@@ -19740,6 +19740,10 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model?: components["schemas"]["ModelId"] | null;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /**
        * Http Auth Username
        * @description Username for HTTP Basic Authentication (optional)
@@ -19750,10 +19754,6 @@ export interface components {
        * @description Password for HTTP Basic Authentication (optional). Must be provided together with username.
        */
       http_auth_password?: string | null;
-      /** Chunk Size */
-      chunk_size?: number | null;
-      /** Chunk Overlap */
-      chunk_overlap?: number | null;
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -19889,6 +19889,10 @@ export interface components {
       crawl_type?: components["schemas"]["CrawlType"];
       /** Update Interval */
       update_interval?: components["schemas"]["UpdateInterval"];
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /**
        * Http Auth Username
        * @description Username for HTTP Basic Authentication. Set to null to remove auth. Must be provided with password.
@@ -19899,10 +19903,6 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
-      /** Chunk Size */
-      chunk_size?: number | null;
-      /** Chunk Overlap */
-      chunk_overlap?: number | null;
     };
     /**
      * WizardType
