@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-30 | **Atomic Builder template attachment binding**: exactly one confirmed DOCX is compiled into required, runtime-provable placeholder bindings before proposal hashing; transcription-dependent templates make audio input required; apply reuses the same uploaded File and atomically creates the Flow asset and normal resource binding; authorization, bounded inspection, rollback, retry, replay, deletion races, publish pinning, real DOCX rendering, and deterministic zero-token execution are proven, while reference/context/example attachments remain planning-only (`2d608b309`, gate green 9/10 after six same-session passes, no findings) |
 | 2026-07-30 | **Reliable Builder attachment interpretation**: canonically equal explicit schemas now merge with complete provenance, distinct schemas ask one replay-safe bounded question before provider work, and selected example outputs contribute cited structure/style guidance plus deliberately open inferred JSON shape without exact-fidelity or closed-world claims; one focused schema-evidence owner enforces strict JSON, byte/depth/field bounds, conservative inference, and shared field projection, while `PlanningState` owns one atomic attachment-interpretation transition (`f25b029e6`, gate green 8/10 after four same-session passes, no findings) |
 | 2026-07-30 | **Honest Builder attachment evidence**: persisted file-role evidence now retains independent readability and exact coverage through live refresh and classifier replay; inventory-only files cannot promote semantic roles; full placeholder identity survives persistence and compilation while shared prompt rendering is safely bounded; deterministic discovery records every valid schema candidate and refuses multiple candidates before provider work; a private full-evidence fingerprint invalidates confirmation even for omitted or display-colliding attachments, while Swedish/English summaries stay bounded (`caa17c3ef`, gate green 8/10 after four same-session passes, no findings) |
 | 2026-07-30 | **Honest Builder execution profile**: proposals now expose an output-only static profile for completion-model, transcription-model, deterministic, schema-constrained, and authored mapped work; one pure mapped-execution owner aligns validation, runtime dispatch, and projection while rejecting invalid or dual configurations as structured Builder feedback; the advanced Swedish/English UI explains overlapping categories and avoids provider-call claims; five disproven lints were deleted while the two source-proven structural-waste critic rules remain (`5509eef84..fb6934b5a`, gate green 8/10 after four focused passes, no findings) |
@@ -103,28 +104,17 @@ external release gate (item 10); BM0.2 is external (item 10).
    Builder feedback. Five disproven heuristic lints were deleted. The two
    source-proven structural-waste critic rules remain; adding new critic
    topology is recorded as `measured_no_change`.
-5. **Operational attachment semantics** *(large; evidence and interpretation
-   slices LANDED `caa17c3ef`, `f25b029e6`)* — actual readability and coverage
-   survive role selection and replay; full placeholder identity remains
-   canonical; equal explicit schemas merge, real conflicts ask one replay-safe
-   bounded question before provider work, and confirmed example outputs carry
-   cited structure/style guidance plus conservative open JSON shape into
-   confirmation, proposal, critic, and compiler ownership. Remaining work:
-   bind exactly one selected template. The conversion happens at the
-   post-flow-creation materialization seam, inside the existing atomic apply
-   transaction: the Builder carries one typed template-attachment INTENT
-   through the authoring command; after the materializer creates/locks the Flow,
-   a deepened
-   `FlowTemplateAssetService.create_from_existing_attached_file` converts
-   it and the normal template-asset binding replaces the intent before
-   steps are built. Builder never creates a temporary Flow, copies the
-   file, or patches after apply (BM2.4 — currently documented but not
-   implemented; `upload_asset` requires a persisted flow, which create-mode
-   only has mid-materialization). Exactly ONE selected template for the
-   terminal template-fill step; zero or multiple → typed question/refusal.
-   Tests: detach/retention races, tenant/space mismatch, replay,
-   rollback, publish, runtime rendering, survival after Builder-session
-   deletion.
+5. ~~Operational attachment semantics~~ — **LANDED**
+   `caa17c3ef..2d608b309`. Actual readability, exact coverage, full placeholder
+   identity, schema/example interpretation, and one replay-safe conflict
+   question survive confirmation and replay. Exactly one confirmed DOCX becomes
+   a typed intent; after the Flow exists, the atomic materializer reuses the
+   same authorized File, creates or reuses the normal template asset and
+   resource binding, revalidates the approved exact placeholder contract, and
+   commits no partial authoring effects on failure. Runtime and lifecycle proofs
+   cover required transcription input, detach/deletion races, authorization,
+   rollback, retry, replay, publish pinning, session deletion, real DOCX render,
+   and deterministic zero-token template fill.
 6. **One canonical attempt-evidence projection** *(medium/large)* —
    ownership boundary: the immutable attempt input owns the exact execution
    snapshot; relational result files own artifacts; attempt provenance owns
@@ -157,10 +147,10 @@ external release gate (item 10); BM0.2 is external (item 10).
    generic constraints-discovery API.
 9. **Docs-site contract correction** *(medium, per-slice from now on)* —
    the false "influenced the answer" claim is CORRECTED (2026-07-29, with
-   this roadmap revision); each remaining correction lands with its owning
-   slice: attachment-to-template promise with item 5, export limits +
-   lineage writer with items 2/7. Add contract tests covering all four
-   export limits and prohibiting material-influence wording.
+   this roadmap revision); the attachment-to-template lifecycle is CORRECTED
+   with item 5 (`2d608b309`). Remaining corrections land with their owning
+   slice: export limits and lineage writer with items 2/7. Add contract tests
+   covering all four export limits and prohibiting material-influence wording.
 10. **Release proof** *(external gates, tracked not implemented here)* —
     BEFORE any live run, freeze in the tracked gate input: repetition
     count, required cases, non-municipal domain families, provider
@@ -216,10 +206,11 @@ controls all other ordering.
   provider work; (b) **LANDED `f25b029e6`** — derive and confirm bounded,
   cited structure/style/schema constraints, deduplicate canonically equal
   schemas, ask one replay-safe question on real conflicts, and keep inferred
-  example shape open and explicitly non-exact; (c) bind exactly one selected
-  template at the atomic materialization seam and prove reference/context
-  material is never resent at runtime. Evidence, interpretation, then binding;
-  do not invent richer coverage states before their owner can produce them. *(L)*
+  example shape open and explicitly non-exact; (c) **LANDED `2d608b309`** —
+  bind exactly one selected template at the atomic materialization seam, reuse
+  the same File, compile exact runtime-provable placeholders before approval,
+  and keep reference/context/example attachments planning-only. Evidence,
+  interpretation, then binding; no richer coverage state was invented. *(L)*
 - **B3**: no silent guessing after question-budget exhaustion — preserve each
   candidate's source-specific commit-grade policy; every material commit-grade
   candidate ends asked, explicitly defaulted and surfaced at confirmation, or
