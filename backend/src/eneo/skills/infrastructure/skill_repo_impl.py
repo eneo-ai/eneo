@@ -1253,7 +1253,7 @@ class SkillRepoImpl:
                     Apps.tenant_id == tenant_id,
                 )
                 .order_by(Apps.id)
-                .with_for_update(of=Apps)
+                .with_for_update(of=Apps, key_share=True)
             )
         ).all()
         locked_parent_versions = {

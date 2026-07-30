@@ -9,9 +9,10 @@ import pytest
 import sqlalchemy as sa
 from PIL import Image
 
+from eneo.apps.app_runs.app_run_repo import _serialize_skill_provenance
 from eneo.apps.apps.app_repo import AppRepository
 from eneo.audit.domain.action_types import ActionType
-from eneo.database.tables.app_table import Apps, AppsFiles
+from eneo.database.tables.app_table import AppRuns, Apps, AppsFiles
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -341,6 +342,112 @@ async def test_chunk_advances_apps_while_retained_run_provenance_stays_exact(
     }
     assert audit_metadata[0]["extra"]["surface"] == "app"
     assert "instructions" not in str(audit_metadata[0])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_queued_run_keeps_old_provenance_while_fleet_advance_waits(
+    monkeypatch,
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    app_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_apps(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            app_factory=app_factory,
+            size=1,
+        )
+
+    queue_composed = asyncio.Event()
+    fleet_parent_locked = asyncio.Event()
+    run_persisted = asyncio.Event()
+    original_lock_skill = SkillRepoImpl._lock_organization_skill
+
+    async def hold_fleet_after_parent_lock(repo, **kwargs):
+        fleet_parent_locked.set()
+        await run_persisted.wait()
+        return await original_lock_skill(repo, **kwargs)
+
+    monkeypatch.setattr(
+        SkillRepoImpl,
+        "_lock_organization_skill",
+        hold_fleet_after_parent_lock,
+    )
+
+    async def queue_run():
+        async with db_container() as container:
+            completion_model_id = await container.session().scalar(
+                sa.select(Apps.completion_model_id).where(Apps.id == seed.app_ids[0])
+            )
+            assert completion_model_id is not None
+            composition = await container.skill_service().compose_for_app(
+                app_id=seed.app_ids[0],
+                base_instructions="App prompt",
+            )
+            assert composition.provenance[0].skill_revision_id == seed.old_revision_id
+            queue_composed.set()
+            await fleet_parent_locked.wait()
+
+            app_run_id = uuid4()
+            container.session().add(
+                AppRuns(
+                    id=app_run_id,
+                    tenant_id=admin_user.tenant_id,
+                    user_id=admin_user.id,
+                    app_id=seed.app_ids[0],
+                    completion_model_id=completion_model_id,
+                    skill_provenance=_serialize_skill_provenance(
+                        composition.provenance
+                    ),
+                )
+            )
+            await container.session().flush()
+            run_persisted.set()
+            return app_run_id, composition.provenance
+
+    queue_task = asyncio.create_task(queue_run())
+    await asyncio.wait_for(queue_composed.wait(), timeout=5)
+    fleet_task = asyncio.create_task(
+        client.post(
+            f"/api/v1/skills/organization/{seed.skill_id}/apps/advance/",
+            json={"expected_published_revision_id": str(seed.published_revision_id)},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    )
+
+    response, queued_run = await asyncio.wait_for(
+        asyncio.gather(fleet_task, queue_task),
+        timeout=10,
+    )
+    app_run_id, queued_provenance = queued_run
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 1,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    async with db_container() as container:
+        persisted_provenance = await container.session().scalar(
+            sa.select(AppRuns.skill_provenance).where(AppRuns.id == app_run_id)
+        )
+        pin = await container.session().scalar(
+            sa.select(AppSkillBindings.skill_revision_id).where(
+                AppSkillBindings.app_id == seed.app_ids[0],
+                AppSkillBindings.skill_id == seed.skill_id,
+            )
+        )
+
+    assert persisted_provenance == _serialize_skill_provenance(queued_provenance)
+    assert pin == seed.published_revision_id
 
 
 @pytest.mark.integration
