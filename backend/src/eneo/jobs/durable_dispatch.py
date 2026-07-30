@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.job_table import Jobs
-from eneo.jobs.job_models import Task
+from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
     TaskParams,
@@ -99,11 +99,17 @@ async def redispatch_stale_jobs(
             reason = f"Invalid dispatch envelope: {exc}"
             job.status = Status.FAILED.value
             job.finished_at = attempted_at
-            job.result_location = reason[:512]
+            job.result_location = None
+            job.failure_code = JobFailureCode.INVALID_JOB_PAYLOAD.value
             failed += 1
             logger.warning(
                 "Durable job dispatch envelope is invalid",
-                extra={"job_id": str(job.id), "reason": reason},
+                extra={
+                    "job_id": str(job.id),
+                    "task": job.task,
+                    "failure_code": JobFailureCode.INVALID_JOB_PAYLOAD.value,
+                    "reason": reason,
+                },
             )
             continue
 

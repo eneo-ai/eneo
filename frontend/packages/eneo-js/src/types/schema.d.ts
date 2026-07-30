@@ -13044,6 +13044,20 @@ export interface components {
       /** Oldest Created At */
       oldest_created_at: string | null;
     };
+    /**
+     * JobFailureCode
+     * @enum {string}
+     */
+    JobFailureCode:
+      | "extraction_failed"
+      | "no_extractable_text"
+      | "encrypted"
+      | "corrupt"
+      | "unsupported_format"
+      | "processing_failed"
+      | "cancelled"
+      | "processing_interrupted"
+      | "invalid_job_payload";
     /** JobPublic */
     JobPublic: {
       /** Created At */
@@ -13063,6 +13077,7 @@ export interface components {
       result_location?: string | null;
       /** Finished At */
       finished_at?: string | null;
+      failure_code?: components["schemas"]["JobFailureCode"] | null;
     };
     /** Knowledge */
     Knowledge: {
