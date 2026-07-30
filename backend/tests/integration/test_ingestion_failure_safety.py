@@ -22,10 +22,13 @@ from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import Spaces, SpacesTranscriptionModels
 from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
+from eneo.info_blobs.info_blob_service import InfoBlobService
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
+from eneo.main.container.container import Container, SessionProxy
 from eneo.main.models import Status
+from eneo.worker.task_manager import TaskManager
 from eneo.worker.upload_tasks import transcription_task, upload_info_blob_task
 
 TITLE = "stable-knowledge.txt"
@@ -166,6 +169,14 @@ def _assert_prior_knowledge(prior, blobs, chunks):
     assert chunks == expected_chunks
 
 
+def _sessionless_container(*, user, tenant) -> Container:
+    return Container(
+        session=providers.Object(SessionProxy()),
+        user=providers.Object(user),
+        tenant=providers.Object(tenant),
+    )
+
+
 @pytest.mark.parametrize("failure", ["extraction", "chunking", "embedding", "blank"])
 async def test_upload_failure_preserves_committed_prior_knowledge(
     db_container, tmp_path, monkeypatch, failure
@@ -177,37 +188,43 @@ async def test_upload_failure_preserves_committed_prior_knowledge(
     async with db_container() as container:
         user, space, group, job, prior = await _seed_attempt(container)
         job_id = job.id
-        _stage_job_file(tmp_path, job_id, b"replacement")
-        extracted: str | Exception = "replacement knowledge"
-        if failure == "extraction":
-            extracted = RuntimeError("extraction failed")
-        elif failure == "blank":
-            extracted = " \n\t "
-        container.text_extractor.override(providers.Object(StubExtractor(extracted)))
-        if failure in {"embedding", "blank"}:
-            embeddings = AsyncMock()
-            embeddings.get_embeddings.side_effect = RuntimeError("embedding failed")
-            container.create_embeddings_service.override(providers.Object(embeddings))
-        if failure == "chunking":
-            monkeypatch.setattr(
-                Datastore,
-                "_chunk_text",
-                lambda self, info_blob: (_ for _ in ()).throw(
-                    RuntimeError("chunking failed")
-                ),
-            )
+        group_id = group.id
+        space_id = space.id
+        tenant = container.tenant()
+
+    _stage_job_file(tmp_path, job_id, b"replacement")
+    extracted: str | Exception = "replacement knowledge"
+    if failure == "extraction":
+        extracted = RuntimeError("extraction failed")
+    elif failure == "blank":
+        extracted = " \n\t "
+    task_container = _sessionless_container(user=user, tenant=tenant)
+    task_container.text_extractor.override(providers.Object(StubExtractor(extracted)))
+    if failure in {"embedding", "blank"}:
+        embeddings = AsyncMock()
+        embeddings.get_embeddings.side_effect = RuntimeError("embedding failed")
+        task_container.create_embeddings_service.override(providers.Object(embeddings))
+    if failure == "chunking":
+        monkeypatch.setattr(
+            Datastore,
+            "_chunk_text",
+            lambda self, info_blob: (_ for _ in ()).throw(
+                RuntimeError("chunking failed")
+            ),
+        )
+    async with db_container():
         result = await upload_info_blob_task(
-            job_id=job.id,
+            job_id=job_id,
             params=UploadInfoBlob(
                 user_id=user.id,
-                group_id=group.id,
-                space_id=space.id,
+                group_id=group_id,
+                space_id=space_id,
                 filename=TITLE,
                 mimetype="text/plain",
             ),
-            container=container,
+            container=task_container,
         )
-        assert result is False
+    assert result is False
 
     (status, error), blobs, chunks = await _committed_state(job_id)
     assert status == Status.FAILED.value
@@ -228,27 +245,33 @@ async def test_first_upload_failure_publishes_no_knowledge(
     async with db_container() as container:
         user, space, group, job, _ = await _seed_attempt(container, with_existing=False)
         job_id = job.id
-        _stage_job_file(tmp_path, job_id, b"replacement")
-        container.text_extractor.override(
-            providers.Object(
-                StubExtractor(" \n " if failure == "blank" else "replacement knowledge")
-            )
+        group_id = group.id
+        space_id = space.id
+        tenant = container.tenant()
+
+    _stage_job_file(tmp_path, job_id, b"replacement")
+    task_container = _sessionless_container(user=user, tenant=tenant)
+    task_container.text_extractor.override(
+        providers.Object(
+            StubExtractor(" \n " if failure == "blank" else "replacement knowledge")
         )
-        embeddings = AsyncMock()
-        embeddings.get_embeddings.side_effect = RuntimeError("embedding failed")
-        container.create_embeddings_service.override(providers.Object(embeddings))
+    )
+    embeddings = AsyncMock()
+    embeddings.get_embeddings.side_effect = RuntimeError("embedding failed")
+    task_container.create_embeddings_service.override(providers.Object(embeddings))
+    async with db_container():
         result = await upload_info_blob_task(
-            job_id=job.id,
+            job_id=job_id,
             params=UploadInfoBlob(
                 user_id=user.id,
-                group_id=group.id,
-                space_id=space.id,
+                group_id=group_id,
+                space_id=space_id,
                 filename=TITLE,
                 mimetype="text/plain",
             ),
-            container=container,
+            container=task_container,
         )
-        assert result is False
+    assert result is False
 
     (status, error), blobs, chunks = await _committed_state(job_id)
     assert status == Status.FAILED.value
@@ -270,32 +293,38 @@ async def test_successful_upload_commits_replacement_knowledge(
     async with db_container() as container:
         user, space, group, job, prior = await _seed_attempt(container)
         job_id = job.id
-        _stage_job_file(tmp_path, job_id, b"replacement")
-        container.text_extractor.override(
-            providers.Object(StubExtractor(replacement_text))
-        )
-        embeddings = AsyncMock()
+        group_id = group.id
+        space_id = space.id
+        tenant = container.tenant()
 
-        def embed(*, model, chunks):
-            result = ChunkEmbeddingList()
-            result.add(chunks, [[0.7, 0.8, 0.9] for _ in chunks])
-            return result
+    _stage_job_file(tmp_path, job_id, b"replacement")
+    task_container = _sessionless_container(user=user, tenant=tenant)
+    task_container.text_extractor.override(
+        providers.Object(StubExtractor(replacement_text))
+    )
+    embeddings = AsyncMock()
 
-        embeddings.get_embeddings.side_effect = embed
-        container.create_embeddings_service.override(providers.Object(embeddings))
+    def embed(*, model, chunks):
+        result = ChunkEmbeddingList()
+        result.add(chunks, [[0.7, 0.8, 0.9] for _ in chunks])
+        return result
 
+    embeddings.get_embeddings.side_effect = embed
+    task_container.create_embeddings_service.override(providers.Object(embeddings))
+
+    async with db_container():
         result = await upload_info_blob_task(
-            job_id=job.id,
+            job_id=job_id,
             params=UploadInfoBlob(
                 user_id=user.id,
-                group_id=group.id,
-                space_id=space.id,
+                group_id=group_id,
+                space_id=space_id,
                 filename=TITLE,
                 mimetype="text/plain",
             ),
-            container=container,
+            container=task_container,
         )
-        assert result is True
+    assert result is True
 
     (status, result_location), blobs, chunks = await _committed_state(job_id)
     old_blob_id, _ = prior
@@ -312,6 +341,156 @@ async def test_successful_upload_commits_replacement_knowledge(
     assert chunks[0][3] == _pgvector_values([0.7, 0.8, 0.9])
 
 
+async def test_reaped_job_cannot_publish_or_report_success(
+    db_container, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    replacement_text = "Replacement that must roll back"
+    async with db_container() as container:
+        user, space, group, job, prior = await _seed_attempt(container)
+        job_id = job.id
+        group_id = group.id
+        space_id = space.id
+        tenant = container.tenant()
+
+    original_publish = InfoBlobService.publish_info_blob_without_validation
+    reaped_finished_at = None
+
+    async def publish_then_reap(self, info_blob, *, embedding_model):
+        nonlocal reaped_finished_at
+        published = await original_publish(
+            self,
+            info_blob,
+            embedding_model=embedding_model,
+        )
+        async with sessionmanager.session() as session, session.begin():
+            reaped_finished_at = (
+                await session.execute(
+                    sa.update(Jobs)
+                    .where(Jobs.id == job_id)
+                    .values(
+                        status=Status.FAILED.value,
+                        finished_at=sa.func.now(),
+                        result_location="Reaped while processing",
+                    )
+                    .returning(Jobs.finished_at)
+                )
+            ).scalar_one()
+        return published
+
+    monkeypatch.setattr(
+        InfoBlobService,
+        "publish_info_blob_without_validation",
+        publish_then_reap,
+    )
+    _stage_job_file(tmp_path, job_id, b"replacement")
+    task_container = _sessionless_container(user=user, tenant=tenant)
+    task_container.text_extractor.override(
+        providers.Object(StubExtractor(replacement_text))
+    )
+    embeddings = AsyncMock()
+
+    def embed(*, model, chunks):
+        result = ChunkEmbeddingList()
+        result.add(chunks, [[0.7, 0.8, 0.9] for _ in chunks])
+        return result
+
+    embeddings.get_embeddings.side_effect = embed
+    task_container.create_embeddings_service.override(providers.Object(embeddings))
+
+    async with db_container():
+        result = await upload_info_blob_task(
+            job_id=job_id,
+            params=UploadInfoBlob(
+                user_id=user.id,
+                group_id=group_id,
+                space_id=space_id,
+                filename=TITLE,
+                mimetype="text/plain",
+            ),
+            container=task_container,
+        )
+
+    assert result is False
+    (status, reason), blobs, chunks = await _committed_state(job_id)
+    assert status == Status.FAILED.value
+    assert reason == "Reaped while processing"
+    async with sessionmanager.session() as session, session.begin():
+        finished_at = await session.scalar(
+            sa.select(Jobs.finished_at).where(Jobs.id == job_id)
+        )
+    assert finished_at == reaped_finished_at
+    _assert_prior_knowledge(prior, blobs, chunks)
+
+
+async def test_complete_status_publication_failure_preserves_committed_knowledge(
+    db_container, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    replacement_text = "Committed replacement knowledge"
+    async with db_container() as container:
+        user, space, group, job, prior = await _seed_attempt(container)
+        job_id = job.id
+        group_id = group.id
+        space_id = space.id
+        tenant = container.tenant()
+
+    original_publish_status = TaskManager.publish_status
+
+    async def fail_complete_status(self, status):
+        if status == Status.COMPLETE:
+            raise RuntimeError("status publication failed")
+        await original_publish_status(self, status)
+
+    monkeypatch.setattr(TaskManager, "publish_status", fail_complete_status)
+    _stage_job_file(tmp_path, job_id, b"replacement")
+    task_container = _sessionless_container(user=user, tenant=tenant)
+    task_container.text_extractor.override(
+        providers.Object(StubExtractor(replacement_text))
+    )
+    embeddings = AsyncMock()
+
+    def embed(*, model, chunks):
+        result = ChunkEmbeddingList()
+        result.add(chunks, [[0.7, 0.8, 0.9] for _ in chunks])
+        return result
+
+    embeddings.get_embeddings.side_effect = embed
+    task_container.create_embeddings_service.override(providers.Object(embeddings))
+
+    async with db_container():
+        result = await upload_info_blob_task(
+            job_id=job_id,
+            params=UploadInfoBlob(
+                user_id=user.id,
+                group_id=group_id,
+                space_id=space_id,
+                filename=TITLE,
+                mimetype="text/plain",
+            ),
+            container=task_container,
+        )
+
+    assert result is False
+    (status, result_location), blobs, chunks = await _committed_state(job_id)
+    old_blob_id, _ = prior
+    assert status == Status.COMPLETE.value
+    assert len(blobs) == 1
+    blob_id, text, _ = blobs[0]
+    assert blob_id != old_blob_id
+    assert text == replacement_text
+    assert result_location == f"/api/v1/info-blobs/{blob_id}/"
+    assert [(chunk_no, text) for _, chunk_no, text, _ in chunks] == [
+        (0, replacement_text)
+    ]
+
+
 @pytest.mark.parametrize("failure", ["embedding", "blank"])
 async def test_transcription_failure_preserves_committed_prior_knowledge(
     db_container, tmp_path, monkeypatch, transcription_model_factory, failure
@@ -323,7 +502,9 @@ async def test_transcription_failure_preserves_committed_prior_knowledge(
     async with db_container() as container:
         user, space, group, job, prior = await _seed_attempt(container)
         job_id = job.id
-        _stage_job_file(tmp_path, job_id, b"not used")
+        group_id = group.id
+        space_id = space.id
+        tenant = container.tenant()
         transcription_model = await transcription_model_factory(
             container.session(), "ingestion-safety-transcription"
         )
@@ -333,27 +514,32 @@ async def test_transcription_failure_preserves_committed_prior_knowledge(
             )
         )
         await container.session().flush()
-        transcriber = AsyncMock()
-        transcriber.transcribe_from_filepath.return_value = (
-            " \n " if failure == "blank" else "replacement transcript"
-        )
-        container.transcriber.override(providers.Object(transcriber))
-        embeddings = AsyncMock()
-        embeddings.get_embeddings.side_effect = RuntimeError("embedding failed")
-        container.create_embeddings_service.override(providers.Object(embeddings))
 
+    _stage_job_file(tmp_path, job_id, b"not used")
+    task_container = _sessionless_container(user=user, tenant=tenant)
+    transcriber = AsyncMock()
+    transcriber.prepare_transcription.return_value = object()
+    transcriber.transcribe_prepared_from_filepath.return_value = (
+        " \n " if failure == "blank" else "replacement transcript"
+    )
+    task_container.transcriber.override(providers.Object(transcriber))
+    embeddings = AsyncMock()
+    embeddings.get_embeddings.side_effect = RuntimeError("embedding failed")
+    task_container.create_embeddings_service.override(providers.Object(embeddings))
+
+    async with db_container():
         result = await transcription_task(
-            job_id=job.id,
+            job_id=job_id,
             params=Transcription(
                 user_id=user.id,
-                group_id=group.id,
-                space_id=space.id,
+                group_id=group_id,
+                space_id=space_id,
                 filename=TITLE,
                 mimetype="audio/wav",
             ),
-            container=container,
+            container=task_container,
         )
-        assert result is False
+    assert result is False
 
     (status, error), blobs, chunks = await _committed_state(job_id)
     assert status == Status.FAILED.value
