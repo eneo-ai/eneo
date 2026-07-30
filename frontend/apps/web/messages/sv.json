@@ -4131,5 +4131,12 @@
   "chat_debug_copy_value": "Kopiera {label}",
   "chat_debug_show_more": "Visa ytterligare {count} Skills",
   "chat_debug_legacy_skills_title": "Sparat underlag för Skills saknas",
-  "chat_debug_legacy_skills_description": "Meddelandet sparades innan aktiveringsunderlag för Skills började lagras. Modell, verktyg, kunskap och filer visas fortfarande ovan."
+  "chat_debug_legacy_skills_description": "Meddelandet sparades innan aktiveringsunderlag för Skills började lagras. Modell, verktyg, kunskap och filer visas fortfarande ovan.",
+  "chunk_settings_customize": "Anpassa chunk-inställningar",
+  "chunk_settings_description": "Styr hur dokument delas upp innan de indexeras för sökning. Lämna av för att använda rekommenderade standardvärden.",
+  "chunk_size_label": "Chunk-storlek (tokens)",
+  "chunk_size_description": "Ungefärlig storlek på varje textbit. Större bitar behåller mer sammanhang; mindre bitar ger mer precisa träffar.",
+  "chunk_overlap_label": "Chunk-överlapp (tokens)",
+  "chunk_overlap_description": "Hur mycket intilliggande bitar överlappar, så att sammanhang inte tappas vid gränserna.",
+  "chunk_settings_reembed_note": "Ändringar gäller endast nytt eller ominläst innehåll. Redan indexerat material behåller sin nuvarande chunkning tills det laddas upp igen."
 }

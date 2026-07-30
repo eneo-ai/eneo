@@ -4131,5 +4131,12 @@
   "chat_debug_copy_value": "Copy {label}",
   "chat_debug_show_more": "Show {count} more Skills",
   "chat_debug_legacy_skills_title": "No retained Skill evidence",
-  "chat_debug_legacy_skills_description": "This persisted turn predates retained Skill activation evidence. Its model, tools, knowledge, and files are still available above."
+  "chat_debug_legacy_skills_description": "This persisted turn predates retained Skill activation evidence. Its model, tools, knowledge, and files are still available above.",
+  "chunk_settings_customize": "Customize chunk settings",
+  "chunk_settings_description": "Controls how documents are split before they are indexed for search. Leave off to use the recommended defaults.",
+  "chunk_size_label": "Chunk size (tokens)",
+  "chunk_size_description": "Approximate size of each text chunk. Larger chunks keep more context; smaller chunks give more precise matches.",
+  "chunk_overlap_label": "Chunk overlap (tokens)",
+  "chunk_overlap_description": "How much neighbouring chunks overlap, so context isn't lost at chunk boundaries.",
+  "chunk_settings_reembed_note": "Changes only apply to newly added or re-indexed content. Already indexed material keeps its current chunking until it is re-uploaded."
 }

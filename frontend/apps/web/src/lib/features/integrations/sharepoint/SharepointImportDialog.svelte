@@ -2,6 +2,7 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
+  import ChunkSettings from "$lib/features/knowledge/components/ChunkSettings.svelte";
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
@@ -128,6 +129,9 @@
   let selectedEmbeddingModel = $state<{ id: string } | null>(null);
   let selectedItems = $state<SelectedImportItem[]>([]);
   let wrapperName = $state("");
+  // Chunk configuration (null = use platform defaults).
+  let chunkSize = $state<number | null>(null);
+  let chunkOverlap = $state<number | null>(null);
 
   const loadPreview = createAsyncState(async () => {
     const { id } = integration;
@@ -308,7 +312,9 @@
         items: batchItems,
         wrapper_name: requiresWrapperName ? wrapperName.trim() : undefined,
         embedding_model: selectedEmbeddingModel,
-        space: $currentSpace
+        space: $currentSpace,
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap
       });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -571,6 +577,8 @@
         bind:value={selectedEmbeddingModel}
         selectableModels={$currentSpace.embedding_models}
       ></SelectEmbeddingModel>
+
+      <ChunkSettings bind:chunkSize bind:chunkOverlap />
     </Dialog.Section>
 
     <Dialog.Controls>

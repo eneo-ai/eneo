@@ -646,6 +646,8 @@ async def create_space_groups(
         name=group.name,
         space_id=id,
         embedding_model_id=embedding_model_id,
+        chunk_size=group.chunk_size,
+        chunk_overlap=group.chunk_overlap,
     )
 
     # Get space for context (graceful degradation if space fetch fails)

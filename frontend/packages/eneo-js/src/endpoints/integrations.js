@@ -96,11 +96,20 @@ export function initIntegrations(client) {
        * @param {import('../types/resources').IntegrationKnowledgePreview & {folder_id?: string, folder_path?: string, resource_type?: string}} args.preview The preview item received from calling the preview
        * @param {{id: string}} args.space Space to add this to
        * @param {{id: string}} args.embedding_model Embedding model to use
+       * @param {number | null=} args.chunk_size Optional chunk size (null/undefined = platform default)
+       * @param {number | null=} args.chunk_overlap Optional chunk overlap (null/undefined = platform default)
        *
        * @returns {Promise<any>} The background job processing this import
        * @throws {EneoError}
        * */
-      import: async ({ integration, preview, space, embedding_model }) => {
+      import: async ({
+        integration,
+        preview,
+        space,
+        embedding_model,
+        chunk_size,
+        chunk_overlap
+      }) => {
         const { id: user_integration_id } = integration;
         const { id } = space;
         const { key, name, url, folder_id, folder_path, type, resource_type } = preview;
@@ -120,7 +129,9 @@ export function initIntegrations(client) {
                 folder_path,
                 selected_item_type: type,
                 resource_type: resource_type || "site",
-                embedding_model
+                embedding_model,
+                chunk_size,
+                chunk_overlap
               }
             }
           }
@@ -144,10 +155,20 @@ export function initIntegrations(client) {
        * @param {string=} args.wrapper_name
        * @param {{id: string}} args.space Space to add this to
        * @param {{id: string}} args.embedding_model Embedding model to use
+       * @param {number | null=} args.chunk_size Optional chunk size (null/undefined = platform default)
+       * @param {number | null=} args.chunk_overlap Optional chunk overlap (null/undefined = platform default)
        *
        * @throws {EneoError}
        * */
-      importBatch: async ({ integration, items, wrapper_name, space, embedding_model }) => {
+      importBatch: async ({
+        integration,
+        items,
+        wrapper_name,
+        space,
+        embedding_model,
+        chunk_size,
+        chunk_overlap
+      }) => {
         const { id: user_integration_id } = integration;
         const { id } = space;
 
@@ -162,6 +183,8 @@ export function initIntegrations(client) {
               "application/json": {
                 embedding_model,
                 wrapper_name,
+                chunk_size,
+                chunk_overlap,
                 items: items.map((item) => ({
                   key: item.key,
                   name: item.name,

@@ -274,6 +274,8 @@ class CreateSpaceServiceResponse(InDB, ResourcePermissionsMixin):
 
 class CreateSpaceGroupsRequest(CreateRequest):
     embedding_model: Optional[ModelId] = None
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
 
 
 class CreateSpaceGroupsResponse(InDB):

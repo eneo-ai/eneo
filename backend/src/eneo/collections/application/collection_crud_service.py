@@ -34,6 +34,8 @@ class CollectionCRUDService:
         space_id: "UUID",
         name: str,
         embedding_model_id: Optional["UUID"] = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> Collection:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -49,6 +51,16 @@ class CollectionCRUDService:
         )
 
         space_after = await self.space_service.get_space_by_collection(group_id=grp.id)
+
+        # Apply optional chunk configuration through the domain update path,
+        # which reuses the same clamping as regular updates.
+        if chunk_size is not None or chunk_overlap is not None:
+            collection = space_after.get_collection(collection_id=grp.id)
+            collection.update(
+                name=name, chunk_size=chunk_size, chunk_overlap=chunk_overlap
+            )
+            space_after = await self.space_repo.update(space=space_after)
+
         return space_after.get_collection(collection_id=grp.id)
 
     async def get_collection(self, collection_id: "UUID") -> Collection:

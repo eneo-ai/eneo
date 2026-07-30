@@ -8452,11 +8452,7 @@ export interface components {
      * @enum {string}
      */
     ApiKeySearchMatchReason:
-      | "exact_secret"
-      | "key_suffix"
-      | "name_or_description"
-      | "owner"
-      | "creator";
+      "exact_secret" | "key_suffix" | "name_or_description" | "owner" | "creator";
     /**
      * ApiKeyState
      * @enum {string}
@@ -10923,6 +10919,10 @@ export interface components {
       /** Name */
       name: string;
       embedding_model?: components["schemas"]["ModelId"] | null;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** CreateSpaceIntegrationKnowledge */
     CreateSpaceIntegrationKnowledge: {
@@ -10944,6 +10944,10 @@ export interface components {
        * @default site
        */
       resource_type?: string | null;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** CreateSpaceIntegrationKnowledgeBatchItem */
     CreateSpaceIntegrationKnowledgeBatchItem: {
@@ -10972,6 +10976,10 @@ export interface components {
       wrapper_name?: string | null;
       /** Items */
       items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchItem"][];
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** CreateSpaceIntegrationKnowledgeBatchResponse */
     CreateSpaceIntegrationKnowledgeBatchResponse: {
@@ -12713,11 +12721,7 @@ export interface components {
      * @enum {string}
      */
     InputFieldType:
-      | "text-field"
-      | "text-upload"
-      | "audio-upload"
-      | "audio-recorder"
-      | "image-upload";
+      "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
     /** Integration */
     Integration: {
       /**
@@ -12794,6 +12798,10 @@ export interface components {
       wrapper_id?: string | null;
       /** Wrapper Name */
       wrapper_name?: string | null;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Permissions */
       permissions?: components["schemas"]["ResourcePermission"][];
       metadata: components["schemas"]["IntegrationKnowledgeMetaData"];
@@ -18924,11 +18932,7 @@ export interface components {
      * @enum {string}
      */
     UploadLimitUseCase:
-      | "session_file"
-      | "session_image"
-      | "session_audio"
-      | "knowledge_file"
-      | "knowledge_audio";
+      "session_file" | "session_image" | "session_audio" | "knowledge_file" | "knowledge_audio";
     /** UseTools */
     UseTools: {
       /** Assistants */
@@ -19746,6 +19750,10 @@ export interface components {
        * @description Password for HTTP Basic Authentication (optional). Must be provided together with username.
        */
       http_auth_password?: string | null;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -19864,6 +19872,10 @@ export interface components {
        * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
        */
       is_auto_disabled: boolean;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
@@ -19887,6 +19899,10 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /**
      * WizardType
@@ -24568,8 +24584,7 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  | components["schemas"]["SecurityClassificationPublic"]
-                  | null;
+                  components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
@@ -24987,8 +25002,7 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  | components["schemas"]["SecurityClassificationPublic"]
-                  | null;
+                  components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */

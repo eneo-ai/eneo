@@ -2,6 +2,7 @@
   import { makeEditable } from "$lib/core/editable";
   import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
+  import ChunkSettings from "$lib/features/knowledge/components/ChunkSettings.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { type Website } from "@eneo/eneo-js";
   import { Dialog, Button, Input, Select, Tooltip } from "@eneo/ui";
@@ -37,6 +38,10 @@
   let websiteName = website.name ?? "";
   let isProcessing = false;
   let validUrl = false;
+
+  // Chunk configuration (null = use platform defaults).
+  let chunkSize: number | null = website.chunk_size ?? null;
+  let chunkOverlap: number | null = website.chunk_overlap ?? null;
 
   // HTTP Basic Authentication state
   let httpAuthEnabled = website?.requires_http_auth ?? false;
@@ -199,6 +204,8 @@
 
       // Handle HTTP auth fields
       const editsAny = edits as Record<string, unknown>;
+      editsAny.chunk_size = chunkSize;
+      editsAny.chunk_overlap = chunkOverlap;
       if (httpAuthEnabled && httpAuthUsername) {
         editsAny.http_auth_username = httpAuthUsername;
         if (httpAuthPassword) {
@@ -232,7 +239,9 @@
       const websiteData: any = {
         spaceId: $currentSpace.id,
         ...editableWebsite,
-        name: websiteName === "" ? null : websiteName
+        name: websiteName === "" ? null : websiteName,
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap
       };
 
       // Add HTTP auth if enabled
@@ -455,6 +464,8 @@
           selectableModels={$currentSpace.embedding_models}
         ></SelectEmbeddingModel>
       {/if}
+
+      <ChunkSettings bind:chunkSize bind:chunkOverlap />
     </Dialog.Section>
 
     <Dialog.Controls let:close>
