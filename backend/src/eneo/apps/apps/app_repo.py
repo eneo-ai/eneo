@@ -324,8 +324,10 @@ class AppRepository:
             transcription_model=app.transcription_model,
         )
 
-    async def get(self, id: UUID) -> App | None:
+    async def _get(self, id: UUID, *, for_update: bool) -> App | None:
         stmt = sa.select(Apps).where(Apps.id == id)
+        if for_update:
+            stmt = stmt.with_for_update(of=Apps)
 
         entry_in_db = await self._get_record_with_options(stmt)
 
@@ -348,6 +350,12 @@ class AppRepository:
             prompt=prompt,
             transcription_model=transcription_model,
         )
+
+    async def get(self, id: UUID) -> App | None:
+        return await self._get(id, for_update=False)
+
+    async def get_for_update(self, id: UUID) -> App | None:
+        return await self._get(id, for_update=True)
 
     async def update(self, app: App) -> App:
         # See `add` — same reason: never write NULL back to the column.

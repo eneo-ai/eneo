@@ -1097,38 +1097,40 @@
       </AlertDialog.Description>
     </AlertDialog.Header>
     {#if publicationAction === "publish"}
-      <Field.Field orientation="horizontal" class="border-border rounded-lg border p-3">
-        <Checkbox
-          id="update-bindings-on-publish"
-          bind:checked={updateBindingsOnPublish}
-          disabled={publicationSaving}
-          aria-describedby="update-bindings-on-publish-description"
-        />
-        <Field.Content>
-          <Field.Label for="update-bindings-on-publish">
-            {m.organization_skills_publish_update_bindings_label()}
-          </Field.Label>
-          <Field.Description id="update-bindings-on-publish-description">
-            {m.organization_skills_publish_update_bindings_description()}
-          </Field.Description>
-        </Field.Content>
-      </Field.Field>
-      <Field.Field orientation="horizontal" class="bg-muted/40 ml-8 rounded-md p-3">
-        <Checkbox
-          id="update-apps-on-publish"
-          bind:checked={updateAppsOnPublish}
-          disabled={publicationSaving || !updateBindingsOnPublish}
-          aria-describedby="update-apps-on-publish-description"
-        />
-        <Field.Content>
-          <Field.Label for="update-apps-on-publish">
-            {m.organization_skills_publish_update_apps_label()}
-          </Field.Label>
-          <Field.Description id="update-apps-on-publish-description">
-            {m.organization_skills_publish_update_apps_description()}
-          </Field.Description>
-        </Field.Content>
-      </Field.Field>
+      <div class="grid gap-2">
+        <Field.Field orientation="horizontal" class="border-border rounded-lg border p-3">
+          <Checkbox
+            id="update-bindings-on-publish"
+            bind:checked={updateBindingsOnPublish}
+            disabled={publicationSaving}
+            aria-describedby="update-bindings-on-publish-description"
+          />
+          <Field.Content>
+            <Field.Label for="update-bindings-on-publish">
+              {m.organization_skills_publish_update_bindings_label()}
+            </Field.Label>
+            <Field.Description id="update-bindings-on-publish-description">
+              {m.organization_skills_publish_update_bindings_description()}
+            </Field.Description>
+          </Field.Content>
+        </Field.Field>
+        <Field.Field orientation="horizontal" class="border-border rounded-lg border p-3">
+          <Checkbox
+            id="update-apps-on-publish"
+            bind:checked={updateAppsOnPublish}
+            disabled={publicationSaving || !updateBindingsOnPublish}
+            aria-describedby="update-apps-on-publish-description"
+          />
+          <Field.Content>
+            <Field.Label for="update-apps-on-publish">
+              {m.organization_skills_publish_update_apps_label()}
+            </Field.Label>
+            <Field.Description id="update-apps-on-publish-description">
+              {m.organization_skills_publish_update_apps_description()}
+            </Field.Description>
+          </Field.Content>
+        </Field.Field>
+      </div>
     {/if}
     {#if publicationError}
       <Alert.Root variant="destructive">

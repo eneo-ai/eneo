@@ -967,8 +967,8 @@ class OrganizationSkillService:
                 entity_id=skill.id,
                 description=(
                     f"Moved App bindings of Skill "
-                    f"'{skill.current_revision.display_name}' to published "
-                    f"revision {skill.published_revision_number}"
+                    f"'{candidate_binding.display_name}' to published "
+                    f"revision {candidate_binding.revision_number}"
                 ),
                 metadata=AuditMetadata.standard(
                     actor=self.user,

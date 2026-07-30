@@ -9,8 +9,9 @@ import pytest
 import sqlalchemy as sa
 from PIL import Image
 
+from eneo.apps.apps.app_repo import AppRepository
 from eneo.audit.domain.action_types import ActionType
-from eneo.database.tables.app_table import AppsFiles
+from eneo.database.tables.app_table import Apps, AppsFiles
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -340,6 +341,55 @@ async def test_chunk_advances_apps_while_retained_run_provenance_stays_exact(
     }
     assert audit_metadata[0]["extra"]["surface"] == "app"
     assert "instructions" not in str(audit_metadata[0])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_recovery_audit_uses_the_applied_revision_name(
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    app_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_apps(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            app_factory=app_factory,
+            size=1,
+        )
+        draft = await container.skill_repo().create_revision(
+            skill_id=seed.skill_id,
+            display_name="Renamed draft",
+            description="A draft newer than the published App revision",
+            instructions="Use the renamed draft instructions.",
+            content_digest="3" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert draft is not None
+
+    response = await client.post(
+        f"/api/v1/skills/organization/{seed.skill_id}/apps/advance/",
+        json={"expected_published_revision_id": str(seed.published_revision_id)},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    async with db_container() as container:
+        description = await container.session().scalar(
+            sa.select(AuditLog.description).where(
+                AuditLog.entity_id == seed.skill_id,
+                AuditLog.action == ActionType.SKILL_BINDINGS_ADVANCED.value,
+            )
+        )
+    assert description == (
+        "Moved App bindings of Skill 'App fleet' to published revision 2"
+    )
 
 
 @pytest.mark.integration
@@ -741,6 +791,157 @@ async def test_concurrent_app_edit_supersedes_the_staged_validation_result(
             )
         )
     assert pin == seed.old_revision_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_editor_first_app_update_and_fleet_apply_do_not_deadlock(
+    monkeypatch,
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    app_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_apps(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            app_factory=app_factory,
+            size=1,
+        )
+
+    editor_locked = asyncio.Event()
+    fleet_started = asyncio.Event()
+    original_get_for_update = AppRepository.get_for_update
+    original_apply = SkillRepoImpl.advance_app_skill_pins
+
+    async def hold_editor_parent_lock(repo, app_id):
+        locked_app = await original_get_for_update(repo, app_id)
+        if app_id == seed.app_ids[0]:
+            editor_locked.set()
+            await fleet_started.wait()
+        return locked_app
+
+    async def note_fleet_start(repo, **kwargs):
+        fleet_started.set()
+        return await original_apply(repo, **kwargs)
+
+    monkeypatch.setattr(AppRepository, "get_for_update", hold_editor_parent_lock)
+    monkeypatch.setattr(SkillRepoImpl, "advance_app_skill_pins", note_fleet_start)
+
+    async def edit_app():
+        async with db_container() as editor:
+            return await editor.app_service().update_app(
+                app_id=seed.app_ids[0],
+                prompt_text="Edited while the fleet update was staged.",
+            )
+
+    editor_request = asyncio.create_task(edit_app())
+    await asyncio.wait_for(editor_locked.wait(), timeout=5)
+    fleet_request = asyncio.create_task(
+        client.post(
+            f"/api/v1/skills/organization/{seed.skill_id}/apps/advance/",
+            json={"expected_published_revision_id": str(seed.published_revision_id)},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    )
+    _, response = await asyncio.wait_for(
+        asyncio.gather(editor_request, fleet_request),
+        timeout=10,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 0,
+        "concurrent_change": 1,
+        "incompatible": 0,
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_fleet_first_app_apply_and_publish_do_not_deadlock(
+    monkeypatch,
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    app_factory,
+):
+    async with db_container() as container:
+        seed = await _seed_behind_apps(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            app_factory=app_factory,
+            size=1,
+        )
+
+    fleet_applied = asyncio.Event()
+    editor_started = asyncio.Event()
+    original_get_for_update = AppRepository.get_for_update
+    original_apply = SkillRepoImpl.advance_app_skill_pins
+
+    async def hold_fleet_locks(repo, **kwargs):
+        results = await original_apply(repo, **kwargs)
+        fleet_applied.set()
+        await editor_started.wait()
+        return results
+
+    async def note_editor_start(repo, app_id):
+        if app_id == seed.app_ids[0]:
+            editor_started.set()
+        return await original_get_for_update(repo, app_id)
+
+    monkeypatch.setattr(SkillRepoImpl, "advance_app_skill_pins", hold_fleet_locks)
+    monkeypatch.setattr(AppRepository, "get_for_update", note_editor_start)
+
+    fleet_request = asyncio.create_task(
+        client.post(
+            f"/api/v1/skills/organization/{seed.skill_id}/apps/advance/",
+            json={"expected_published_revision_id": str(seed.published_revision_id)},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    )
+    await asyncio.wait_for(fleet_applied.wait(), timeout=5)
+
+    async def publish_app():
+        async with db_container() as editor:
+            return await editor.app_service().publish_app(seed.app_ids[0], True)
+
+    publish_request = asyncio.create_task(publish_app())
+    response, _ = await asyncio.wait_for(
+        asyncio.gather(fleet_request, publish_request),
+        timeout=10,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"] == {
+        "advanced": 1,
+        "concurrent_change": 0,
+        "incompatible": 0,
+    }
+    async with db_container() as container:
+        pin, published = (
+            await container.session().execute(
+                sa.select(AppSkillBindings.skill_revision_id, Apps.published)
+                .join(Apps, Apps.id == AppSkillBindings.app_id)
+                .where(
+                    AppSkillBindings.app_id == seed.app_ids[0],
+                    AppSkillBindings.skill_id == seed.skill_id,
+                )
+            )
+        ).one()
+    assert pin == seed.published_revision_id
+    assert published is True
 
 
 @pytest.mark.parametrize(

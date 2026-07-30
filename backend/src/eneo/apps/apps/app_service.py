@@ -18,7 +18,11 @@ from eneo.files.file_models import File
 from eneo.files.file_service import FileService
 from eneo.files.transcriber import Transcriber
 from eneo.icons.icon_repo import IconRepository
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.main.logging import get_logger
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
 from eneo.prompts.prompt_service import PromptService
@@ -128,6 +132,12 @@ class AppService:
             app_id=app.id,
             base_instructions=base_instructions,
         )
+
+    async def _lock_app_for_context_validation(self, app_id: UUID) -> App:
+        app = await self.repo.get_for_update(app_id)
+        if app is None:
+            raise NotFoundException()
+        return app
 
     async def _validate_configured_context(
         self,
@@ -394,6 +404,15 @@ class AppService:
                 },
             )
 
+        requires_context_validation = (
+            attachment_ids is not None
+            or completion_model_id is not None
+            or prompt_text is not None
+            or skill_references is not None
+        )
+        if requires_context_validation:
+            app = await self._lock_app_for_context_validation(app_id)
+
         completion_model = None
         if completion_model_id is not None:
             if not space.is_completion_model_available(
@@ -642,6 +661,7 @@ class AppService:
             )
 
         if publish:
+            app = await self._lock_app_for_context_validation(app_id)
             composition = await self._compose_app_prompt(app)
             await self._validate_configured_context(app=app, composition=composition)
 
