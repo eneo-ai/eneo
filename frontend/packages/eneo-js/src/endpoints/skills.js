@@ -10,6 +10,7 @@
 /** @typedef {import('../types/resources').SkillAdoptionProjectionPagePublic} SkillAdoptionProjectionPagePublic */
 /** @typedef {import('../types/resources').PublishedSkillPublic} PublishedSkillPublic */
 /** @typedef {import('../types/resources').PersonalChatPinAdvancePublic} PersonalChatPinAdvancePublic */
+/** @typedef {import('../types/resources').AssistantFleetAdvancePublic} AssistantFleetAdvancePublic */
 /** @typedef {import('../types/resources').PublishedSkillSummaryPagePublic} PublishedSkillSummaryPagePublic */
 
 /**
@@ -342,6 +343,21 @@ export function initSkills(client) {
        */
       advancePersonalChat: async ({ skillId, ...request }) => {
         return await client.fetch("/api/v1/skills/organization/{skill_id}/personal-chat/advance/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": request }
+        });
+      },
+
+      /**
+       * Move eligible Assistant bindings of this Skill to the reviewed
+       * published revision in bounded server-owned chunks.
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/assistants/advance/">} params
+       * @returns {Promise<AssistantFleetAdvancePublic>}
+       * @throws {EneoError}
+       */
+      advanceAssistants: async ({ skillId, ...request }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/assistants/advance/", {
           method: "post",
           params: { path: { skill_id: skillId } },
           requestBody: { "application/json": request }

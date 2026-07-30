@@ -1,3 +1,16 @@
+<script lang="ts" module>
+  export type SkillAdoptionRun = {
+    status: "running" | "completed" | "stopped" | "failed";
+    provisionalTotal: number;
+    advanced: number;
+    concurrentChange: number;
+    activationUnavailable: number;
+    contextWindow: number;
+    personalChat: "pending" | "advanced" | "failed" | "not_applicable";
+    stopRequested?: boolean;
+  };
+</script>
+
 <script lang="ts">
   import type { SkillAdoptionProjectionPagePublic } from "@eneo/eneo-js";
   import { AlertCircle, LoaderCircle } from "lucide-svelte";
@@ -26,6 +39,9 @@
       options: { limit: number; cursor: string | null }
     ) => Promise<SkillAdoptionProjectionPagePublic>;
     onAdvancePersonalChat?: (pinned: PersonalChatPin) => void;
+    run?: SkillAdoptionRun | null;
+    onStop?: () => void;
+    onRestart?: () => void;
   };
 
   let {
@@ -34,7 +50,10 @@
     initialLoading = false,
     initialError = false,
     getOrganizationSkillAdoption,
-    onAdvancePersonalChat
+    onAdvancePersonalChat,
+    run = null,
+    onStop,
+    onRestart
   }: Props = $props();
 
   let observedSkillId = untrack(() => skillId);
@@ -50,6 +69,12 @@
   let loadMoreError = $state<string | null>(null);
   let summary = $derived(page?.summary ?? null);
   let resourceTotal = $derived(summary === null ? 0 : summary.assistant_count + summary.app_count);
+  let rolloutProcessed = $derived(
+    run === null
+      ? 0
+      : run.advanced + run.concurrentChange + run.activationUnavailable + run.contextWindow
+  );
+  let rolloutTotal = $derived(run === null ? 0 : Math.max(run.provisionalTotal, rolloutProcessed));
 
   $effect(() => {
     const nextSkillId = skillId;
@@ -110,6 +135,47 @@
     return generation === projectionGeneration && requestSkillId === skillId;
   }
 
+  function rolloutStatusLabel(status: SkillAdoptionRun["status"]): string {
+    switch (status) {
+      case "running":
+        return m.organization_skills_rollout_status_running();
+      case "completed":
+        return m.organization_skills_rollout_status_completed();
+      case "stopped":
+        return m.organization_skills_rollout_status_stopped();
+      case "failed":
+        return m.organization_skills_rollout_status_failed();
+    }
+  }
+
+  function rolloutStatusVariant(
+    status: SkillAdoptionRun["status"]
+  ): "default" | "secondary" | "outline" | "destructive" {
+    switch (status) {
+      case "running":
+        return "default";
+      case "completed":
+        return "secondary";
+      case "stopped":
+        return "outline";
+      case "failed":
+        return "destructive";
+    }
+  }
+
+  function personalChatResultLabel(result: SkillAdoptionRun["personalChat"]): string {
+    switch (result) {
+      case "pending":
+        return m.organization_skills_rollout_personal_chat_pending();
+      case "advanced":
+        return m.organization_skills_rollout_personal_chat_advanced();
+      case "failed":
+        return m.organization_skills_rollout_personal_chat_failed();
+      case "not_applicable":
+        return m.organization_skills_rollout_personal_chat_not_applicable();
+    }
+  }
+
   async function retryInitialLoad() {
     if (loadingInitial) return;
     const generation = projectionGeneration;
@@ -162,6 +228,88 @@
   }
 </script>
 
+{#snippet rolloutReceipt()}
+  {#if run !== null}
+    <Alert.Root
+      role="region"
+      aria-labelledby="organization-skill-rollout-heading"
+      variant={run.status === "failed" ? "destructive" : "default"}
+    >
+      <Alert.Title>
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="organization-skill-rollout-heading">
+            {m.organization_skills_rollout_title()}
+          </span>
+          <Badge variant={rolloutStatusVariant(run.status)}>
+            {rolloutStatusLabel(run.status)}
+          </Badge>
+        </div>
+      </Alert.Title>
+      <Alert.Description class="mt-2 flex flex-col gap-3 text-balance">
+        <p role="status" aria-live="polite" aria-atomic="true" class="font-medium tabular-nums">
+          {m.organization_skills_rollout_progress({
+            updated: String(run.advanced),
+            total: String(rolloutTotal)
+          })}
+        </p>
+        <div class="border-border border-y">
+          <Table.Root>
+            <Table.Header>
+              <Table.Row>
+                <Table.Head>{m.organization_skills_rollout_outcome_column()}</Table.Head>
+                <Table.Head class="w-20 text-right">
+                  {m.organization_skills_rollout_count_column()}
+                </Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              <Table.Row>
+                <Table.Cell>{m.organization_skills_rollout_updated()}</Table.Cell>
+                <Table.Cell class="text-right tabular-nums">{run.advanced}</Table.Cell>
+              </Table.Row>
+              <Table.Row>
+                <Table.Cell>{m.organization_skills_rollout_concurrent_change()}</Table.Cell>
+                <Table.Cell class="text-right tabular-nums">{run.concurrentChange}</Table.Cell>
+              </Table.Row>
+              <Table.Row>
+                <Table.Cell>{m.organization_skills_rollout_activation_unavailable()}</Table.Cell>
+                <Table.Cell class="text-right tabular-nums">{run.activationUnavailable}</Table.Cell>
+              </Table.Row>
+              <Table.Row>
+                <Table.Cell>{m.organization_skills_rollout_context_window()}</Table.Cell>
+                <Table.Cell class="text-right tabular-nums">{run.contextWindow}</Table.Cell>
+              </Table.Row>
+            </Table.Body>
+          </Table.Root>
+        </div>
+        <p>{m.organization_skills_rollout_exclusions()}</p>
+        <p>{personalChatResultLabel(run.personalChat)}</p>
+        {#if run.status === "failed"}
+          <p>{m.organization_skills_rollout_failure()}</p>
+        {/if}
+        {#if run.status === "running" && onStop !== undefined}
+          <div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={run.stopRequested === true}
+              onclick={onStop}
+            >
+              {m.organization_skills_rollout_stop()}
+            </Button>
+          </div>
+        {:else if (run.status === "stopped" || run.status === "failed") && run.personalChat !== "pending" && onRestart !== undefined}
+          <div>
+            <Button variant="outline" size="sm" onclick={onRestart}>
+              {m.organization_skills_rollout_restart()}
+            </Button>
+          </div>
+        {/if}
+      </Alert.Description>
+    </Alert.Root>
+  {/if}
+{/snippet}
+
 <section
   class="flex flex-col gap-5"
   aria-labelledby="organization-skill-adoption-heading"
@@ -204,6 +352,7 @@
         <Button variant="outline" size="sm" onclick={retryInitialLoad}>{m.retry()}</Button>
       </Alert.Action>
     </Alert.Root>
+    {@render rolloutReceipt()}
   {:else if summary !== null}
     <dl class="grid grid-cols-2 gap-x-6 gap-y-5 border-y py-5 sm:grid-cols-4">
       <div>
@@ -242,6 +391,8 @@
         </dd>
       </div>
     </dl>
+
+    {@render rolloutReceipt()}
 
     {#if summary.assistant_count === 0 && summary.app_count === 0 && summary.personal_chat === null}
       <div class="border-border flex flex-col items-center border-y px-6 py-8 text-center">

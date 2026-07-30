@@ -84,6 +84,141 @@ function emptyAdoptionPage(): SkillAdoptionProjectionPagePublic {
 }
 
 describe("Skill adoption projection", () => {
+  test("announces rollout progress and exposes only the action for the current state", async () => {
+    const onStop = vi.fn();
+    const onRestart = vi.fn();
+    const rendered = render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      run: {
+        status: "running",
+        provisionalTotal: 5,
+        advanced: 3,
+        concurrentChange: 1,
+        activationUnavailable: 1,
+        contextWindow: 1,
+        personalChat: "failed"
+      },
+      onStop,
+      onRestart
+    });
+
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_rollout_progress({
+            updated: "3",
+            total: "6"
+          })
+        )
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_running(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_updated()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_concurrent_change()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_activation_unavailable()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_context_window()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.organization_skills_rollout_stop() }).click();
+    expect(onStop).toHaveBeenCalledOnce();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .not.toBeInTheDocument();
+
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      run: {
+        status: "stopped",
+        provisionalTotal: 5,
+        advanced: 3,
+        concurrentChange: 1,
+        activationUnavailable: 1,
+        contextWindow: 1,
+        personalChat: "failed"
+      },
+      onStop,
+      onRestart
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_stopped(), { exact: true }))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.organization_skills_rollout_restart() }).click();
+    expect(onRestart).toHaveBeenCalledOnce();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_stop() }))
+      .not.toBeInTheDocument();
+
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      run: {
+        status: "completed",
+        provisionalTotal: 5,
+        advanced: 3,
+        concurrentChange: 1,
+        activationUnavailable: 1,
+        contextWindow: 1,
+        personalChat: "not_applicable"
+      },
+      onStop,
+      onRestart
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_not_applicable()))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_stop() }))
+      .not.toBeInTheDocument();
+
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      run: {
+        status: "failed",
+        provisionalTotal: 5,
+        advanced: 3,
+        concurrentChange: 1,
+        activationUnavailable: 1,
+        contextWindow: 1,
+        personalChat: "advanced"
+      },
+      onStop,
+      onRestart
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_failed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .toBeVisible();
+  });
+
   test("shows server-owned summary, Personal Chat pin, revision counts, and resource drift", async () => {
     render(SkillAdoptionProjection, {
       skillId: "skill-1",
@@ -116,6 +251,9 @@ describe("Skill adoption projection", () => {
       )
       .toBeVisible();
     await expect.element(page.getByRole("table").first()).toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_title()))
+      .not.toBeInTheDocument();
   });
 
   test("offers the Personal Chat update only through the reviewed pin", async () => {
