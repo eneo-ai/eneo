@@ -23,9 +23,6 @@ from pydantic import (
     model_validator,
 )
 
-from eneo.flows.ai_builder.ai_builder_attachment_context import (
-    AIBuilderAttachmentCoverage,
-)
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
     normalize_question_answer,
@@ -65,7 +62,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
-from eneo.flows.ai_builder.planning_state import FileRole
+from eneo.flows.ai_builder.planning_state import AttachmentCoverage, FileRole
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.main.logging import get_logger
@@ -76,6 +73,7 @@ QUESTION_ANSWER_METADATA_KEY = "question_answer"
 REQUIREMENTS_CONFIRMED_METADATA_KEY = "requirements_confirmed"
 REQUIREMENTS_SUMMARY_METADATA_KEY = "requirements_summary"
 REQUIREMENTS_VERSION_METADATA_KEY = "requirements_version"
+ATTACHMENT_EVIDENCE_FINGERPRINT_METADATA_KEY = "attachment_evidence_fingerprint"
 UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
@@ -133,7 +131,7 @@ class SlotClassificationSourceMetadata(BaseModel):
     question_id: str | None = Field(default=None, min_length=1, max_length=128)
     selected_value: str | None = Field(default=None, max_length=500)
     file_id: UUID | None = None
-    coverage: AIBuilderAttachmentCoverage | None = None
+    coverage: AttachmentCoverage | None = None
     truncated: bool = False
 
     @model_validator(mode="after")
@@ -579,6 +577,7 @@ class RequirementsSummaryMetadata(BaseModel):
 
     requirements_summary: RequirementsSummaryPayload
     requirements_version: str | None = None
+    attachment_evidence_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class PersistedAssistantToolCall(BaseModel):
@@ -1010,15 +1009,25 @@ def metadata_with_slot_classification(
 
 def requirements_summary_to_metadata(
     payload: RequirementsSummaryPayload,
+    *,
+    attachment_evidence_fingerprint: str,
 ) -> FlowPersistedJsonObject:
     version = payload.requirements_version
     if not isinstance(version, str) or not version:
         raise ValueError("requirements_summary metadata requires requirements_version")
+    RequirementsSummaryMetadata.model_validate(
+        {
+            "requirements_summary": payload,
+            "requirements_version": version,
+            "attachment_evidence_fingerprint": attachment_evidence_fingerprint,
+        }
+    )
     return {
         REQUIREMENTS_SUMMARY_METADATA_KEY: payload.model_dump(
             mode="json", exclude_none=True
         ),
         REQUIREMENTS_VERSION_METADATA_KEY: version,
+        ATTACHMENT_EVIDENCE_FINGERPRINT_METADATA_KEY: attachment_evidence_fingerprint,
     }
 
 
@@ -1041,6 +1050,9 @@ def requirements_summary_from_metadata(
                     version
                     if isinstance(version, str)
                     else summary_payload.requirements_version
+                ),
+                "attachment_evidence_fingerprint": metadata_map.get(
+                    ATTACHMENT_EVIDENCE_FINGERPRINT_METADATA_KEY
                 ),
             }
         )

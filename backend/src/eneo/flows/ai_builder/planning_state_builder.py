@@ -85,6 +85,7 @@ from eneo.flows.ai_builder.planning_state import (
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
     FileRole,
+    FileRoleEvidence,
     MappedFileLimit,
     OutputSchemaEvidence,
     PlanningSignal,
@@ -178,6 +179,7 @@ def build_planning_state_from_conversation(
     *,
     flow: Flow | None = None,
     attachment_output_schema_evidence: OutputSchemaEvidence | None = None,
+    attachment_file_roles: list[FileRoleEvidence] | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
 ) -> PlanningState:
     """Derive a `PlanningState` from a conversation and optional `Flow`.
@@ -205,6 +207,7 @@ def build_planning_state_from_conversation(
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
         resolved_slots=resolved_slots,
+        file_roles=list(attachment_file_roles or ()),
         output_schema_evidence=output_schema_evidence,
         input_fields=_confirmed_input_fields(conversation),
         mapped_file_limit=_mapped_file_limit(

@@ -177,6 +177,85 @@ def _slot_classification_metadata(
     return result
 
 
+def test_conversation_replay_overlays_live_attachment_role_evidence() -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000701")
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id="user_message:file-role",
+                kind="user_message",
+                text="This attachment is the example output.",
+                message_id="file-role",
+            ),
+            SlotClassificationSource(
+                source_id=f"uploaded_file:{file_id}",
+                kind="uploaded_file",
+                text="filename: example.pdf",
+                file_id=file_id,
+                coverage="fully_seen",
+            ),
+        )
+    )
+    metadata = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            file_roles=(
+                ClassifiedFileRole(
+                    file_id=file_id,
+                    role="example_output",
+                    confidence="high",
+                    reason="The user identified the example output.",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id="user_message:file-role",
+                            quote="This attachment is the example output.",
+                        ),
+                    ),
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+        classification_input=classification_input,
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    assert metadata is not None
+    conversation_metadata = metadata_with_slot_classification(None, metadata)
+    assert conversation_metadata is not None
+
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                message_id="file-role",
+                role="user",
+                content="This attachment is the example output.",
+                metadata=conversation_metadata,
+            )
+        ],
+        attachment_file_roles=[
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="example.pdf",
+                file_type="document",
+                mimetype="application/pdf",
+                has_readable_text=True,
+                coverage="excerpt_truncated",
+                role="context_only",
+                source="heuristic",
+                confidence="low",
+                evidence=["fallback:unclassified_file"],
+                candidate_roles=["context_only"],
+            )
+        ],
+    )
+
+    assert len(state.file_roles) == 1
+    role = state.file_roles[0]
+    assert role.role == "example_output"
+    assert role.source == "model"
+    assert role.has_readable_text is True
+    assert role.coverage == "excerpt_truncated"
+
+
 class TestPersistedNone:
     def test_is_noop_when_persisted_is_none(self) -> None:
         rebuilt = _state()
@@ -275,6 +354,8 @@ class TestFileRoleEvidencePreservation:
             filename="lagstod.pdf",
             file_type="document",
             mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
             role="reference_material",
             source="heuristic",
             confidence="medium",
@@ -301,6 +382,8 @@ class TestFileRoleEvidencePreservation:
                 "application/vnd.openxmlformats-officedocument.wordprocessingml."
                 "document"
             ),
+            has_readable_text=True,
+            coverage="fully_seen",
             role="template",
             source="heuristic",
             confidence="medium",
@@ -313,6 +396,8 @@ class TestFileRoleEvidencePreservation:
                 "application/vnd.openxmlformats-officedocument.wordprocessingml."
                 "document"
             ),
+            has_readable_text=True,
+            coverage="fully_seen",
             role="context_only",
             source="heuristic",
             confidence="low",
@@ -336,6 +421,8 @@ class TestFileRoleEvidencePreservation:
             filename="lagstod.pdf",
             file_type="document",
             mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
             role="reference_material",
             source="heuristic",
             confidence="medium",
@@ -2526,6 +2613,8 @@ class TestModelSlotMerge:
                 filename="bilaga.pdf",
                 file_type="document",
                 mimetype="application/pdf",
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="context_only",
                 source="heuristic",
                 confidence="low",
@@ -2570,6 +2659,8 @@ class TestModelSlotMerge:
                 filename="bilaga.pdf",
                 file_type="document",
                 mimetype="application/pdf",
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="context_only",
                 source="heuristic",
                 confidence="low",
@@ -2607,6 +2698,8 @@ class TestModelSlotMerge:
                 filename="meeting.m4a",
                 file_type="audio",
                 mimetype="audio/mp4",
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="runtime_input_sample",
                 source="heuristic",
                 confidence="high",
@@ -2645,6 +2738,8 @@ class TestModelSlotMerge:
                 filename="mall.docx",
                 file_type="document",
                 mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="template",
                 source="heuristic",
                 confidence="medium",

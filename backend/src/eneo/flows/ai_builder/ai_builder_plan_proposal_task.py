@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import assert_never
 
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    render_ai_builder_evidence_value,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     top_level_schema_property_names,
@@ -216,7 +219,7 @@ def _file_roles_block(planning_state: PlanningState) -> str | None:
     if not planning_state.file_roles:
         return None
     return "\n".join(
-        f"- {item.filename}: {item.role} "
+        f"- {render_ai_builder_evidence_value(item.filename)}: {item.role} "
         f"({item.source}, {item.confidence} confidence"
         f"{_file_role_detail_prompt_suffix(item)})"
         for item in planning_state.file_roles
@@ -224,14 +227,20 @@ def _file_roles_block(planning_state: PlanningState) -> str | None:
 
 
 def _file_role_detail_prompt_suffix(item: FileRoleEvidence) -> str:
-    details: list[str] = []
+    details = [
+        f"has_readable_text: {str(item.has_readable_text).lower()}",
+        f"coverage: {item.coverage}",
+    ]
     candidate_roles = tuple(item.candidate_roles)
     if candidate_roles and candidate_roles != (item.role,):
         details.append("candidates: " + ", ".join(candidate_roles))
     if item.evidence:
-        details.append("evidence: " + ", ".join(item.evidence[:6]))
-    if not details:
-        return ""
+        details.append(
+            "evidence: "
+            + ", ".join(
+                render_ai_builder_evidence_value(marker) for marker in item.evidence[:6]
+            )
+        )
     return "; " + "; ".join(details)
 
 
@@ -240,7 +249,11 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
     if evidence is None:
         return None
     fields = top_level_schema_property_names(evidence.json_schema)
-    field_text = ", ".join(fields) if fields else "top-level object"
+    field_text = (
+        ", ".join(render_ai_builder_evidence_value(field) for field in fields)
+        if fields
+        else "top-level object"
+    )
     if evidence.source == "template_placeholders":
         coverage_line = (
             f"- placeholder coverage: {len(fields)} of {evidence.total_count} unique "

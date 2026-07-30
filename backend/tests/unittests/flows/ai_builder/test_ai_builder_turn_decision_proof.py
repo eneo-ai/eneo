@@ -258,10 +258,24 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
 def test_turn_controller_returns_canonical_server_decisions(
     case: TurnDecisionCase,
 ) -> None:
+    confirmed_attachment_evidence_fingerprint: str | None = None
+    if case.requirements_confirmed:
+        unconfirmed = resolve_turn_control(
+            session_state=case.state,
+            selected_discovery_question_ids=case.selected_questions,
+            confirmed_attachment_evidence_fingerprint=None,
+            ui_language="en",
+        ).decision
+        if isinstance(unconfirmed, ConfirmRequirements):
+            confirmed_attachment_evidence_fingerprint = (
+                unconfirmed.attachment_evidence_fingerprint
+            )
     turn_control = resolve_turn_control(
         session_state=case.state,
         selected_discovery_question_ids=case.selected_questions,
-        requirements_confirmed=case.requirements_confirmed,
+        confirmed_attachment_evidence_fingerprint=(
+            confirmed_attachment_evidence_fingerprint
+        ),
         ui_language="en",
     )
     decision = turn_control.decision

@@ -5932,12 +5932,13 @@ async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
                             key_decisions=[],
                             input_description="Användaren skriver text.",
                             output_description="Flödet svarar med text.",
-                        )
+                        ),
+                        attachment_evidence_fingerprint="a" * 64,
                     ),
                     conversation=[],
                     new_messages_start=0,
                     flow=None,
-                    requirements_confirmed=False,
+                    confirmed_attachment_evidence_fingerprint=None,
                     ui_language="sv",
                     telemetry=ServerDecisionTelemetry(
                         request_id="req-requirements-lost-lease",
@@ -6027,7 +6028,7 @@ async def test_server_question_with_lost_lease_rolls_back(
                     conversation=[],
                     new_messages_start=0,
                     flow=None,
-                    requirements_confirmed=False,
+                    confirmed_attachment_evidence_fingerprint=None,
                     ui_language="sv",
                     telemetry=ServerDecisionTelemetry(
                         request_id="req-question-lost-lease",

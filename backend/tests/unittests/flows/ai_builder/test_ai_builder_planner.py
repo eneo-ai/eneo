@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import replace
@@ -21,6 +22,10 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
+    AIBuilderAttachmentOutputSchemaDiscovery,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -65,7 +70,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTele
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalMessageGroup,
 )
-from eneo.flows.ai_builder.ai_builder_requirements_state import RequirementsState
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    RequirementsState,
+    build_requirements_version,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
@@ -93,13 +101,16 @@ from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
+    ConfirmRequirements,
     ReviseArchitecture,
+    resolve_turn_control,
 )
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     resolve_user_question_metadata,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    FileRoleEvidence,
     PlanningState,
     PlanningStatePayloadTooLargeError,
     ResolvedSlot,
@@ -228,13 +239,18 @@ def _kb_resource(
     }
 
 
-def _make_file(text: str = "Reference") -> File:
+def _make_file(
+    text: str = "Reference",
+    *,
+    name: str = "reference.txt",
+    mimetype: str = "text/plain",
+) -> File:
     return File(
         id=uuid4(),
-        name="reference.txt",
+        name=name,
         checksum="checksum",
         size=len(text.encode("utf-8")),
-        mimetype="text/plain",
+        mimetype=mimetype,
         file_type=FileType.TEXT,
         text=text,
         blob=None,
@@ -290,6 +306,7 @@ async def _prepare_planner_request_for_test(
     prior_plan_for_revision: BuilderPlan | None = None,
     allow_discovery_semantic_adjudication: bool = True,
     persisted_planning_state: PlanningState | None = None,
+    before_provider_call: AsyncMock | None = None,
 ):
     return await prepare_planner_request(
         PlannerRequestPreparationInput(
@@ -323,6 +340,7 @@ async def _prepare_planner_request_for_test(
                 model=completion_model_route.litellm_model,
                 target_kind=TargetKind.CREATE,
             ),
+            before_provider_call=before_provider_call,
         )
     )
 
@@ -349,6 +367,32 @@ def _requirements_state_confirmed(
     return RequirementsState(
         latest_summary=_requirements_summary(version),
         latest_version=version,
+        latest_attachment_evidence_fingerprint=hashlib.sha256(b"[]").hexdigest(),
+        confirmed_version=version,
+    )
+
+
+def _requirements_state_confirmed_for(
+    state: PlanningState,
+    *,
+    ui_language: str | None = "en",
+    discovery_assumptions: tuple[str, ...] = (),
+) -> RequirementsState:
+    decision = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language=ui_language,
+        discovery_assumptions=discovery_assumptions,
+    ).decision
+    assert isinstance(decision, ConfirmRequirements)
+    version = build_requirements_version(decision.payload)
+    return RequirementsState(
+        latest_summary=decision.payload,
+        latest_version=version,
+        latest_attachment_evidence_fingerprint=(
+            decision.attachment_evidence_fingerprint
+        ),
         confirmed_version=version,
     )
 
@@ -859,6 +903,149 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
 
 
 @pytest.mark.asyncio
+async def test_prepare_planner_request_refuses_ambiguous_attachment_schemas_before_discovery() -> (
+    None
+):
+    planner = _make_planner()
+    schema = '{"type":"object","properties":{"decision":{"type":"string"}}}'
+    provider_callback = AsyncMock()
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+        new_callable=AsyncMock,
+        return_value=_runtime_result(_discovery_analysis(), PlanningState.empty()),
+    ) as build_discovery_runtime_result:
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await _prepare_planner_request_for_test(
+                planner,
+                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                message="Build a flow",
+                completion_model_route=_route(),
+                attachment_files=[
+                    _make_file(
+                        schema,
+                        name="first.schema.json",
+                        mimetype="application/json",
+                    ),
+                    _make_file(
+                        schema,
+                        name="second.schema.json",
+                        mimetype="application/json",
+                    ),
+                ],
+                before_provider_call=provider_callback,
+            )
+
+    assert exc_info.value.code is AIBuilderErrorCode.AMBIGUOUS_ATTACHMENT_OUTPUT_SCHEMAS
+    assert "Keep one schema attached and retry." in str(exc_info.value)
+    build_discovery_runtime_result.assert_not_awaited()
+    provider_callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prepare_planner_request_requires_fresh_confirmation_after_attachment_change() -> (
+    None
+):
+    planner = _make_planner()
+    conversation = [ConversationMessage(role="user", content="Build a report flow")]
+    discovery_analysis = _discovery_analysis()
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_document"],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID(int=index + 1),
+            filename=f"reference-{index}.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+        )
+        for index in range(12)
+    ]
+    prior_confirmation = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(prior_confirmation, ConfirmRequirements)
+    confirmed_version = build_requirements_version(prior_confirmation.payload)
+    requirements_state = RequirementsState(
+        latest_summary=prior_confirmation.payload,
+        latest_version=confirmed_version,
+        latest_attachment_evidence_fingerprint=(
+            prior_confirmation.attachment_evidence_fingerprint
+        ),
+        confirmed_version=confirmed_version,
+    )
+    state.file_roles[11] = state.file_roles[11].model_copy(
+        update={
+            "coverage": "excerpt_truncated",
+            "role": "reference_material",
+            "source": "model",
+            "confidence": "high",
+        }
+    )
+    provider_callback = AsyncMock()
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            new_callable=AsyncMock,
+            return_value=_runtime_result(discovery_analysis, state),
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_plan_proposal_system_prompt",
+            return_value="proposal prompt",
+        ) as build_proposal_prompt,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
+            return_value=256,
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
+            return_value=[{"role": "user", "content": "Build a report flow"}],
+        ),
+    ):
+        prepared = await _prepare_planner_request_for_test(
+            planner,
+            conversation=conversation,
+            message="Build a report flow",
+            completion_model_route=_route(),
+            allow_discovery_semantic_adjudication=False,
+            before_provider_call=provider_callback,
+        )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, ConfirmRequirements)
+    assert any(
+        "2 additional attachments are omitted" in assumption
+        for assumption in prepared.server_decision.payload.assumptions
+    )
+    build_proposal_prompt.assert_not_called()
+    provider_callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_server_action_policy_overrides_stale_discovery_question() -> None:
     planner = _make_planner()
     conversation = [
@@ -1019,12 +1206,13 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
             confidence="medium",
         ),
     }
-    attachment_context = SimpleNamespace(
+    attachment_context = AIBuilderAttachmentContext(
         context=None,
         evidence=(),
         included_file_ids=[],
         total_chars=0,
         truncated=False,
+        output_schema_discovery=AIBuilderAttachmentOutputSchemaDiscovery(candidates=()),
     )
 
     with (
@@ -1080,7 +1268,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
 ):
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build from this file")]
-    requirements_state = _requirements_state_confirmed()
     discovery_analysis = _discovery_analysis()
     state = PlanningState.empty()
     state.architecture_commit = ArchitectureCommit(
@@ -1096,6 +1283,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
         committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
         architecture_hash="a" * 64,
     )
+    requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build from this file.",
         key_decisions=[],
@@ -1121,12 +1309,15 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
-            return_value=SimpleNamespace(
+            return_value=AIBuilderAttachmentContext(
                 context="attachment context",
                 evidence=(),
                 included_file_ids=[],
                 total_chars=18,
                 truncated=False,
+                output_schema_discovery=AIBuilderAttachmentOutputSchemaDiscovery(
+                    candidates=()
+                ),
             ),
         ) as build_attachment_context,
         patch(
@@ -1177,7 +1368,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
 async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
-    requirements_state = _requirements_state_confirmed()
     discovery_analysis = _discovery_analysis()
     state = PlanningState.empty()
     state.architecture_commit = ArchitectureCommit(
@@ -1193,6 +1383,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
         committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
         architecture_hash="a" * 64,
     )
+    requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build a report flow.",
         key_decisions=[
@@ -1300,7 +1491,6 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
 async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
-    requirements_state = _requirements_state_confirmed()
     discovery_analysis = _discovery_analysis()
     state = PlanningState.empty()
     state.architecture_commit = ArchitectureCommit(
@@ -1316,6 +1506,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
         committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
         architecture_hash="a" * 64,
     )
+    requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build a report flow.",
         key_decisions=[],

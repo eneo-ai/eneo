@@ -26,6 +26,8 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 
+_ATTACHMENT_EVIDENCE_FINGERPRINT = "f" * 64
+
 
 def _summary_payload() -> RequirementsSummaryPayload:
     return RequirementsSummaryPayload.model_validate(
@@ -55,6 +57,9 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
         ]
@@ -64,6 +69,10 @@ class TestResolveRequirementsStateFromAssistantMetadata:
         assert state.latest_summary is not None
         assert state.latest_summary.summary == payload.summary
         assert state.latest_version == version
+        assert (
+            state.latest_attachment_evidence_fingerprint
+            == _ATTACHMENT_EVIDENCE_FINGERPRINT
+        )
         assert state.confirmed is False  # no user confirmation yet
 
     def test_user_confirmation_completes_the_confirmed_contract(self) -> None:
@@ -77,6 +86,9 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(
@@ -95,6 +107,10 @@ class TestResolveRequirementsStateFromAssistantMetadata:
         assert state.latest_version == version
         assert state.confirmed_version == version
         assert state.confirmed is True
+        assert (
+            state.confirmed_attachment_evidence_fingerprint
+            == _ATTACHMENT_EVIDENCE_FINGERPRINT
+        )
 
     def test_legacy_user_confirmation_without_version_confirms_latest_summary(
         self,
@@ -109,6 +125,9 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(
@@ -134,6 +153,9 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(
@@ -161,6 +183,9 @@ class TestResolveRequirementsStateFromAssistantMetadata:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(
@@ -230,6 +255,9 @@ class TestRenderConfirmedRequirementsBlocks:
                 metadata={
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        _ATTACHMENT_EVIDENCE_FINGERPRINT
+                    ),
                 },
             ),
             ConversationMessage(

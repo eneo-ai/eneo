@@ -799,6 +799,10 @@ def test_critic_context_renders_typed_confirmed_requirements_signal() -> None:
                 "metadata": {
                     "requirements_summary": payload.model_dump(mode="json"),
                     "requirements_version": version,
+                    "attachment_evidence_fingerprint": (
+                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
+                        "ed12ab4d8e11ba873c2f11161202b945"
+                    ),
                 },
             },
             {

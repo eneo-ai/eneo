@@ -461,6 +461,10 @@ class TestRequirementsConfirmation:
                         "manual_setup_notes": [],
                     },
                     "requirements_version": requirements_version,
+                    "attachment_evidence_fingerprint": (
+                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
+                        "ed12ab4d8e11ba873c2f11161202b945"
+                    ),
                 },
             ),
             ConversationMessage(
@@ -1176,6 +1180,8 @@ class TestExtendedClarificationHints:
                     "application/vnd.openxmlformats-officedocument.wordprocessingml."
                     "document"
                 ),
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="template",
                 source="heuristic",
                 confidence="medium",
@@ -1215,6 +1221,8 @@ class TestExtendedClarificationHints:
                     "application/vnd.openxmlformats-officedocument.wordprocessingml."
                     "document"
                 ),
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="template",
                 source="heuristic",
                 confidence="medium",
@@ -1272,6 +1280,8 @@ class TestExtendedClarificationHints:
                     "application/vnd.openxmlformats-officedocument.wordprocessingml."
                     "document"
                 ),
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="template",
                 source="heuristic",
                 confidence="medium",
@@ -3332,7 +3342,7 @@ class TestPlannerDiscoveryQuestionDispatch:
                 conversation=conversation,
                 new_messages_start=0,
                 flow=None,
-                requirements_confirmed=False,
+                confirmed_attachment_evidence_fingerprint=None,
                 ui_language="en",
                 telemetry=ServerDecisionTelemetry(
                     request_id="req-test",

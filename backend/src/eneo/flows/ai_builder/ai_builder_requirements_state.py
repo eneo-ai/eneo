@@ -74,6 +74,7 @@ _BOILERPLATE_REQUIREMENT_TEXTS = frozenset(
 class RequirementsState:
     latest_summary: RequirementsSummaryPayload | None = None
     latest_version: str | None = None
+    latest_attachment_evidence_fingerprint: str | None = None
     confirmed_version: str | None = None
 
     @property
@@ -81,8 +82,13 @@ class RequirementsState:
         return (
             self.latest_summary is not None
             and self.latest_version is not None
+            and self.latest_attachment_evidence_fingerprint is not None
             and self.confirmed_version == self.latest_version
         )
+
+    @property
+    def confirmed_attachment_evidence_fingerprint(self) -> str | None:
+        return self.latest_attachment_evidence_fingerprint if self.confirmed else None
 
 
 def build_requirements_version(payload: RequirementsSummaryPayload) -> str:
@@ -123,6 +129,7 @@ def resolve_requirements_state(
 ) -> RequirementsState:
     latest_summary: RequirementsSummaryPayload | None = None
     latest_version: str | None = None
+    latest_attachment_evidence_fingerprint: str | None = None
     latest_summary_index: int | None = None
 
     for index, message in enumerate(conversation):
@@ -137,6 +144,7 @@ def resolve_requirements_state(
                     continue
                 latest_summary = payload
                 latest_version = build_requirements_version(payload)
+                latest_attachment_evidence_fingerprint = None
                 latest_summary_index = index
 
         if message.role not in ("tool", "assistant"):
@@ -145,6 +153,9 @@ def resolve_requirements_state(
         if summary_metadata is None:
             continue
         latest_summary = summary_metadata.requirements_summary
+        latest_attachment_evidence_fingerprint = (
+            summary_metadata.attachment_evidence_fingerprint
+        )
         computed_version = build_requirements_version(latest_summary)
         if (
             summary_metadata.requirements_version is not None
@@ -188,6 +199,7 @@ def resolve_requirements_state(
     return RequirementsState(
         latest_summary=latest_summary,
         latest_version=latest_version,
+        latest_attachment_evidence_fingerprint=(latest_attachment_evidence_fingerprint),
         confirmed_version=confirmed_version,
     )
 

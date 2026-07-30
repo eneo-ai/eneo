@@ -8833,6 +8833,7 @@ export interface components {
       | "ai_builder_plan_resource_binding_unavailable"
       | "ai_builder_plan_resource_bindings_missing"
       | "bad_request"
+      | "ambiguous_attachment_output_schemas"
       | "builder_attachment_unavailable"
       | "edit_session_flow_required"
       | "flow_is_published"

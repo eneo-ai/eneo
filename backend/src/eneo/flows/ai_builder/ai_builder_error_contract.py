@@ -123,6 +123,7 @@ class AIBuilderErrorCode(StrEnum):
         "ai_builder_plan_resource_bindings_missing"
     )
     BAD_REQUEST = "bad_request"
+    AMBIGUOUS_ATTACHMENT_OUTPUT_SCHEMAS = "ambiguous_attachment_output_schemas"
     BUILDER_ATTACHMENT_UNAVAILABLE = "builder_attachment_unavailable"
     EDIT_SESSION_FLOW_REQUIRED = "edit_session_flow_required"
     FLOW_IS_PUBLISHED = "flow_is_published"
@@ -670,6 +671,12 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.AMBIGUOUS_ATTACHMENT_OUTPUT_SCHEMAS: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
         ),
         AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,

@@ -85,7 +85,7 @@ class ServerDecisionDispatchRequest:
     conversation: list[ConversationMessage]
     new_messages_start: int
     flow: "Flow | None"
-    requirements_confirmed: bool
+    confirmed_attachment_evidence_fingerprint: str | None
     ui_language: str | None
     telemetry: ServerDecisionTelemetry
     planning_state: PlanningState
@@ -227,7 +227,9 @@ async def _dispatch_architecture_commit(
     turn_control = resolve_turn_control(
         session_state=session_state,
         selected_discovery_question_ids=(),
-        requirements_confirmed=request.requirements_confirmed,
+        confirmed_attachment_evidence_fingerprint=(
+            request.confirmed_attachment_evidence_fingerprint
+        ),
         ui_language=request.ui_language,
         discovery_assumptions=request.discovery_assumptions,
     )
@@ -240,7 +242,9 @@ async def _dispatch_architecture_commit(
                 conversation=request.conversation,
                 new_messages_start=len(request.conversation),
                 flow=request.flow,
-                requirements_confirmed=request.requirements_confirmed,
+                confirmed_attachment_evidence_fingerprint=(
+                    request.confirmed_attachment_evidence_fingerprint
+                ),
                 ui_language=request.ui_language,
                 telemetry=request.telemetry,
                 planning_state=session_state,
@@ -288,7 +292,12 @@ async def _dispatch_requirements_confirmation(
                     architecture_commit_populated=False,
                     tool_call_count=0,
                 ),
-                base_metadata=requirements_summary_to_metadata(requirements_payload),
+                base_metadata=requirements_summary_to_metadata(
+                    requirements_payload,
+                    attachment_evidence_fingerprint=(
+                        decision.attachment_evidence_fingerprint
+                    ),
+                ),
             ),
         )
     )

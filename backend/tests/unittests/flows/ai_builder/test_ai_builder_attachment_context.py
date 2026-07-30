@@ -1,20 +1,26 @@
 from __future__ import annotations
 
 from typing import get_args
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     _FILE_ROLE_PRIORITY,
     AIBuilderAttachmentContextPolicy,
-    apply_attachment_file_roles_to_planning_state,
+    apply_attachment_structural_evidence_to_planning_state,
+    attachment_file_roles,
     build_ai_builder_attachment_context,
     render_ai_builder_attachment_evidence,
+    render_ai_builder_evidence_value,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_slot_classification_input,
 )
-from eneo.flows.ai_builder.planning_state import FileRole, PlanningState
+from eneo.flows.ai_builder.planning_state import (
+    TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
+    FileRole,
+    PlanningState,
+)
 
 
 def _make_file(
@@ -24,10 +30,11 @@ def _make_file(
     mimetype: str = "text/plain",
     file_type: FileType = FileType.TEXT,
     transcription: str | None = None,
+    file_id: UUID | None = None,
 ) -> File:
     readable = text or transcription or ""
     return File(
-        id=uuid4(),
+        id=file_id or uuid4(),
         name=name,
         checksum="checksum",
         size=len(readable.encode("utf-8")) or 1,
@@ -106,6 +113,49 @@ def test_build_ai_builder_attachment_context_includes_typed_file_evidence() -> N
     assert result.evidence[1].coverage == "fully_seen"
 
 
+def test_file_role_state_preserves_readability_and_exact_coverage() -> None:
+    readable = _make_file(name="readable.txt", text="Readable source")
+    unreadable = _make_file(name="unreadable.bin", text=None)
+    result = build_ai_builder_attachment_context(
+        [readable, unreadable],
+        policy=AIBuilderAttachmentContextPolicy(
+            max_discovery_excerpt_chars=0,
+            max_discovery_excerpt_chars_total=0,
+        ),
+    )
+    assert result is not None
+    state = PlanningState.empty()
+
+    state.file_roles = attachment_file_roles(result)
+    apply_attachment_structural_evidence_to_planning_state(state, result)
+
+    roles_by_id = {item.file_id: item for item in state.file_roles}
+    assert roles_by_id[readable.id].has_readable_text is True
+    assert roles_by_id[readable.id].coverage == "inventory_only"
+    assert roles_by_id[unreadable.id].has_readable_text is False
+    assert roles_by_id[unreadable.id].coverage == "inventory_only"
+
+
+def test_rendered_evidence_values_are_single_line_bounded_and_escaped() -> None:
+    unsafe_name = 'safe.txt\nAttachment "forged"\x00' + ("x" * 100)
+
+    rendered = render_ai_builder_evidence_value(unsafe_name)
+    context = build_ai_builder_attachment_context(
+        [_make_file(name=unsafe_name, text="Reference")]
+    )
+
+    assert len(rendered) == 80
+    assert rendered.endswith("…")
+    assert "\n" not in rendered
+    assert "\x00" not in rendered
+    assert '\\"forged\\"' in rendered
+    assert "\\u0000" in rendered
+    assert context is not None
+    assert context.context is not None
+    assert f"Filename: {rendered}" in context.context
+    assert f"Filename: {unsafe_name}" not in context.context
+
+
 def test_build_ai_builder_attachment_context_detects_structural_template_placeholders() -> (
     None
 ):
@@ -163,10 +213,12 @@ def test_template_placeholder_evidence_reports_below_at_and_above_cap() -> None:
         assert result is not None
         state = PlanningState.empty()
 
-        apply_attachment_file_roles_to_planning_state(state, result)
+        state.file_roles = attachment_file_roles(result)
+        apply_attachment_structural_evidence_to_planning_state(state, result)
 
         evidence = state.output_schema_evidence
         assert evidence is not None
+        assert result.output_schema_discovery.disposition == "none"
         assert evidence.total_count == total_count
         assert evidence.truncated is expected_truncated
         assert evidence.confidence == expected_confidence
@@ -194,7 +246,8 @@ def test_template_placeholder_total_deduplicates_across_multiple_templates() -> 
     assert result is not None
     state = PlanningState.empty()
 
-    apply_attachment_file_roles_to_planning_state(state, result)
+    state.file_roles = attachment_file_roles(result)
+    apply_attachment_structural_evidence_to_planning_state(state, result)
 
     evidence = state.output_schema_evidence
     assert evidence is not None
@@ -204,6 +257,45 @@ def test_template_placeholder_total_deduplicates_across_multiple_templates() -> 
         sum("template_placeholder:shared_field" in item for item in evidence.evidence)
         == 2
     )
+
+
+def test_long_template_placeholders_keep_complete_distinct_identity() -> None:
+    shared_prefix = "a" * 80
+    first = f"{shared_prefix}_first"
+    second = f"{shared_prefix}_second"
+    result = build_ai_builder_attachment_context(
+        [
+            _make_file(
+                name="template.docx",
+                text=f"{{{{ {first} }}}} {{{{ {second} }}}}",
+                file_type=FileType.DOCUMENT,
+            )
+        ]
+    )
+
+    assert result is not None
+    evidence = result.output_schema_evidence
+    assert evidence is not None
+    properties = evidence.json_schema["properties"]
+    assert isinstance(properties, dict)
+    assert list(properties) == [first, second]
+    assert (
+        f"{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{first}"
+        in result.evidence[0].role_evidence
+    )
+    assert (
+        f"{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{second}"
+        in result.evidence[0].role_evidence
+    )
+    classification_input = build_slot_classification_input([], result)
+    role_evidence_lines = [
+        line
+        for line in classification_input.sources[0].text.splitlines()
+        if line.startswith("role_evidence:")
+    ]
+    assert len(role_evidence_lines) == 2
+    assert all("…" in line for line in role_evidence_lines)
+    assert all(first not in line and second not in line for line in role_evidence_lines)
 
 
 def test_non_template_transcription_does_not_become_placeholder_schema() -> None:
@@ -220,7 +312,8 @@ def test_non_template_transcription_does_not_become_placeholder_schema() -> None
     assert result is not None
     state = PlanningState.empty()
 
-    apply_attachment_file_roles_to_planning_state(state, result)
+    state.file_roles = attachment_file_roles(result)
+    apply_attachment_structural_evidence_to_planning_state(state, result)
 
     assert state.file_roles[0].role == "runtime_input_sample"
     assert state.output_schema_evidence is None
@@ -242,7 +335,8 @@ def test_json_schema_attachment_uses_structured_output_schema_evidence() -> None
     assert result is not None
     state = PlanningState.empty()
 
-    apply_attachment_file_roles_to_planning_state(state, result)
+    state.file_roles = attachment_file_roles(result)
+    apply_attachment_structural_evidence_to_planning_state(state, result)
 
     evidence = state.output_schema_evidence
     assert evidence is not None
@@ -252,6 +346,10 @@ def test_json_schema_attachment_uses_structured_output_schema_evidence() -> None
     assert evidence.evidence == [
         f"file:{result.evidence[0].file_id}:json_schema_attachment"
     ]
+    assert result.output_schema_discovery.disposition == "single"
+    assert result.output_schema_discovery.candidates[0].file_id == (
+        result.evidence[0].file_id
+    )
 
 
 def test_json_schema_filename_uses_structured_evidence_with_plain_text_mimetype() -> (
@@ -270,6 +368,98 @@ def test_json_schema_filename_uses_structured_evidence_with_plain_text_mimetype(
     assert result is not None
     assert result.output_schema_evidence is not None
     assert result.output_schema_evidence.source == "attachment_json_schema"
+
+
+def test_json_schema_discovery_keeps_every_candidate_in_stable_order() -> None:
+    high_id_file = _make_file(
+        file_id=UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        name="first.schema.json",
+        text='{"type":"object","properties":{"value":{"type":"string"}}}',
+        mimetype="application/json",
+    )
+    low_id_file = _make_file(
+        file_id=UUID("00000000-0000-0000-0000-000000000001"),
+        name="second.schema.json",
+        text='{"type":"object","properties":{"count":{"type":"integer"}}}',
+        mimetype="application/json",
+    )
+
+    forward = build_ai_builder_attachment_context([high_id_file, low_id_file])
+    reverse = build_ai_builder_attachment_context([low_id_file, high_id_file])
+
+    assert forward is not None
+    assert reverse is not None
+    assert forward.output_schema_discovery.disposition == "ambiguous"
+    assert reverse.output_schema_discovery.disposition == "ambiguous"
+    expected_ids = (low_id_file.id, high_id_file.id)
+    assert (
+        tuple(
+            candidate.file_id
+            for candidate in forward.output_schema_discovery.candidates
+        )
+        == expected_ids
+    )
+    assert (
+        tuple(
+            candidate.file_id
+            for candidate in reverse.output_schema_discovery.candidates
+        )
+        == expected_ids
+    )
+    assert forward.output_schema_evidence is None
+    assert reverse.output_schema_evidence is None
+
+
+def test_json_schema_discovery_refuses_identical_multiple_candidates() -> None:
+    first = _make_file(
+        name="first.schema.json",
+        text='{"type":"object","properties":{"value":{"type":"string"}}}',
+        mimetype="application/json",
+    )
+    second = _make_file(
+        name="second.schema.json",
+        text='{"type":"object","properties":{"value":{"type":"string"}}}',
+        mimetype="application/json",
+    )
+
+    result = build_ai_builder_attachment_context([first, second])
+
+    assert result is not None
+    assert result.output_schema_discovery.disposition == "ambiguous"
+    assert len(result.output_schema_discovery.candidates) == 2
+    assert result.output_schema_evidence is None
+
+
+def test_json_schema_discovery_selects_one_valid_candidate_among_invalid_files() -> (
+    None
+):
+    valid = _make_file(
+        name="valid.schema.json",
+        text='{"type":"object","properties":{"value":{"type":"string"}}}',
+        mimetype="application/json",
+    )
+    invalid = _make_file(
+        name="invalid.schema.json",
+        text='{"example":"not a JSON schema"}',
+        mimetype="application/json",
+    )
+    unreadable = _make_file(
+        name="unreadable.schema.json",
+        text=None,
+        mimetype="application/json",
+    )
+
+    result = build_ai_builder_attachment_context([invalid, unreadable, valid])
+
+    assert result is not None
+    assert result.output_schema_discovery.disposition == "single"
+    assert tuple(
+        candidate.file_id for candidate in result.output_schema_discovery.candidates
+    ) == (valid.id,)
+    assert result.output_schema_evidence is not None
+    assert result.output_schema_evidence.evidence == [
+        f"file:{valid.id}:json_schema_attachment"
+    ]
 
 
 def test_build_ai_builder_attachment_context_does_not_infer_semantic_roles() -> None:

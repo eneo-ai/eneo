@@ -30,6 +30,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
@@ -179,6 +183,15 @@ async def prepare_planner_request(
     attachment_context_result = build_ai_builder_attachment_context(
         request.attachment_files
     )
+    if (
+        attachment_context_result is not None
+        and attachment_context_result.output_schema_discovery.disposition == "ambiguous"
+    ):
+        raise AIBuilderBadRequestException(
+            "Multiple valid JSON schemas are attached. "
+            "Keep one schema attached and retry.",
+            code=AIBuilderErrorCode.AMBIGUOUS_ATTACHMENT_OUTPUT_SCHEMAS,
+        )
     discovery_runtime = await build_discovery_runtime_result(
         request.conversation,
         flow=request.flow,
@@ -218,7 +231,9 @@ async def prepare_planner_request(
     turn_control = resolve_turn_control(
         session_state=rebuilt_planning_state,
         selected_discovery_question_ids=discovery_analysis.selected_question_ids,
-        requirements_confirmed=requirements_state.confirmed,
+        confirmed_attachment_evidence_fingerprint=(
+            requirements_state.confirmed_attachment_evidence_fingerprint
+        ),
         ui_language=ui_language,
         discovery_assumptions=discovery_analysis.assumptions,
     )

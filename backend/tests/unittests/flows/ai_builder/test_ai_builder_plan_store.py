@@ -536,6 +536,8 @@ async def test_store_plan_persists_prepared_file_roles() -> None:
                 "application/vnd.openxmlformats-officedocument.wordprocessingml."
                 "document"
             ),
+            has_readable_text=True,
+            coverage="fully_seen",
             role="template",
             source="heuristic",
             confidence="medium",
@@ -576,6 +578,8 @@ async def test_store_plan_prefers_current_file_role_over_prior_same_file() -> No
                 "application/vnd.openxmlformats-officedocument.wordprocessingml."
                 "document"
             ),
+            has_readable_text=True,
+            coverage="fully_seen",
             role="context_only",
             source="heuristic",
             confidence="low",
@@ -591,6 +595,8 @@ async def test_store_plan_prefers_current_file_role_over_prior_same_file() -> No
                 "application/vnd.openxmlformats-officedocument.wordprocessingml."
                 "document"
             ),
+            has_readable_text=True,
+            coverage="fully_seen",
             role="template",
             source="heuristic",
             confidence="medium",
@@ -630,6 +636,8 @@ async def test_store_plan_drops_prior_file_evidence_when_file_is_detached() -> N
                 "application/vnd.openxmlformats-officedocument.wordprocessingml."
                 "document"
             ),
+            has_readable_text=True,
+            coverage="fully_seen",
             role="template",
             source="heuristic",
             confidence="high",

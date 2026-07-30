@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, cast
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from eneo.flows.ai_builder.planning_state import (
     ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
+    AttachmentCoverage,
     FileRole,
     FileRoleEvidence,
     OutputSchemaEvidence,
@@ -17,6 +19,7 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
     SignalConfidence,
 )
+from eneo.flows.ai_builder.planning_state_builder import parse_output_schema_candidate
 from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.json_types import JsonObject
 
@@ -30,17 +33,11 @@ class AIBuilderAttachmentContextPolicy:
 
 
 AI_BUILDER_MAX_ATTACHMENTS = 100
+AI_BUILDER_RENDERED_EVIDENCE_MAX_CHARS = 80
 AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE = (
     f"AI Builder sessions support at most {AI_BUILDER_MAX_ATTACHMENTS} attachments. "
     "Detach an existing attachment before adding another."
 )
-
-
-AIBuilderAttachmentCoverage = Literal[
-    "fully_seen",
-    "excerpt_truncated",
-    "inventory_only",
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,11 +48,33 @@ class AIBuilderAttachmentEvidence:
     mimetype: str | None
     has_readable_text: bool
     excerpt: str | None
-    coverage: AIBuilderAttachmentCoverage
+    coverage: AttachmentCoverage
     inferred_role: FileRole = "context_only"
     role_confidence: SignalConfidence = "low"
     role_evidence: tuple[str, ...] = ()
     candidate_roles: tuple[FileRole, ...] = ()
+
+
+AttachmentOutputSchemaDisposition = Literal["none", "single", "ambiguous"]
+
+
+@dataclass(frozen=True, slots=True)
+class AIBuilderAttachmentOutputSchemaCandidate:
+    file_id: UUID
+    json_schema: JsonObject
+
+
+@dataclass(frozen=True, slots=True)
+class AIBuilderAttachmentOutputSchemaDiscovery:
+    candidates: tuple[AIBuilderAttachmentOutputSchemaCandidate, ...]
+
+    @property
+    def disposition(self) -> AttachmentOutputSchemaDisposition:
+        if not self.candidates:
+            return "none"
+        if len(self.candidates) == 1:
+            return "single"
+        return "ambiguous"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +85,9 @@ class AIBuilderAttachmentContext:
     total_chars: int
     truncated: bool
     output_schema_evidence: OutputSchemaEvidence | None = None
+    output_schema_discovery: AIBuilderAttachmentOutputSchemaDiscovery = field(
+        default_factory=lambda: AIBuilderAttachmentOutputSchemaDiscovery(candidates=())
+    )
 
 
 def readable_attachment_text(file: File) -> str | None:
@@ -76,26 +98,35 @@ def readable_attachment_text(file: File) -> str | None:
     return None
 
 
-def apply_attachment_file_roles_to_planning_state(
-    state: PlanningState,
+def attachment_file_roles(
     attachment_context: AIBuilderAttachmentContext | None,
-) -> None:
+) -> list[FileRoleEvidence]:
     if attachment_context is None:
-        return
-    roles_by_id = {item.file_id: item for item in state.file_roles}
-    for item in attachment_context.evidence:
-        roles_by_id[item.file_id] = FileRoleEvidence(
+        return []
+    return [
+        FileRoleEvidence(
             file_id=item.file_id,
             filename=item.filename,
             file_type=item.file_type,
             mimetype=item.mimetype,
+            has_readable_text=item.has_readable_text,
+            coverage=item.coverage,
             role=item.inferred_role,
             source="heuristic",
             confidence=item.role_confidence,
             evidence=list(item.role_evidence),
             candidate_roles=list(item.candidate_roles),
         )
-    state.file_roles = list(roles_by_id.values())
+        for item in attachment_context.evidence
+    ]
+
+
+def apply_attachment_structural_evidence_to_planning_state(
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> None:
+    if attachment_context is None:
+        return
     if (
         state.output_schema_evidence is None
         and attachment_context.output_schema_evidence is not None
@@ -115,29 +146,43 @@ _FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
 _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = 8
 
 
-def _attachment_output_schema_evidence(
+def _attachment_output_schema_discovery(
     files: list[File],
     readable_text_by_file: Mapping[UUID, str | None],
-) -> OutputSchemaEvidence | None:
-    # A top-level import would cycle through conversation metadata back into this
-    # module. The parser remains owned by planning_state_builder until that owner
-    # can move independently without widening this persisted-contract slice.
-    from eneo.flows.ai_builder.planning_state_builder import (
-        parse_output_schema_candidate,
-    )
-
-    for file in sorted(files, key=lambda item: str(item.id)):
-        text = readable_text_by_file[file.id]
-        if text is None or not _is_json_attachment(file):
+) -> AIBuilderAttachmentOutputSchemaDiscovery:
+    candidates: list[AIBuilderAttachmentOutputSchemaCandidate] = []
+    for attachment in sorted(files, key=lambda item: str(item.id)):
+        text = readable_text_by_file[attachment.id]
+        if text is None or not _is_json_attachment(attachment):
             continue
         schema = parse_output_schema_candidate(text)
         if schema is not None:
-            return OutputSchemaEvidence(
-                json_schema=schema,
-                source="attachment_json_schema",
-                confidence="high",
-                evidence=[f"file:{file.id}{ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX}"],
+            candidates.append(
+                AIBuilderAttachmentOutputSchemaCandidate(
+                    file_id=attachment.id,
+                    json_schema=schema,
+                )
             )
+    return AIBuilderAttachmentOutputSchemaDiscovery(candidates=tuple(candidates))
+
+
+def _selected_output_schema_evidence(
+    discovery: AIBuilderAttachmentOutputSchemaDiscovery,
+    files: list[File],
+    readable_text_by_file: Mapping[UUID, str | None],
+) -> OutputSchemaEvidence | None:
+    if discovery.disposition == "ambiguous":
+        return None
+    if discovery.disposition == "single":
+        candidate = discovery.candidates[0]
+        return OutputSchemaEvidence(
+            json_schema=candidate.json_schema,
+            source="attachment_json_schema",
+            confidence="high",
+            evidence=[
+                f"file:{candidate.file_id}{ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX}"
+            ],
+        )
     return _template_placeholder_output_schema_evidence(files, readable_text_by_file)
 
 
@@ -248,7 +293,7 @@ def _fair_discovery_excerpts(
     readable_text_by_file: Mapping[UUID, str | None],
     *,
     policy: AIBuilderAttachmentContextPolicy,
-) -> dict[UUID, tuple[str | None, AIBuilderAttachmentCoverage]]:
+) -> dict[UUID, tuple[str | None, AttachmentCoverage]]:
     readable_files = sorted(
         (
             (file_id, text)
@@ -257,7 +302,7 @@ def _fair_discovery_excerpts(
         ),
         key=lambda item: str(item[0]),
     )
-    excerpt_by_file: dict[UUID, tuple[str | None, AIBuilderAttachmentCoverage]] = {
+    excerpt_by_file: dict[UUID, tuple[str | None, AttachmentCoverage]] = {
         file_id: (None, "inventory_only") for file_id in readable_text_by_file
     }
     if not readable_files:
@@ -382,7 +427,7 @@ def _template_placeholder_evidence(text: str) -> tuple[str, ...]:
 
 def _iter_normalized_template_placeholders(text: str) -> Iterator[str]:
     for expression in iter_template_expressions(text):
-        normalized = " ".join(expression.split())[:80]
+        normalized = " ".join(expression.split())
         if normalized:
             yield normalized
 
@@ -398,7 +443,12 @@ def build_ai_builder_attachment_context(
     resolved_policy = policy or AIBuilderAttachmentContextPolicy()
     remaining = resolved_policy.max_total_chars
     readable_text_by_file = {file.id: readable_attachment_text(file) for file in files}
-    output_schema_evidence = _attachment_output_schema_evidence(
+    output_schema_discovery = _attachment_output_schema_discovery(
+        files,
+        readable_text_by_file,
+    )
+    output_schema_evidence = _selected_output_schema_evidence(
+        output_schema_discovery,
         files,
         readable_text_by_file,
     )
@@ -446,7 +496,7 @@ def build_ai_builder_attachment_context(
         )
         truncated = truncated or file_truncated
         filename_header = (
-            f"Filename: {file.name}\n"
+            f"Filename: {render_ai_builder_evidence_value(file.name)}\n"
             f"File role: {attachment_evidence.inferred_role} "
             f"({attachment_evidence.role_confidence}, unconfirmed)\n"
         )
@@ -473,6 +523,7 @@ def build_ai_builder_attachment_context(
         total_chars=total_chars,
         truncated=truncated,
         output_schema_evidence=output_schema_evidence,
+        output_schema_discovery=output_schema_discovery,
     )
 
 
@@ -492,7 +543,7 @@ def render_ai_builder_attachment_evidence(
 ) -> str:
     lines = [
         f"file_id: {item.file_id}",
-        f"filename: {item.filename}",
+        f"filename: {render_ai_builder_evidence_value(item.filename)}",
         f"file_type: {item.file_type.value}",
         f"mimetype: {item.mimetype or 'unknown'}",
         f"has_readable_text: {str(item.has_readable_text).lower()}",
@@ -503,7 +554,25 @@ def render_ai_builder_attachment_evidence(
     if len(item.candidate_roles) > 1:
         lines.append(f"candidate_roles: {', '.join(item.candidate_roles)}")
     for marker in item.role_evidence:
-        lines.append(f"role_evidence: {marker}")
+        lines.append(f"role_evidence: {render_ai_builder_evidence_value(marker)}")
     if item.excerpt is not None:
         lines.append(f"excerpt: {item.excerpt}")
     return "\n".join(lines)
+
+
+def render_ai_builder_evidence_value(value: str) -> str:
+    normalized = " ".join(value.split())
+    encoded = json.dumps(normalized, ensure_ascii=False)[1:-1]
+    if len(encoded) <= AI_BUILDER_RENDERED_EVIDENCE_MAX_CHARS:
+        return encoded
+
+    retained: list[str] = []
+    retained_chars = 0
+    max_retained_chars = AI_BUILDER_RENDERED_EVIDENCE_MAX_CHARS - 1
+    for character in normalized:
+        encoded_character = json.dumps(character, ensure_ascii=False)[1:-1]
+        if retained_chars + len(encoded_character) > max_retained_chars:
+            break
+        retained.append(encoded_character)
+        retained_chars += len(encoded_character)
+    return f"{''.join(retained)}…"

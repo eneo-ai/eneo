@@ -45,6 +45,7 @@ _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
 )
 _CLASSIFICATION_SOURCE_ID = "user_message:user-1"
+_ATTACHMENT_EVIDENCE_FINGERPRINT = "f" * 64
 
 
 def _classified_evidence(quote: str) -> ClassifiedEvidence:
@@ -264,15 +265,44 @@ def test_requirements_summary_round_trips_through_canonical_metadata() -> None:
                 "output_description": "A concise summary.",
                 "assumptions": ["The user will upload files at runtime."],
             }
-        )
+        ),
+        attachment_evidence_fingerprint=_ATTACHMENT_EVIDENCE_FINGERPRINT,
     )
 
     parsed = requirements_summary_from_metadata(metadata)
 
     assert metadata["requirements_version"] == "req_1"
+    assert (
+        metadata["attachment_evidence_fingerprint"] == _ATTACHMENT_EVIDENCE_FINGERPRINT
+    )
     assert parsed is not None
     assert parsed.requirements_version == "req_1"
+    assert parsed.attachment_evidence_fingerprint == _ATTACHMENT_EVIDENCE_FINGERPRINT
     assert parsed.requirements_summary.summary == "Build a document summary flow."
+
+
+def test_requirements_summary_metadata_requires_attachment_fingerprint(
+    monkeypatch,
+) -> None:
+    warnings = _capture_metadata_warnings(monkeypatch)
+    payload = RequirementsSummaryPayload(
+        requirements_version="req_1",
+        summary="Build a document summary flow.",
+        key_decisions=[],
+        input_description="Uploaded documents.",
+        output_description="A concise summary.",
+    )
+
+    parsed = requirements_summary_from_metadata(
+        {
+            "requirements_summary": payload.model_dump(mode="json"),
+            "requirements_version": "req_1",
+        }
+    )
+
+    assert parsed is None
+    assert warnings
+    assert warnings[0][1]["metadata_kind"] == "requirements_summary"
 
 
 def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:

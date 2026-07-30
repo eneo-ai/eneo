@@ -10,7 +10,8 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
     AI_BUILDER_MAX_ATTACHMENTS,
     AIBuilderAttachmentContext,
-    apply_attachment_file_roles_to_planning_state,
+    apply_attachment_structural_evidence_to_planning_state,
+    attachment_file_roles,
     render_ai_builder_attachment_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -313,9 +314,10 @@ async def build_runtime_discovery_context(
             if attachment_context is not None
             else None
         ),
+        attachment_file_roles=attachment_file_roles(attachment_context),
         mapped_execution_policy=mapped_execution_policy,
     )
-    apply_attachment_file_roles_to_planning_state(state, attachment_context)
+    apply_attachment_structural_evidence_to_planning_state(state, attachment_context)
     if (
         not allow_classification
         or litellm_client is None

@@ -108,6 +108,39 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
     ] == ["kundnamn"]
 
 
+def test_compile_context_keeps_distinct_long_template_placeholder_names() -> None:
+    shared_prefix = "a" * 80
+    first = f"{shared_prefix}_first"
+    second = f"{shared_prefix}_second"
+    state = PlanningState.empty()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "docx_document",
+    )
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {
+                first: {"type": "string"},
+                second: {"type": "string"},
+            },
+        },
+        source="template_placeholders",
+        confidence="high",
+        evidence=[
+            f"file:file_id:content:template_placeholder:{first}",
+            f"file:file_id:content:template_placeholder:{second}",
+        ],
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert [
+        hint.variable_name for hint in context.template_placeholder_field_hints
+    ] == [first, second]
+
+
 def test_compile_context_binds_attachment_json_schema_to_json_terminal() -> None:
     state = PlanningState.empty()
     state.resolved_slots["terminal_output"] = _slot(

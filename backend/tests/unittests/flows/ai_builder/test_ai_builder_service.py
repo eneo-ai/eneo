@@ -44,6 +44,12 @@ from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_MAX_ATTACHMENTS,
 )
@@ -99,11 +105,13 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_turn_controller import (
+    ConfirmRequirements,
+    resolve_turn_control,
+)
 from eneo.flows.ai_builder.planning_state import (
-    ArchitectureCommit,
     PlanningState,
     ResolvedSlot,
-    StepTriple,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
@@ -360,17 +368,19 @@ def _make_file(
     )
 
 
+def _make_requirements_decision() -> ConfirmRequirements:
+    decision = resolve_turn_control(
+        session_state=_make_committed_planning_state(),
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(decision, ConfirmRequirements)
+    return decision
+
+
 def _make_requirements_summary_payload() -> RequirementsSummaryPayload:
-    return RequirementsSummaryPayload(
-        summary="A confirmed document-analysis flow.",
-        key_decisions=[
-            {"topic": "Input", "decision": "User uploads documents at runtime."},
-            {"topic": "Output", "decision": "Flow produces a structured analysis."},
-        ],
-        input_description="User uploads files and fills in form values at runtime.",
-        output_description="The flow returns a reviewed structured result.",
-        manual_setup_notes=[],
-    )
+    return _make_requirements_decision().payload
 
 
 def _make_requirements_confirmation() -> dict[str, Any]:
@@ -409,24 +419,18 @@ def _make_committed_planning_state() -> PlanningState:
             confidence="medium",
         ),
     }
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["document_to_structured_report"],
-        required_capabilities=[],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="c" * 64,
+    architecture_draft = derive_architecture_commit_draft(state)
+    assert architecture_draft is not None
+    state.architecture_commit = finalize_architecture_commit(
+        architecture_draft,
+        now=lambda: datetime(2026, 4, 24, tzinfo=timezone.utc),
     )
     return state
 
 
 def _make_confirmed_requirements_conversation() -> list[ConversationMessage]:
-    summary = _make_requirements_summary_payload()
+    decision = _make_requirements_decision()
+    summary = decision.payload
     version = build_requirements_version(summary)
     summary_data = summary.model_dump(mode="json")
     return [
@@ -437,6 +441,9 @@ def _make_confirmed_requirements_conversation() -> list[ConversationMessage]:
             metadata={
                 "requirements_summary": summary_data,
                 "requirements_version": version,
+                "attachment_evidence_fingerprint": (
+                    decision.attachment_evidence_fingerprint
+                ),
             },
         ),
     ]

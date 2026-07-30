@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import get_args
+from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
+)
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    build_requirements_version,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
@@ -18,6 +22,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    FileRoleEvidence,
     OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
@@ -65,10 +70,25 @@ def _decision(
     requirements_confirmed: bool = False,
     discovery_assumptions: tuple[str, ...] = (),
 ) -> object:
+    confirmed_attachment_evidence_fingerprint: str | None = None
+    if requirements_confirmed:
+        unconfirmed = resolve_turn_control(
+            session_state=state,
+            selected_discovery_question_ids=(),
+            confirmed_attachment_evidence_fingerprint=None,
+            ui_language=ui_language,
+            discovery_assumptions=discovery_assumptions,
+        ).decision
+        if isinstance(unconfirmed, ConfirmRequirements):
+            confirmed_attachment_evidence_fingerprint = (
+                unconfirmed.attachment_evidence_fingerprint
+            )
     return resolve_turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
-        requirements_confirmed=requirements_confirmed,
+        confirmed_attachment_evidence_fingerprint=(
+            confirmed_attachment_evidence_fingerprint
+        ),
         ui_language=ui_language,
         discovery_assumptions=discovery_assumptions,
     ).decision
@@ -191,6 +211,200 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_englis
         "The template contains 12 unique placeholders; 8 are shown in the planning evidence."
         in decision.payload.summary
     )
+
+
+def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() -> None:
+    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID("00000000-0000-0000-0000-000000000701"),
+            filename="complete.docx",
+            file_type="document",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="heuristic",
+            confidence="medium",
+        ),
+        FileRoleEvidence(
+            file_id=UUID("00000000-0000-0000-0000-000000000702"),
+            filename="not-excerpted.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="inventory_only",
+            role="reference_material",
+            source="model",
+            confidence="medium",
+        ),
+        FileRoleEvidence(
+            file_id=UUID("00000000-0000-0000-0000-000000000703"),
+            filename="unreadable.bin",
+            file_type="text",
+            mimetype="application/octet-stream",
+            has_readable_text=False,
+            coverage="inventory_only",
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+        ),
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    swedish = _decision(state=state, ui_language="sv")
+    english = _decision(state=state, ui_language="en")
+
+    assert isinstance(swedish, ConfirmRequirements)
+    assert isinstance(english, ConfirmRequirements)
+    assert any(
+        'Bilageunderlag – Bilaga "complete.docx": vald roll Mall; '
+        "läsbar text: ja; "
+        "täckning: hela den läsbara texten ingår." == assumption
+        for assumption in swedish.payload.assumptions
+    )
+    assert any(
+        'Bilageunderlag – Bilaga "not-excerpted.pdf": vald roll Referensmaterial; '
+        "läsbar text: ja; täckning: läsbar text finns men "
+        "inget utdrag ingår." == assumption
+        for assumption in swedish.payload.assumptions
+    )
+    assert any(
+        'Attachment evidence — Attachment "unreadable.bin": '
+        "selected role Context only; "
+        "readable text: no; coverage: no readable text is available." == assumption
+        for assumption in english.payload.assumptions
+    )
+
+
+def test_server_confirmation_bounds_attachment_detail_and_versions_coverage() -> None:
+    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    long_filename = f"attachment-0-{'x' * 120}.txt"
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID(int=index + 1),
+            filename=long_filename if index == 0 else f"attachment-{index}.txt",
+            file_type="text",
+            mimetype="text/plain",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+        )
+        for index in range(12)
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    first = _decision(state=state, ui_language="en")
+    assert isinstance(first, ConfirmRequirements)
+    attachment_assumptions = [
+        assumption
+        for assumption in first.payload.assumptions
+        if assumption.startswith('Attachment evidence — Attachment "')
+    ]
+    assert len(attachment_assumptions) == 10
+    assert all(long_filename not in assumption for assumption in attachment_assumptions)
+    assert "…" in attachment_assumptions[0]
+    assert all("fully_seen" not in assumption for assumption in attachment_assumptions)
+    assert (
+        "Attachment evidence — 2 additional attachments are omitted from this "
+        "summary (12 total)." in first.payload.assumptions
+    )
+    first_version = build_requirements_version(first.payload)
+
+    state.file_roles[0] = state.file_roles[0].model_copy(
+        update={"coverage": "excerpt_truncated"}
+    )
+    changed = _decision(state=state, ui_language="en")
+    assert isinstance(changed, ConfirmRequirements)
+    assert build_requirements_version(changed.payload) != first_version
+
+
+def test_server_reconfirms_when_omitted_attachment_facts_change() -> None:
+    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID(int=index + 1),
+            filename=f"attachment-{index}.txt",
+            file_type="text",
+            mimetype="text/plain",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+        )
+        for index in range(12)
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+    prior = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(prior, ConfirmRequirements)
+
+    state.file_roles[11] = state.file_roles[11].model_copy(
+        update={
+            "coverage": "excerpt_truncated",
+            "role": "reference_material",
+        }
+    )
+    current = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=(
+            prior.attachment_evidence_fingerprint
+        ),
+        ui_language="en",
+    ).decision
+
+    assert isinstance(current, ConfirmRequirements)
+
+
+def test_server_reconfirms_for_clipped_filename_identity_collision() -> None:
+    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    shared_prefix = "x" * 100
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID(int=1),
+            filename=f"{shared_prefix}-first.txt",
+            file_type="text",
+            mimetype="text/plain",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+        )
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+    prior = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(prior, ConfirmRequirements)
+
+    state.file_roles[0] = state.file_roles[0].model_copy(
+        update={
+            "file_id": UUID(int=2),
+            "filename": f"{shared_prefix}-second.txt",
+        }
+    )
+    current = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=(
+            prior.attachment_evidence_fingerprint
+        ),
+        ui_language="en",
+    ).decision
+
+    assert isinstance(current, ConfirmRequirements)
 
 
 def test_server_confirmation_summarizes_processing_goal() -> None:

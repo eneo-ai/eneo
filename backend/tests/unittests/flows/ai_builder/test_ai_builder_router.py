@@ -900,6 +900,10 @@ class TestGetSessionEndpoint:
                         "requirements_version": "req-1",
                     },
                     "requirements_version": "req-1",
+                    "attachment_evidence_fingerprint": (
+                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
+                        "ed12ab4d8e11ba873c2f11161202b945"
+                    ),
                 },
             ),
             ConversationMessage(

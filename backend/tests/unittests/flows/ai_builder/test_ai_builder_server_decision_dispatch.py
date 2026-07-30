@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -36,7 +36,9 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     BuilderTurnDecision,
     CommitArchitecture,
+    ConfirmRequirements,
     ReviseArchitecture,
+    resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -66,7 +68,7 @@ def _request(
     conversation: list[ConversationMessage],
     new_messages_start: int = 0,
     planning_state: PlanningState | None = None,
-    requirements_confirmed: bool = False,
+    confirmed_attachment_evidence_fingerprint: str | None = None,
     discovery_assumptions: tuple[str, ...] = (),
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
@@ -76,7 +78,9 @@ def _request(
         conversation=conversation,
         new_messages_start=new_messages_start,
         flow=None,
-        requirements_confirmed=requirements_confirmed,
+        confirmed_attachment_evidence_fingerprint=(
+            confirmed_attachment_evidence_fingerprint
+        ),
         ui_language="en",
         telemetry=ServerDecisionTelemetry(
             request_id="req-test",
@@ -180,6 +184,8 @@ async def test_server_question_preserves_prepared_file_roles_on_commit() -> None
             filename="lagstod.pdf",
             file_type="document",
             mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
             role="reference_material",
             source="heuristic",
             confidence="medium",
@@ -311,13 +317,22 @@ async def test_confirmed_architecture_revision_returns_proposal_continuation() -
     repo.load_planning_state.return_value = state
     conversation = [ConversationMessage(role="user", content="Make it PDF instead")]
     decision = ReviseArchitecture(architecture_commit=draft)
+    confirmation = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(confirmation, ConfirmRequirements)
 
     result = await dispatch_server_decision(
         _request(
             repo=repo,
             decision=decision,
             conversation=conversation,
-            requirements_confirmed=True,
+            confirmed_attachment_evidence_fingerprint=(
+                confirmation.attachment_evidence_fingerprint
+            ),
         )
     )
 
@@ -327,3 +342,62 @@ async def test_confirmed_architecture_revision_returns_proposal_continuation() -
     assert result.new_planning_state_version == 5
     assert result.proposal_continuation is not None
     assert result.proposal_continuation.planning_state is state
+
+
+@pytest.mark.asyncio
+async def test_architecture_revision_reconfirms_changed_hidden_attachment() -> None:
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = [5, 6]
+    now = datetime(2026, 4, 24, tzinfo=timezone.utc)
+    state = _revised_pdf_state()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID(int=index + 1),
+            filename=f"reference-{index}.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+        )
+        for index in range(12)
+    ]
+    draft = _draft_for_state(state)
+    state.architecture_commit = finalize_architecture_commit(draft, now=lambda: now)
+    confirmation = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(confirmation, ConfirmRequirements)
+    state.file_roles[11] = state.file_roles[11].model_copy(
+        update={
+            "coverage": "excerpt_truncated",
+            "role": "reference_material",
+        }
+    )
+    repo.load_planning_state.return_value = state
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=ReviseArchitecture(architecture_commit=draft),
+            conversation=[
+                ConversationMessage(role="user", content="Use the new reference")
+            ],
+            confirmed_attachment_evidence_fingerprint=(
+                confirmation.attachment_evidence_fingerprint
+            ),
+        )
+    )
+
+    assert result.action_kind == "revise_architecture"
+    assert [event.event for event in result.events] == [
+        "status",
+        "requirements_summary",
+    ]
+    assert result.new_planning_state_version == 6
+    assert result.proposal_continuation is None

@@ -12,9 +12,6 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
-from eneo.flows.ai_builder.ai_builder_attachment_context import (
-    AIBuilderAttachmentCoverage,
-)
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     record_ai_builder_provider_failure,
@@ -26,7 +23,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     completion_token_usage_from_response,
 )
-from eneo.flows.ai_builder.planning_state import FileRole
+from eneo.flows.ai_builder.planning_state import AttachmentCoverage, FileRole
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -77,7 +74,7 @@ class SlotClassificationSource:
     question_id: str | None = None
     selected_value: str | None = None
     file_id: UUID | None = None
-    coverage: AIBuilderAttachmentCoverage | None = None
+    coverage: AttachmentCoverage | None = None
     truncated: bool = False
 
 
@@ -491,8 +488,13 @@ def _file_role_evidence(
     return tuple(
         item
         for item in evidence
-        if sources_by_id[item.source_id].kind != "uploaded_file"
-        or sources_by_id[item.source_id].file_id == file_id
+        if (
+            sources_by_id[item.source_id].kind != "uploaded_file"
+            or (
+                sources_by_id[item.source_id].file_id == file_id
+                and sources_by_id[item.source_id].coverage != "inventory_only"
+            )
+        )
     )
 
 

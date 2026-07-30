@@ -1638,7 +1638,11 @@ def test_planning_state_uses_existing_audio_input_when_edit_summary_drifts() -> 
                         "output_description": (
                             "Huvudsakligt slutresultat: DOCX-dokument."
                         ),
-                    }
+                    },
+                    "attachment_evidence_fingerprint": (
+                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
+                        "ed12ab4d8e11ba873c2f11161202b945"
+                    ),
                 },
             ),
         ],
@@ -1666,7 +1670,11 @@ def test_planning_state_uses_requirements_summary_without_flow_default() -> None
                         "output_description": (
                             "Huvudsakligt slutresultat: DOCX-dokument."
                         ),
-                    }
+                    },
+                    "attachment_evidence_fingerprint": (
+                        "4f53cda18c2baa0c0354bb5f9a3ecbe5"
+                        "ed12ab4d8e11ba873c2f11161202b945"
+                    ),
                 },
             )
         ],

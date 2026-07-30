@@ -381,6 +381,44 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
     assert result.file_roles[0].evidence == ()
 
 
+def test_inventory_only_attachment_evidence_cannot_promote_semantic_file_role() -> None:
+    file_id = uuid4()
+    source_id = f"uploaded_file:{file_id}"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "example_output",
+                        "confidence": "high",
+                        "reason": "filename suggests an example output",
+                        "evidence": [
+                            _evidence("filename: example.pdf", source_id=source_id)
+                        ],
+                    }
+                ]
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=source_id,
+                    kind="uploaded_file",
+                    text="filename: example.pdf",
+                    file_id=file_id,
+                    coverage="inventory_only",
+                ),
+            )
+        ),
+    )
+
+    assert result is not None
+    assert result.file_roles[0].confidence == "low"
+    assert result.file_roles[0].evidence == ()
+
+
 def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
     result = parse_slot_classification_response(
         json.dumps(

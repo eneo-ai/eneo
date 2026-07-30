@@ -219,6 +219,8 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
                 "application/vnd.openxmlformats-officedocument.wordprocessingml."
                 "document"
             ),
+            has_readable_text=True,
+            coverage="fully_seen",
             role="template",
             source="heuristic",
             confidence="medium",
@@ -234,6 +236,8 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
             filename="lagstod.pdf",
             file_type="document",
             mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
             role="reference_material",
             source="heuristic",
             confidence="medium",
@@ -252,11 +256,15 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
     assert "Uploaded file roles:" in prompt
     assert (
         "- avtalsmall.docx: template (heuristic, medium confidence; "
+        "has_readable_text: true; coverage: fully_seen; "
         "candidates: template, reference_material; evidence: "
         "content:template_marker, content:template_placeholder:kundnamn, "
         "content:template_placeholder:datum)"
     ) in prompt
-    assert "- lagstod.pdf: reference_material (heuristic, medium confidence)" in prompt
+    assert (
+        "- lagstod.pdf: reference_material (heuristic, medium confidence; "
+        "has_readable_text: true; coverage: fully_seen)"
+    ) in prompt
 
 
 def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None:
@@ -322,6 +330,49 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
     assert "Prefer source-derived output_fields" in prompt
     assert "use input_fields only for values the user must provide at runtime" in prompt
     assert "Use output_fields consistent with these user-declared fields." not in prompt
+
+
+def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> None:
+    long_placeholder = "field_" + "x" * 240
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="template.docx",
+            file_type="document",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="heuristic",
+            confidence="medium",
+            evidence=[
+                f"content:template_placeholder:{long_placeholder}",
+            ],
+            candidate_roles=["template"],
+        )
+    ]
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {long_placeholder: {"type": "string"}},
+        },
+        source="template_placeholders",
+        confidence="high",
+        evidence=[f"file:file_id:content:template_placeholder:{long_placeholder}"],
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert long_placeholder not in prompt
+    assert "…" in prompt
 
 
 def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():

@@ -20,6 +20,10 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentEvidence,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_slot_classification,
+    slot_classification_metadata_from_result,
+)
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
@@ -39,13 +43,18 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
+    ClassifiedEvidence,
+    ClassifiedFileRole,
+    SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
     slot_classification_provider_identity,
 )
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    FileRoleEvidence,
     OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
@@ -510,6 +519,100 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
 
 
 @pytest.mark.asyncio
+async def test_degraded_turn_replays_semantic_role_over_fresh_attachment_facts() -> (
+    None
+):
+    file_id = uuid4()
+    user_source_id = "user_message:file-role"
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id=user_source_id,
+                kind="user_message",
+                text="This attachment is the example output.",
+                message_id="file-role",
+            ),
+            SlotClassificationSource(
+                source_id=f"uploaded_file:{file_id}",
+                kind="uploaded_file",
+                text="filename: earlier-example.pdf",
+                file_id=file_id,
+                coverage="fully_seen",
+            ),
+        )
+    )
+    classification = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            file_roles=(
+                ClassifiedFileRole(
+                    file_id=file_id,
+                    role="example_output",
+                    confidence="high",
+                    reason="The user identified the example output.",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id=user_source_id,
+                            quote="This attachment is the example output.",
+                        ),
+                    ),
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+        classification_input=classification_input,
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    assert classification is not None
+    conversation_metadata = metadata_with_slot_classification(None, classification)
+    assert conversation_metadata is not None
+
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    message_id="file-role",
+                    role="user",
+                    content="This attachment is the example output.",
+                    metadata=conversation_metadata,
+                )
+            ],
+            tenant_id=uuid4(),
+            allow_classification=False,
+            attachment_context=AIBuilderAttachmentContext(
+                context=None,
+                evidence=(
+                    AIBuilderAttachmentEvidence(
+                        file_id=file_id,
+                        filename="refreshed-example.pdf",
+                        file_type=FileType.DOCUMENT,
+                        mimetype="application/pdf",
+                        has_readable_text=True,
+                        excerpt="Only the refreshed excerpt is available.",
+                        coverage="excerpt_truncated",
+                        inferred_role="context_only",
+                        role_confidence="low",
+                        role_evidence=("fallback:unclassified_file",),
+                    ),
+                ),
+                included_file_ids=[file_id],
+                total_chars=39,
+                truncated=True,
+            ),
+        )
+    ).planning_state
+
+    assert len(state.file_roles) == 1
+    role = state.file_roles[0]
+    assert role.filename == "refreshed-example.pdf"
+    assert role.has_readable_text is True
+    assert role.coverage == "excerpt_truncated"
+    assert role.role == "example_output"
+    assert role.source == "model"
+    assert role.confidence == "high"
+
+
+@pytest.mark.asyncio
 async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -> None:
     file_id = uuid4()
     conversation = [
@@ -918,6 +1021,21 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
             source="structured_answer",
         ),
     }
+    initial_state.file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename="exempelrapport.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+            evidence=["fallback:unclassified_file"],
+            candidate_roles=["context_only"],
+        )
+    ]
     monkeypatch.setattr(
         runtime,
         "build_planning_state_from_conversation",

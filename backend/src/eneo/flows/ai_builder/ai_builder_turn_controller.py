@@ -7,6 +7,8 @@ selection are server decisions derived from typed `PlanningState`.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypeAlias, assert_never
@@ -17,6 +19,9 @@ from eneo.flows.ai_builder.ai_builder_action_policy import (
 )
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
+)
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    render_ai_builder_evidence_value,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
@@ -39,10 +44,17 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
+    AttachmentCoverage,
+    FileRole,
+    FileRoleEvidence,
     PlanningState,
     ResolvedSlot,
 )
 from eneo.flows.ai_builder.question_catalog import Locale, render_question
+
+_MAX_CONFIRMATION_ATTACHMENT_DETAILS = 10
+_ATTACHMENT_ASSUMPTION_PREFIX_EN = "Attachment evidence — "
+_ATTACHMENT_ASSUMPTION_PREFIX_SV = "Bilageunderlag – "
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +76,7 @@ class ReviseArchitecture:
 @dataclass(frozen=True, slots=True)
 class ConfirmRequirements:
     payload: RequirementsSummaryPayload
+    attachment_evidence_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,30 +102,57 @@ def resolve_turn_control(
     *,
     session_state: PlanningState,
     selected_discovery_question_ids: tuple[str, ...],
-    requirements_confirmed: bool,
+    confirmed_attachment_evidence_fingerprint: str | None,
     ui_language: str | None,
     discovery_assumptions: tuple[str, ...] = (),
 ) -> BuilderTurnControl:
+    requirements_payload = _confirm_requirements_payload(
+        session_state,
+        _locale(ui_language),
+        discovery_assumptions,
+    )
+    attachment_evidence_fingerprint = _attachment_evidence_fingerprint(
+        session_state.file_roles
+    )
     action_policy = build_planner_action_policy(
         session_state=session_state,
         selected_discovery_question_ids=selected_discovery_question_ids,
-        requirements_confirmed=requirements_confirmed,
+        requirements_confirmed=(
+            confirmed_attachment_evidence_fingerprint == attachment_evidence_fingerprint
+        ),
     )
     return BuilderTurnControl(
         decision=_decision_from_policy(
             action_policy=action_policy,
             session_state=session_state,
-            discovery_assumptions=discovery_assumptions,
+            requirements_payload=requirements_payload,
+            attachment_evidence_fingerprint=attachment_evidence_fingerprint,
             ui_language=ui_language,
         ),
     )
+
+
+def _attachment_evidence_fingerprint(
+    file_roles: list[FileRoleEvidence],
+) -> str:
+    serialized = json.dumps(
+        [
+            item.model_dump(mode="json")
+            for item in sorted(file_roles, key=lambda item: str(item.file_id))
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _decision_from_policy(
     *,
     action_policy: PlannerActionPolicy,
     session_state: PlanningState,
-    discovery_assumptions: tuple[str, ...],
+    requirements_payload: RequirementsSummaryPayload,
+    attachment_evidence_fingerprint: str,
     ui_language: str | None,
 ) -> BuilderTurnDecision:
     if "ask_question" in action_policy.allowed_action_kinds:
@@ -138,11 +178,8 @@ def _decision_from_policy(
 
     if "confirm_requirements" in action_policy.allowed_action_kinds:
         return ConfirmRequirements(
-            payload=_confirm_requirements_payload(
-                session_state,
-                _locale(ui_language),
-                discovery_assumptions,
-            )
+            payload=requirements_payload,
+            attachment_evidence_fingerprint=attachment_evidence_fingerprint,
         )
 
     if action_policy.allowed_action_kinds == ("propose_plan",):
@@ -207,10 +244,114 @@ def _confirm_requirements_payload(
                 if not _slot_is_key_decision(resolved[slot_name])
             ],
             *discovery_assumptions,
+            *_attachment_assumptions(session_state, locale),
             *_assumptions(locale),
         ],
         manual_setup_notes=[],
     )
+
+
+def _attachment_assumptions(
+    session_state: PlanningState,
+    locale: Locale,
+) -> list[str]:
+    ordered = sorted(session_state.file_roles, key=lambda item: str(item.file_id))
+    rendered = [
+        _attachment_assumption(item, locale)
+        for item in ordered[:_MAX_CONFIRMATION_ATTACHMENT_DETAILS]
+    ]
+    omitted = len(ordered) - len(rendered)
+    if omitted <= 0:
+        return rendered
+    if locale == "sv":
+        rendered.append(
+            f"{_ATTACHMENT_ASSUMPTION_PREFIX_SV}Ytterligare {omitted} bilagor "
+            f"utelämnas från denna sammanfattning ({len(ordered)} totalt)."
+        )
+    else:
+        rendered.append(
+            f"{_ATTACHMENT_ASSUMPTION_PREFIX_EN}{omitted} additional attachments "
+            f"are omitted from this summary ({len(ordered)} total)."
+        )
+    return rendered
+
+
+def _attachment_assumption(
+    item: FileRoleEvidence,
+    locale: Locale,
+) -> str:
+    role = _attachment_role_label(item.role, locale)
+    coverage = _attachment_coverage_description(
+        item.coverage,
+        has_readable_text=item.has_readable_text,
+        locale=locale,
+    )
+    filename = render_ai_builder_evidence_value(item.filename)
+    if locale == "sv":
+        readable = "ja" if item.has_readable_text else "nej"
+        return (
+            f'{_ATTACHMENT_ASSUMPTION_PREFIX_SV}Bilaga "{filename}": '
+            f"vald roll {role}; läsbar text: {readable}; "
+            f"täckning: {coverage}."
+        )
+    readable = "yes" if item.has_readable_text else "no"
+    return (
+        f'{_ATTACHMENT_ASSUMPTION_PREFIX_EN}Attachment "{filename}": '
+        f"selected role {role}; "
+        f"readable text: {readable}; coverage: {coverage}."
+    )
+
+
+def _attachment_role_label(role: FileRole, locale: Locale) -> str:
+    labels_sv: dict[FileRole, str] = {
+        "runtime_input_sample": "Exempel på körningsindata",
+        "template": "Mall",
+        "reference_material": "Referensmaterial",
+        "example_output": "Exempelresultat",
+        "context_only": "Endast kontext",
+    }
+    labels_en: dict[FileRole, str] = {
+        "runtime_input_sample": "Runtime input sample",
+        "template": "Template",
+        "reference_material": "Reference material",
+        "example_output": "Example output",
+        "context_only": "Context only",
+    }
+    return (labels_sv if locale == "sv" else labels_en)[role]
+
+
+def _attachment_coverage_description(
+    coverage: AttachmentCoverage,
+    *,
+    has_readable_text: bool,
+    locale: Locale,
+) -> str:
+    match coverage:
+        case "fully_seen":
+            return (
+                "hela den läsbara texten ingår"
+                if locale == "sv"
+                else "all readable text is included"
+            )
+        case "excerpt_truncated":
+            return (
+                "ett förkortat utdrag av den läsbara texten ingår"
+                if locale == "sv"
+                else "a truncated excerpt of the readable text is included"
+            )
+        case "inventory_only":
+            if has_readable_text:
+                return (
+                    "läsbar text finns men inget utdrag ingår"
+                    if locale == "sv"
+                    else "readable text exists but no excerpt is included"
+                )
+            return (
+                "ingen läsbar text är tillgänglig"
+                if locale == "sv"
+                else "no readable text is available"
+            )
+    return assert_never(coverage)
 
 
 def _output_schema_summary_line(

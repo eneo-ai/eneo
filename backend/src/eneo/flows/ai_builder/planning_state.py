@@ -52,7 +52,7 @@ from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 6
+BUILDER_SCHEMA_VERSION: int = 7
 PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
 ARCHITECTURE_HASH_HEX_LENGTH: int = 64
 
@@ -97,6 +97,11 @@ FileRole = Literal[
 ]
 
 FileRoleSource = Literal["structured_answer", "heuristic", "model"]
+AttachmentCoverage = Literal[
+    "fully_seen",
+    "excerpt_truncated",
+    "inventory_only",
+]
 OutputSchemaEvidenceSource = Literal[
     "freeform_text",
     "template_placeholders",
@@ -256,6 +261,8 @@ class FileRoleEvidence(_PlanningModel):
     filename: str
     file_type: FileType
     mimetype: str | None = None
+    has_readable_text: bool
+    coverage: AttachmentCoverage
     role: FileRole
     source: FileRoleSource
     confidence: SignalConfidence
@@ -263,7 +270,11 @@ class FileRoleEvidence(_PlanningModel):
     candidate_roles: list[FileRole] = Field(default_factory=list[FileRole])
 
     @model_validator(mode="after")
-    def _candidate_roles_include_primary_role(self) -> FileRoleEvidence:
+    def _validate_role_evidence(self) -> FileRoleEvidence:
+        if not self.has_readable_text and self.coverage != "inventory_only":
+            raise ValueError(
+                "non-readable file role evidence must have inventory_only coverage"
+            )
         if not self.candidate_roles:
             return self
         seen: set[FileRole] = set()

@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
+    AttachmentCoverage,
     FileRoleEvidence,
     OutputSchemaEvidence,
     PlanningSignal,
@@ -36,8 +37,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_six(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 6
+    def test_builder_schema_version_is_seven(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 7
 
     def test_payload_cap_is_128_kilobytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 128 * 1024
@@ -150,6 +151,8 @@ class TestRoundTrip:
                         "application/vnd.openxmlformats-officedocument."
                         "wordprocessingml.document"
                     ),
+                    has_readable_text=True,
+                    coverage="fully_seen",
                     role="template",
                     source="heuristic",
                     confidence="medium",
@@ -237,12 +240,51 @@ class TestSignalValidation:
 
 
 class TestFileRoleEvidenceValidation:
+    @pytest.mark.parametrize(
+        "coverage",
+        ["fully_seen", "excerpt_truncated", "inventory_only"],
+    )
+    def test_readable_file_role_evidence_accepts_every_coverage_state(
+        self,
+        coverage: AttachmentCoverage,
+    ) -> None:
+        evidence = FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="lagstod.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage=coverage,
+            role="reference_material",
+            source="heuristic",
+            confidence="medium",
+        )
+
+        assert evidence.has_readable_text is True
+        assert evidence.coverage == coverage
+
+    def test_non_readable_file_role_evidence_requires_inventory_only(self) -> None:
+        with pytest.raises(ValidationError):
+            FileRoleEvidence(
+                file_id="00000000-0000-0000-0000-000000000701",
+                filename="lagstod.pdf",
+                file_type="document",
+                mimetype="application/pdf",
+                has_readable_text=False,
+                coverage="fully_seen",
+                role="reference_material",
+                source="heuristic",
+                confidence="medium",
+            )
+
     def test_file_role_evidence_accepts_declared_roles(self) -> None:
         evidence = FileRoleEvidence(
             file_id="00000000-0000-0000-0000-000000000701",
             filename="lagstod.pdf",
             file_type="document",
             mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
             role="reference_material",
             source="heuristic",
             confidence="medium",
@@ -260,6 +302,8 @@ class TestFileRoleEvidenceValidation:
                 "application/vnd.openxmlformats-officedocument.wordprocessingml."
                 "document"
             ),
+            has_readable_text=True,
+            coverage="fully_seen",
             role="template",
             source="heuristic",
             confidence="medium",
@@ -279,6 +323,8 @@ class TestFileRoleEvidenceValidation:
                     "application/vnd.openxmlformats-officedocument.wordprocessingml."
                     "document"
                 ),
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="template",
                 source="heuristic",
                 confidence="medium",
@@ -292,6 +338,8 @@ class TestFileRoleEvidenceValidation:
                 filename="lagstod.pdf",
                 file_type="document",
                 mimetype="application/pdf",
+                has_readable_text=True,
+                coverage="fully_seen",
                 role="sourceish",  # type: ignore[arg-type]
                 source="heuristic",
                 confidence="medium",
@@ -303,6 +351,8 @@ class TestFileRoleEvidenceValidation:
             filename="lagstod.pdf",
             file_type="document",
             mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
             role="reference_material",
             source="heuristic",
             confidence="medium",
