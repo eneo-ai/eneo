@@ -113,6 +113,153 @@ class SkillAdoptionCursor:
             raise BadRequestException("Invalid Skill adoption cursor") from error
 
 
+class AssistantPinAdvanceOutcome(str, Enum):
+    ADVANCED = "advanced"
+    CONCURRENT_CHANGE = "concurrent_change"
+    INCOMPATIBLE = "incompatible"
+
+
+class AssistantPinAdvanceIncompatibleReason(str, Enum):
+    ACTIVATION_UNAVAILABLE = "activation_unavailable"
+    CONTEXT_WINDOW = "context_window"
+
+
+@dataclass(frozen=True)
+class AssistantPinAdvanceTarget:
+    assistant_id: UUID
+    from_revision_id: UUID
+    from_revision_number: int
+    assistant_row_version: str
+
+
+@dataclass(frozen=True)
+class AssistantPinAdvanceTargetResult:
+    assistant_id: UUID
+    outcome: AssistantPinAdvanceOutcome
+    reason: AssistantPinAdvanceIncompatibleReason | None = None
+
+
+@dataclass(frozen=True)
+class AssistantFleetAdvanceCursor:
+    skill_id: UUID
+    expected_published_revision_id: UUID
+    run_id: UUID
+    after_assistant_id: UUID | None
+
+    def serialize(self) -> str:
+        after = str(self.after_assistant_id) if self.after_assistant_id else ""
+        payload = (
+            f"{self.skill_id}:{self.expected_published_revision_id}:"
+            f"{self.run_id}:{after}"
+        ).encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+    @classmethod
+    def parse(cls, cursor: str | None) -> "AssistantFleetAdvanceCursor | None":
+        if cursor is None:
+            return None
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            decoded = base64.b64decode(
+                cursor + padding,
+                altchars=b"-_",
+                validate=True,
+            ).decode()
+            skill_id, revision_id, run_id, after_assistant_id = decoded.split(":")
+            return cls(
+                skill_id=UUID(skill_id),
+                expected_published_revision_id=UUID(revision_id),
+                run_id=UUID(run_id),
+                after_assistant_id=(
+                    UUID(after_assistant_id) if after_assistant_id else None
+                ),
+            )
+        except (binascii.Error, UnicodeDecodeError, ValueError) as error:
+            raise BadRequestException("Invalid Assistant fleet cursor") from error
+
+
+@dataclass(frozen=True)
+class AssistantFleetChunkOutcome:
+    run_id: UUID
+    cursor: AssistantFleetAdvanceCursor | None
+    results: tuple[AssistantPinAdvanceTargetResult, ...]
+    advanced_count: int
+    concurrent_change_count: int
+    incompatible_count: int
+
+
+class AppPinAdvanceOutcome(str, Enum):
+    ADVANCED = "advanced"
+    CONCURRENT_CHANGE = "concurrent_change"
+    INCOMPATIBLE = "incompatible"
+
+
+class AppPinAdvanceIncompatibleReason(str, Enum):
+    CONTEXT_WINDOW = "context_window"
+
+
+@dataclass(frozen=True)
+class AppPinAdvanceTarget:
+    app_id: UUID
+    from_revision_id: UUID
+    app_row_version: str
+    incompatible_reason: AppPinAdvanceIncompatibleReason | None = None
+
+
+@dataclass(frozen=True)
+class AppPinAdvanceTargetResult:
+    app_id: UUID
+    outcome: AppPinAdvanceOutcome
+    reason: AppPinAdvanceIncompatibleReason | None = None
+
+
+@dataclass(frozen=True)
+class AppFleetAdvanceCursor:
+    skill_id: UUID
+    expected_published_revision_id: UUID
+    run_id: UUID
+    after_app_id: UUID | None
+
+    def serialize(self) -> str:
+        after = str(self.after_app_id) if self.after_app_id else ""
+        payload = (
+            f"{self.skill_id}:{self.expected_published_revision_id}:"
+            f"{self.run_id}:{after}"
+        ).encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+    @classmethod
+    def parse(cls, cursor: str | None) -> "AppFleetAdvanceCursor | None":
+        if cursor is None:
+            return None
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            decoded = base64.b64decode(
+                cursor + padding,
+                altchars=b"-_",
+                validate=True,
+            ).decode()
+            skill_id, revision_id, run_id, after_app_id = decoded.split(":")
+            return cls(
+                skill_id=UUID(skill_id),
+                expected_published_revision_id=UUID(revision_id),
+                run_id=UUID(run_id),
+                after_app_id=UUID(after_app_id) if after_app_id else None,
+            )
+        except (binascii.Error, UnicodeDecodeError, ValueError) as error:
+            raise BadRequestException("Invalid App fleet cursor") from error
+
+
+@dataclass(frozen=True)
+class AppFleetChunkOutcome:
+    run_id: UUID
+    cursor: AppFleetAdvanceCursor | None
+    results: tuple[AppPinAdvanceTargetResult, ...]
+    advanced_count: int
+    concurrent_change_count: int
+    incompatible_count: int
+
+
 def normalize_skill_content(
     *, display_name: str, description: str, instructions: str
 ) -> tuple[str, str, str]:
@@ -458,6 +605,74 @@ class SkillPublicationChange:
     previous_is_active: bool
 
 
+class PersonalChatPinAdvanceOutcome(str, Enum):
+    """What advancing the Personal Chat pin to the published revision did.
+
+    Everything except ADVANCED is a refusal or a no-op; the caller maps each
+    to its own response. A stale reviewed revision is not an outcome — it
+    raises SkillRevisionConflictError, because it must never write.
+    """
+
+    ADVANCED = "advanced"
+    ALREADY_CURRENT = "already_current"
+    NOT_BOUND = "not_bound"
+    NOT_PUBLISHED = "not_published"
+    BLOCKED = "blocked"
+
+
+@dataclass(frozen=True)
+class PersonalChatPinAdvance:
+    outcome: PersonalChatPinAdvanceOutcome
+    from_revision_id: UUID | None = None
+    from_revision_number: int | None = None
+    to_revision_id: UUID | None = None
+    to_revision_number: int | None = None
+
+
+@dataclass(frozen=True)
+class PersonalDefaultsSnapshot:
+    assistant_count: int
+    row_versions_digest: str | None
+    runtime_policy_version: str | None
+
+
+@dataclass(frozen=True)
+class PersonalChatPinOverride:
+    skill_id: UUID
+    from_revision_id: UUID
+    to_revision_id: UUID
+
+
+@dataclass(frozen=True)
+class PersonalChatPinAdvanceStage:
+    """A read-only pin candidate, awaiting fit validation and a confirmed apply.
+
+    ``policy_version`` is the policy row's version marker at stage time; the
+    confirm step refuses the apply when it moved, so a policy edit that
+    commits during the fit scan can never merge with a stale validation.
+    """
+
+    advance: PersonalChatPinAdvance
+    policy_id: UUID | None = None
+    policy_version: str | None = None
+    personal_defaults_snapshot: PersonalDefaultsSnapshot | None = None
+
+
+class PersonalChatPinConfirmOutcome(str, Enum):
+    """Result of the short apply that follows a validated staged move.
+
+    Anything except CONFIRMED means the state the validation depended on
+    changed while it ran; the caller raises and the administrator retries
+    against the live state.
+    """
+
+    CONFIRMED = "confirmed"
+    POLICY_CHANGED = "policy_changed"
+    PUBLICATION_CHANGED = "publication_changed"
+    PERSONAL_DEFAULTS_CHANGED = "personal_defaults_changed"
+    BLOCKED = "blocked"
+
+
 class SkillHasBindingsError(Exception):
     pass
 
@@ -468,6 +683,18 @@ class SkillHasActiveAppRunsError(Exception):
 
 class SkillRevisionConflictError(Exception):
     pass
+
+
+class SkillRuntimePolicyChangedError(Exception):
+    pass
+
+
+class SkillNotPublishedForBindingError(Exception):
+    """A binding change targeted a Skill with no published revision."""
+
+
+class SkillBlockedForBindingError(Exception):
+    """A binding change targeted a Skill under an active execution block."""
 
 
 class SkillSlugConflictError(Exception):
@@ -588,6 +815,12 @@ class SkillRuntimePolicy:
                 f"{MIN_SKILL_ACTIVATIONS_PER_TURN} and "
                 f"{MAX_SKILL_ACTIVATIONS_PER_TURN}"
             )
+
+
+@dataclass(frozen=True)
+class SkillRuntimePolicySnapshot:
+    policy: SkillRuntimePolicy
+    row_version: str
 
 
 # Product-standard seeds. Reset restores these values, not a deployment's
@@ -743,6 +976,10 @@ class SkillActivationFallbackReason(str, Enum):
     SELECTIVE_ACTIVATION_DISABLED = "selective_activation_disabled"
 
 
+class SkillActivationUnavailableException(BadRequestException):
+    pass
+
+
 class SkillActivationRejectionReason(str, Enum):
     UNKNOWN_KEY = "unknown_key"
     BLOCKED = "blocked"
@@ -766,6 +1003,15 @@ class SkillActivationReference(BaseModel):
     content_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
     position: int = Field(ge=0, strict=True)
     source: SkillBindingSource
+    # Identity labels captured at execution time so retained evidence stays
+    # readable after a Skill is renamed or deleted. Optional because evidence
+    # persisted before these fields existed has no labels to recover.
+    display_name: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SKILL_DISPLAY_NAME_LENGTH
+    )
+    slug: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SKILL_SLUG_LENGTH
+    )
 
     @classmethod
     def from_binding(
@@ -782,6 +1028,8 @@ class SkillActivationReference(BaseModel):
             content_digest=binding.content_digest,
             position=binding.position,
             source=binding.source,
+            display_name=binding.display_name,
+            slug=binding.slug,
         )
 
 

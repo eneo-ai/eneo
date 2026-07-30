@@ -398,7 +398,7 @@ class SessionService:
         repo: QuestionRepository,
         question_add: QuestionAdd,
         files: Sequence[File] | None,
-    ) -> UUID:
+    ) -> tuple[UUID, datetime | None]:
         question_record = await repo.add(
             question_add,
             info_blob_chunks=[],
@@ -409,7 +409,7 @@ class SessionService:
         assert question_record is not None, (
             "question_repo.add must return the newly inserted row"
         )
-        return question_record.id
+        return question_record.id, question_record.created_at
 
     async def create_session_with_question_placeholder(
         self,
@@ -423,7 +423,7 @@ class SessionService:
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
         skill_activation: SkillActivationEvidenceV1 | None = None,
-    ) -> tuple[SessionInDB, UUID]:
+    ) -> tuple[SessionInDB, UUID, datetime | None]:
         """Commit a new conversation and its first user message atomically."""
         session_add = self._build_session_add(
             name=name,
@@ -440,10 +440,10 @@ class SessionService:
                 skill_provenance=skill_provenance,
                 skill_activation=skill_activation,
             )
-            question_id = await self._insert_question_placeholder(
+            question_id, question_created_at = await self._insert_question_placeholder(
                 self._question_repository(db_session), question_add, files
             )
-        return session_record, question_id
+        return session_record, question_id, question_created_at
 
     async def create_question_placeholder(
         self,
@@ -455,10 +455,11 @@ class SessionService:
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
         skill_activation: SkillActivationEvidenceV1 | None = None,
-    ) -> UUID:
+    ) -> tuple[UUID, datetime | None]:
         """Persist a placeholder Question row with the user's message and an empty answer.
 
-        Returns the new question's id so the caller can complete the row when the LLM
+        Returns the new question's id and persisted creation time so the caller
+        can complete the row when the LLM
         stream finishes (normally or via abort). This guarantees the user's message is
         durably stored before any LLM token streams out.
 
@@ -492,6 +493,9 @@ class SessionService:
         answer: str,
         num_tokens_question: int,
         num_tokens_answer: int,
+        context_prompt_tokens: int | None = None,
+        context_completion_tokens: int | None = None,
+        skill_context_tokens: int | None = None,
         completion_model: CompletionModel | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore],
         generated_files: Sequence[File] | None = None,
@@ -512,6 +516,9 @@ class SessionService:
                 answer=answer,
                 num_tokens_question=num_tokens_question,
                 num_tokens_answer=num_tokens_answer,
+                context_prompt_tokens=context_prompt_tokens,
+                context_completion_tokens=context_completion_tokens,
+                skill_context_tokens=skill_context_tokens,
                 completion_model_id=completion_model_id,
                 tool_calls=tool_calls,
                 reasoning=reasoning,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatService, type ChatPartner } from "./ChatService.svelte";
 import { projectTurnDebugDetails } from "./turnDebugProjection";
+import type { Conversation } from "@eneo/eneo-js";
 
 function assistantPartner(overrides: Partial<ChatPartner> = {}): ChatPartner {
   return {
@@ -25,6 +26,7 @@ function chatService(
     ask?: ReturnType<typeof vi.fn>;
     get?: ReturnType<typeof vi.fn>;
     getTurnDiagnostics?: ReturnType<typeof vi.fn>;
+    initialConversation?: Conversation | null;
   } = {}
 ) {
   return new ChatService({
@@ -43,7 +45,7 @@ function chatService(
       }
     } as never,
     chatPartner: assistantPartner(),
-    initialConversation: null,
+    initialConversation: overrides.initialConversation ?? null,
     initialHistory: { items: [], count: 0, total_count: 0 }
   });
 }
@@ -71,6 +73,7 @@ describe("ChatService assistant baseline preflight", () => {
       file_tokens: 0,
       prompt_tokens: 125,
       assistant_attachment_tokens: 3500,
+      skill_context_tokens: 45,
       model_name: "gpt-4o",
       context_window: 128000
     });
@@ -88,6 +91,7 @@ describe("ChatService assistant baseline preflight", () => {
     });
     expect(chat.assistantPromptTokens).toBe(125);
     expect(chat.assistantAttachmentTokens).toBe(3500);
+    expect(chat.assistantSkillTokens).toBe(45);
     expect(chat.contextTokens).toBe(3625);
   });
 
@@ -102,6 +106,90 @@ describe("ChatService assistant baseline preflight", () => {
 
     expect(preflight).not.toHaveBeenCalled();
     expect(chat.assistantAttachmentTokens).toBe(0);
+  });
+});
+
+describe("ChatService context usage", () => {
+  it("uses the final provider request for headroom without changing cumulative cost", () => {
+    const chat = chatService(vi.fn(), {
+      initialConversation: {
+        id: "session-1",
+        name: "Skills",
+        messages: [
+          {
+            id: "message-1",
+            question: "Help",
+            answer: "Done",
+            num_tokens_question: 1020,
+            num_tokens_answer: 60,
+            context_prompt_tokens: 520,
+            context_completion_tokens: 40,
+            skill_context_tokens: 37
+          }
+        ]
+      } as Conversation
+    });
+
+    expect(chat.lockedInputTokens).toBe(520);
+    expect(chat.lockedOutputTokens).toBe(40);
+    expect(chat.lockedSkillTokens).toBe(37);
+    expect(chat.contextTokens).toBe(560);
+    expect(chat.cumulativeTokens).toBe(1080);
+  });
+
+  it("falls back to cumulative fields for conversations saved before the new snapshot", () => {
+    const chat = chatService(vi.fn(), {
+      initialConversation: {
+        id: "session-1",
+        name: "Legacy",
+        messages: [
+          {
+            id: "message-1",
+            question: "Help",
+            answer: "Done",
+            num_tokens_question: 500,
+            num_tokens_answer: 20
+          }
+        ]
+      } as Conversation
+    });
+
+    expect(chat.lockedInputTokens).toBe(500);
+    expect(chat.lockedOutputTokens).toBe(20);
+    expect(chat.lockedSkillTokens).toBe(0);
+    expect(chat.contextTokens).toBe(520);
+  });
+
+  it("applies streamed context usage without double-counting the Skill subset", async () => {
+    const ask = vi.fn().mockImplementation(async ({ callbacks }) => {
+      callbacks.onFirstChunk({
+        id: "message-1",
+        session_id: "session-1",
+        answer: "",
+        references: []
+      });
+      callbacks.onEneoEvent({
+        session_id: "session-1",
+        eneo_event_type: "token_usage",
+        usage: {
+          prompt_tokens: 1020,
+          completion_tokens: 60,
+          turn_tokens: 1080,
+          context_prompt_tokens: 520,
+          context_completion_tokens: 40,
+          skill_context_tokens: 37
+        }
+      });
+    });
+    const chat = chatService(vi.fn(), { ask });
+
+    await chat.askQuestion("Help");
+
+    expect(chat.lockedInputTokens).toBe(520);
+    expect(chat.lockedOutputTokens).toBe(40);
+    expect(chat.lockedSkillTokens).toBe(37);
+    expect(chat.contextTokens).toBe(560);
+    expect(chat.cumulativeTokens).toBe(1080);
   });
 });
 

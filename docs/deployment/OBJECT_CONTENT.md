@@ -86,9 +86,10 @@ must pass the same tested subset:
 - object deletion with observable not-found convergence;
 - SHA-256 part/composite semantics for multipart where requested.
 
-Native range support is an endpoint conformance gate. Eneo's application read
-path still full-GETs and verifies the canonical digest before slicing a range
-from its local spool.
+Native range support is an endpoint conformance gate. Eneo fetches and verifies
+only the persisted upload chunks covering the requested interval before sending
+response headers. Content migrated as one whole-object chunk retains its
+full-verification cost for range reads.
 
 Eneo computes the canonical full-byte SHA-256 incrementally over its own upload
 stream. S3 ETags, multipart composite checksums, CRCs, and user metadata never

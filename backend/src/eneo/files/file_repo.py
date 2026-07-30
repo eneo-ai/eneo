@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy import Select
 from sqlalchemy.orm import aliased
 
 from eneo.database.database import AsyncSession
@@ -35,6 +36,12 @@ class FileContentReferenceRecord:
     size_bytes: int
     media_type: str
     access_class: ContentAccessClass
+
+
+@dataclass(frozen=True, slots=True)
+class AttachedDerivedImageProjection:
+    derived_images: tuple[FileMetadata, ...]
+    unstable_parent_ids: frozenset[UUID]
 
 
 _PRIMARY_VARIANTS = (
@@ -134,7 +141,12 @@ class FileRepository:
         self.session = session
 
     @staticmethod
-    def _visible_family(file: type[Files] = Files):
+    def _family_has_content_state(
+        file: type[Files],
+        *,
+        state: ContentState,
+        matches: bool,
+    ):
         root_id = sa.case(
             (file.parent_file_id.is_(None), file.id),
             else_=file.parent_file_id,
@@ -151,22 +163,80 @@ class FileRepository:
             )
             .correlate(file)
         )
-        root_has_content = sa.exists().where(FileContentReferences.file_id == root_id)
         referenced_content_state = (
             sa.select(ObjectContents.state)
             .where(ObjectContents.id == family_reference.content_id)
             .correlate(family_reference)
             .scalar_subquery()
         )
-        unavailable_content = (
+        state_condition = (
+            referenced_content_state == state.value
+            if matches
+            else referenced_content_state != state.value
+        )
+        return (
             sa.exists()
             .where(
                 family_reference.file_id.in_(family_ids),
-                referenced_content_state != ContentState.AVAILABLE.value,
+                state_condition,
             )
             .correlate(file)
         )
-        return sa.and_(root_has_content.correlate(file), ~unavailable_content)
+
+    @staticmethod
+    def _family_has_unavailable_content(file: type[Files] = Files):
+        return FileRepository._family_has_content_state(
+            file,
+            state=ContentState.AVAILABLE,
+            matches=False,
+        )
+
+    @staticmethod
+    def _family_has_pending_content(file: type[Files] = Files):
+        return FileRepository._family_has_content_state(
+            file,
+            state=ContentState.PENDING,
+            matches=True,
+        )
+
+    @staticmethod
+    def _visible_family(file: type[Files] = Files):
+        root_id = sa.case(
+            (file.parent_file_id.is_(None), file.id),
+            else_=file.parent_file_id,
+        )
+        root_has_content = sa.exists().where(FileContentReferences.file_id == root_id)
+        return sa.and_(
+            root_has_content.correlate(file),
+            ~FileRepository._family_has_unavailable_content(file),
+        )
+
+    def _visible_children_query(
+        self,
+        *,
+        parent_ids: list[UUID],
+        user_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        file_type: FileType | None = None,
+    ) -> Select[tuple[Files]]:
+        parent = aliased(Files)
+        query = (
+            sa.select(Files)
+            .join(parent, Files.parent_file_id == parent.id)
+            .where(
+                Files.parent_file_id.in_(parent_ids),
+                Files.user_id == parent.user_id,
+                Files.tenant_id == parent.tenant_id,
+                self._visible_family(),
+            )
+        )
+        if user_id is not None:
+            query = query.where(parent.user_id == user_id)
+        if tenant_id is not None:
+            query = query.where(parent.tenant_id == tenant_id)
+        if file_type is not None:
+            query = query.where(Files.file_type == file_type.value)
+        return query.order_by(Files.created_at, Files.id)
 
     async def add_metadata(self, file: FileMetadataCreate) -> FileMetadata:
         row = Files(**file.model_dump())
@@ -234,15 +304,64 @@ class FileRepository:
         if not parent_ids:
             return []
         rows = await self.session.scalars(
-            sa.select(Files)
-            .where(
-                Files.parent_file_id.in_(parent_ids),
-                Files.user_id == user_id,
-                self._visible_family(),
+            self._visible_children_query(
+                parent_ids=parent_ids,
+                user_id=user_id,
             )
-            .order_by(Files.created_at)
         )
         return [FileMetadata.model_validate(row) for row in rows]
+
+    async def project_derived_images_for_attached_roots(
+        self,
+        *,
+        parent_ids: list[UUID],
+        tenant_id: UUID,
+    ) -> AttachedDerivedImageProjection:
+        if not parent_ids:
+            return AttachedDerivedImageProjection(
+                derived_images=(),
+                unstable_parent_ids=frozenset(),
+            )
+        parent = aliased(Files)
+        child = aliased(Files)
+        family_unavailable = self._family_has_unavailable_content(parent)
+        family_pending = self._family_has_pending_content(parent)
+        rows = (
+            await self.session.execute(
+                sa.select(parent.id, child, family_unavailable, family_pending)
+                .select_from(parent)
+                .outerjoin(
+                    child,
+                    sa.and_(
+                        child.parent_file_id == parent.id,
+                        child.user_id == parent.user_id,
+                        child.tenant_id == parent.tenant_id,
+                        child.file_type == FileType.IMAGE.value,
+                    ),
+                )
+                .where(
+                    parent.id.in_(parent_ids),
+                    parent.tenant_id == tenant_id,
+                )
+                .order_by(parent.id, child.created_at, child.id)
+            )
+        ).all()
+        unavailable_parent_ids = frozenset(
+            parent_id
+            for parent_id, _child, unavailable, _pending in rows
+            if unavailable
+        )
+        unstable_parent_ids = frozenset(
+            parent_id for parent_id, _child, _unavailable, pending in rows if pending
+        )
+        return AttachedDerivedImageProjection(
+            derived_images=tuple(
+                FileMetadata.model_validate(child_row)
+                for parent_id, child_row, _unavailable, _pending in rows
+                if child_row is not None and parent_id not in unavailable_parent_ids
+            ),
+            unstable_parent_ids=unstable_parent_ids,
+        )
 
     async def get_by_id(self, file_id: UUID) -> FileMetadata:
         row = await self.session.scalar(

@@ -9,6 +9,7 @@ from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.job_table import Jobs
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Job, JobInDb, JobUpdate
+from eneo.jobs.task_models import DispatchEnvelope
 
 
 class JobRepository:
@@ -23,6 +24,19 @@ class JobRepository:
 
     async def add_job(self, job: Job):
         return await self.delegate.add(job)
+
+    async def add_durable_knowledge_job(
+        self,
+        job: Job,
+        *,
+        job_id: UUID,
+        dispatch_envelope: DispatchEnvelope,
+    ) -> JobInDb:
+        return await self.delegate.add(
+            job,
+            id=job_id,
+            dispatch_envelope=dispatch_envelope.model_dump(mode="json"),
+        )
 
     async def update_job(self, id: UUID, job: JobUpdate):
         stmt = (

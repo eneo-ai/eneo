@@ -6333,6 +6333,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/skills/organization/{skill_id}/personal-chat/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance Personal Chat Binding
+     * @description Move the Personal Chat binding of this Skill to its currently published revision. Guarded by the pinned revision the administrator reviewed, so a concurrent binding change is refused instead of overwritten.
+     */
+    post: operations["advance_personal_chat_binding_api_v1_skills_organization__skill_id__personal_chat_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/assistants/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance Assistant Bindings
+     * @description Move one bounded chunk of Assistant bindings to the reviewed published Skill revision.
+     */
+    post: operations["advance_assistant_bindings_api_v1_skills_organization__skill_id__assistants_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/apps/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance App Bindings
+     * @description Move one bounded chunk of App bindings to the reviewed published Skill revision. Existing queued App runs keep their retained revision.
+     */
+    post: operations["advance_app_bindings_api_v1_skills_organization__skill_id__apps_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/skills/organization/{skill_id}/unpublish/": {
     parameters: {
       query?: never;
@@ -8004,6 +8064,7 @@ export interface components {
       | "skill_status_changed"
       | "skill_published"
       | "skill_unpublished"
+      | "skill_bindings_advanced"
       | "skill_deleted"
       | "session_started"
       | "session_ended"
@@ -8721,6 +8782,38 @@ export interface components {
       /** Hash Version */
       hash_version: string;
     };
+    /** AppFleetAdvanceCountsPublic */
+    AppFleetAdvanceCountsPublic: {
+      /** Advanced */
+      advanced: number;
+      /** Concurrent Change */
+      concurrent_change: number;
+      /** Incompatible */
+      incompatible: number;
+    };
+    /** AppFleetAdvancePublic */
+    AppFleetAdvancePublic: {
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Next Cursor */
+      next_cursor: string | null;
+      counts: components["schemas"]["AppFleetAdvanceCountsPublic"];
+      /** Outcomes */
+      outcomes: components["schemas"]["AppPinAdvanceOutcomePublic"][];
+    };
+    /** AppFleetAdvanceRequest */
+    AppFleetAdvanceRequest: {
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       */
+      expected_published_revision_id: string;
+      /** Cursor */
+      cursor?: string | null;
+    };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
       /** Name */
@@ -8735,6 +8828,26 @@ export interface components {
       input_description: string | null;
       /** Input Type */
       input_type: string;
+    };
+    /**
+     * AppPinAdvanceIncompatibleReason
+     * @enum {string}
+     */
+    AppPinAdvanceIncompatibleReason: "context_window";
+    /**
+     * AppPinAdvanceOutcome
+     * @enum {string}
+     */
+    AppPinAdvanceOutcome: "advanced" | "concurrent_change" | "incompatible";
+    /** AppPinAdvanceOutcomePublic */
+    AppPinAdvanceOutcomePublic: {
+      /**
+       * App Id
+       * Format: uuid
+       */
+      app_id: string;
+      outcome: components["schemas"]["AppPinAdvanceOutcome"];
+      reason?: components["schemas"]["AppPinAdvanceIncompatibleReason"] | null;
     };
     /** AppPublic */
     AppPublic: {
@@ -9121,6 +9234,11 @@ export interface components {
     AskResponse: {
       /** Id */
       id?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      completion_model?: components["schemas"]["CompletionModelPublic"] | null;
       /**
        * Session Id
        * Format: uuid
@@ -9220,6 +9338,38 @@ export interface components {
        */
       completion_model?: components["schemas"]["ModelId"] | null;
     };
+    /** AssistantFleetAdvanceCountsPublic */
+    AssistantFleetAdvanceCountsPublic: {
+      /** Advanced */
+      advanced: number;
+      /** Concurrent Change */
+      concurrent_change: number;
+      /** Incompatible */
+      incompatible: number;
+    };
+    /** AssistantFleetAdvancePublic */
+    AssistantFleetAdvancePublic: {
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Next Cursor */
+      next_cursor: string | null;
+      counts: components["schemas"]["AssistantFleetAdvanceCountsPublic"];
+      /** Outcomes */
+      outcomes: components["schemas"]["AssistantPinAdvanceOutcomePublic"][];
+    };
+    /** AssistantFleetAdvanceRequest */
+    AssistantFleetAdvanceRequest: {
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       */
+      expected_published_revision_id: string;
+      /** Cursor */
+      cursor?: string | null;
+    };
     /** AssistantGuard */
     AssistantGuard: {
       /**
@@ -9281,6 +9431,26 @@ export interface components {
        * Format: date-time
        */
       created_at: string;
+    };
+    /**
+     * AssistantPinAdvanceIncompatibleReason
+     * @enum {string}
+     */
+    AssistantPinAdvanceIncompatibleReason: "activation_unavailable" | "context_window";
+    /**
+     * AssistantPinAdvanceOutcome
+     * @enum {string}
+     */
+    AssistantPinAdvanceOutcome: "advanced" | "concurrent_change" | "incompatible";
+    /** AssistantPinAdvanceOutcomePublic */
+    AssistantPinAdvanceOutcomePublic: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      outcome: components["schemas"]["AssistantPinAdvanceOutcome"];
+      reason?: components["schemas"]["AssistantPinAdvanceIncompatibleReason"] | null;
     };
     /** AssistantPublic */
     AssistantPublic: {
@@ -11877,7 +12047,10 @@ export interface components {
       | 9049
       | 9050
       | 9051
-      | 9052;
+      | 9052
+      | 9053
+      | 9054
+      | 9055;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -13422,14 +13595,31 @@ export interface components {
       reasoning?: string | null;
       /**
        * Num Tokens Question
+       * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_question?: number;
       /**
        * Num Tokens Answer
+       * @description Cumulative completion tokens across all provider responses in the turn. Use context_completion_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_answer?: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only. Null for rows saved before final-request usage was recorded.
+       */
+      context_prompt_tokens?: number | null;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only. Null for rows saved before final-request usage was recorded.
+       */
+      context_completion_tokens?: number | null;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again. Null for legacy rows.
+       */
+      skill_context_tokens?: number | null;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -13469,14 +13659,31 @@ export interface components {
       reasoning?: string | null;
       /**
        * Num Tokens Question
+       * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_question?: number;
       /**
        * Num Tokens Answer
+       * @description Cumulative completion tokens across all provider responses in the turn. Use context_completion_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_answer?: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only. Null for rows saved before final-request usage was recorded.
+       */
+      context_prompt_tokens?: number | null;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only. Null for rows saved before final-request usage was recorded.
+       */
+      context_completion_tokens?: number | null;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again. Null for legacy rows.
+       */
+      skill_context_tokens?: number | null;
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -15281,6 +15488,33 @@ export interface components {
       /** Description */
       description: string;
     };
+    /** PersonalChatPinAdvancePublic */
+    PersonalChatPinAdvancePublic: {
+      /**
+       * Outcome
+       * @enum {string}
+       */
+      outcome: "advanced" | "already_current";
+      /** From Revision Number */
+      from_revision_number: number;
+      /** To Revision Number */
+      to_revision_number: number;
+    };
+    /** PersonalChatPinAdvanceRequest */
+    PersonalChatPinAdvanceRequest: {
+      /**
+       * Expected Pinned Revision Id
+       * Format: uuid
+       * @description The revision the Personal Chat binding was pinned to when the administrator reviewed the move.
+       */
+      expected_pinned_revision_id: string;
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       * @description The published revision the administrator reviewed as the target. A publish that lands after the review is refused as a conflict instead of silently applied.
+       */
+      expected_published_revision_id: string;
+    };
     /** PlatformAdminGrantRequest */
     PlatformAdminGrantRequest: {
       /** Enabled */
@@ -15423,9 +15657,16 @@ export interface components {
       assistant_attachment_tokens?: number;
       /**
        * Prompt Tokens
+       * @description Model-aware estimate of the initial system message and Skill tool definitions. Includes skill_context_tokens.
        * @default 0
        */
       prompt_tokens?: number;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of prompt_tokens. Already included; do not add it to the preflight total again.
+       * @default 0
+       */
+      skill_context_tokens?: number;
     };
     /** PrivacyPolicy */
     PrivacyPolicy: {
@@ -16723,6 +16964,10 @@ export interface components {
       /** Position */
       position: number;
       source: components["schemas"]["SkillBindingSource"];
+      /** Display Name */
+      display_name?: string | null;
+      /** Slug */
+      slug?: string | null;
     };
     /** SkillActivationRejection */
     SkillActivationRejection: {
@@ -20320,12 +20565,36 @@ export interface components {
     };
     /** TokenUsageEvent */
     TokenUsageEvent: {
-      /** Prompt Tokens */
+      /**
+       * Prompt Tokens
+       * @description Cumulative prompt tokens across every provider request in this logical turn. Use context_prompt_tokens for context-window headroom.
+       */
       prompt_tokens: number;
-      /** Completion Tokens */
+      /**
+       * Completion Tokens
+       * @description Cumulative completion tokens across every provider response in this logical turn. Use context_completion_tokens for context-window headroom.
+       */
       completion_tokens: number;
-      /** Turn Tokens */
+      /**
+       * Turn Tokens
+       * @description Cumulative prompt_tokens plus completion_tokens for this turn.
+       */
       turn_tokens: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only.
+       */
+      context_prompt_tokens: number;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only.
+       */
+      context_completion_tokens: number;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again.
+       */
+      skill_context_tokens: number;
     };
     /** SSETokenUsage */
     SSETokenUsage: {
@@ -20355,6 +20624,18 @@ export interface components {
        * @default null
        */
       id?: string | null;
+      /**
+       * Created At
+       * @default null
+       */
+      created_at?: string | null;
+      /**
+       * Updated At
+       * @default null
+       */
+      updated_at?: string | null;
+      /** @default null */
+      completion_model?: components["schemas"]["CompletionModelPublic"] | null;
       /**
        * Session Id
        * Format: uuid
@@ -24469,6 +24750,11 @@ export interface operations {
           "text/event-stream": {
             /** Id */
             id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            completion_model?: components["schemas"]["CompletionModelPublic"] | null;
             /**
              * Session Id
              * Format: uuid
@@ -24887,6 +25173,11 @@ export interface operations {
           "text/event-stream": {
             /** Id */
             id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            completion_model?: components["schemas"]["CompletionModelPublic"] | null;
             /**
              * Session Id
              * Format: uuid
@@ -26189,6 +26480,11 @@ export interface operations {
             | {
                 /** Id */
                 id?: string | null;
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                completion_model?: components["schemas"]["CompletionModelPublic"] | null;
                 /**
                  * Session Id
                  * Format: uuid
@@ -26213,6 +26509,103 @@ export interface operations {
                  */
                 mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
+                  /** CompletionModelPublic */
+                  CompletionModelPublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Name */
+                    name: string;
+                    /** Nickname */
+                    nickname?: string | null;
+                    /** Family */
+                    family?: string | null;
+                    /** Max Input Tokens */
+                    max_input_tokens: number;
+                    /** Max Output Tokens */
+                    max_output_tokens: number;
+                    /** Is Deprecated */
+                    is_deprecated: boolean;
+                    /** Nr Billion Parameters */
+                    nr_billion_parameters?: number | null;
+                    /** Hf Link */
+                    hf_link?: string | null;
+                    /** Stability */
+                    stability?: string | null;
+                    /** Hosting */
+                    hosting?: string | null;
+                    /** Open Source */
+                    open_source?: boolean | null;
+                    /** Description */
+                    description?: string | null;
+                    /** Deployment Name */
+                    deployment_name?: string | null;
+                    /** Org */
+                    org?: string | null;
+                    /** Vision */
+                    vision: boolean;
+                    /** Reasoning */
+                    reasoning: boolean;
+                    /**
+                     * Supports Tool Calling
+                     * @default false
+                     */
+                    supports_tool_calling?: boolean;
+                    /** Base Url */
+                    base_url?: string | null;
+                    /** Litellm Model Name */
+                    litellm_model_name?: string | null;
+                    model_kwargs_capabilities?:
+                      components["schemas"]["SupportedModelKwargs"] | null;
+                    /** Input Cost Per Token */
+                    input_cost_per_token?: number | string | null;
+                    /** Output Cost Per Token */
+                    output_cost_per_token?: number | string | null;
+                    /**
+                     * Is Org Enabled
+                     * @default false
+                     */
+                    is_org_enabled?: boolean;
+                    /**
+                     * Is Org Default
+                     * @default false
+                     */
+                    is_org_default?: boolean;
+                    /** Tenant Id */
+                    tenant_id?: string | null;
+                    /** Provider Id */
+                    provider_id?: string | null;
+                    /** Provider Type */
+                    provider_type?: string | null;
+                    /** Migrated To Model Id */
+                    migrated_to_model_id?: string | null;
+                    /**
+                     * Can Access
+                     * @default false
+                     */
+                    can_access?: boolean;
+                    /**
+                     * Is Locked
+                     * @default true
+                     */
+                    is_locked?: boolean;
+                    /** Lock Reason */
+                    lock_reason?: string | null;
+                    /** Credential Provider */
+                    credential_provider?: string | null;
+                    security_classification?:
+                      components["schemas"]["SecurityClassificationPublic"] | null;
+                    /** Provider Name */
+                    provider_name?: string | null;
+                    /** Deprecation Date */
+                    deprecation_date?: string | null;
+                  };
                   /** FilePublic */
                   FilePublic: {
                     /** Created At */
@@ -26304,6 +26697,55 @@ export interface operations {
                     tool_call_id?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                  };
+                  /** ModelKwargCapability */
+                  ModelKwargCapability: {
+                    /**
+                     * Supported
+                     * @default false
+                     */
+                    supported?: boolean;
+                    /** Control */
+                    control?: ("slider" | "select") | null;
+                    /** Minimum */
+                    minimum?: number | null;
+                    /** Maximum */
+                    maximum?: number | null;
+                    /** Step */
+                    step?: number | null;
+                    /** Options */
+                    options?: string[] | null;
+                  };
+                  /**
+                   * SecurityClassificationPublic
+                   * @description Basic security classification information.
+                   */
+                  SecurityClassificationPublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Name */
+                    name: string;
+                    /** Description */
+                    description: string | null;
+                    /** Security Level */
+                    security_level: number;
+                  };
+                  /** SupportedModelKwargs */
+                  SupportedModelKwargs: {
+                    temperature?: components["schemas"]["ModelKwargCapability"];
+                    top_p?: components["schemas"]["ModelKwargCapability"];
+                    reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+                    verbosity?: components["schemas"]["ModelKwargCapability"];
+                    presence_penalty?: components["schemas"]["ModelKwargCapability"];
+                    frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+                    top_k?: components["schemas"]["ModelKwargCapability"];
                   };
                   /** ToolAssistant */
                   ToolAssistant: {
@@ -41680,6 +42122,219 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_personal_chat_binding_api_v1_skills_organization__skill_id__personal_chat_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PersonalChatPinAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PersonalChatPinAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_assistant_bindings_api_v1_skills_organization__skill_id__assistants_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssistantFleetAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantFleetAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_app_bindings_api_v1_skills_organization__skill_id__apps_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppFleetAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppFleetAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

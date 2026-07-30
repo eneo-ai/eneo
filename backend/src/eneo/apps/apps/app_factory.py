@@ -49,7 +49,7 @@ class AppFactory:
         return ModelKwargs.model_validate(completion_model_kwargs)
 
     @staticmethod
-    def _create_completion_model_sparse(
+    def create_completion_model_sparse(
         completion_model: CompletionModels,
     ) -> CompletionModelSparse:
         sparse_model = CompletionModelSparse.model_validate(completion_model)
@@ -152,7 +152,7 @@ class AppFactory:
         transcription_model: TranscriptionModel | None = None,
     ) -> App:
         completion_model = (
-            self._create_completion_model_sparse(app_in_db.completion_model)
+            self.create_completion_model_sparse(app_in_db.completion_model)
             if app_in_db.completion_model is not None
             else None
         )

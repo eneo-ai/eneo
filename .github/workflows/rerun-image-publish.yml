@@ -1,0 +1,25 @@
+name: Rerun Failed Image Publish
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Docker Images"]
+    types: [completed]
+
+permissions:
+  actions: write
+
+# Hosted-runner deaths are nondeterministic. One automatic retry keeps merges
+# reliable without masking real breakage, which still fails on attempt 2.
+jobs:
+  rerun-failed-jobs:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt < 2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Rerun failed image publish jobs
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh run rerun "${{ github.event.workflow_run.id }}" --failed

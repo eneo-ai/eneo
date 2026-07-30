@@ -73,10 +73,11 @@
     "vitest-browser-svelte": "^1.1.0"
   },
   "dependencies": {
-    "@inlang/paraglide-js": "^2.20.2",
     "@eneo/ui": "workspace:*",
+    "@inlang/paraglide-js": "^2.20.2",
     "dompurify": "^3.4.11",
     "lucide-svelte": "^0.544.0",
-    "marked": "^15.0.8"
+    "marked": "^15.0.8",
+    "paneforge": "^1.0.2"
   }
 }

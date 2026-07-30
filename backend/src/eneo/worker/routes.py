@@ -10,6 +10,8 @@ from eneo.audit.application.audit_task_params import (
 from eneo.audit.application.audit_worker_task import log_audit_event_task
 from eneo.audit.application.export_worker_task import export_audit_logs_task
 from eneo.database.database import AsyncSession
+from eneo.jobs.durable_dispatch import redispatch_stale_jobs
+from eneo.jobs.job_manager import job_manager
 from eneo.jobs.task_models import (
     AnalyzeConversationInsightsTask,
     Transcription,
@@ -78,16 +80,23 @@ class AuditPurgeResult(TypedDict):
     success: bool
 
 
-@worker.function()
+@worker.function(keep_result=0)
 async def upload_info_blob(job_id: UUID, params: UploadInfoBlob, container: Container):
     return await upload_info_blob_task(
         job_id=job_id, params=params, container=container
     )
 
 
-@worker.function()
+@worker.function(keep_result=0)
 async def transcription(job_id: UUID, params: Transcription, container: Container):
     return await transcription_task(job_id=job_id, params=params, container=container)
+
+
+@worker.cron_job(manages_own_session=True)
+async def redispatch_durable_knowledge_jobs(container: Container) -> None:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await redispatch_stale_jobs(session, enqueue=job_manager.enqueue)
 
 
 @worker.long_running_function()

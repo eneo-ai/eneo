@@ -1,40 +1,54 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
     EneoError,
+    OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE,
+    type ContentMoveFailureCode,
+    type ContentMoveState,
+    type ContentState,
     type DeploymentPolicy,
     type DeploymentPolicyUpdate,
     type MoveQueueResult,
     type ObjectContentInventory,
-    type ObjectContentMoves
+    type ObjectContentMoves,
+    type ObjectContentReadinessCode,
+    type StorageKind,
+    type UploadLimitUseCase
   } from "@eneo/eneo-js";
-  import { AlertCircle, CheckCircle2, Database, HardDrive, Info, Loader2 } from "lucide-svelte";
+  import {
+    AlertCircle,
+    ArrowRightLeft,
+    CheckCircle2,
+    Database,
+    ExternalLink,
+    Gauge,
+    HardDrive,
+    Info,
+    Loader2,
+    RefreshCw
+  } from "lucide-svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import { Separator } from "$lib/components/ui/separator/index.js";
+  import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getEneo } from "$lib/core/Eneo";
-  import { formatBytes } from "$lib/core/formatting/formatBytes";
+  import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
+  import ByteLimitField from "./ByteLimitField.svelte";
+  import StorageInventorySection from "./StorageInventorySection.svelte";
+  import StorageReadinessSection from "./StorageReadinessSection.svelte";
 
-  type StorageTarget = DeploymentPolicy["policy"]["new_write_storage_target"];
-  type ReadinessCode = DeploymentPolicy["capabilities"][number]["readiness_code"];
-  type UploadUseCase = DeploymentPolicy["limits"][number]["use_case"];
-  type ContentState = ObjectContentInventory["inventory"][number]["state"];
-  type MoveState = ObjectContentMoves["moves"][number]["state"];
-  type MoveFailureCode = NonNullable<ObjectContentMoves["moves"][number]["failure_code"]>;
   type InventoryStatus = "idle" | "loading" | "error";
   type MoveAction = "queue" | "pause" | null;
-
-  const DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE = 9046;
-  const OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE = 9047;
 
   const eneo = getEneo();
   const { user } = getAppContext();
@@ -44,7 +58,7 @@
   let inventoryStatus = $state<InventoryStatus>("idle");
   let contentMoves = $state<ObjectContentMoves | null>(null);
   let moveStatus = $state<InventoryStatus>("idle");
-  let moveTarget = $state<StorageTarget>("object_store");
+  let moveTarget = $state<StorageKind>("object_store");
   let moveLimit = $state(25);
   let moveActionPending = $state<MoveAction>(null);
   let moveActionError = $state(false);
@@ -61,11 +75,14 @@
   let targetUnavailable = $state(false);
   let authorityRevoked = $state(false);
 
-  let storageTarget = $state<StorageTarget>("postgres_inline");
+  let storageTarget = $state<StorageKind>("postgres_inline");
   let sessionFileLimitBytes = $state(1);
   let sessionImageLimitBytes = $state(1);
   let knowledgeFileLimitBytes = $state(1);
   let transcriptionAudioLimitBytes = $state(1);
+  let policyAlertRef = $state<HTMLElement | null>(null);
+  let moveAlertRef = $state<HTMLElement | null>(null);
+  let moveStatusAlertRef = $state<HTMLElement | null>(null);
 
   const canEdit = $derived(user.is_platform_admin === true && !authorityRevoked);
   const policyMutationPending = $derived(saving || moveActionPending === "pause");
@@ -75,6 +92,12 @@
   const objectStoreUnavailable = $derived(objectStoreCapability?.selectable !== true);
   const validMoveLimit = $derived(
     Number.isSafeInteger(moveLimit) && moveLimit >= 1 && moveLimit <= 100
+  );
+  const queueUnavailable = $derived(
+    (moveTarget === "object_store" && objectStoreUnavailable) ||
+      !validMoveLimit ||
+      moveStatus !== "idle" ||
+      moveActionPending !== null
   );
   const selectedObjectStoreDegraded = $derived(
     deploymentPolicy?.policy.new_write_storage_target === "object_store" &&
@@ -86,7 +109,7 @@
       sessionImageLimitBytes,
       knowledgeFileLimitBytes,
       transcriptionAudioLimitBytes
-    ].every((value) => Number.isSafeInteger(value) && value > 0)
+    ].every(isValidByteLimit)
   );
   const dirty = $derived(
     deploymentPolicy !== null &&
@@ -96,6 +119,17 @@
         knowledgeFileLimitBytes !== deploymentPolicy.policy.knowledge_file_limit_bytes ||
         transcriptionAudioLimitBytes !== deploymentPolicy.policy.transcription_audio_limit_bytes)
   );
+  const saveUnavailable = $derived(
+    !dirty || !validDraft || policyMutationPending || stale || saveOutcomeUnknown
+  );
+
+  function isValidByteLimit(value: number): boolean {
+    return Number.isSafeInteger(value) && value > 0;
+  }
+
+  $effect(() => policyAlertRef?.focus());
+  $effect(() => moveAlertRef?.focus());
+  $effect(() => moveStatusAlertRef?.focus());
 
   function applyPolicy(next: DeploymentPolicy, preserveDraft = false): boolean {
     const currentRevision = deploymentPolicy?.policy.revision;
@@ -112,6 +146,7 @@
       return false;
 
     deploymentPolicy = next;
+    if (currentRevision === undefined) moveTarget = next.policy.new_write_storage_target;
     if (!preserveDraft) {
       storageTarget = next.policy.new_write_storage_target;
       sessionFileLimitBytes = next.policy.session_file_limit_bytes;
@@ -120,6 +155,22 @@
       transcriptionAudioLimitBytes = next.policy.transcription_audio_limit_bytes;
     }
     return true;
+  }
+
+  function discardPolicyDraft(): void {
+    if (deploymentPolicy === null) return;
+    storageTarget = deploymentPolicy.policy.new_write_storage_target;
+    sessionFileLimitBytes = deploymentPolicy.policy.session_file_limit_bytes;
+    sessionImageLimitBytes = deploymentPolicy.policy.session_image_limit_bytes;
+    knowledgeFileLimitBytes = deploymentPolicy.policy.knowledge_file_limit_bytes;
+    transcriptionAudioLimitBytes = deploymentPolicy.policy.transcription_audio_limit_bytes;
+    stale = false;
+    targetUnavailable = false;
+    saveOutcomeUnknown = false;
+  }
+
+  function updateStorageTarget(value: string): void {
+    if (value === "postgres_inline" || value === "object_store") storageTarget = value;
   }
 
   async function loadPolicy(preserveDraft = false) {
@@ -225,16 +276,7 @@
   }
 
   async function savePolicy() {
-    if (
-      !canEdit ||
-      !deploymentPolicy ||
-      !dirty ||
-      !validDraft ||
-      policyMutationPending ||
-      stale ||
-      saveOutcomeUnknown
-    )
-      return;
+    if (!canEdit || !deploymentPolicy || saveUnavailable) return;
 
     const replacement: DeploymentPolicyUpdate = {
       expected_revision: deploymentPolicy.policy.revision,
@@ -275,14 +317,7 @@
   }
 
   async function queueContentMoves() {
-    if (
-      !canEdit ||
-      objectStoreUnavailable ||
-      !validMoveLimit ||
-      moveStatus !== "idle" ||
-      moveActionPending !== null
-    )
-      return;
+    if (!canEdit || queueUnavailable) return;
 
     moveActionPending = "queue";
     moveActionError = false;
@@ -365,14 +400,14 @@
     }
   }
 
-  function storageTargetLabel(target: StorageTarget | null): string {
+  function storageTargetLabel(target: StorageKind | null): string {
     if (target === "postgres_inline") return m.storage_target_postgres_inline();
     if (target === "object_store") return m.storage_target_object_store();
     return m.storage_target_not_applicable();
   }
 
-  function readinessLabel(code: ReadinessCode): string {
-    const labels: Record<ReadinessCode, () => string> = {
+  function readinessLabel(code: ObjectContentReadinessCode): string {
+    const labels: Record<ObjectContentReadinessCode, () => string> = {
       ready: m.storage_readiness_ready,
       object_store_not_configured: m.storage_readiness_object_store_not_configured,
       not_initialized: m.storage_readiness_not_initialized,
@@ -383,8 +418,8 @@
     return labels[code]();
   }
 
-  function useCaseLabel(useCase: UploadUseCase): string {
-    const labels: Record<UploadUseCase, () => string> = {
+  function useCaseLabel(useCase: UploadLimitUseCase): string {
+    const labels: Record<UploadLimitUseCase, () => string> = {
       session_file: m.storage_use_case_session_file,
       session_image: m.storage_use_case_session_image,
       session_audio: m.storage_use_case_session_audio,
@@ -406,8 +441,8 @@
     return labels[state]();
   }
 
-  function moveStateLabel(state: MoveState): string {
-    const labels: Record<MoveState, () => string> = {
+  function moveStateLabel(state: ContentMoveState): string {
+    const labels: Record<ContentMoveState, () => string> = {
       pending: m.storage_move_state_pending,
       target_verified: m.storage_move_state_target_verified,
       failed: m.storage_move_state_failed
@@ -415,9 +450,9 @@
     return labels[state]();
   }
 
-  function moveFailureLabel(code: MoveFailureCode | null): string {
+  function moveFailureLabel(code: ContentMoveFailureCode | null): string {
     if (code === null) return m.storage_moves_failure_none();
-    const labels: Record<MoveFailureCode, () => string> = {
+    const labels: Record<ContentMoveFailureCode, () => string> = {
       store_unavailable: m.storage_move_failure_store_unavailable,
       target_too_large: m.storage_move_failure_target_too_large,
       source_missing: m.storage_move_failure_source_missing,
@@ -428,11 +463,52 @@
     return labels[code]();
   }
 
+  function policyActorLabel(actor: DeploymentPolicy["policy"]["updated_by_actor"]): string {
+    const labels: Record<DeploymentPolicy["policy"]["updated_by_actor"], () => string> = {
+      migration: m.storage_policy_actor_migration,
+      platform_admin: m.storage_policy_actor_platform_admin
+    };
+    return labels[actor]();
+  }
+
+  function storageLocale(): string {
+    return getLocale() === "sv" ? "sv-SE" : "en-US";
+  }
+
+  function storageCount(value: number): string {
+    return new Intl.NumberFormat(storageLocale()).format(value);
+  }
+
+  function policyBytes(value: number): string {
+    const units = [
+      { bytes: 1024 ** 3, label: m.storage_unit_gb },
+      { bytes: 1024 ** 2, label: m.storage_unit_mb },
+      { bytes: 1024, label: m.storage_unit_kb }
+    ];
+    const unit = units.find((candidate) => value % candidate.bytes === 0);
+    return unit
+      ? `${storageCount(value / unit.bytes)} ${unit.label()}`
+      : `${storageCount(value)} ${m.storage_unit_b()}`;
+  }
+
+  function storageBytes(value: number): string {
+    const units = [
+      { bytes: 1024 ** 3, label: m.storage_unit_gb },
+      { bytes: 1024 ** 2, label: m.storage_unit_mb },
+      { bytes: 1024, label: m.storage_unit_kb },
+      { bytes: 1, label: m.storage_unit_b }
+    ];
+    const unit = units.find((candidate) => value >= candidate.bytes) ?? units[units.length - 1];
+    return `${new Intl.NumberFormat(storageLocale(), { maximumFractionDigits: 0 }).format(
+      value / unit.bytes
+    )} ${unit.label()}`;
+  }
+
   function storageDate(value: string | null): string {
     if (value === null) return m.storage_inventory_not_available();
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return m.storage_inventory_not_available();
-    return new Intl.DateTimeFormat(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    return new Intl.DateTimeFormat(storageLocale(), {
       dateStyle: "medium"
     }).format(date);
   }
@@ -453,18 +529,24 @@
 
   <Page.Main>
     <Settings.Page>
-      <div class="space-y-8 pb-16">
+      <div class="flex flex-col gap-6 pb-16">
         {#if loading}
-          <div data-testid="storage-loading" class="space-y-5" aria-busy="true">
-            <div class="space-y-2">
-              <div class="bg-muted h-5 w-56 animate-pulse rounded-md"></div>
-              <div class="bg-muted h-4 w-full max-w-xl animate-pulse rounded-md"></div>
+          <div data-testid="storage-loading" class="flex flex-col gap-5" aria-busy="true">
+            <div class="flex flex-col gap-2">
+              <Skeleton class="h-5 w-56" />
+              <Skeleton class="h-4 w-full max-w-xl" />
             </div>
-            <div class="bg-muted h-40 w-full animate-pulse rounded-lg"></div>
+            <Skeleton class="h-40 w-full rounded-lg" />
             <span class="sr-only">{m.storage_settings_loading()}</span>
           </div>
         {:else if loadError && !deploymentPolicy}
-          <Alert.Root variant="destructive" aria-live="assertive">
+          <Alert.Root
+            bind:ref={policyAlertRef}
+            data-testid="policy-recovery-alert"
+            tabindex={-1}
+            variant="destructive"
+            aria-live="assertive"
+          >
             <AlertCircle />
             <Alert.Title>{m.storage_settings_load_error_title()}</Alert.Title>
             <Alert.Description>
@@ -475,12 +557,16 @@
             </Alert.Description>
           </Alert.Root>
         {:else if deploymentPolicy}
-          <div class="max-w-3xl space-y-2">
+          <div class="flex max-w-3xl flex-col gap-2">
             <p class="text-secondary text-sm leading-6">
               {m.storage_settings_description()}
             </p>
             <p class="text-muted text-xs">
-              {m.storage_settings_revision({ revision: deploymentPolicy.policy.revision })}
+              {m.storage_settings_last_changed({
+                date: storageDate(deploymentPolicy.policy.updated_at),
+                actor: policyActorLabel(deploymentPolicy.policy.updated_by_actor),
+                revision: deploymentPolicy.policy.revision
+              })}
             </p>
           </div>
 
@@ -492,242 +578,313 @@
             </Alert.Root>
           {/if}
 
-          {#if selectedObjectStoreDegraded}
-            <Alert.Root variant="destructive">
-              <AlertCircle />
-              <Alert.Title>{m.storage_settings_selected_target_degraded_title()}</Alert.Title>
-              <Alert.Description>
-                {m.storage_settings_selected_target_degraded_description()}
-              </Alert.Description>
-            </Alert.Root>
-          {/if}
-
-          <Alert.Root>
-            <Info />
-            <Alert.Title>{m.storage_settings_new_writes_only_title()}</Alert.Title>
-            <Alert.Description>
-              <p>{m.storage_settings_no_move_notice()}</p>
-              <p>{m.storage_settings_no_fallback_notice()}</p>
-            </Alert.Description>
-          </Alert.Root>
-
-          {#if stale}
-            <Alert.Root variant="destructive" aria-live="assertive">
-              <AlertCircle />
-              <Alert.Title>{m.storage_settings_stale_title()}</Alert.Title>
-              <Alert.Description>
-                <p>{m.storage_settings_stale_description()}</p>
-                <Button
-                  class="mt-3"
-                  variant="outline"
-                  disabled={reloading}
-                  onclick={() => loadPolicy()}
-                >
-                  {#if reloading}
-                    <Loader2 class="animate-spin" />
-                    {m.storage_settings_reloading()}
-                  {:else}
-                    {m.storage_settings_reload_latest()}
-                  {/if}
-                </Button>
-              </Alert.Description>
-            </Alert.Root>
-          {:else if loadError}
-            <Alert.Root variant="destructive" aria-live="assertive">
-              <AlertCircle />
-              <Alert.Title>{m.storage_settings_reload_error_title()}</Alert.Title>
-              <Alert.Description>{m.storage_settings_reload_error_description()}</Alert.Description>
-            </Alert.Root>
-          {/if}
-
-          {#if targetUnavailable}
-            <Alert.Root variant="destructive" aria-live="assertive">
-              <AlertCircle />
-              <Alert.Title>{m.storage_settings_target_unavailable_title()}</Alert.Title>
-              <Alert.Description>
-                {m.storage_settings_target_unavailable_description()}
-              </Alert.Description>
-            </Alert.Root>
-          {/if}
-
-          {#if saveOutcomeUnknown}
-            <Alert.Root variant="destructive" aria-live="assertive">
-              <AlertCircle />
-              <Alert.Title>{m.storage_settings_save_outcome_unknown_title()}</Alert.Title>
-              <Alert.Description>
-                <p>{m.storage_settings_save_outcome_unknown_description()}</p>
-                <Button
-                  class="mt-3"
-                  variant="outline"
-                  disabled={reloading}
-                  onclick={() => loadPolicy()}
-                >
-                  {#if reloading}
-                    <Loader2 class="animate-spin" />
-                    {m.storage_settings_reloading()}
-                  {:else}
-                    {m.storage_settings_reload_latest()}
-                  {/if}
-                </Button>
-              </Alert.Description>
-            </Alert.Root>
-          {/if}
-
-          {#if saveSuccess}
-            <Alert.Root aria-live="polite">
-              <CheckCircle2 />
-              <Alert.Title>{m.storage_settings_save_success()}</Alert.Title>
-            </Alert.Root>
-          {/if}
-
           <form
-            class="space-y-10"
+            class="flex flex-col gap-6"
             onsubmit={(event) => {
               event.preventDefault();
               void savePolicy();
             }}
           >
-            <section class="border-default space-y-5 border-b pb-10">
-              <div class="max-w-3xl space-y-1">
-                <h2 class="text-lg font-semibold">{m.storage_settings_target_title()}</h2>
-                <p class="text-secondary text-sm leading-6">
-                  {m.storage_settings_target_description()}
-                </p>
-              </div>
+            <PolicySection
+              id="storage-target"
+              title={m.storage_settings_target_title()}
+              description={m.storage_settings_target_description()}
+              summary={storageTargetLabel(
+                canEdit ? storageTarget : deploymentPolicy.policy.new_write_storage_target
+              )}
+              summaryVariant={selectedObjectStoreDegraded ? "destructive" : "default"}
+            >
+              {#snippet icon()}
+                <Database class="size-5" aria-hidden="true" />
+              {/snippet}
 
-              <fieldset class="grid gap-3 sm:grid-cols-2" aria-describedby="storage-target-help">
-                <legend class="sr-only">{m.storage_settings_target_title()}</legend>
-                <label
-                  class="border-default has-[:checked]:border-accent-default has-[:checked]:bg-accent-dimmer flex items-start gap-3 rounded-lg border p-4"
-                >
-                  <input
-                    type="radio"
-                    name="storage-target"
-                    value="postgres_inline"
-                    checked={storageTarget === "postgres_inline"}
-                    disabled={!canEdit || policyMutationPending}
-                    onchange={() => (storageTarget = "postgres_inline")}
-                  />
-                  <Database class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-                  <span class="space-y-1">
-                    <span class="block font-medium">{m.storage_target_postgres_inline()}</span>
-                    <span class="text-secondary block text-sm">
-                      {m.storage_target_postgres_inline_description()}
-                    </span>
-                  </span>
-                </label>
+              {#if selectedObjectStoreDegraded}
+                <Alert.Root variant="destructive">
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_settings_selected_target_degraded_title()}</Alert.Title>
+                  <Alert.Description>
+                    {m.storage_settings_selected_target_degraded_description()}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
 
-                <label
-                  class="border-default has-[:checked]:border-accent-default has-[:checked]:bg-accent-dimmer flex items-start gap-3 rounded-lg border p-4"
-                  class:opacity-60={objectStoreUnavailable}
+              <Alert.Root>
+                <Info />
+                <Alert.Title>{m.storage_settings_new_writes_only_title()}</Alert.Title>
+                <Alert.Description>
+                  <p>{m.storage_settings_no_move_notice()}</p>
+                  <p>{m.storage_settings_no_fallback_notice()}</p>
+                </Alert.Description>
+              </Alert.Root>
+
+              {#if stale}
+                <Alert.Root
+                  bind:ref={policyAlertRef}
+                  data-testid="policy-recovery-alert"
+                  tabindex={-1}
+                  variant="destructive"
+                  aria-live="assertive"
                 >
-                  <input
-                    type="radio"
-                    name="storage-target"
-                    value="object_store"
-                    checked={storageTarget === "object_store"}
-                    disabled={!canEdit || policyMutationPending || objectStoreUnavailable}
-                    onchange={() => (storageTarget = "object_store")}
-                  />
-                  <HardDrive class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-                  <span class="space-y-1">
-                    <span class="flex flex-wrap items-center gap-2 font-medium">
-                      {m.storage_target_object_store()}
-                      {#if objectStoreUnavailable}
-                        <Badge variant="secondary">{m.storage_target_unavailable()}</Badge>
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_settings_stale_title()}</Alert.Title>
+                  <Alert.Description>
+                    <p>{m.storage_settings_stale_description()}</p>
+                    <Button
+                      class="mt-3"
+                      variant="outline"
+                      disabled={reloading}
+                      onclick={() => loadPolicy()}
+                    >
+                      {#if reloading}
+                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        {m.storage_settings_reloading()}
+                      {:else}
+                        {m.storage_settings_reload_latest()}
                       {/if}
-                    </span>
-                    <span class="text-secondary block text-sm">
-                      {m.storage_target_object_store_description()}
-                    </span>
-                    {#if objectStoreCapability}
-                      <span class="text-muted block text-xs">
-                        {readinessLabel(objectStoreCapability.readiness_code)}
+                    </Button>
+                  </Alert.Description>
+                </Alert.Root>
+              {:else if loadError}
+                <Alert.Root
+                  bind:ref={policyAlertRef}
+                  data-testid="policy-recovery-alert"
+                  tabindex={-1}
+                  variant="destructive"
+                  aria-live="assertive"
+                >
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_settings_reload_error_title()}</Alert.Title>
+                  <Alert.Description>
+                    {m.storage_settings_reload_error_description()}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
+
+              {#if targetUnavailable}
+                <Alert.Root
+                  bind:ref={policyAlertRef}
+                  data-testid="policy-recovery-alert"
+                  tabindex={-1}
+                  variant="destructive"
+                  aria-live="assertive"
+                >
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_settings_target_unavailable_title()}</Alert.Title>
+                  <Alert.Description>
+                    {m.storage_settings_target_unavailable_description()}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
+
+              {#if saveOutcomeUnknown}
+                <Alert.Root
+                  bind:ref={policyAlertRef}
+                  data-testid="policy-recovery-alert"
+                  tabindex={-1}
+                  variant="destructive"
+                  aria-live="assertive"
+                >
+                  <AlertCircle />
+                  <Alert.Title>{m.storage_settings_save_outcome_unknown_title()}</Alert.Title>
+                  <Alert.Description>
+                    <p>{m.storage_settings_save_outcome_unknown_description()}</p>
+                    <Button
+                      class="mt-3"
+                      variant="outline"
+                      disabled={reloading}
+                      onclick={() => loadPolicy()}
+                    >
+                      {#if reloading}
+                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        {m.storage_settings_reloading()}
+                      {:else}
+                        {m.storage_settings_reload_latest()}
+                      {/if}
+                    </Button>
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
+
+              {#if saveSuccess}
+                <Alert.Root aria-live="polite">
+                  <CheckCircle2 />
+                  <Alert.Title>{m.storage_settings_save_success()}</Alert.Title>
+                </Alert.Root>
+              {/if}
+
+              {#if canEdit}
+                <Field.Set>
+                  <Field.Legend class="sr-only">{m.storage_settings_target_title()}</Field.Legend>
+                  <RadioGroup.Root
+                    bind:value={() => storageTarget, updateStorageTarget}
+                    class="grid gap-3 sm:grid-cols-2"
+                    disabled={policyMutationPending}
+                    aria-invalid={storageTarget === "object_store" && objectStoreUnavailable}
+                    aria-describedby="storage-target-help"
+                  >
+                    <Field.Label
+                      for="storage-target-postgres"
+                      class="border-default has-data-[state=checked]:border-accent-default has-data-[state=checked]:bg-accent-dimmer w-auto cursor-pointer items-start rounded-lg border p-4"
+                    >
+                      <RadioGroup.Item
+                        id="storage-target-postgres"
+                        value="postgres_inline"
+                        class="mt-0.5"
+                      />
+                      <Database class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                      <span class="flex flex-col gap-1">
+                        <span class="font-medium">{m.storage_target_postgres_inline()}</span>
+                        <span class="text-secondary text-sm">
+                          {m.storage_target_postgres_inline_description()}
+                        </span>
                       </span>
-                    {/if}
-                  </span>
-                </label>
-              </fieldset>
-              <p id="storage-target-help" class="text-muted text-xs">
-                {m.storage_settings_target_help()}
-              </p>
-            </section>
+                    </Field.Label>
 
-            <section class="border-default space-y-5 border-b pb-10">
-              <div class="max-w-3xl space-y-1">
-                <h2 class="text-lg font-semibold">{m.storage_settings_limits_title()}</h2>
-                <p class="text-secondary text-sm leading-6">
-                  {m.storage_settings_limits_description()}
-                </p>
-              </div>
+                    <Field.Label
+                      for="storage-target-object-store"
+                      class="border-default has-data-[state=checked]:border-accent-default has-data-[state=checked]:bg-accent-dimmer data-[disabled=true]:opacity-60 w-auto cursor-pointer items-start rounded-lg border p-4"
+                      data-disabled={objectStoreUnavailable}
+                    >
+                      <RadioGroup.Item
+                        id="storage-target-object-store"
+                        value="object_store"
+                        disabled={objectStoreUnavailable}
+                        class="mt-0.5"
+                      />
+                      <HardDrive class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                      <span class="flex flex-col gap-1">
+                        <span class="flex flex-wrap items-center gap-2 font-medium">
+                          {m.storage_target_object_store()}
+                          {#if objectStoreUnavailable}
+                            <Badge variant="secondary">{m.storage_target_unavailable()}</Badge>
+                          {/if}
+                        </span>
+                        <span class="text-secondary text-sm">
+                          {m.storage_target_object_store_description()}
+                        </span>
+                        {#if objectStoreCapability}
+                          <span class="text-muted text-xs">
+                            {readinessLabel(objectStoreCapability.readiness_code)}
+                          </span>
+                        {/if}
+                        {#if objectStoreUnavailable}
+                          <Button
+                            href="https://docs.eneo.ai/guides/object-content-storage"
+                            target="_blank"
+                            rel="noreferrer"
+                            variant="link"
+                            size="sm"
+                            class="h-auto w-fit px-0"
+                            onclick={(event) => event.stopPropagation()}
+                          >
+                            {m.storage_settings_object_store_docs()}
+                            <ExternalLink data-icon="inline-end" aria-hidden="true" />
+                          </Button>
+                        {/if}
+                      </span>
+                    </Field.Label>
+                  </RadioGroup.Root>
+                  <Field.Description id="storage-target-help">
+                    {m.storage_settings_target_help()}
+                  </Field.Description>
+                </Field.Set>
+              {:else}
+                <div class="flex items-start gap-3">
+                  {#if deploymentPolicy.policy.new_write_storage_target === "postgres_inline"}
+                    <Database class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                  {:else}
+                    <HardDrive class="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                  {/if}
+                  <div class="flex flex-col gap-1">
+                    <p class="font-medium">
+                      {storageTargetLabel(deploymentPolicy.policy.new_write_storage_target)}
+                    </p>
+                    <p class="text-secondary text-sm">
+                      {deploymentPolicy.policy.new_write_storage_target === "postgres_inline"
+                        ? m.storage_target_postgres_inline_description()
+                        : m.storage_target_object_store_description()}
+                    </p>
+                  </div>
+                </div>
+              {/if}
+            </PolicySection>
 
-              <div class="grid gap-5 sm:grid-cols-2">
-                <div class="space-y-2">
-                  <label for="session-file-limit" class="text-sm font-medium">
-                    {m.storage_limit_session_file()}
-                  </label>
-                  <Input
+            <PolicySection
+              id="storage-limits"
+              title={m.storage_settings_limits_title()}
+              description={m.storage_settings_limits_description()}
+              summary={m.storage_settings_revision({ revision: deploymentPolicy.policy.revision })}
+              summaryVariant="outline"
+            >
+              {#snippet icon()}
+                <Gauge class="size-5" aria-hidden="true" />
+              {/snippet}
+
+              {#if canEdit}
+                <Field.Group class="grid gap-5 sm:grid-cols-2">
+                  <ByteLimitField
                     id="session-file-limit"
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    disabled={!canEdit || policyMutationPending}
-                    bind:value={sessionFileLimitBytes}
+                    label={m.storage_limit_session_file()}
+                    description={m.storage_limit_bytes_help()}
+                    bind:bytes={sessionFileLimitBytes}
+                    storedBytes={deploymentPolicy.policy.session_file_limit_bytes}
+                    disabled={policyMutationPending}
                   />
-                  <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
-                </div>
-
-                <div class="space-y-2">
-                  <label for="session-image-limit" class="text-sm font-medium">
-                    {m.storage_limit_session_image()}
-                  </label>
-                  <Input
+                  <ByteLimitField
                     id="session-image-limit"
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    disabled={!canEdit || policyMutationPending}
-                    bind:value={sessionImageLimitBytes}
+                    label={m.storage_limit_session_image()}
+                    description={m.storage_limit_bytes_help()}
+                    bind:bytes={sessionImageLimitBytes}
+                    storedBytes={deploymentPolicy.policy.session_image_limit_bytes}
+                    disabled={policyMutationPending}
                   />
-                  <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
-                </div>
-
-                <div class="space-y-2">
-                  <label for="knowledge-file-limit" class="text-sm font-medium">
-                    {m.storage_limit_knowledge_file()}
-                  </label>
-                  <Input
+                  <ByteLimitField
                     id="knowledge-file-limit"
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    disabled={!canEdit || policyMutationPending}
-                    bind:value={knowledgeFileLimitBytes}
+                    label={m.storage_limit_knowledge_file()}
+                    description={m.storage_limit_bytes_help()}
+                    bind:bytes={knowledgeFileLimitBytes}
+                    storedBytes={deploymentPolicy.policy.knowledge_file_limit_bytes}
+                    disabled={policyMutationPending}
                   />
-                  <p class="text-muted text-xs">{m.storage_limit_bytes_help()}</p>
-                </div>
-
-                <div class="space-y-2">
-                  <label for="transcription-audio-limit" class="text-sm font-medium">
-                    {m.storage_limit_transcription_audio()}
-                  </label>
-                  <Input
+                  <ByteLimitField
                     id="transcription-audio-limit"
-                    type="number"
-                    min="1"
-                    step="1"
-                    required
-                    disabled={!canEdit || policyMutationPending}
-                    bind:value={transcriptionAudioLimitBytes}
+                    label={m.storage_limit_transcription_audio()}
+                    description={m.storage_limit_audio_help()}
+                    bind:bytes={transcriptionAudioLimitBytes}
+                    storedBytes={deploymentPolicy.policy.transcription_audio_limit_bytes}
+                    disabled={policyMutationPending}
                   />
-                  <p class="text-muted text-xs">{m.storage_limit_audio_help()}</p>
-                </div>
-              </div>
+                </Field.Group>
+              {:else}
+                <dl class="grid gap-5 sm:grid-cols-2">
+                  <div class="flex flex-col gap-1">
+                    <dt class="text-sm font-medium">{m.storage_limit_session_file()}</dt>
+                    <dd class="text-secondary text-sm">
+                      {policyBytes(deploymentPolicy.policy.session_file_limit_bytes)}
+                    </dd>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <dt class="text-sm font-medium">{m.storage_limit_session_image()}</dt>
+                    <dd class="text-secondary text-sm">
+                      {policyBytes(deploymentPolicy.policy.session_image_limit_bytes)}
+                    </dd>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <dt class="text-sm font-medium">{m.storage_limit_knowledge_file()}</dt>
+                    <dd class="text-secondary text-sm">
+                      {policyBytes(deploymentPolicy.policy.knowledge_file_limit_bytes)}
+                    </dd>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <dt class="text-sm font-medium">{m.storage_limit_transcription_audio()}</dt>
+                    <dd class="text-secondary text-sm">
+                      {policyBytes(deploymentPolicy.policy.transcription_audio_limit_bytes)}
+                    </dd>
+                  </div>
+                </dl>
+              {/if}
 
-              <div class="border-default overflow-hidden rounded-lg border">
+              <div class="border-default overflow-x-auto rounded-lg border">
                 <Table.Root class="min-w-[760px]">
                   <Table.Caption class="sr-only">
                     {m.storage_effective_limits_caption()}
@@ -746,13 +903,13 @@
                     {#each deploymentPolicy.limits as limit (limit.use_case)}
                       <Table.Row>
                         <Table.Cell class="font-medium">{useCaseLabel(limit.use_case)}</Table.Cell>
-                        <Table.Cell>{formatBytes(limit.configured_bytes)}</Table.Cell>
-                        <Table.Cell>{formatBytes(limit.effective_bytes)}</Table.Cell>
+                        <Table.Cell>{policyBytes(limit.configured_bytes)}</Table.Cell>
+                        <Table.Cell>{policyBytes(limit.effective_bytes)}</Table.Cell>
                         <Table.Cell>{storageTargetLabel(limit.storage_target)}</Table.Cell>
                         <Table.Cell>
                           {limit.operator_ceiling_bytes === null
                             ? m.storage_effective_limits_no_ceiling()
-                            : formatBytes(limit.operator_ceiling_bytes)}
+                            : policyBytes(limit.operator_ceiling_bytes)}
                         </Table.Cell>
                         <Table.Cell>
                           {limit.constraining_source === "operator_ceiling"
@@ -764,89 +921,82 @@
                   </Table.Body>
                 </Table.Root>
               </div>
-            </section>
 
-            {#if canEdit}
-              <div class="flex flex-wrap items-center justify-end gap-3">
-                <p class="text-muted mr-auto text-sm" aria-live="polite">
-                  {dirty ? m.storage_settings_unsaved_changes() : m.storage_settings_no_changes()}
-                </p>
-                <Button
-                  type="submit"
-                  disabled={!dirty ||
-                    !validDraft ||
-                    policyMutationPending ||
-                    stale ||
-                    saveOutcomeUnknown}
+              {#if canEdit}
+                <Settings.Row
+                  fullWidth
+                  title={m.storage_settings_save()}
+                  description={dirty
+                    ? m.storage_settings_unsaved_changes()
+                    : m.storage_settings_no_changes()}
+                  hasChanges={dirty}
+                  revertFn={discardPolicyDraft}
                 >
-                  {#if saving}
-                    <Loader2 class="animate-spin" />
-                    {m.storage_settings_saving()}
-                  {:else}
-                    {m.storage_settings_save()}
-                  {/if}
-                </Button>
-              </div>
-            {/if}
+                  <div class="flex justify-end">
+                    <Button
+                      type="submit"
+                      disabled={saveUnavailable && !saving && !saveSuccess}
+                      aria-disabled={saveUnavailable}
+                      class={saveUnavailable && (saving || saveSuccess)
+                        ? "pointer-events-none opacity-50"
+                        : undefined}
+                    >
+                      {#if saving}
+                        <Loader2 data-icon="inline-start" class="animate-spin" />
+                        {m.storage_settings_saving()}
+                      {:else}
+                        {m.storage_settings_save()}
+                      {/if}
+                    </Button>
+                  </div>
+                </Settings.Row>
+              {/if}
+            </PolicySection>
           </form>
 
-          <section class="border-default space-y-4 border-t pt-8">
-            <div class="max-w-3xl space-y-1">
-              <h2 class="text-lg font-semibold">{m.storage_capabilities_title()}</h2>
-              <p class="text-secondary text-sm leading-6">
-                {m.storage_capabilities_description()}
-              </p>
-            </div>
-            <div class="border-default overflow-hidden rounded-lg border">
-              <Table.Root class="min-w-[560px]">
-                <Table.Caption class="sr-only">
-                  {m.storage_capabilities_caption()}
-                </Table.Caption>
-                <Table.Header>
-                  <Table.Row>
-                    <Table.Head>{m.storage_capabilities_target()}</Table.Head>
-                    <Table.Head>{m.storage_capabilities_configured()}</Table.Head>
-                    <Table.Head>{m.storage_capabilities_selectable()}</Table.Head>
-                    <Table.Head>{m.storage_capabilities_status()}</Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {#each deploymentPolicy.capabilities as capability (capability.target)}
-                    <Table.Row>
-                      <Table.Cell class="font-medium">
-                        {storageTargetLabel(capability.target)}
-                      </Table.Cell>
-                      <Table.Cell>
-                        {capability.configured ? m.yes() : m.no()}
-                      </Table.Cell>
-                      <Table.Cell>
-                        {capability.selectable ? m.yes() : m.no()}
-                      </Table.Cell>
-                      <Table.Cell>{readinessLabel(capability.readiness_code)}</Table.Cell>
-                    </Table.Row>
-                  {/each}
-                </Table.Body>
-              </Table.Root>
-            </div>
-          </section>
+          <StorageReadinessSection
+            capabilities={deploymentPolicy.capabilities}
+            {storageTargetLabel}
+            {readinessLabel}
+          />
 
           {#if user.is_platform_admin === true && !authorityRevoked}
-            <Separator />
-            <section class="space-y-5">
-              <div class="max-w-3xl space-y-1">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h2 class="text-lg font-semibold">{m.storage_moves_title()}</h2>
-                  {#if contentMoves}
-                    <Badge variant="secondary">
-                      {contentMoves.paused
-                        ? m.storage_moves_status_paused()
-                        : m.storage_moves_status_running()}
-                    </Badge>
-                  {/if}
-                </div>
-                <p class="text-secondary text-sm leading-6">
-                  {m.storage_moves_description()}
-                </p>
+            <PolicySection
+              id="storage-moves"
+              title={m.storage_moves_title()}
+              description={m.storage_moves_description()}
+              summary={contentMoves
+                ? contentMoves.paused
+                  ? m.storage_moves_status_paused()
+                  : m.storage_moves_status_running()
+                : moveStatus === "loading"
+                  ? m.loading()
+                  : m.storage_inventory_not_available()}
+              summaryVariant={moveStatus === "error"
+                ? "destructive"
+                : contentMoves?.paused
+                  ? "outline"
+                  : "default"}
+            >
+              {#snippet icon()}
+                <ArrowRightLeft class="size-5" aria-hidden="true" />
+              {/snippet}
+
+              <div class="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={moveStatus === "loading" || moveActionPending !== null}
+                  aria-busy={moveStatus === "loading"}
+                  onclick={loadMoves}
+                >
+                  <RefreshCw
+                    data-icon="inline-start"
+                    class={moveStatus === "loading" ? "animate-spin" : undefined}
+                    aria-hidden="true"
+                  />
+                  {m.storage_moves_refresh()}
+                </Button>
               </div>
 
               {#if objectStoreUnavailable}
@@ -860,7 +1010,13 @@
               {/if}
 
               {#if moveActionStale}
-                <Alert.Root variant="destructive" aria-live="assertive">
+                <Alert.Root
+                  bind:ref={moveAlertRef}
+                  data-testid="move-recovery-alert"
+                  tabindex={-1}
+                  variant="destructive"
+                  aria-live="assertive"
+                >
                   <AlertCircle />
                   <Alert.Title>{m.storage_moves_stale_title()}</Alert.Title>
                   <Alert.Description>
@@ -871,11 +1027,18 @@
                   </Alert.Description>
                 </Alert.Root>
               {:else if moveActionError}
-                <Alert.Root variant="destructive" aria-live="assertive">
+                <Alert.Root
+                  bind:ref={moveAlertRef}
+                  data-testid="move-recovery-alert"
+                  tabindex={-1}
+                  variant="destructive"
+                  aria-live="assertive"
+                >
                   <AlertCircle />
                   <Alert.Title>{m.storage_moves_action_error_title()}</Alert.Title>
-                  <Alert.Description>{m.storage_moves_action_error_description()}</Alert.Description
-                  >
+                  <Alert.Description>
+                    {m.storage_moves_action_error_description()}
+                  </Alert.Description>
                 </Alert.Root>
               {:else if moveOutcomeUnknown}
                 <Alert.Root aria-live="polite">
@@ -890,22 +1053,32 @@
                   <CheckCircle2 />
                   <Alert.Title>
                     {m.storage_moves_queue_result({
-                      queued: moveQueueResult.queued_count,
-                      tooLarge: moveQueueResult.target_too_large_count
+                      queued: storageCount(moveQueueResult.queued_count),
+                      tooLarge: storageCount(moveQueueResult.target_too_large_count)
                     })}
                   </Alert.Title>
                 </Alert.Root>
               {/if}
 
               <Field.Group class="grid gap-4 sm:grid-cols-2">
-                <Field.Field data-disabled={moveActionPending !== null || undefined}>
+                <Field.Field
+                  data-disabled={moveActionPending !== null || undefined}
+                  data-invalid={moveTarget === "object_store" && objectStoreUnavailable
+                    ? true
+                    : undefined}
+                >
                   <Field.Label for="move-target">{m.storage_moves_target()}</Field.Label>
                   <Select.Root
                     type="single"
                     bind:value={moveTarget}
                     disabled={moveActionPending !== null}
                   >
-                    <Select.Trigger id="move-target" class="w-full">
+                    <Select.Trigger
+                      id="move-target"
+                      class="w-full"
+                      aria-invalid={moveTarget === "object_store" && objectStoreUnavailable}
+                      aria-describedby="move-target-description"
+                    >
                       <span data-slot="select-value">{storageTargetLabel(moveTarget)}</span>
                     </Select.Trigger>
                     <Select.Content>
@@ -922,6 +1095,9 @@
                       </Select.Group>
                     </Select.Content>
                   </Select.Root>
+                  <Field.Description id="move-target-description">
+                    {m.storage_settings_target_help()}
+                  </Field.Description>
                 </Field.Field>
                 <Field.Field
                   data-disabled={moveActionPending !== null || undefined}
@@ -944,14 +1120,16 @@
                   </Field.Description>
                 </Field.Field>
               </Field.Group>
+
               <div class="flex flex-wrap gap-3">
                 <Button
                   type="button"
-                  disabled={objectStoreUnavailable ||
-                    !validMoveLimit ||
-                    moveStatus !== "idle" ||
-                    moveActionPending !== null}
+                  disabled={queueUnavailable && moveActionPending !== "queue"}
+                  aria-disabled={queueUnavailable}
                   aria-busy={moveActionPending === "queue"}
+                  class={queueUnavailable && moveActionPending === "queue"
+                    ? "pointer-events-none opacity-50"
+                    : undefined}
                   onclick={queueContentMoves}
                 >
                   {#if moveActionPending === "queue"}
@@ -979,7 +1157,13 @@
                   {m.storage_moves_loading()}
                 </p>
               {:else if moveStatus === "error"}
-                <Alert.Root variant="destructive" aria-live="assertive">
+                <Alert.Root
+                  bind:ref={moveStatusAlertRef}
+                  data-testid="move-status-recovery-alert"
+                  tabindex={-1}
+                  variant="destructive"
+                  aria-live="assertive"
+                >
                   <AlertCircle />
                   <Alert.Title>{m.storage_moves_load_error_title()}</Alert.Title>
                   <Alert.Description>
@@ -1015,8 +1199,8 @@
                           </Table.Cell>
                           <Table.Cell>{moveStateLabel(item.state)}</Table.Cell>
                           <Table.Cell>{moveFailureLabel(item.failure_code)}</Table.Cell>
-                          <Table.Cell>{item.count}</Table.Cell>
-                          <Table.Cell>{formatBytes(item.bytes)}</Table.Cell>
+                          <Table.Cell>{storageCount(item.count)}</Table.Cell>
+                          <Table.Cell>{storageBytes(item.bytes)}</Table.Cell>
                           <Table.Cell>{storageDate(item.oldest_updated_at)}</Table.Cell>
                         </Table.Row>
                       {/each}
@@ -1024,69 +1208,19 @@
                   </Table.Root>
                 </div>
               {/if}
-            </section>
-          {/if}
+            </PolicySection>
 
-          {#if user.is_platform_admin === true && !authorityRevoked}
-            <section class="space-y-4 pb-8">
-              <div class="max-w-3xl space-y-1">
-                <h2 class="text-lg font-semibold">{m.storage_inventory_title()}</h2>
-                <p class="text-secondary text-sm leading-6">
-                  {m.storage_inventory_description()}
-                </p>
-              </div>
-              {#if inventoryStatus === "loading"}
-                <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
-                  <Loader2 class="size-4 animate-spin" />
-                  {m.storage_inventory_loading()}
-                </p>
-              {:else if inventoryStatus === "error"}
-                <Alert.Root variant="destructive" aria-live="assertive">
-                  <AlertCircle />
-                  <Alert.Title>{m.storage_inventory_error_title()}</Alert.Title>
-                  <Alert.Description>
-                    <p>{m.storage_inventory_error_description()}</p>
-                    <Button class="mt-3" variant="outline" onclick={loadInventory}>
-                      {m.retry()}
-                    </Button>
-                  </Alert.Description>
-                </Alert.Root>
-              {:else if contentInventory?.inventory.length === 0}
-                <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
-                  {m.storage_inventory_empty()}
-                </p>
-              {:else if contentInventory}
-                <div class="border-default overflow-hidden rounded-lg border">
-                  <Table.Root class="min-w-[640px]">
-                    <Table.Caption class="sr-only">
-                      {m.storage_inventory_caption()}
-                    </Table.Caption>
-                    <Table.Header>
-                      <Table.Row>
-                        <Table.Head>{m.storage_inventory_target()}</Table.Head>
-                        <Table.Head>{m.storage_inventory_state()}</Table.Head>
-                        <Table.Head>{m.storage_inventory_count()}</Table.Head>
-                        <Table.Head>{m.storage_inventory_bytes()}</Table.Head>
-                        <Table.Head>{m.storage_inventory_oldest()}</Table.Head>
-                      </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                      {#each contentInventory.inventory as item (`${item.target}-${item.state}`)}
-                        <Table.Row>
-                          <Table.Cell class="font-medium"
-                            >{storageTargetLabel(item.target)}</Table.Cell
-                          >
-                          <Table.Cell>{contentStateLabel(item.state)}</Table.Cell>
-                          <Table.Cell>{item.count}</Table.Cell>
-                          <Table.Cell>{formatBytes(item.bytes)}</Table.Cell>
-                          <Table.Cell>{storageDate(item.oldest_created_at)}</Table.Cell>
-                        </Table.Row>
-                      {/each}
-                    </Table.Body>
-                  </Table.Root>
-                </div>
-              {/if}
-            </section>
+            <StorageInventorySection
+              inventory={contentInventory}
+              status={inventoryStatus}
+              onRetry={loadInventory}
+              onRefresh={loadInventory}
+              {storageTargetLabel}
+              {contentStateLabel}
+              {storageDate}
+              {storageCount}
+              {storageBytes}
+            />
           {/if}
         {/if}
       </div>

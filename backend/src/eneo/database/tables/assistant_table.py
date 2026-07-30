@@ -1,6 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -91,6 +92,16 @@ class Assistants(BasePublic):
             "space_id",
             "id",
             unique=True,
+        ),
+        # Serves the keyset walk in get_personal_defaults_page: pages order by
+        # (created_at, id) and only default assistants qualify, so a partial
+        # index gives every page an ordered range scan instead of re-sorting
+        # the tenant's remaining rows.
+        Index(
+            "ix_assistants_default_created_at_id",
+            "created_at",
+            "id",
+            postgresql_where=sa.text("is_default = true"),
         ),
         {"extend_existing": True},  # Temporary
     )

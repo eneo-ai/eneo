@@ -27,6 +27,9 @@ class Questions(BasePublic):
     answer: Mapped[str] = mapped_column()
     num_tokens_question: Mapped[int] = mapped_column()
     num_tokens_answer: Mapped[int] = mapped_column()
+    context_prompt_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
+    context_completion_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
+    skill_context_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
     tool_calls: Mapped[Optional[list[object]]] = mapped_column(JSONB, nullable=True)
     reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
     skill_provenance: Mapped[Optional[list[dict[str, object]]]] = mapped_column(

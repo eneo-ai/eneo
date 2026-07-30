@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.files.text import NoExtractableTextError
+from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
@@ -17,6 +18,15 @@ def _remove_file(filepath: Path):
         os.remove(filepath)
 
 
+def _job_file_path(job_id: UUID, params: UploadInfoBlob | Transcription) -> Path:
+    # Remove only when the minimum upgrade source includes this release, pre-bridge
+    # ARQ backlog has drained (TTL ~24h), and no rollback window remains.
+    legacy_path = getattr(params, "filepath", None)
+    if isinstance(legacy_path, str) and legacy_path.strip():
+        return Path(legacy_path)
+    return job_staging_path(job_id)
+
+
 async def transcription_task(
     *,
     job_id: UUID,
@@ -25,7 +35,7 @@ async def transcription_task(
 ):
     task_manager = container.task_manager(job_id=job_id)
     async with task_manager.set_status_on_exception():
-        filepath = Path(params.filepath)
+        filepath = _job_file_path(job_id, params)
 
         # Define cleanup function
         task_manager.cleanup_func = lambda: _remove_file(filepath)
@@ -79,7 +89,7 @@ async def upload_info_blob_task(
 ):
     task_manager = container.task_manager(job_id=job_id)
     async with task_manager.set_status_on_exception():
-        filepath = Path(params.filepath)
+        filepath = _job_file_path(job_id, params)
 
         # Define cleanup function
         task_manager.cleanup_func = lambda: _remove_file(filepath)

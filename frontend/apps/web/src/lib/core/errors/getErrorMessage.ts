@@ -63,12 +63,15 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- Concurrent changes ---
   9043: () => m.eneo_error_9043(), // SKILL_REVISION_CONFLICT
   9052: () => m.eneo_error_9052(), // SKILL_EXECUTION_BLOCK_CONFLICT
+  9055: () => m.eneo_error_9055(), // SKILL_RUNTIME_POLICY_CHANGED
 
   // --- Skill lifecycle ---
   9048: () => m.eneo_error_9048(), // SKILL_SLUG_TAKEN
   9049: () => m.eneo_error_9049(), // SKILL_PUBLISHED_NOT_DELETABLE
   9050: () => m.eneo_error_9050(), // SKILL_IN_USE_BY_APP_RUN
-  9051: () => m.eneo_error_9051() // SKILL_STILL_ATTACHED
+  9051: () => m.eneo_error_9051(), // SKILL_STILL_ATTACHED
+  9053: () => m.eneo_error_9053(), // SKILL_NOT_PUBLISHED_FOR_BINDING
+  9054: () => m.eneo_error_9054() // SKILL_BLOCKED_FOR_BINDING
 };
 
 /**

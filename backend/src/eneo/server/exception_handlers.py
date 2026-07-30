@@ -27,9 +27,12 @@ from eneo.object_content.deployment_policy import (
 )
 from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
+    SkillBlockedForBindingError,
     SkillExecutionBlockConflictError,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
+    SkillNotPublishedForBindingError,
+    SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
 
@@ -156,11 +159,27 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "This Skill is still attached. Remove every binding before deleting it.",
         ErrorCodes.SKILL_STILL_ATTACHED,
     ),
+    SkillNotPublishedForBindingError: (
+        400,
+        "Bindings can only move to published organisation Skill versions",
+        ErrorCodes.SKILL_NOT_PUBLISHED_FOR_BINDING,
+    ),
+    SkillBlockedForBindingError: (
+        400,
+        "Blocked organisation Skills cannot receive new or changed bindings",
+        ErrorCodes.SKILL_BLOCKED_FOR_BINDING,
+    ),
     SkillExecutionBlockConflictError: (
         409,
         "This execution block changed after you reviewed it. "
         "Reload the Skill before unblocking.",
         ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
+    ),
+    SkillRuntimePolicyChangedError: (
+        409,
+        "The organisation's Skill policy changed while this move was being "
+        "validated. Run the update again against the current policy.",
+        ErrorCodes.SKILL_RUNTIME_POLICY_CHANGED,
     ),
 }
 

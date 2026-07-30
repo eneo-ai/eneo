@@ -217,11 +217,15 @@ async def test_global_inventory_requires_platform_admin_authority(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_privileged_policy_routes_reject_user_api_keys(
+async def test_policy_routes_enforce_api_key_auth_asymmetry(
     client,
     admin_user_api_key,
 ) -> None:
     headers = {"X-API-Key": admin_user_api_key.key}
+    policy = await client.get(
+        "/api/v1/admin/object-content-policy",
+        headers=headers,
+    )
     inventory = await client.get(
         "/api/v1/admin/object-content-inventory",
         headers=headers,
@@ -253,6 +257,7 @@ async def test_privileged_policy_routes_reject_user_api_keys(
         json={"expected_revision": 1, "moves_paused": True},
     )
 
+    assert policy.status_code == 200, policy.text
     for response in (inventory, replacement, moves, queue, pause):
         assert response.status_code == 403, response.text
         assert "session token" in response.text.lower()

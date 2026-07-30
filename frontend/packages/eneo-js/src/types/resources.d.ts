@@ -30,6 +30,9 @@ export type OrganizationSkillSummaryPagePublic =
   components["schemas"]["OrganizationSkillSummaryPagePublic"];
 export type SkillAdoptionProjectionPagePublic =
   components["schemas"]["SkillAdoptionProjectionPagePublic"];
+export type PersonalChatPinAdvancePublic = components["schemas"]["PersonalChatPinAdvancePublic"];
+export type AssistantFleetAdvancePublic = components["schemas"]["AssistantFleetAdvancePublic"];
+export type AppFleetAdvancePublic = components["schemas"]["AppFleetAdvancePublic"];
 export type PublishedSkillPublic = components["schemas"]["PublishedSkillPublic"];
 export type PublishedSkillSummaryPublic = components["schemas"]["PublishedSkillSummaryPublic"];
 export type PublishedSkillSummaryPagePublic =
@@ -82,6 +85,12 @@ export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];
 export type CurrentUser = components["schemas"]["UserPublic"];
+export type StorageKind = components["schemas"]["StorageKind"];
+export type ObjectContentReadinessCode = components["schemas"]["ObjectContentReadinessCode"];
+export type UploadLimitUseCase = components["schemas"]["UploadLimitUseCase"];
+export type ContentState = components["schemas"]["ContentState"];
+export type ContentMoveState = components["schemas"]["ContentMoveState"];
+export type ContentMoveFailureCode = components["schemas"]["ContentMoveFailureCode"];
 export type DeploymentPolicy = components["schemas"]["DeploymentPolicyPublic"];
 export type DeploymentPolicyUpdate = components["schemas"]["DeploymentPolicyUpdate"];
 export type ObjectContentInventory = components["schemas"]["ObjectContentInventoryPublic"];
@@ -156,13 +165,7 @@ export type Conversation = components["schemas"]["SessionPublic"] & {
 };
 export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
 export type McpToolReference = components["schemas"]["McpToolReferencePublic"];
-// num_tokens_* are populated by the backend on every persisted message and
-// streamed live via the SSE token_usage event, but are not part of the generated
-// Message schema.
-export type ConversationMessage = components["schemas"]["Message"] & {
-  num_tokens_question?: number;
-  num_tokens_answer?: number;
-};
+export type ConversationMessage = components["schemas"]["Message"];
 export type ConversationTools = components["schemas"]["UseTools"];
 export type ChatTurnDiagnostics = components["schemas"]["ChatTurnDiagnostics"];
 export type PreflightResponse = components["schemas"]["PreflightResponse"];

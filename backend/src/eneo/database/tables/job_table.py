@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BasePublic
@@ -16,3 +17,7 @@ class Jobs(BasePublic):
     result_location: Mapped[Optional[str]] = mapped_column()
     name: Mapped[Optional[str]] = mapped_column()
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    dispatch_envelope: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    dispatch_attempted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )

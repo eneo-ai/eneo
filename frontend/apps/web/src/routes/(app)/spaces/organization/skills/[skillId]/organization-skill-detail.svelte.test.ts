@@ -1,4 +1,6 @@
 import {
+  type AppFleetAdvancePublic,
+  type AssistantFleetAdvancePublic,
   EneoError,
   type OrganizationSkillPublic,
   type PublishedSkillPublic,
@@ -29,6 +31,16 @@ vi.mock("$app/navigation", () => ({
 }));
 
 import OrganizationSkillDetailPage from "./+page.svelte";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function revision(revisionNumber: number): SkillRevisionPublic {
   return {
@@ -67,8 +79,8 @@ function updatePendingSkill(): OrganizationSkillPublic {
   };
 }
 
-function publishedSkill(): PublishedSkillPublic {
-  const publishedRevision = revision(1);
+function publishedSkillAt(revisionNumber: number): PublishedSkillPublic {
+  const publishedRevision = revision(revisionNumber);
   return {
     id: "skill-1",
     slug: "hr-support",
@@ -81,6 +93,10 @@ function publishedSkill(): PublishedSkillPublic {
     execution_blocked: false,
     revision: publishedRevision
   };
+}
+
+function publishedSkill(): PublishedSkillPublic {
+  return publishedSkillAt(1);
 }
 
 function adoptionPage() {
@@ -104,6 +120,76 @@ function unblockedState(): SkillExecutionBlockState {
     skill_id: "skill-1",
     block: null
   };
+}
+
+function publicationLifecycleData({
+  skill = updatePendingSkill(),
+  adoption = Promise.resolve(adoptionPage()),
+  advanceApps = vi.fn(),
+  advanceAssistants = vi.fn(),
+  advancePersonalChat = vi.fn(),
+  getAdoption = vi.fn(),
+  publish = vi.fn(async () => {}),
+  unpublish = vi.fn(async () => {})
+}: {
+  skill?: OrganizationSkillPublic;
+  adoption?: Promise<unknown>;
+  advanceApps?: unknown;
+  advanceAssistants?: unknown;
+  advancePersonalChat?: unknown;
+  getAdoption?: unknown;
+  publish?: unknown;
+  unpublish?: unknown;
+} = {}) {
+  return {
+    skill,
+    published: publishedSkill(),
+    revisionPage: {
+      items: [],
+      count: 0,
+      limit: 25,
+      next_cursor: null
+    },
+    adoptionPage: adoption,
+    executionBlock: { ...unblockedState(), skill_id: skill.id },
+    eneo: {
+      settings: {
+        blockSkillExecution: vi.fn(),
+        getSkillExecutionBlock: vi.fn(),
+        unblockSkillExecution: vi.fn()
+      },
+      skills: {
+        organization: {
+          advanceApps,
+          advanceAssistants,
+          advancePersonalChat,
+          createRevision: vi.fn(),
+          getAdoption,
+          getRevision: vi.fn(),
+          listRevisionSummaries: vi.fn(),
+          publish,
+          restoreRevision: vi.fn(),
+          unpublish
+        }
+      }
+    }
+  };
+}
+
+function deferredAdvance() {
+  let resolve!: (value: {
+    outcome: "advanced";
+    from_revision_number: number;
+    to_revision_number: number;
+  }) => void;
+  const promise = new Promise<{
+    outcome: "advanced";
+    from_revision_number: number;
+    to_revision_number: number;
+  }>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 describe("organisation Skill detail page", () => {
@@ -170,6 +256,401 @@ describe("organisation Skill detail page", () => {
       .element(page.getByText(m.skills_revision_form_error_title()))
       .not.toBeInTheDocument();
     expect(createRevision).toHaveBeenCalledTimes(1);
+  });
+
+  test("moves the Personal Chat binding through the reviewed pin and refreshes", async () => {
+    const advancePersonalChat = vi.fn(async () => ({
+      outcome: "advanced" as const,
+      from_revision_number: 1,
+      to_revision_number: 2
+    }));
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(behindAdoption),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await expect
+      .element(
+        page.getByText(m.organization_skills_advance_description({ pinned: "1", published: "2" }))
+      )
+      .toBeVisible();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+    await expect
+      .element(page.getByText(m.organization_skills_advance_title()))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText(m.organization_skills_advance_announcement({ version: "2" })))
+      .toBeInTheDocument();
+  });
+
+  test("a retried adoption load still offers the Personal Chat update", async () => {
+    const advancePersonalChat = vi.fn(async () => ({
+      outcome: "advanced" as const,
+      from_revision_number: 1,
+      to_revision_number: 2
+    }));
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    const getAdoption = vi.fn(async () => behindAdoption);
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.reject(new Error("Transient adoption failure")),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption,
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_adoption_error_title()))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.retry() }).click();
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+  });
+
+  test("navigating to another Skill discards the reviewed update state", async () => {
+    const firstAdvance = deferredAdvance();
+    const advancePersonalChat = vi.fn(() => firstAdvance.promise);
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    const dataFor = (skillId: string) =>
+      ({
+        skill: { ...skill, id: skillId },
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(behindAdoption),
+        executionBlock: { skill_id: skillId, block: null },
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      }) as never;
+    const rendered = render(OrganizationSkillDetailPage, { data: dataFor("skill-1") });
+
+    // Submit for Skill A, then navigate to Skill B while the request runs.
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+
+    await rendered.rerender({ data: dataFor("skill-2") });
+    await expect
+      .element(page.getByText(m.organization_skills_advance_title()))
+      .not.toBeInTheDocument();
+
+    firstAdvance.resolve({
+      outcome: "advanced",
+      from_revision_number: 1,
+      to_revision_number: 2
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_advance_announcement({ version: "2" })))
+      .not.toBeInTheDocument();
+    expect(invalidate).not.toHaveBeenCalled();
+    // The dialog opened for Skill B must review Skill B, not replay Skill A.
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenLastCalledWith({
+        skillId: "skill-2",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+  });
+
+  test("keeps the update dialog open with the error when the move is refused", async () => {
+    const advancePersonalChat = vi.fn(async () => {
+      throw new Error("Refused");
+    });
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    const published = {
+      ...publishedSkill(),
+      revision_id: "revision-2",
+      revision_number: 2
+    };
+    const behindAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published,
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(behindAdoption),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_advance_confirm() }).click();
+
+    await expect.element(page.getByText(m.organization_skills_advance_error())).toBeVisible();
+    await expect.element(page.getByText(m.organization_skills_advance_title())).toBeVisible();
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  test("hides the approved snapshot when it matches the current revision", async () => {
+    const skill = {
+      ...updatePendingSkill(),
+      published_revision_number: 2,
+      publication_state: "published" as const
+    };
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill,
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await expect
+      .element(page.getByRole("heading", { name: m.skills_library_content_heading() }))
+      .toBeVisible();
+    expect(document.querySelector("#organization-skill-approved-heading")).toBeNull();
   });
 
   test("places adoption oversight after publication and before revision history", async () => {
@@ -306,6 +787,1229 @@ describe("organisation Skill detail page", () => {
     );
     expect(publish).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+  });
+
+  test("offers binding updates only for publish and respects an unchecked choice", async () => {
+    const pendingPublish = deferred<void>();
+    const publish = vi.fn(() => pendingPublish.promise);
+    const advanceApps = vi.fn();
+    const advancePersonalChat = vi.fn();
+    const advanceAssistants = vi.fn();
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advanceApps,
+              advanceAssistants,
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish,
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    const updateBindings = page.getByRole("checkbox", {
+      name: m.organization_skills_publish_update_bindings_label()
+    });
+    await expect.element(updateBindings).toBeChecked();
+    await expect
+      .element(page.getByText(m.organization_skills_publish_update_bindings_description()))
+      .toBeVisible();
+    const updateApps = page.getByRole("checkbox", {
+      name: m.organization_skills_publish_update_apps_label()
+    });
+    await expect.element(updateApps).not.toBeChecked();
+    await expect
+      .element(page.getByText(m.organization_skills_publish_update_apps_description()))
+      .toBeVisible();
+    await updateBindings.click();
+    await expect.element(updateBindings).not.toBeChecked();
+    await expect.element(updateApps).toBeDisabled();
+    await page.getByRole("button", { name: m.cancel() }).click();
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await expect.element(updateBindings).toBeChecked();
+    await updateBindings.click();
+
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+    await expect.element(updateBindings).toBeDisabled();
+    pendingPublish.resolve(undefined);
+
+    await vi.waitFor(() =>
+      expect(publish).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_revision_id: "revision-2"
+      })
+    );
+    expect(advancePersonalChat).not.toHaveBeenCalled();
+    expect(advanceAssistants).not.toHaveBeenCalled();
+    expect(advanceApps).not.toHaveBeenCalled();
+
+    await page
+      .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
+      .click();
+    await expect
+      .element(
+        page.getByRole("checkbox", {
+          name: m.organization_skills_publish_update_bindings_label()
+        })
+      )
+      .not.toBeInTheDocument();
+  });
+
+  test("updates reviewed bindings across Assistant chunks and shows the aggregate receipt", async () => {
+    const secondChunk = deferred<AssistantFleetAdvancePublic>();
+    const personalChatAdvance = deferred<{
+      outcome: "advanced";
+      from_revision_number: number;
+      to_revision_number: number;
+    }>();
+    const publish = vi.fn(async () => {});
+    const advancePersonalChat = vi.fn(() => personalChatAdvance.promise);
+    const advanceAssistants = vi
+      .fn()
+      .mockResolvedValueOnce({
+        run_id: "run-1",
+        next_cursor: "cursor-2",
+        counts: {
+          advanced: 1,
+          concurrent_change: 1,
+          incompatible: 1
+        },
+        outcomes: [
+          { assistant_id: "assistant-1", outcome: "advanced" },
+          { assistant_id: "assistant-2", outcome: "concurrent_change" },
+          {
+            assistant_id: "assistant-3",
+            outcome: "incompatible",
+            reason: "activation_unavailable"
+          }
+        ]
+      })
+      .mockReturnValueOnce(secondChunk.promise);
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        assistant_count: 5,
+        app_count: 1,
+        distinct_space_count: 2,
+        behind_published_count: 5,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        },
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 4,
+            app_count: 1,
+            personal_chat_pinned: true
+          },
+          {
+            revision_id: "revision-2",
+            revision_number: 2,
+            assistant_count: 1,
+            app_count: 0,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(reviewedAdoption),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              advanceAssistants,
+              advancePersonalChat,
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish,
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_running(), { exact: true }))
+      .toBeVisible();
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledTimes(2));
+    expect(publish).toHaveBeenCalledWith({
+      skillId: "skill-1",
+      expected_revision_id: "revision-2"
+    });
+    expect(advancePersonalChat).toHaveBeenCalledWith({
+      skillId: "skill-1",
+      expected_pinned_revision_id: "revision-1",
+      expected_published_revision_id: "revision-2"
+    });
+    expect(advanceAssistants).toHaveBeenNthCalledWith(1, {
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: null
+    });
+    expect(advanceAssistants).toHaveBeenNthCalledWith(2, {
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: "cursor-2"
+    });
+
+    secondChunk.resolve({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 1
+      },
+      outcomes: [
+        { assistant_id: "assistant-4", outcome: "advanced" },
+        {
+          assistant_id: "assistant-5",
+          outcome: "incompatible",
+          reason: "context_window"
+        }
+      ]
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_running(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_pending()))
+      .toBeVisible();
+
+    personalChatAdvance.resolve({
+      outcome: "advanced",
+      from_revision_number: 1,
+      to_revision_number: 2
+    });
+
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_rollout_progress({
+            updated: "2",
+            total: "5"
+          })
+        )
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("row", {
+          name: `${m.organization_skills_rollout_concurrent_change()} 1`
+        })
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("row", {
+          name: `${m.organization_skills_rollout_activation_unavailable()} 1`
+        })
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("row", {
+          name: `${m.organization_skills_rollout_context_window()} 1`
+        })
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_advanced()))
+      .toBeVisible();
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+  });
+
+  test("updates App bindings only after explicit acknowledgement and the Assistant walk", async () => {
+    const assistantChunk = deferred<AssistantFleetAdvancePublic>();
+    const advanceAssistants = vi.fn(() => assistantChunk.promise);
+    const advanceApps = vi.fn(async (): Promise<AppFleetAdvancePublic> => ({
+      run_id: "app-run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 1
+      },
+      outcomes: [
+        { app_id: "app-1", outcome: "advanced" },
+        {
+          app_id: "app-2",
+          outcome: "incompatible",
+          reason: "context_window"
+        }
+      ]
+    }));
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        assistant_count: 1,
+        app_count: 2,
+        distinct_space_count: 1,
+        behind_published_count: 3,
+        personal_chat: null,
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 1,
+            app_count: 2,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceApps,
+        advanceAssistants
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("checkbox", { name: m.organization_skills_publish_update_apps_label() })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledOnce());
+    expect(advanceApps).not.toHaveBeenCalled();
+
+    assistantChunk.resolve({
+      run_id: "assistant-run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+
+    await vi.waitFor(() =>
+      expect(advanceApps).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_published_revision_id: "revision-2",
+        cursor: null
+      })
+    );
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_apps_title(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_apps_progress({ updated: "1", total: "2" }))
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_apps_queued_runs_unchanged()))
+      .toBeVisible();
+  });
+
+  test("stops after an App chunk and restarts with a fresh stateless walk", async () => {
+    const firstAppChunk = deferred<AppFleetAdvancePublic>();
+    const advanceApps = vi
+      .fn()
+      .mockReturnValueOnce(firstAppChunk.promise)
+      .mockResolvedValueOnce({
+        run_id: "app-run-2",
+        next_cursor: null,
+        counts: {
+          advanced: 1,
+          concurrent_change: 0,
+          incompatible: 0
+        },
+        outcomes: [{ app_id: "app-2", outcome: "advanced" }]
+      });
+    const advanceAssistants = vi.fn(async (): Promise<AssistantFleetAdvancePublic> => ({
+      run_id: "assistant-run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 0,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: []
+    }));
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        assistant_count: 0,
+        app_count: 2,
+        distinct_space_count: 1,
+        behind_published_count: 2,
+        personal_chat: null,
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 0,
+            app_count: 2,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceApps,
+        advanceAssistants
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("checkbox", { name: m.organization_skills_publish_update_apps_label() })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await vi.waitFor(() => expect(advanceApps).toHaveBeenCalledOnce());
+    await page.getByRole("button", { name: m.organization_skills_rollout_stop() }).click();
+    firstAppChunk.resolve({
+      run_id: "app-run-1",
+      next_cursor: "cursor-2",
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ app_id: "app-1", outcome: "advanced" }]
+    });
+
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_status_stopped(), { exact: true }).first()
+      )
+      .toBeVisible();
+    expect(advanceApps).toHaveBeenCalledTimes(1);
+
+    await page.getByRole("button", { name: m.organization_skills_rollout_restart() }).click();
+    await vi.waitFor(() => expect(advanceApps).toHaveBeenCalledTimes(2));
+    expect(advanceApps).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: null
+    });
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_apps_progress({ updated: "1", total: "1" }))
+      )
+      .toBeVisible();
+  });
+
+  test("continues publication and the Assistant walk when adoption could not be read", async () => {
+    const publish = vi.fn(async () => {});
+    const getAdoption = vi.fn(async () => {
+      throw new Error("Adoption unavailable");
+    });
+    const advancePersonalChat = vi.fn();
+    const advanceAssistants = vi.fn(async () => ({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 0,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: []
+    }));
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.reject(new Error("Adoption unavailable")),
+        advanceAssistants,
+        advancePersonalChat,
+        getAdoption,
+        publish
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await vi.waitFor(() =>
+      expect(publish).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_revision_id: "revision-2"
+      })
+    );
+    await vi.waitFor(() =>
+      expect(advanceAssistants).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_published_revision_id: "revision-2",
+        cursor: null
+      })
+    );
+    expect(getAdoption).toHaveBeenCalledWith({
+      skillId: "skill-1",
+      limit: 1,
+      cursor: null
+    });
+    expect(advancePersonalChat).not.toHaveBeenCalled();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_not_applicable()))
+      .not.toBeInTheDocument();
+  });
+
+  test("recovers the reviewed Personal Chat pin when the loader adoption read failed", async () => {
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        }
+      }
+    };
+    const getAdoption = vi.fn(async () => reviewedAdoption);
+    const advancePersonalChat = vi.fn(async () => ({
+      outcome: "advanced" as const,
+      from_revision_number: 1,
+      to_revision_number: 2
+    }));
+    const advanceAssistants = vi.fn(async () => ({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 0,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: []
+    }));
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.reject(new Error("Loader adoption unavailable")),
+        advanceAssistants,
+        advancePersonalChat,
+        getAdoption
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await vi.waitFor(() =>
+      expect(advancePersonalChat).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_pinned_revision_id: "revision-1",
+        expected_published_revision_id: "revision-2"
+      })
+    );
+    expect(getAdoption).toHaveBeenCalledWith({
+      skillId: "skill-1",
+      limit: 1,
+      cursor: null
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_advanced()))
+      .toBeVisible();
+  });
+
+  test("shows a Personal Chat refusal without stopping the Assistant update", async () => {
+    const advancePersonalChat = vi.fn(async () => {
+      throw new Error("Refused");
+    });
+    const advanceAssistants = vi.fn(async () => ({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" as const }]
+    }));
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 1,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        },
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 1,
+            app_count: 0,
+            personal_chat_pinned: true
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceAssistants,
+        advancePersonalChat
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
+      .toBeVisible();
+    expect(advancePersonalChat).toHaveBeenCalledOnce();
+    expect(advanceAssistants).toHaveBeenCalledOnce();
+  });
+
+  test("retries completed exclusions and a failed Personal Chat without a remount", async () => {
+    const advancePersonalChat = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Refused"))
+      .mockResolvedValueOnce({
+        outcome: "advanced" as const,
+        from_revision_number: 1,
+        to_revision_number: 2
+      });
+    const advanceAssistants = vi
+      .fn()
+      .mockResolvedValueOnce({
+        run_id: "run-1",
+        next_cursor: null,
+        counts: {
+          advanced: 0,
+          concurrent_change: 1,
+          incompatible: 0
+        },
+        outcomes: [{ assistant_id: "assistant-1", outcome: "concurrent_change" as const }]
+      })
+      .mockResolvedValueOnce({
+        run_id: "run-2",
+        next_cursor: null,
+        counts: {
+          advanced: 1,
+          concurrent_change: 0,
+          incompatible: 0
+        },
+        outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" as const }]
+      });
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 1,
+        behind_published_count: 1,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        },
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 1,
+            app_count: 0,
+            personal_chat_pinned: true
+          }
+        ]
+      }
+    };
+    const rendered = render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceAssistants,
+        advancePersonalChat
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
+      .toBeVisible();
+
+    await rendered.rerender({
+      data: {
+        ...publicationLifecycleData({
+          skill: {
+            ...updatePendingSkill(),
+            published_revision_number: 2,
+            publication_state: "published" as const
+          },
+          adoption: Promise.resolve(reviewedAdoption),
+          advanceAssistants,
+          advancePersonalChat
+        }),
+        published: publishedSkillAt(2)
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_rollout_recovery_action() })
+      .click();
+
+    await vi.waitFor(() => {
+      expect(advanceAssistants).toHaveBeenCalledTimes(2);
+      expect(advancePersonalChat).toHaveBeenCalledTimes(2);
+    });
+    expect(advanceAssistants).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: null
+    });
+    expect(advancePersonalChat).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_pinned_revision_id: "revision-1",
+      expected_published_revision_id: "revision-2"
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_advanced()))
+      .toBeVisible();
+  });
+
+  test("retains completed Assistant counts when a later chunk fails", async () => {
+    const advanceAssistants = vi
+      .fn()
+      .mockResolvedValueOnce({
+        run_id: "run-1",
+        next_cursor: "cursor-2",
+        counts: {
+          advanced: 1,
+          concurrent_change: 0,
+          incompatible: 0
+        },
+        outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+      })
+      .mockRejectedValueOnce(new Error("Chunk unavailable"));
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 2,
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 2,
+            app_count: 0,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceAssistants
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_failed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_rollout_progress({
+            updated: "1",
+            total: "2"
+          })
+        )
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .toBeVisible();
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+  });
+
+  test("stops between Assistant chunks and restarts a fresh server walk", async () => {
+    const firstChunk = deferred<AssistantFleetAdvancePublic>();
+    const restartChunk = deferred<AssistantFleetAdvancePublic>();
+    const publish = vi.fn(async () => {});
+    const advanceAssistants = vi
+      .fn()
+      .mockReturnValueOnce(firstChunk.promise)
+      .mockReturnValueOnce(restartChunk.promise);
+    const restartedResult: AssistantFleetAdvancePublic = {
+      run_id: "run-2",
+      next_cursor: null,
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-2", outcome: "advanced" }]
+    };
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 2,
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 2,
+            app_count: 0,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceAssistants,
+        publish
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+    const publishButton = page.getByRole("button", {
+      name: m.organization_skills_publish_update_action()
+    });
+    const unpublishButton = page.getByRole("button", {
+      name: m.organization_skills_unpublish_action(),
+      exact: true
+    });
+    await expect.element(publishButton).toBeDisabled();
+    await expect.element(unpublishButton).toBeDisabled();
+    expect(publish).toHaveBeenCalledOnce();
+    await page.getByRole("button", { name: m.organization_skills_rollout_stop() }).click();
+
+    firstChunk.resolve({
+      run_id: "run-1",
+      next_cursor: "cursor-2",
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_stopped(), { exact: true }))
+      .toBeVisible();
+    await expect.element(publishButton).toBeEnabled();
+    await expect.element(unpublishButton).toBeEnabled();
+    expect(advanceAssistants).toHaveBeenCalledTimes(1);
+
+    await page.getByRole("button", { name: m.organization_skills_rollout_restart() }).click();
+    await expect.element(publishButton).toBeDisabled();
+    await expect.element(unpublishButton).toBeDisabled();
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledTimes(2));
+    expect(advanceAssistants).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: null
+    });
+    restartChunk.resolve(restartedResult);
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_rollout_progress({
+            updated: "1",
+            total: "1"
+          })
+        )
+      )
+      .toBeVisible();
+  });
+
+  test("does not restart a first-publication rollout after that publication is withdrawn", async () => {
+    const firstChunk = deferred<AssistantFleetAdvancePublic>();
+    const advanceAssistants = vi.fn(() => firstChunk.promise);
+    const publish = vi.fn(async () => {});
+    const unpublish = vi.fn(async () => {});
+    const firstPublicationSkill: OrganizationSkillPublic = {
+      ...updatePendingSkill(),
+      published_revision_number: null,
+      first_published_at: null,
+      publication_state: "draft"
+    };
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 2,
+        revision_counts: []
+      }
+    };
+    const lifecycle = {
+      skill: firstPublicationSkill,
+      adoption: Promise.resolve(reviewedAdoption),
+      advanceAssistants,
+      publish,
+      unpublish
+    };
+    const rendered = render(OrganizationSkillDetailPage, {
+      data: {
+        ...publicationLifecycleData(lifecycle),
+        published: null
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .first()
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledOnce());
+    await page.getByRole("button", { name: m.organization_skills_rollout_stop() }).click();
+
+    firstChunk.resolve({
+      run_id: "run-1",
+      next_cursor: "cursor-2",
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_stopped(), { exact: true }))
+      .toBeVisible();
+
+    const publishedSkillState: OrganizationSkillPublic = {
+      ...firstPublicationSkill,
+      published_revision_number: 2,
+      first_published_at: "2026-07-20T09:00:00Z",
+      publication_state: "published"
+    };
+    await rendered.rerender({
+      data: {
+        ...publicationLifecycleData({ ...lifecycle, skill: publishedSkillState }),
+        published: publishedSkillAt(2)
+      } as never
+    });
+    await page
+      .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
+      .last()
+      .click();
+    await vi.waitFor(() => expect(unpublish).toHaveBeenCalledOnce());
+
+    await rendered.rerender({
+      data: {
+        ...publicationLifecycleData({
+          ...lifecycle,
+          skill: {
+            ...publishedSkillState,
+            published_revision_number: null,
+            publication_state: "unpublished"
+          }
+        }),
+        published: null
+      } as never
+    });
+
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .not.toBeInTheDocument();
+    expect(advanceAssistants).toHaveBeenCalledTimes(1);
+  });
+
+  test("discards a running receipt and ignores its late response after navigation", async () => {
+    const lateChunk = deferred<AssistantFleetAdvancePublic>();
+    const advanceAssistants = vi.fn(() => lateChunk.promise);
+    const firstData = publicationLifecycleData({ advanceAssistants });
+    const rendered = render(OrganizationSkillDetailPage, { data: firstData as never });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledOnce());
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_running(), { exact: true }))
+      .toBeVisible();
+
+    await rendered.rerender({
+      data: publicationLifecycleData({
+        skill: { ...updatePendingSkill(), id: "skill-2" },
+        advanceAssistants
+      }) as never
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_title()))
+      .not.toBeInTheDocument();
+
+    lateChunk.resolve({
+      run_id: "run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_title()))
+      .not.toBeInTheDocument();
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  test("continues a rollout when a new draft leaves its target published", async () => {
+    const firstChunk = deferred<AssistantFleetAdvancePublic>();
+    const advanceAssistants = vi
+      .fn()
+      .mockReturnValueOnce(firstChunk.promise)
+      .mockResolvedValueOnce({
+        run_id: "run-1",
+        next_cursor: null,
+        counts: {
+          advanced: 1,
+          concurrent_change: 0,
+          incompatible: 0
+        },
+        outcomes: [{ assistant_id: "assistant-2", outcome: "advanced" }]
+      });
+    const firstData = publicationLifecycleData({ advanceAssistants });
+    const rendered = render(OrganizationSkillDetailPage, { data: firstData as never });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledOnce());
+
+    const nextRevision = revision(3);
+    await rendered.rerender({
+      data: {
+        ...publicationLifecycleData({
+          skill: {
+            ...updatePendingSkill(),
+            current_revision_id: nextRevision.id,
+            current_revision_number: nextRevision.revision_number,
+            display_name: nextRevision.display_name,
+            description: nextRevision.description,
+            content_digest: nextRevision.content_digest,
+            current_revision: nextRevision
+          },
+          advanceAssistants
+        }),
+        published: publishedSkillAt(2)
+      } as never
+    });
+
+    firstChunk.resolve({
+      run_id: "run-1",
+      next_cursor: "cursor-2",
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledTimes(2));
+    expect(advanceAssistants).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: "cursor-2"
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+  });
+
+  test("starts a fresh Assistant walk from saved adoption after a remount", async () => {
+    const advanceAssistants = vi.fn(async () => ({
+      run_id: "run-2",
+      next_cursor: null,
+      counts: {
+        advanced: 2,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [
+        { assistant_id: "assistant-1", outcome: "advanced" as const },
+        { assistant_id: "assistant-2", outcome: "advanced" as const }
+      ]
+    }));
+    const publishedRevision = revision(2);
+    const published = publishedSkillAt(2);
+    const adoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 2,
+        behind_published_count: 2,
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 2,
+            app_count: 0,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        ...publicationLifecycleData({
+          skill: {
+            ...updatePendingSkill(),
+            published_revision_number: 2,
+            publication_state: "published" as const,
+            current_revision: publishedRevision
+          },
+          adoption: Promise.resolve(adoption),
+          advanceAssistants
+        }),
+        published
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_rollout_recovery_action() })
+      .click();
+
+    await vi.waitFor(() =>
+      expect(advanceAssistants).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_published_revision_id: "revision-2",
+        cursor: null
+      })
+    );
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
   });
 
   test("keeps a publication change committed when refreshing the page data fails", async () => {

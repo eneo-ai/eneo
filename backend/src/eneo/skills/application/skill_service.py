@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -14,6 +15,7 @@ from eneo.skills.domain.skill import (
     MAX_SKILL_CATALOG_QUERY_LENGTH,
     AssistantSkillBindingReplacement,
     NormalizedSkillContent,
+    PersonalChatPinOverride,
     PublishedSkillDeactivationError,
     ResolvedSkillBinding,
     Skill,
@@ -922,8 +924,41 @@ class SkillService:
         self,
         *,
         policy_id: UUID,
+        personal_chat_pin_override: PersonalChatPinOverride | None = None,
     ) -> SkillRuntimeResolution:
         bindings = await self.repo.list_policy_bindings(policy_id=policy_id)
+        if personal_chat_pin_override is not None:
+            overridden_binding = next(
+                (
+                    binding
+                    for binding in bindings
+                    if binding.skill_id == personal_chat_pin_override.skill_id
+                ),
+                None,
+            )
+            if overridden_binding is not None:
+                candidate = await self.repo.resolve_references_for_execution_snapshot(
+                    tenant_id=self.user.tenant_id,
+                    parent_space_id=overridden_binding.skill_space_id,
+                    references=[
+                        SkillBindingReference(
+                            skill_id=personal_chat_pin_override.skill_id,
+                            skill_revision_id=personal_chat_pin_override.to_revision_id,
+                        )
+                    ],
+                )
+                if candidate:
+                    candidate_binding = replace(
+                        candidate[0],
+                        position=overridden_binding.position,
+                        activation_mode=overridden_binding.activation_mode,
+                    )
+                    bindings = [
+                        candidate_binding
+                        if binding.skill_id == personal_chat_pin_override.skill_id
+                        else binding
+                        for binding in bindings
+                    ]
         return await self._resolve_execution_blocks(
             tenant_id=self.user.tenant_id,
             bindings=bindings,
@@ -939,6 +974,34 @@ class SkillService:
             tenant_id=self.user.tenant_id,
             bindings=bindings,
         )
+
+    async def resolve_assistant_bindings_for_runtime_batch(
+        self,
+        assistant_ids: Sequence[UUID],
+    ) -> dict[UUID, SkillRuntimeResolution]:
+        bindings_by_assistant = await self.repo.list_assistant_bindings_batch(
+            assistant_ids=assistant_ids
+        )
+        all_bindings = [
+            binding
+            for bindings in bindings_by_assistant.values()
+            for binding in bindings
+        ]
+        blocks = await self._active_execution_blocks(
+            tenant_id=self.user.tenant_id,
+            bindings=all_bindings,
+        )
+        return {
+            assistant_id: SkillRuntimeResolution(
+                eligible=tuple(
+                    binding for binding in bindings if binding.skill_id not in blocks
+                ),
+                blocked=tuple(
+                    binding for binding in bindings if binding.skill_id in blocks
+                ),
+            )
+            for assistant_id, bindings in bindings_by_assistant.items()
+        }
 
     async def create_turn_plan(
         self,

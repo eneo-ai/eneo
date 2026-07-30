@@ -84,6 +84,233 @@ function emptyAdoptionPage(): SkillAdoptionProjectionPagePublic {
 }
 
 describe("Skill adoption projection", () => {
+  test("announces rollout progress and exposes only the action for the current state", async () => {
+    const onStop = vi.fn();
+    const onRestart = vi.fn();
+    const rendered = render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      run: {
+        status: "running",
+        assistantsIncluded: true,
+        provisionalTotal: 5,
+        advanced: 3,
+        concurrentChange: 1,
+        activationUnavailable: 1,
+        contextWindow: 1,
+        personalChat: "failed",
+        apps: null
+      },
+      onStop,
+      onRestart
+    });
+
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_rollout_progress({
+            updated: "3",
+            total: "6"
+          })
+        )
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_running(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_updated()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_concurrent_change()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_activation_unavailable()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_context_window()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.organization_skills_rollout_stop() }).click();
+    expect(onStop).toHaveBeenCalledOnce();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .not.toBeInTheDocument();
+
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      run: {
+        status: "stopped",
+        assistantsIncluded: true,
+        provisionalTotal: 5,
+        advanced: 3,
+        concurrentChange: 1,
+        activationUnavailable: 1,
+        contextWindow: 1,
+        personalChat: "failed",
+        apps: null
+      },
+      onStop,
+      onRestart
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_stopped(), { exact: true }))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.organization_skills_rollout_restart() }).click();
+    expect(onRestart).toHaveBeenCalledOnce();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_stop() }))
+      .not.toBeInTheDocument();
+
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      run: {
+        status: "completed",
+        assistantsIncluded: true,
+        provisionalTotal: 5,
+        advanced: 3,
+        concurrentChange: 1,
+        activationUnavailable: 1,
+        contextWindow: 1,
+        personalChat: "not_applicable",
+        apps: null
+      },
+      onStop,
+      onRestart
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_not_applicable()))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_stop() }))
+      .not.toBeInTheDocument();
+
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      run: {
+        status: "failed",
+        assistantsIncluded: true,
+        provisionalTotal: 5,
+        advanced: 3,
+        concurrentChange: 1,
+        activationUnavailable: 1,
+        contextWindow: 1,
+        personalChat: "advanced",
+        apps: null
+      },
+      onStop,
+      onRestart
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_failed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
+      .toBeVisible();
+  });
+
+  test("shows App rollout results", async () => {
+    const appProjection = adoptionPage({
+      items: [
+        {
+          kind: "app",
+          resource_id: "app-1",
+          name: "Payroll workflow",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind"
+        }
+      ]
+    });
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: appProjection,
+      getOrganizationSkillAdoption: vi.fn(),
+      publishedRevisionId: "revision-2",
+      run: {
+        status: "completed",
+        assistantsIncluded: false,
+        provisionalTotal: 0,
+        advanced: 0,
+        concurrentChange: 0,
+        activationUnavailable: 0,
+        contextWindow: 0,
+        personalChat: "not_applicable",
+        apps: {
+          status: "completed",
+          provisionalTotal: 2,
+          advanced: 1,
+          concurrentChange: 0,
+          contextWindow: 1
+        }
+      }
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_apps_title(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_apps_progress({ updated: "1", total: "2" }))
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_apps_queued_runs_unchanged()))
+      .toBeVisible();
+  });
+
+  test("offers explicit recovery for outdated App bindings", async () => {
+    const appProjection = adoptionPage({
+      items: [
+        {
+          kind: "app",
+          resource_id: "app-1",
+          name: "Payroll workflow",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind"
+        }
+      ]
+    });
+    const onStartAppUpdate = vi.fn();
+
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: appProjection,
+      getOrganizationSkillAdoption: vi.fn(),
+      publishedRevisionId: "revision-2",
+      onStartAppUpdate,
+      run: null
+    });
+    await page
+      .getByRole("button", { name: m.organization_skills_rollout_apps_recovery_action() })
+      .click();
+    expect(onStartAppUpdate).toHaveBeenCalledOnce();
+    expect(onStartAppUpdate.mock.calls[0]?.[0].items[0]?.resource_id).toBe("app-1");
+  });
+
   test("shows server-owned summary, Personal Chat pin, revision counts, and resource drift", async () => {
     render(SkillAdoptionProjection, {
       skillId: "skill-1",
@@ -116,6 +343,69 @@ describe("Skill adoption projection", () => {
       )
       .toBeVisible();
     await expect.element(page.getByRole("table").first()).toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_title()))
+      .not.toBeInTheDocument();
+  });
+
+  test("offers the Personal Chat update only through the reviewed pin", async () => {
+    const onAdvancePersonalChat = vi.fn();
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn(),
+      onAdvancePersonalChat
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_adoption_personal_chat_advance_action()
+      })
+      .click();
+
+    expect(onAdvancePersonalChat).toHaveBeenCalledWith({
+      revisionId: "revision-1",
+      revisionNumber: 1
+    });
+  });
+
+  test("shows no Personal Chat update without a handler or when the pin is current", async () => {
+    const rendered = render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage(),
+      getOrganizationSkillAdoption: vi.fn()
+    });
+
+    await expect
+      .element(
+        page.getByText(m.organization_skills_adoption_personal_chat_pinned({ version: "1" }))
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_adoption_personal_chat_advance_action()
+        })
+      )
+      .not.toBeInTheDocument();
+
+    const current = adoptionPage();
+    if (current.summary?.personal_chat) {
+      current.summary.personal_chat.drift = "current";
+    }
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: current,
+      getOrganizationSkillAdoption: vi.fn(),
+      onAdvancePersonalChat: vi.fn()
+    });
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_adoption_personal_chat_advance_action()
+        })
+      )
+      .not.toBeInTheDocument();
   });
 
   test("distinguishes an empty structural projection from runtime usage", async () => {
