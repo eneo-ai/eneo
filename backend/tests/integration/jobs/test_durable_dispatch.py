@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,13 +14,14 @@ from arq.jobs import JobStatus
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.job_table import Jobs
+from eneo.jobs import durable_dispatch
 from eneo.jobs.durable_dispatch import (
     DISPATCH_PAGE_SIZE,
     DISPATCH_STALE_AFTER,
     redispatch_stale_jobs,
 )
 from eneo.jobs.job_manager import job_manager
-from eneo.jobs.job_models import Task
+from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
 from eneo.jobs.job_staging import job_staging_path
@@ -161,11 +163,13 @@ async def test_redispatch_rejects_envelope_user_mismatch(
 
     assert result.failed == 1
     enqueue.assert_not_awaited()
-    reason = await async_session.scalar(
-        sa.select(Jobs.result_location).where(Jobs.id == job_id)
-    )
-    assert reason is not None
-    assert "user does not match" in reason
+    row = (
+        await async_session.execute(
+            sa.select(Jobs.failure_code, Jobs.result_location).where(Jobs.id == job_id)
+        )
+    ).one()
+    assert row.failure_code == JobFailureCode.INVALID_JOB_PAYLOAD.value
+    assert row.result_location is None
 
 
 async def test_redispatch_page_progress_and_cross_task_fairness(
@@ -233,7 +237,7 @@ async def test_redispatch_refusal_advances_but_complete_job_is_ignored(
 
 
 async def test_corrupt_envelope_fails_without_enqueue_or_path_influence(
-    async_session, admin_user, tmp_path
+    async_session, admin_user, tmp_path, monkeypatch
 ) -> None:
     hostile_path = tmp_path / "hostile"
     hostile_path.write_text("untouched")
@@ -252,18 +256,34 @@ async def test_corrupt_envelope_fails_without_enqueue_or_path_influence(
         },
     )
     enqueue = AsyncMock()
+    failure_log = MagicMock()
+    monkeypatch.setattr(
+        durable_dispatch,
+        "logger",
+        SimpleNamespace(warning=failure_log),
+    )
 
     await redispatch_stale_jobs(async_session, enqueue=enqueue)
 
     enqueue.assert_not_awaited()
     row = (
         await async_session.execute(
-            sa.select(Jobs.status, Jobs.result_location).where(Jobs.id == job_id)
+            sa.select(
+                Jobs.status,
+                Jobs.failure_code,
+                Jobs.result_location,
+            ).where(Jobs.id == job_id)
         )
     ).one()
     assert row.status == Status.FAILED.value
-    assert "dispatch envelope" in row.result_location
+    assert row.failure_code == JobFailureCode.INVALID_JOB_PAYLOAD.value
+    assert row.result_location is None
     assert hostile_path.read_text() == "untouched"
+    failure_log.assert_called_once()
+    log_fields = failure_log.call_args.kwargs["extra"]
+    assert log_fields["job_id"] == str(job_id)
+    assert log_fields["task"] == Task.UPLOAD_FILE.value
+    assert log_fields["failure_code"] == JobFailureCode.INVALID_JOB_PAYLOAD.value
 
 
 def test_staging_path_depends_only_on_job_id(tmp_path: Path) -> None:

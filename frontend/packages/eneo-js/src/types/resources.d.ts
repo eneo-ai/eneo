@@ -66,6 +66,7 @@ export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
+export type JobFailureCode = components["schemas"]["JobFailureCode"];
 export type JobStatus = components["schemas"]["Status"];
 // Backend's TenantPublic schema omits `id`, but the actual API response includes it.
 // Until the schema is fixed upstream we extend the type so consumers can use `tenant.id`.

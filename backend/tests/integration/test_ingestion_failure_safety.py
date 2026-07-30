@@ -23,7 +23,7 @@ from eneo.database.tables.spaces_table import Spaces, SpacesTranscriptionModels
 from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob_service import InfoBlobService
-from eneo.jobs.job_models import Task
+from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
 from eneo.main.container.container import Container, SessionProxy
@@ -134,7 +134,11 @@ async def _committed_state(job_id: UUID):
     async with sessionmanager.session() as session, session.begin():
         job_state = (
             await session.execute(
-                sa.select(Jobs.status, Jobs.result_location).where(Jobs.id == job_id)
+                sa.select(
+                    Jobs.status,
+                    Jobs.result_location,
+                    Jobs.failure_code,
+                ).where(Jobs.id == job_id)
             )
         ).one()
         blobs = (
@@ -226,10 +230,17 @@ async def test_upload_failure_preserves_committed_prior_knowledge(
         )
     assert result is False
 
-    (status, error), blobs, chunks = await _committed_state(job_id)
+    (status, result_location, failure_code), blobs, chunks = await _committed_state(
+        job_id
+    )
     assert status == Status.FAILED.value
+    assert result_location is None
+    assert failure_code == (
+        JobFailureCode.NO_EXTRACTABLE_TEXT.value
+        if failure == "blank"
+        else JobFailureCode.PROCESSING_FAILED.value
+    )
     if failure == "blank":
-        assert error == f"File '{TITLE}' contains no extractable text"
         embeddings.get_embeddings.assert_not_awaited()
     _assert_prior_knowledge(prior, blobs, chunks)
 
@@ -273,10 +284,17 @@ async def test_first_upload_failure_publishes_no_knowledge(
         )
     assert result is False
 
-    (status, error), blobs, chunks = await _committed_state(job_id)
+    (status, result_location, failure_code), blobs, chunks = await _committed_state(
+        job_id
+    )
     assert status == Status.FAILED.value
+    assert result_location is None
+    assert failure_code == (
+        JobFailureCode.NO_EXTRACTABLE_TEXT.value
+        if failure == "blank"
+        else JobFailureCode.PROCESSING_FAILED.value
+    )
     if failure == "blank":
-        assert error == f"File '{TITLE}' contains no extractable text"
         embeddings.get_embeddings.assert_not_awaited()
     assert blobs == []
     assert chunks == []
@@ -326,7 +344,9 @@ async def test_successful_upload_commits_replacement_knowledge(
         )
     assert result is True
 
-    (status, result_location), blobs, chunks = await _committed_state(job_id)
+    (status, result_location, failure_code), blobs, chunks = await _committed_state(
+        job_id
+    )
     old_blob_id, _ = prior
     assert status == Status.COMPLETE.value
     assert len(blobs) == 1
@@ -335,6 +355,7 @@ async def test_successful_upload_commits_replacement_knowledge(
     assert text == replacement_text
     assert size > 0
     assert result_location == f"/api/v1/info-blobs/{blob_id}/"
+    assert failure_code is None
     assert [(chunk_no, text) for _, chunk_no, text, _ in chunks] == [
         (0, replacement_text)
     ]
@@ -374,7 +395,8 @@ async def test_reaped_job_cannot_publish_or_report_success(
                     .values(
                         status=Status.FAILED.value,
                         finished_at=sa.func.now(),
-                        result_location="Reaped while processing",
+                        result_location=None,
+                        failure_code=JobFailureCode.PROCESSING_INTERRUPTED.value,
                     )
                     .returning(Jobs.finished_at)
                 )
@@ -415,9 +437,12 @@ async def test_reaped_job_cannot_publish_or_report_success(
         )
 
     assert result is False
-    (status, reason), blobs, chunks = await _committed_state(job_id)
+    (status, result_location, failure_code), blobs, chunks = await _committed_state(
+        job_id
+    )
     assert status == Status.FAILED.value
-    assert reason == "Reaped while processing"
+    assert result_location is None
+    assert failure_code == JobFailureCode.PROCESSING_INTERRUPTED.value
     async with sessionmanager.session() as session, session.begin():
         finished_at = await session.scalar(
             sa.select(Jobs.finished_at).where(Jobs.id == job_id)
@@ -478,7 +503,9 @@ async def test_complete_status_publication_failure_preserves_committed_knowledge
         )
 
     assert result is False
-    (status, result_location), blobs, chunks = await _committed_state(job_id)
+    (status, result_location, failure_code), blobs, chunks = await _committed_state(
+        job_id
+    )
     old_blob_id, _ = prior
     assert status == Status.COMPLETE.value
     assert len(blobs) == 1
@@ -486,6 +513,7 @@ async def test_complete_status_publication_failure_preserves_committed_knowledge
     assert blob_id != old_blob_id
     assert text == replacement_text
     assert result_location == f"/api/v1/info-blobs/{blob_id}/"
+    assert failure_code is None
     assert [(chunk_no, text) for _, chunk_no, text, _ in chunks] == [
         (0, replacement_text)
     ]
@@ -541,9 +569,16 @@ async def test_transcription_failure_preserves_committed_prior_knowledge(
         )
     assert result is False
 
-    (status, error), blobs, chunks = await _committed_state(job_id)
+    (status, result_location, failure_code), blobs, chunks = await _committed_state(
+        job_id
+    )
     assert status == Status.FAILED.value
+    assert result_location is None
+    assert failure_code == (
+        JobFailureCode.NO_EXTRACTABLE_TEXT.value
+        if failure == "blank"
+        else JobFailureCode.PROCESSING_FAILED.value
+    )
     if failure == "blank":
-        assert error == f"File '{TITLE}' contains no extractable text"
         embeddings.get_embeddings.assert_not_awaited()
     _assert_prior_knowledge(prior, blobs, chunks)

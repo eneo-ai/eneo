@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 from eneo.files.text import NoExtractableTextError
+from eneo.jobs.job_models import Task, failure_code_for_exception
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
 from eneo.main.container.container import Container
@@ -75,10 +76,12 @@ class _KnowledgeJobLifecycle:
         *,
         container: Container,
         job_id: UUID,
+        task: Task,
         task_manager: TaskManager,
     ) -> None:
         self.container = container
         self.job_id = job_id
+        self.task = task
         self.task_manager = task_manager
 
     @classmethod
@@ -87,6 +90,7 @@ class _KnowledgeJobLifecycle:
         *,
         container: Container,
         job_id: UUID,
+        task: Task,
     ) -> "_KnowledgeJobLifecycle | None":
         async with Container.session_scope():
             if not await container.job_repo().mark_job_started(job_id):
@@ -95,6 +99,7 @@ class _KnowledgeJobLifecycle:
         return cls(
             container=container,
             job_id=job_id,
+            task=task,
             task_manager=container.task_manager(
                 job_id=job_id,
             ),
@@ -109,19 +114,25 @@ class _KnowledgeJobLifecycle:
         self.task_manager.result_location = result_location
 
     async def _fail_if_running(self, exc: BaseException) -> None:
-        if isinstance(exc, asyncio.CancelledError):
-            message = "Job cancelled"
-        else:
-            error = str(exc).strip()
-            message = error[:512] if error else None
+        failure_code = failure_code_for_exception(exc)
 
         self.task_manager.mark_job_handled()
         async with Container.session_scope():
-            failed = await self.container.job_repo().mark_job_failed_if_running(
-                self.job_id,
-                message,
+            failed = (
+                await self.container.job_repo().mark_knowledge_job_failed_if_running(
+                    self.job_id,
+                    failure_code,
+                )
             )
         if failed:
+            logger.warning(
+                "Knowledge job failed",
+                extra={
+                    "job_id": str(self.job_id),
+                    "task": self.task.value,
+                    "failure_code": failure_code.value,
+                },
+            )
             await self.task_manager.publish_status(Status.FAILED)
 
     @asynccontextmanager
@@ -148,6 +159,7 @@ async def transcription_task(
     lifecycle = await _KnowledgeJobLifecycle.start(
         container=container,
         job_id=job_id,
+        task=Task.TRANSCRIPTION,
     )
     if lifecycle is None:
         return None
@@ -205,6 +217,7 @@ async def upload_info_blob_task(
     lifecycle = await _KnowledgeJobLifecycle.start(
         container=container,
         job_id=job_id,
+        task=Task.UPLOAD_FILE,
     )
     if lifecycle is None:
         return None
