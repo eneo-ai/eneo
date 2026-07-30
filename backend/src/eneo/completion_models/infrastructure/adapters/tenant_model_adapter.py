@@ -569,6 +569,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             prompt_tokens=getattr(usage, "prompt_tokens", None),
             completion_tokens=getattr(usage, "completion_tokens", None),
             reasoning_tokens=reasoning_tokens,
+            context_prompt_tokens=getattr(usage, "prompt_tokens", None),
+            context_completion_tokens=getattr(usage, "completion_tokens", None),
         )
 
     def _accumulate_usage(
@@ -579,7 +581,12 @@ class TenantModelAdapter(CompletionModelAdapter):
         if not existing:
             return new or TokenUsage()
         if not new:
-            return existing
+            return existing.model_copy(
+                update={
+                    "context_prompt_tokens": None,
+                    "context_completion_tokens": None,
+                }
+            )
 
         def _add(a: int | None, b: int | None) -> int | None:
             if a is None and b is None:
@@ -590,6 +597,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             prompt_tokens=_add(existing.prompt_tokens, new.prompt_tokens),
             completion_tokens=_add(existing.completion_tokens, new.completion_tokens),
             reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
+            context_prompt_tokens=new.context_prompt_tokens,
+            context_completion_tokens=new.context_completion_tokens,
         )
 
     def _resolve_request_input_tokens(
@@ -883,6 +892,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         try:
             cumulative_input_tokens = 0
             used_input_estimate = False
+            context_input_token_estimate: int | None = None
             # Call LiteLLM with drop_params=True to handle unsupported params gracefully
             response = cast(
                 _LiteLLMResponse,
@@ -906,6 +916,9 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             cumulative_input_tokens += request_input_tokens
             used_input_estimate = used_input_estimate or request_was_estimated
+            context_input_token_estimate = (
+                request_input_tokens if request_was_estimated else None
+            )
 
             # Extract token usage from provider response
             usage = self._extract_usage(response)
@@ -1050,6 +1063,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
                     cumulative_input_tokens += request_input_tokens
                     used_input_estimate = used_input_estimate or request_was_estimated
+                    context_input_token_estimate = (
+                        request_input_tokens if request_was_estimated else None
+                    )
                     usage = self._accumulate_usage(usage, response)
                     if not response.choices:
                         break
@@ -1066,6 +1082,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 completion.input_token_estimate = cumulative_input_tokens
                 if usage is not None:
                     usage = usage.model_copy(update={"prompt_tokens": None})
+            completion.context_input_token_estimate = context_input_token_estimate
             completion.usage = usage
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Completion successful"
@@ -1255,6 +1272,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.usage: TokenUsage | None = None
                     self.cumulative_input_tokens = 0
                     self.used_input_estimate = False
+                    self.context_input_token_estimate: int | None = None
 
             result = _StreamResult()
 
@@ -1275,6 +1293,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
                 res.assistant_content = []
+                if res.usage is not None:
+                    res.usage = res.usage.model_copy(
+                        update={
+                            "context_prompt_tokens": None,
+                            "context_completion_tokens": None,
+                        }
+                    )
 
                 async for chunk in s:
                     logger.debug(f"[DEBUG] Raw chunk: {chunk}")
@@ -1410,6 +1435,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 if provider_reported_prompt_tokens:
                     res.cumulative_input_tokens += request_prompt_tokens
+                    res.context_input_token_estimate = None
                 elif request_messages is not None:
                     measurement = measure_provider_input_tokens(
                         request_messages,
@@ -1418,6 +1444,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
                     res.cumulative_input_tokens += measurement.tokens
                     res.used_input_estimate = True
+                    res.context_input_token_estimate = measurement.tokens
 
             # --- Drain initial stream ---
             async for comp in _drain_stream(
@@ -1928,6 +1955,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     if result.used_input_estimate
                     else None
                 ),
+                context_input_token_estimate=result.context_input_token_estimate,
             )
 
             logger.info(

@@ -7,7 +7,10 @@ from weakref import ReferenceType, ref
 
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.ai_models.completion_models.completion_model import (
+    ModelKwargs,
+    function_definition_to_tool,
+)
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_repo import CompletionFileValidationProjection
 from eneo.assistants.assistant_service import AssistantService
@@ -31,7 +34,7 @@ from eneo.skills.domain.skill import (
     SkillTurnPlan,
 )
 from eneo.spaces.space_repo import AssistantMCPServerProjection
-from eneo.tokens.token_utils import TokenCountSource
+from eneo.tokens.token_utils import TokenCountSource, measure_provider_input_tokens
 
 
 def _settings(**overrides):
@@ -1064,10 +1067,19 @@ async def test_preflight_baseline_uses_the_exact_initial_turn_runtime_prompt(
         supports_tool_calling=assistant.completion_model.supports_tool_calling,
     )
 
-    prompt, attachments = await service.get_preflight_baseline(assistant.id)
+    baseline = await service.get_preflight_baseline(assistant.id)
+    assert expected_runtime.tool_definition is not None
+    expected_prompt_tokens = measure_provider_input_tokens(
+        [{"role": "system", "content": expected_runtime.prompt}],
+        [function_definition_to_tool(expected_runtime.tool_definition)],
+        assistant.completion_model.get_model_route(),
+    ).tokens
 
-    assert prompt == expected_runtime.prompt
-    assert attachments == assistant.attachments
+    assert baseline.attachments == assistant.attachments
+    assert baseline.skill_context_tokens == 10
+    assert baseline.prompt_tokens == expected_prompt_tokens
+    assert "Instructions for Always" in expected_runtime.prompt
+    assert "Instructions for On demand" not in expected_runtime.prompt
 
 
 @pytest.mark.parametrize(

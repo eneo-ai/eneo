@@ -13499,14 +13499,31 @@ export interface components {
       reasoning?: string | null;
       /**
        * Num Tokens Question
+       * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_question?: number;
       /**
        * Num Tokens Answer
+       * @description Cumulative completion tokens across all provider responses in the turn. Use context_completion_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_answer?: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only. Null for rows saved before final-request usage was recorded.
+       */
+      context_prompt_tokens?: number | null;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only. Null for rows saved before final-request usage was recorded.
+       */
+      context_completion_tokens?: number | null;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again. Null for legacy rows.
+       */
+      skill_context_tokens?: number | null;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -13546,14 +13563,31 @@ export interface components {
       reasoning?: string | null;
       /**
        * Num Tokens Question
+       * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_question?: number;
       /**
        * Num Tokens Answer
+       * @description Cumulative completion tokens across all provider responses in the turn. Use context_completion_tokens for context-window headroom.
        * @default 0
        */
       num_tokens_answer?: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only. Null for rows saved before final-request usage was recorded.
+       */
+      context_prompt_tokens?: number | null;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only. Null for rows saved before final-request usage was recorded.
+       */
+      context_completion_tokens?: number | null;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again. Null for legacy rows.
+       */
+      skill_context_tokens?: number | null;
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -15527,9 +15561,16 @@ export interface components {
       assistant_attachment_tokens?: number;
       /**
        * Prompt Tokens
+       * @description Model-aware estimate of the initial system message and Skill tool definitions. Includes skill_context_tokens.
        * @default 0
        */
       prompt_tokens?: number;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of prompt_tokens. Already included; do not add it to the preflight total again.
+       * @default 0
+       */
+      skill_context_tokens?: number;
     };
     /** PrivacyPolicy */
     PrivacyPolicy: {
@@ -20416,12 +20457,36 @@ export interface components {
     };
     /** TokenUsageEvent */
     TokenUsageEvent: {
-      /** Prompt Tokens */
+      /**
+       * Prompt Tokens
+       * @description Cumulative prompt tokens across every provider request in this logical turn. Use context_prompt_tokens for context-window headroom.
+       */
       prompt_tokens: number;
-      /** Completion Tokens */
+      /**
+       * Completion Tokens
+       * @description Cumulative completion tokens across every provider response in this logical turn. Use context_completion_tokens for context-window headroom.
+       */
       completion_tokens: number;
-      /** Turn Tokens */
+      /**
+       * Turn Tokens
+       * @description Cumulative prompt_tokens plus completion_tokens for this turn.
+       */
       turn_tokens: number;
+      /**
+       * Context Prompt Tokens
+       * @description Prompt tokens for the final provider request only.
+       */
+      context_prompt_tokens: number;
+      /**
+       * Context Completion Tokens
+       * @description Completion tokens for the final provider response only.
+       */
+      context_completion_tokens: number;
+      /**
+       * Skill Context Tokens
+       * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again.
+       */
+      skill_context_tokens: number;
     };
     /** SSETokenUsage */
     SSETokenUsage: {

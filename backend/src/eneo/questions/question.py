@@ -107,6 +107,9 @@ class ToolCallInfo(BaseModel):
 class QuestionAdd(QuestionBase):
     num_tokens_question: int
     num_tokens_answer: int
+    context_prompt_tokens: Optional[int] = None
+    context_completion_tokens: Optional[int] = None
+    skill_context_tokens: Optional[int] = None
     tenant_id: UUID
     completion_model_id: Optional[UUID] = None
     session_id: Optional[UUID] = None
@@ -170,14 +173,46 @@ class Message(QuestionBase, InDB):
     tool_calls: list[ToolCallInfo] = []
     skill_provenance: Optional[list[SkillExecutionReference]] = None
     reasoning: Optional[str] = None
-    # Default 0 keeps deserialization safe for rows persisted before token
-    # measurement was introduced. The DB columns are NOT NULL int, so every
-    # persisted row reads back as an integer. Clients that sum these values
-    # across history should treat 0 as "zero OR unmeasured" — historical
-    # conversations from before measurement was added will underreport actual
-    # context usage. Fix requires a backfill migration, out of scope here.
-    num_tokens_question: int = 0
-    num_tokens_answer: int = 0
+    # Cumulative turn usage across provider requests. Historical rows from
+    # before measurement was introduced use 0 for unmeasured usage.
+    num_tokens_question: int = Field(
+        default=0,
+        description=(
+            "Cumulative prompt tokens across all provider requests in the turn. "
+            "Use context_prompt_tokens for context-window headroom."
+        ),
+    )
+    num_tokens_answer: int = Field(
+        default=0,
+        description=(
+            "Cumulative completion tokens across all provider responses in the "
+            "turn. Use context_completion_tokens for context-window headroom."
+        ),
+    )
+    # Final provider request/response only. Unlike num_tokens_*, these values
+    # are not accumulated across Skill activation or tool rounds.
+    context_prompt_tokens: Optional[int] = Field(
+        default=None,
+        description=(
+            "Prompt tokens for the final provider request only. Null for rows "
+            "saved before final-request usage was recorded."
+        ),
+    )
+    context_completion_tokens: Optional[int] = Field(
+        default=None,
+        description=(
+            "Completion tokens for the final provider response only. Null for rows "
+            "saved before final-request usage was recorded."
+        ),
+    )
+    # LiteLLM-measured subset of context_prompt_tokens owned by Skills.
+    skill_context_tokens: Optional[int] = Field(
+        default=None,
+        description=(
+            "Model-aware Skill-owned subset of context_prompt_tokens. Already "
+            "included; do not add it to context usage again. Null for legacy rows."
+        ),
+    )
 
     @field_validator("tool_calls", mode="before")
     @classmethod

@@ -110,7 +110,22 @@ class PreflightResponse(BaseModel):
     # live per-message file_tokens for accuracy on unsaved edits; these report
     # the always-present baseline for callers that need it (e.g. a turn-1 view).
     assistant_attachment_tokens: int = 0
-    prompt_tokens: int = 0
+    prompt_tokens: int = Field(
+        default=0,
+        description=(
+            "Model-aware estimate of the initial system message and Skill tool "
+            "definitions. Includes skill_context_tokens."
+        ),
+    )
+    # LiteLLM-measured Skill-owned subset of prompt_tokens. Callers must not add
+    # it to the total a second time.
+    skill_context_tokens: int = Field(
+        default=0,
+        description=(
+            "Model-aware Skill-owned subset of prompt_tokens. Already included; "
+            "do not add it to the preflight total again."
+        ),
+    )
 
 
 class ConversationRequest(_ConversationTarget):

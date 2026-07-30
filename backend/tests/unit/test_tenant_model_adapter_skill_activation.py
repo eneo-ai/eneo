@@ -275,6 +275,88 @@ async def test_non_streaming_activates_skill_before_follow_up() -> None:
 
 
 @pytest.mark.asyncio
+async def test_non_streaming_keeps_final_request_context_usage_separate() -> None:
+    adapter = _adapter()
+    runtime = _runtime()
+    activation_response = _response(
+        tool_calls=[
+            _provider_tool_call(
+                call_id="activation-1",
+                name=SKILL_ACTIVATION_TOOL_NAME,
+                arguments='{"skill_key":"skill-1"}',
+            )
+        ],
+        finish_reason="tool_calls",
+    )
+    activation_response.usage = SimpleNamespace(
+        prompt_tokens=500,
+        completion_tokens=20,
+        completion_tokens_details=None,
+    )
+    answer_response = _response(content="Payroll answer")
+    answer_response.usage = SimpleNamespace(
+        prompt_tokens=520,
+        completion_tokens=40,
+        completion_tokens_details=None,
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=[activation_response, answer_response]),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            skill_runtime=runtime,
+        )
+
+    assert completion.usage is not None
+    assert completion.usage.prompt_tokens == 1020
+    assert completion.usage.completion_tokens == 60
+    assert completion.usage.context_prompt_tokens == 520
+    assert completion.usage.context_completion_tokens == 40
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_does_not_reuse_context_usage_from_an_earlier_request() -> (
+    None
+):
+    adapter = _adapter()
+    runtime = _runtime()
+    activation_response = _response(
+        tool_calls=[
+            _provider_tool_call(
+                call_id="activation-1",
+                name=SKILL_ACTIVATION_TOOL_NAME,
+                arguments='{"skill_key":"skill-1"}',
+            )
+        ],
+        finish_reason="tool_calls",
+    )
+    activation_response.usage = SimpleNamespace(
+        prompt_tokens=500,
+        completion_tokens=20,
+        completion_tokens_details=None,
+    )
+    answer_response = _response(content="Payroll answer")
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=[activation_response, answer_response]),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            skill_runtime=runtime,
+        )
+
+    assert completion.usage is not None
+    assert completion.usage.context_prompt_tokens is None
+    assert completion.usage.context_completion_tokens is None
+    assert completion.context_input_token_estimate is not None
+
+
+@pytest.mark.asyncio
 async def test_non_streaming_rejects_unadvertised_activation_with_mcp_present() -> None:
     adapter = _adapter()
     runtime = _runtime(selective_activation_enabled=False)
@@ -364,6 +446,13 @@ async def test_non_streaming_estimates_every_request_when_provider_omits_usage()
     assert request_payloads[1][0][-2]["role"] == "assistant"
     assert request_payloads[1][0][-1]["role"] == "tool"
     assert completion.input_token_estimate == expected
+    assert completion.context_input_token_estimate == (
+        measure_provider_input_tokens(
+            request_payloads[-1][0],
+            request_payloads[-1][1],
+            adapter.litellm_model,
+        ).tokens
+    )
     assert completion.usage is None or completion.usage.prompt_tokens is None
 
 
@@ -727,7 +816,133 @@ async def test_streaming_estimates_every_request_when_provider_omits_usage() -> 
     assert request_payloads[1][0][-2]["role"] == "assistant"
     assert request_payloads[1][0][-1]["role"] == "tool"
     assert output[-1].input_token_estimate == expected
+    assert output[-1].context_input_token_estimate == (
+        measure_provider_input_tokens(
+            request_payloads[-1][0],
+            request_payloads[-1][1],
+            adapter.litellm_model,
+        ).tokens
+    )
     assert output[-1].usage is None
+
+
+@pytest.mark.asyncio
+async def test_streaming_keeps_final_request_context_usage_separate() -> None:
+    adapter = _adapter()
+    runtime = _runtime()
+    adapter._merge_mcp_tools = Mock(
+        return_value=[
+            {
+                "type": "function",
+                "function": {"name": SKILL_ACTIVATION_TOOL_NAME},
+            }
+        ]
+    )
+    activation_chunk = _tool_chunk(
+        calls=[
+            (
+                "activation-1",
+                SKILL_ACTIVATION_TOOL_NAME,
+                '{"skill_key":"skill-1"}',
+            )
+        ]
+    )
+    activation_chunk.usage = SimpleNamespace(
+        prompt_tokens=500,
+        completion_tokens=20,
+        completion_tokens_details=None,
+    )
+    answer_chunk = _text_chunk("Payroll answer")
+    answer_chunk.usage = SimpleNamespace(
+        prompt_tokens=520,
+        completion_tokens=40,
+        completion_tokens_details=None,
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            side_effect=[
+                _AsyncChunkStream([activation_chunk]),
+                _AsyncChunkStream([answer_chunk]),
+            ]
+        ),
+    ):
+        prepared = await adapter.prepare_streaming(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            skill_runtime=runtime,
+        )
+        output = [
+            completion
+            async for completion in adapter.iterate_stream(
+                stream=prepared,
+                model_kwargs={},
+            )
+        ]
+
+    usage = output[-1].usage
+    assert usage is not None
+    assert usage.prompt_tokens == 1020
+    assert usage.completion_tokens == 60
+    assert usage.context_prompt_tokens == 520
+    assert usage.context_completion_tokens == 40
+
+
+@pytest.mark.asyncio
+async def test_streaming_does_not_reuse_context_usage_from_an_earlier_request() -> None:
+    adapter = _adapter()
+    runtime = _runtime()
+    adapter._merge_mcp_tools = Mock(
+        return_value=[
+            {
+                "type": "function",
+                "function": {"name": SKILL_ACTIVATION_TOOL_NAME},
+            }
+        ]
+    )
+    activation_chunk = _tool_chunk(
+        calls=[
+            (
+                "activation-1",
+                SKILL_ACTIVATION_TOOL_NAME,
+                '{"skill_key":"skill-1"}',
+            )
+        ]
+    )
+    activation_chunk.usage = SimpleNamespace(
+        prompt_tokens=500,
+        completion_tokens=20,
+        completion_tokens_details=None,
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            side_effect=[
+                _AsyncChunkStream([activation_chunk]),
+                _AsyncChunkStream([_text_chunk("Payroll answer")]),
+            ]
+        ),
+    ):
+        prepared = await adapter.prepare_streaming(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            skill_runtime=runtime,
+        )
+        output = [
+            completion
+            async for completion in adapter.iterate_stream(
+                stream=prepared,
+                model_kwargs={},
+            )
+        ]
+
+    usage = output[-1].usage
+    assert usage is not None
+    assert usage.context_prompt_tokens is None
+    assert usage.context_completion_tokens is None
+    assert output[-1].context_input_token_estimate is not None
 
 
 @pytest.mark.asyncio
