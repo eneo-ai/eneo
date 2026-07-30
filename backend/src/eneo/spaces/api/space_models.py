@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -274,8 +274,8 @@ class CreateSpaceServiceResponse(InDB, ResourcePermissionsMixin):
 
 class CreateSpaceGroupsRequest(CreateRequest):
     embedding_model: Optional[ModelId] = None
-    chunk_size: Optional[int] = None
-    chunk_overlap: Optional[int] = None
+    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
+    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
 
 
 class CreateSpaceGroupsResponse(InDB):
@@ -344,8 +344,8 @@ class CreateSpaceIntegrationKnowledge(BaseModel):
     resource_type: Optional[str] = (
         "site"  # "site" for SharePoint, "onedrive" for OneDrive
     )
-    chunk_size: Optional[int] = None
-    chunk_overlap: Optional[int] = None
+    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
+    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
 
 
 class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
@@ -363,8 +363,8 @@ class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
 class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):
     embedding_model: ModelId
     wrapper_name: Optional[str] = None
-    chunk_size: Optional[int] = None
-    chunk_overlap: Optional[int] = None
+    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
+    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
     items: list[CreateSpaceIntegrationKnowledgeBatchItem] = Field(
         min_length=1, max_length=50
     )

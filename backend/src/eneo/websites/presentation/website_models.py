@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Union
+from typing import Annotated, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
@@ -163,8 +163,8 @@ class WebsiteCreate(BaseModel):
     update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: Optional[ModelId] = None
     """Embedding model to use (defaults to space's default model if not specified)"""
-    chunk_size: Optional[int] = None
-    chunk_overlap: Optional[int] = None
+    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
+    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
 
     http_auth_username: Optional[str] = Field(
         None, description="Username for HTTP Basic Authentication (optional)"
@@ -201,8 +201,8 @@ class WebsiteUpdate(BaseModel):
     download_files: Union[bool, NotProvided] = NOT_PROVIDED
     crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED
     update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED
-    chunk_size: Union[int, None, NotProvided] = NOT_PROVIDED
-    chunk_overlap: Union[int, None, NotProvided] = NOT_PROVIDED
+    chunk_size: Union[Annotated[int, Field(ge=1)], None, NotProvided] = NOT_PROVIDED
+    chunk_overlap: Union[Annotated[int, Field(ge=0)], None, NotProvided] = NOT_PROVIDED
 
     http_auth_username: Union[str, None, NotProvided] = Field(
         NOT_PROVIDED,

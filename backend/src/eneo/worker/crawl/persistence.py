@@ -182,6 +182,14 @@ async def persist_batch(
     prepared_pages: list[PreparedPage] = []
     buffer_embedding_bytes = 0
 
+    # Build the splitter before any session exists. It is pure, but it raises on a
+    # nonsensical chunk config (RecursiveCharacterTextSplitter rejects chunk_size <= 0),
+    # and doing it after the session is created would leak that session on the way out.
+    splitter = build_text_splitter(ctx.chunk_size, ctx.chunk_overlap)
+    effective_chunk_size, effective_chunk_overlap = resolve_chunk_config(
+        ctx.chunk_size, ctx.chunk_overlap
+    )
+
     # Create a short-lived session for embedding service to load provider credentials
     embedding_session = sessionmanager.create_session()
     try:
@@ -202,11 +210,6 @@ async def persist_batch(
         for page in page_buffer:
             add_failure(FailureReason.EMBEDDING_ERROR, page["url"])
         return 0, len(page_buffer), [], failures_by_reason
-
-    splitter = build_text_splitter(ctx.chunk_size, ctx.chunk_overlap)
-    effective_chunk_size, effective_chunk_overlap = resolve_chunk_config(
-        ctx.chunk_size, ctx.chunk_overlap
-    )
 
     # PHASE 1: Compute embeddings (uses embedding_session for provider credentials)
     # The embedding session is used to load API credentials from DB, but the actual

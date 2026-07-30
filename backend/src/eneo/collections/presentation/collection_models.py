@@ -1,7 +1,7 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
@@ -48,5 +48,5 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
 
 class CollectionUpdate(BaseModel):
     name: str
-    chunk_size: int | None = None
-    chunk_overlap: int | None = None
+    chunk_size: Annotated[int, Field(ge=1)] | None = None
+    chunk_overlap: Annotated[int, Field(ge=0)] | None = None
