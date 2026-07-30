@@ -229,7 +229,7 @@ AI_BUILDER_PLAN_APPROVAL_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
 AI_BUILDER_APPLY_RESULT_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_name": "Employee Review Summary",
-    "steps_created": 2,
+    "steps_created": 3,
     "steps_updated": 0,
     "steps_removed": 0,
 }

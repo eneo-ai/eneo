@@ -55,6 +55,7 @@
   const isPowerUser = $derived($userMode === "power_user");
   const isCreateMode = $derived(service.session?.target_kind === "create");
   let assumptionsOpen = $state(false);
+  let executionProfileOpen = $state(false);
   // Rationale default: the BUILDER CONTAINER's width (≥768px open, §1.5)
   // decides the initial state until the user changes it — never the viewport.
   let rationaleOpen = $state(true);
@@ -198,6 +199,13 @@
 
   function resolveMcpToolName(ref: string): string | null {
     return mcpResourceLabels.toolLabels.get(ref) ?? null;
+  }
+
+  function executionStepLabel(planStepRef: string): string {
+    const steps = service.currentPlan?.proposal.spec.steps ?? [];
+    const stepIndex = steps.findIndex((step) => step.plan_step_ref === planStepRef);
+    if (stepIndex === -1) return planStepRef;
+    return `${stepIndex + 1}. ${steps[stepIndex].name}`;
   }
 
   let isApproving = $state(false);
@@ -635,6 +643,94 @@
                   <p class="text-secondary mt-2 text-[0.8125rem] leading-relaxed">
                     {plan.proposal.plan_rationale}
                   </p>
+                </Collapsible.Content>
+              </Collapsible.Root>
+            </section>
+          {/if}
+
+          {#if isPowerUser}
+            <section class="border-default border-t px-5 py-4 md:px-6">
+              <Collapsible.Root bind:open={executionProfileOpen}>
+                <h3 class="text-sm">
+                  <Collapsible.Trigger class="section-heading-trigger">
+                    <span>{m.ai_builder_execution_profile()}</span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      class="size-3.5 shrink-0 transition-transform duration-200 ease-out {executionProfileOpen
+                        ? 'rotate-180'
+                        : ''}"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </Collapsible.Trigger>
+                </h3>
+                <Collapsible.Content class="collapsible-animate">
+                  <p class="text-secondary mt-2 text-[0.8125rem] leading-relaxed">
+                    {m.ai_builder_execution_profile_description()}
+                  </p>
+                  <dl class="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2">
+                    <dt class="text-secondary text-[0.8125rem]">
+                      {m.ai_builder_execution_completion_model()}
+                    </dt>
+                    <dd class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums">
+                      {plan.proposal.execution_shape.completion_model_step_count}
+                    </dd>
+                    <dt class="text-secondary text-[0.8125rem]">
+                      {m.ai_builder_execution_transcription_model()}
+                    </dt>
+                    <dd class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums">
+                      {plan.proposal.execution_shape.transcription_model_step_count}
+                    </dd>
+                    <dt class="text-secondary text-[0.8125rem]">
+                      {m.ai_builder_execution_deterministic()}
+                    </dt>
+                    <dd class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums">
+                      {plan.proposal.execution_shape.deterministic_step_count}
+                    </dd>
+                    <dt class="text-secondary text-[0.8125rem]">
+                      {m.ai_builder_execution_schema_constrained()}
+                    </dt>
+                    <dd class="text-primary text-right text-[0.8125rem] font-semibold tabular-nums">
+                      {plan.proposal.execution_shape.schema_constrained_step_count}
+                    </dd>
+                  </dl>
+                  <h4 class="text-primary mt-4 text-[0.8125rem] font-semibold">
+                    {m.ai_builder_execution_mapped_limits()}
+                  </h4>
+                  {@const mappedStepBounds =
+                    plan.proposal.execution_shape.mapped_step_upper_bounds ?? []}
+                  {#if mappedStepBounds.length > 0}
+                    <ul
+                      class="text-secondary mt-1.5 flex flex-col gap-1 text-[0.8125rem] leading-relaxed"
+                    >
+                      {#each mappedStepBounds as bound (bound.plan_step_ref)}
+                        <li>
+                          {#if bound.execution_mode === "per_source"}
+                            {m.ai_builder_execution_per_source_limit({
+                              step: executionStepLabel(bound.plan_step_ref),
+                              count: bound.maximum_items
+                            })}
+                          {:else}
+                            {m.ai_builder_execution_per_item_limit({
+                              step: executionStepLabel(bound.plan_step_ref),
+                              count: bound.maximum_items
+                            })}
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+                  {:else}
+                    <p class="text-secondary mt-1.5 text-[0.8125rem] leading-relaxed">
+                      {m.ai_builder_execution_no_mapped_steps()}
+                    </p>
+                  {/if}
                 </Collapsible.Content>
               </Collapsible.Root>
             </section>

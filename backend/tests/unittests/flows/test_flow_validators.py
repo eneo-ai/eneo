@@ -794,6 +794,99 @@ def test_validate_steps_publish_accepts_bounded_mapped_modes() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "step",
+    [
+        _step(
+            input_type="text",
+            input_config={
+                "runtime_input": {
+                    "enabled": True,
+                    "execution_mode": "per_source",
+                    "max_files": 2,
+                }
+            },
+        ),
+        _step(
+            input_type="text",
+            input_config={"item_map": {"enabled": True, "max_items": 2}},
+        ),
+    ],
+    ids=["unsupported_per_source", "unsupported_per_item"],
+)
+def test_validate_steps_rejects_mapped_modes_runtime_cannot_dispatch(
+    step: FlowStep,
+) -> None:
+    _assert_validate_steps_rejects(
+        [step],
+        expected_type=FlowStepValidationError,
+        match="mapped execution requires",
+        step_order=1,
+        require_complete_template_fill_config=True,
+    )
+
+
+def test_validate_steps_rejects_simultaneous_mapped_modes() -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(1),
+            _step(
+                2,
+                input_type="json",
+                input_config={
+                    "runtime_input": {
+                        "enabled": True,
+                        "execution_mode": "per_source",
+                        "max_files": 3,
+                    },
+                    "item_map": {"enabled": True, "max_items": 5},
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="only one mapped execution mode",
+        step_order=2,
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("input_config", "message"),
+    [
+        (
+            {"item_map": "bad"},
+            "Step input_config.item_map must be an object.",
+        ),
+        (
+            {
+                "runtime_input": {
+                    "enabled": True,
+                    "execution_mode": "per_source",
+                    "max_files": "bad",
+                }
+            },
+            "Step input_config.runtime_input is invalid.",
+        ),
+    ],
+    ids=["item_map", "runtime_input"],
+)
+def test_collect_step_graph_issues_projects_malformed_mapped_config(
+    input_config: dict[str, object],
+    message: str,
+) -> None:
+    issues = collect_step_graph_issues(
+        flow_step_validation_views_from_flow_steps([_step(input_config=input_config)]),
+        require_complete_template_fill_config=True,
+    )
+
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.step_order == 1
+    assert issue.code is FlowGraphIssueCode.FLOW_STEP_INVALID
+    assert issue.exception_kind == "bad_request"
+    assert issue.message == message
+
+
 def test_validate_steps_source_refs_do_not_satisfy_runtime_input_consumption() -> None:
     with pytest.raises(
         BadRequestException,

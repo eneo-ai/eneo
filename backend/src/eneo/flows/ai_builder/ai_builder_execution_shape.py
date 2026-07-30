@@ -13,7 +13,10 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, InputType, StepSpec
 from eneo.flows.runtime_input import build_runtime_input_config
-from eneo.flows.step_item_map import build_step_item_map_config
+from eneo.flows.step_mapped_execution import (
+    FlowStepMappedExecutionConfigurationError,
+    resolve_step_mapped_execution,
+)
 
 
 class FlowBuilderMappedStepUpperBound(BaseModel):
@@ -95,23 +98,22 @@ def _step_uses_transcription_model(
 def _authored_mapped_upper_bound(
     step: StepSpec,
 ) -> FlowBuilderMappedStepUpperBound | None:
-    runtime_input = build_runtime_input_config(step.input_config)
-    if runtime_input.enabled and runtime_input.execution_mode == "per_source":
-        if runtime_input.max_files is None:
-            return None
-        return FlowBuilderMappedStepUpperBound(
-            plan_step_ref=step.plan_step_ref,
-            execution_mode="per_source",
-            maximum_items=runtime_input.max_files,
+    try:
+        mapped_execution = resolve_step_mapped_execution(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            output_mode=step.output_mode,
+            output_type=step.output_type,
+            input_config=step.input_config,
         )
-
-    item_map = build_step_item_map_config(step.input_config)
-    if not item_map.enabled or item_map.max_items is None:
+    except FlowStepMappedExecutionConfigurationError:
+        return None
+    if mapped_execution is None or mapped_execution.maximum_items is None:
         return None
     return FlowBuilderMappedStepUpperBound(
         plan_step_ref=step.plan_step_ref,
-        execution_mode="per_item",
-        maximum_items=item_map.max_items,
+        execution_mode=mapped_execution.execution_mode,
+        maximum_items=mapped_execution.maximum_items,
     )
 
 

@@ -80,6 +80,7 @@ source_modules =
     eneo.flows.step_chain_rules
     eneo.flows.step_item_map
     eneo.flows.step_lineage
+    eneo.flows.step_mapped_execution
     eneo.flows.template_reference_analyzer
     eneo.flows.transcription_config
     eneo.flows.type_policies

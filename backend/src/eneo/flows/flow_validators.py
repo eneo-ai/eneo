@@ -75,8 +75,11 @@ from eneo.flows.output_processing import (
 )
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.step_chain_rules import iter_step_chain_violations
-from eneo.flows.step_item_map import build_step_item_map_config
 from eneo.flows.step_lineage import build_step_ref_mapping
+from eneo.flows.step_mapped_execution import (
+    FlowStepMappedExecutionConfigurationError,
+    resolve_step_mapped_execution,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -446,15 +449,10 @@ def collect_step_graph_issues(
                     ),
                 ),
             )
-        _capture_flow_step_validation(
-            issues,
-            FlowGraphIssueCode.FLOW_STEP_INVALID,
-            lambda: _validate_runtime_input_publish_rules(step=step),
-        )
         _capture_bad_request_validation(
             issues,
             FlowGraphIssueCode.FLOW_STEP_INVALID,
-            validate=lambda: _validate_step_item_map_config(step=step),
+            validate=lambda: _validate_step_input_configuration(step=step),
             step_order=step.step_order,
         )
 
@@ -1291,18 +1289,17 @@ def _validate_compose_array_source_ref(
         )
 
 
+def _validate_step_input_configuration(*, step: FlowStepValidationView) -> None:
+    _validate_runtime_input_publish_rules(step=step)
+    _validate_step_mapped_execution(step=step)
+
+
 def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> None:
     runtime_input: FlowRuntimeInputConfig = build_runtime_input_config(
         step.input_config
     )
     if not runtime_input.enabled:
         return
-
-    if runtime_input.execution_mode == "per_source" and runtime_input.max_files is None:
-        raise FlowStepValidationError(
-            f"Step {step.step_order}: per_source runtime input requires an explicit max_files ceiling.",
-            step_order=step.step_order,
-        )
 
     if step.output_mode == "transcribe_only" and runtime_input.input_format != "audio":
         raise FlowStepValidationError(
@@ -1328,10 +1325,29 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
             )
 
 
-def _validate_step_item_map_config(*, step: FlowStepValidationView) -> None:
-    item_map = build_step_item_map_config(step.input_config)
-    if item_map.enabled and item_map.max_items is None:
+def _validate_step_mapped_execution(*, step: FlowStepValidationView) -> None:
+    try:
+        mapped_execution = resolve_step_mapped_execution(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            output_mode=step.output_mode,
+            output_type=step.output_type,
+            input_config=step.input_config,
+        )
+    except FlowStepMappedExecutionConfigurationError as exc:
         raise FlowStepValidationError(
-            f"Step {step.step_order}: enabled item_map requires an explicit max_items ceiling.",
+            f"Step {step.step_order}: {exc}",
+            step_order=step.step_order,
+        ) from exc
+
+    if mapped_execution is None or mapped_execution.maximum_items is not None:
+        return
+    if mapped_execution.execution_mode == "per_source":
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: per_source runtime input requires an explicit max_files ceiling.",
             step_order=step.step_order,
         )
+    raise FlowStepValidationError(
+        f"Step {step.step_order}: enabled item_map requires an explicit max_items ceiling.",
+        step_order=step.step_order,
+    )

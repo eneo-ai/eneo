@@ -19,16 +19,14 @@ from eneo.flows.runtime.step_handlers.base import (
     PrepareAssistantStepFn,
     PreviewAssistantStepFn,
 )
-from eneo.flows.runtime.step_handlers.per_item_map import (
-    execute_per_item_map,
-    should_execute_per_item_map,
-)
+from eneo.flows.runtime.step_handlers.per_item_map import execute_per_item_map
 from eneo.flows.runtime.step_handlers.per_source_reader import (
     execute_per_source_reader,
-    should_execute_per_source_reader,
 )
-from eneo.flows.runtime_input import build_runtime_input_config
-from eneo.flows.step_item_map import build_step_item_map_config
+from eneo.flows.step_mapped_execution import (
+    FlowStepMappedExecutionConfigurationError,
+    resolve_step_mapped_execution,
+)
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -53,7 +51,24 @@ class PassThroughStepHandler:
         version_metadata: dict[str, object] | None,
         attempt_no: int,
     ) -> StepExecutionResult:
-        if should_execute_per_source_reader(step):
+        try:
+            mapped_execution = resolve_step_mapped_execution(
+                input_source=step.input_source,
+                input_type=step.input_type,
+                output_mode=step.output_mode,
+                output_type=step.output_type,
+                input_config=step.input_config,
+            )
+        except FlowStepMappedExecutionConfigurationError as exc:
+            raise TypedIOValidationException(
+                str(exc),
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            ) from exc
+
+        if (
+            mapped_execution is not None
+            and mapped_execution.execution_mode == "per_source"
+        ):
             if self.list_step_input_file_ids is None:
                 raise RuntimeError(
                     "Per-source reader execution requires file-id listing."
@@ -80,7 +95,10 @@ class PassThroughStepHandler:
                 mapped_execution_policy=self.mapped_execution_policy,
                 rag_evidence_policy=self.rag_evidence_policy,
             )
-        if should_execute_per_item_map(step):
+        if (
+            mapped_execution is not None
+            and mapped_execution.execution_mode == "per_item"
+        ):
             if self.preview_assistant_step is None:
                 raise RuntimeError(
                     "Per-item map execution requires side-effect-free preview."
@@ -101,20 +119,6 @@ class PassThroughStepHandler:
                 ),
                 mapped_execution_policy=self.mapped_execution_policy,
                 rag_evidence_policy=self.rag_evidence_policy,
-            )
-        runtime_input = build_runtime_input_config(step.input_config)
-        if runtime_input.execution_mode == "per_source":
-            raise TypedIOValidationException(
-                "Per-source execution is configured but the step is not a "
-                "supported per-source document reader.",
-                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-            )
-        item_map = build_step_item_map_config(step.input_config)
-        if item_map.enabled:
-            raise TypedIOValidationException(
-                "Per-item map execution is configured but the step is not a "
-                "supported previous-step JSON map.",
-                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
         prepared_step = await self.prepare_assistant_step(
             step=step,

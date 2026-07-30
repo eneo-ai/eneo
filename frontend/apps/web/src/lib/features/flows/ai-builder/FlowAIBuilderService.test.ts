@@ -51,7 +51,14 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
         form_fields: null
       },
       assumptions: [],
-      lint_warnings: []
+      lint_warnings: [],
+      execution_shape: {
+        completion_model_step_count: 0,
+        transcription_model_step_count: 0,
+        deterministic_step_count: 0,
+        schema_constrained_step_count: 0,
+        mapped_step_upper_bounds: []
+      }
     },
     ...overrides
   };

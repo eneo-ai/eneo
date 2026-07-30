@@ -28,7 +28,6 @@ from eneo.flows.flow_run_provenance import (
     build_resolved_input_edge,
     sum_complete_token_counts,
 )
-from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -67,16 +66,6 @@ class PerItemMapCall:
     output: StepExecutionOutput
     deps: StepExecutionRuntimeDeps
     elapsed_ms: int
-
-
-def should_execute_per_item_map(step: RuntimeStep) -> bool:
-    item_map = build_step_item_map_config(step.input_config)
-    return (
-        item_map.enabled
-        and step.input_source == "previous_step"
-        and step.input_type == "json"
-        and resolve_format_spec(step.output_type) is JSON_OUTPUT_FORMAT
-    )
 
 
 async def execute_per_item_map(

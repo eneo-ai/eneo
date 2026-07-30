@@ -226,11 +226,11 @@ describe("FlowAIBuilderPlanPane", () => {
     const state = {
       session: makeSession({ status: "awaiting_approval", target_kind: "create", flow_id: null }),
       currentPlan: makePlan({
-        proposal: {
+        proposal: makeProposal({
           spec: { flow_name: "Flow", flow_description: "", steps: [], form_fields: [] },
           assumptions: ["Underlaget är på svenska.", "En körning i taget."],
           lint_warnings: []
-        }
+        })
       })
     };
 
@@ -255,6 +255,90 @@ describe("FlowAIBuilderPlanPane", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     await fireEvent.click(trigger);
     expect(screen.getByText("Underlaget är på svenska.")).toBeTruthy();
+  });
+
+  it("hides the execution profile outside Avancerad", () => {
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: { session: makeSession(), currentPlan: makePlan() },
+      userMode: "user"
+    });
+
+    expect(screen.queryByText(m.ai_builder_execution_profile())).toBeNull();
+  });
+
+  it("renders backend execution facts in Avancerad", async () => {
+    const state = {
+      session: makeSession({ status: "awaiting_approval", target_kind: "create", flow_id: null }),
+      currentPlan: makePlan({
+        proposal: makeProposal({
+          spec: {
+            flow_name: "Mapped report",
+            flow_description: "",
+            steps: [
+              makeStep({ plan_step_ref: "step_a", name: "Read files" }),
+              makeStep({ plan_step_ref: "step_b", name: "Analyze items" })
+            ],
+            form_fields: []
+          },
+          execution_shape: makeExecutionShape({
+            completion_model_step_count: 2,
+            transcription_model_step_count: 1,
+            deterministic_step_count: 1,
+            schema_constrained_step_count: 1,
+            mapped_step_upper_bounds: [
+              {
+                plan_step_ref: "step_a",
+                execution_mode: "per_source",
+                maximum_items: 3
+              },
+              {
+                plan_step_ref: "step_b",
+                execution_mode: "per_item",
+                maximum_items: 5
+              }
+            ]
+          })
+        })
+      })
+    };
+
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state,
+      userMode: "power_user"
+    });
+    const trigger = screen.getByRole("button", { name: m.ai_builder_execution_profile() });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.click(trigger);
+
+    for (const [label, count] of [
+      [m.ai_builder_execution_completion_model(), 2],
+      [m.ai_builder_execution_transcription_model(), 1],
+      [m.ai_builder_execution_deterministic(), 1],
+      [m.ai_builder_execution_schema_constrained(), 1]
+    ] as const) {
+      expect(screen.getByText(label).parentElement?.textContent).toContain(String(count));
+    }
+    expect(
+      screen.getByText(m.ai_builder_execution_per_source_limit({ step: "1. Read files", count: 3 }))
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        m.ai_builder_execution_per_item_limit({ step: "2. Analyze items", count: 5 })
+      )
+    ).toBeTruthy();
+  });
+
+  it("states when the plan has no mapped steps", async () => {
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: { session: makeSession(), currentPlan: makePlan() },
+      userMode: "power_user"
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_execution_profile() }));
+    expect(screen.getByText(m.ai_builder_execution_no_mapped_steps())).toBeTruthy();
   });
 
   it("keeps an expanded step expanded across Diagram↔Detaljer switches", async () => {
@@ -424,7 +508,7 @@ function makeApprovedCreatePlanState({ step }: { step: Partial<StepSpec> }) {
     }),
     currentPlan: makePlan({
       status: "approved",
-      proposal: {
+      proposal: makeProposal({
         spec: {
           flow_name: "Audio intake",
           flow_description: "Transcribe uploaded audio.",
@@ -433,7 +517,7 @@ function makeApprovedCreatePlanState({ step }: { step: Partial<StepSpec> }) {
         },
         assumptions: [],
         lint_warnings: []
-      }
+      })
     })
   };
 }
@@ -501,16 +585,35 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   return {
     plan_id: "plan-1",
     status: "proposed",
-    proposal: {
-      spec: {
-        flow_name: "Flow",
-        flow_description: "",
-        steps: [],
-        form_fields: []
-      },
-      assumptions: [],
-      lint_warnings: []
+    proposal: makeProposal(),
+    ...overrides
+  };
+}
+
+function makeProposal(overrides: Partial<ProposedPlan["proposal"]> = {}): ProposedPlan["proposal"] {
+  return {
+    spec: {
+      flow_name: "Flow",
+      flow_description: "",
+      steps: [],
+      form_fields: []
     },
+    assumptions: [],
+    lint_warnings: [],
+    execution_shape: makeExecutionShape(),
+    ...overrides
+  };
+}
+
+function makeExecutionShape(
+  overrides: Partial<ProposedPlan["proposal"]["execution_shape"]> = {}
+): ProposedPlan["proposal"]["execution_shape"] {
+  return {
+    completion_model_step_count: 0,
+    transcription_model_step_count: 0,
+    deterministic_step_count: 0,
+    schema_constrained_step_count: 0,
+    mapped_step_upper_bounds: [],
     ...overrides
   };
 }

@@ -10342,7 +10342,7 @@ export interface components {
      * @example {
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_name": "Employee Review Summary",
-     *       "steps_created": 2,
+     *       "steps_created": 3,
      *       "steps_removed": 0,
      *       "steps_updated": 0
      *     }
@@ -14066,6 +14066,40 @@ export interface components {
       confidence?: "ready" | "needs_review" | "low_confidence";
     };
     /**
+     * FlowBuilderExecutionShape
+     * @description Static proposal facts; counts are not provider-call estimates.
+     */
+    FlowBuilderExecutionShape: {
+      /** Completion Model Step Count */
+      completion_model_step_count: number;
+      /** Transcription Model Step Count */
+      transcription_model_step_count: number;
+      /** Deterministic Step Count */
+      deterministic_step_count: number;
+      /** Schema Constrained Step Count */
+      schema_constrained_step_count: number;
+      /**
+       * Mapped Step Upper Bounds
+       * @default []
+       */
+      mapped_step_upper_bounds?: components["schemas"]["FlowBuilderMappedStepUpperBound"][];
+    };
+    /**
+     * FlowBuilderMappedStepUpperBound
+     * @description Authored logical-item ceiling for one mapped step.
+     */
+    FlowBuilderMappedStepUpperBound: {
+      /** Plan Step Ref */
+      plan_step_ref: string;
+      /**
+       * Execution Mode
+       * @enum {string}
+       */
+      execution_mode: "per_source" | "per_item";
+      /** Maximum Items */
+      maximum_items: number;
+    };
+    /**
      * FlowBuilderProposalContent
      * @description Typed proposal content reused by storage, HTTP responses, and SSE.
      */
@@ -14083,6 +14117,7 @@ export interface components {
        */
       description_override_manual?: boolean;
       edit?: components["schemas"]["FlowBuilderEditApproval"] | null;
+      readonly execution_shape: components["schemas"]["FlowBuilderExecutionShape"];
     };
     /**
      * FlowClassificationRetentionPoliciesPublic
@@ -24071,8 +24106,15 @@ export interface components {
      *         "assumptions": [
      *           "Uploaded audio is clear enough to transcribe."
      *         ],
+     *         "execution_shape": {
+     *           "completion_model_step_count": 1,
+     *           "deterministic_step_count": 1,
+     *           "mapped_step_upper_bounds": [],
+     *           "schema_constrained_step_count": 0,
+     *           "transcription_model_step_count": 1
+     *         },
      *         "lint_warnings": [],
-     *         "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
+     *         "plan_rationale": "The flow separates transcription, summary writing, and deterministic PDF rendering.",
      *         "spec": {
      *           "flow_description": "Transcribe a review conversation and generate a PDF summary.",
      *           "flow_name": "Employee Review Summary",
@@ -24099,19 +24141,31 @@ export interface components {
      *             },
      *             {
      *               "assistant_spec": {
-     *                 "instructions": "Summarize the transcription into a professional PDF.",
+     *                 "instructions": "Summarize the transcription for the named employee.",
      *                 "knowledge_refs": [],
      *                 "model_ref": "model.gpt-5-4"
      *               },
      *               "input_bindings": {
-     *                 "question": "{{ step_a.output.text }}"
+     *                 "question": "Employee: {{ flow_input.employee_name }}\n\nTranscript: {{ step_a.output.text }}"
      *               },
      *               "input_source": "previous_step",
      *               "input_type": "text",
-     *               "name": "Create PDF summary",
+     *               "name": "Write review summary",
      *               "output_mode": "pass_through",
-     *               "output_type": "pdf",
+     *               "output_type": "text",
      *               "plan_step_ref": "step_b"
+     *             },
+     *             {
+     *               "assistant_spec": {
+     *                 "instructions": "Render the completed summary as a PDF.",
+     *                 "knowledge_refs": []
+     *               },
+     *               "input_source": "previous_step",
+     *               "input_type": "text",
+     *               "name": "Render PDF",
+     *               "output_mode": "render_verbatim",
+     *               "output_type": "pdf",
+     *               "plan_step_ref": "step_c"
      *             }
      *           ]
      *         }
@@ -25702,8 +25756,15 @@ export interface components {
      *             "assumptions": [
      *               "Uploaded audio is clear enough to transcribe."
      *             ],
+     *             "execution_shape": {
+     *               "completion_model_step_count": 1,
+     *               "deterministic_step_count": 1,
+     *               "mapped_step_upper_bounds": [],
+     *               "schema_constrained_step_count": 0,
+     *               "transcription_model_step_count": 1
+     *             },
      *             "lint_warnings": [],
-     *             "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
+     *             "plan_rationale": "The flow separates transcription, summary writing, and deterministic PDF rendering.",
      *             "spec": {
      *               "flow_description": "Transcribe a review conversation and generate a PDF summary.",
      *               "flow_name": "Employee Review Summary",
@@ -25730,19 +25791,31 @@ export interface components {
      *                 },
      *                 {
      *                   "assistant_spec": {
-     *                     "instructions": "Summarize the transcription into a professional PDF.",
+     *                     "instructions": "Summarize the transcription for the named employee.",
      *                     "knowledge_refs": [],
      *                     "model_ref": "model.gpt-5-4"
      *                   },
      *                   "input_bindings": {
-     *                     "question": "{{ step_a.output.text }}"
+     *                     "question": "Employee: {{ flow_input.employee_name }}\n\nTranscript: {{ step_a.output.text }}"
      *                   },
      *                   "input_source": "previous_step",
      *                   "input_type": "text",
-     *                   "name": "Create PDF summary",
+     *                   "name": "Write review summary",
      *                   "output_mode": "pass_through",
-     *                   "output_type": "pdf",
+     *                   "output_type": "text",
      *                   "plan_step_ref": "step_b"
+     *                 },
+     *                 {
+     *                   "assistant_spec": {
+     *                     "instructions": "Render the completed summary as a PDF.",
+     *                     "knowledge_refs": []
+     *                   },
+     *                   "input_source": "previous_step",
+     *                   "input_type": "text",
+     *                   "name": "Render PDF",
+     *                   "output_mode": "render_verbatim",
+     *                   "output_type": "pdf",
+     *                   "plan_step_ref": "step_c"
      *                 }
      *               ]
      *             }

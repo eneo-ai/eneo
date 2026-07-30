@@ -25,7 +25,6 @@ from eneo.flows.flow_run_provenance import (
     MappedProviderCallProvenance,
     sum_complete_token_counts,
 )
-from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -67,17 +66,6 @@ class PerSourceReaderCall:
     output: StepExecutionOutput
     deps: StepExecutionRuntimeDeps
     elapsed_ms: int
-
-
-def should_execute_per_source_reader(step: RuntimeStep) -> bool:
-    runtime_input = build_runtime_input_config(step.input_config)
-    return (
-        runtime_input.enabled
-        and runtime_input.execution_mode == "per_source"
-        and step.input_source == "flow_input"
-        and step.input_type in {"document", "file"}
-        and resolve_format_spec(step.output_type) is JSON_OUTPUT_FORMAT
-    )
 
 
 async def execute_per_source_reader(
