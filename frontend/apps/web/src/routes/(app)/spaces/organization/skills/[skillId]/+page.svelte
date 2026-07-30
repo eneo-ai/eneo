@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    type AssistantFleetAdvancePublic,
     EneoError,
     type OrganizationSkillPublic,
     type SkillAdoptionProjectionPagePublic,
@@ -12,6 +13,7 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
@@ -22,12 +24,23 @@
   import { getErrorMessage, SKILL_EXECUTION_BLOCK_CONFLICT } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
-  import SkillAdoptionProjection from "$lib/features/skills/SkillAdoptionProjection.svelte";
+  import SkillAdoptionProjection, {
+    type SkillAdoptionRun
+  } from "$lib/features/skills/SkillAdoptionProjection.svelte";
   import { Info, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-svelte";
-  import { tick, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
 
   type PublicationAction = "publish" | "unpublish";
   type ExecutionAction = "block" | "unblock";
+  type ReviewedAdoption =
+    { status: "loaded"; page: SkillAdoptionProjectionPagePublic } | { status: "unavailable" };
+  type RolloutState = SkillAdoptionRun & {
+    generation: number;
+    skillId: string;
+    publishedRevisionId: string;
+    previousPublishedRevisionId: string | null;
+    stopRequested: boolean;
+  };
 
   let { data } = $props();
 
@@ -35,6 +48,10 @@
   let publicationAction = $state<PublicationAction | null>(null);
   let publicationSaving = $state(false);
   let publicationError = $state<string | null>(null);
+  let updateBindingsOnPublish = $state(true);
+  let rollout = $state<RolloutState | null>(null);
+  let rolloutGeneration = 0;
+  let componentActive = true;
   let executionBlockOverride = $state<SkillExecutionBlockState | null>(null);
   let executionBlockOverrideBase = $state<SkillExecutionBlockState | null>(null);
   let executionAction = $state<ExecutionAction | null>(null);
@@ -59,6 +76,9 @@
   );
   const executionBlock = $derived(executionBlockOverride ?? data.executionBlock);
   const normalizedExecutionReason = $derived(executionReason.trim());
+  const rolloutMutationInFlight = $derived(
+    rollout?.status === "running" || rollout?.personalChat === "pending"
+  );
 
   $effect(() => {
     if (
@@ -90,11 +110,22 @@
     return "outline";
   }
 
-  async function refreshOrganizationSkills() {
+  onDestroy(() => {
+    componentActive = false;
+    rolloutGeneration += 1;
+  });
+
+  function isCurrentSkill(skillId: string): boolean {
+    return componentActive && data.skill.id === skillId;
+  }
+
+  async function refreshOrganizationSkills(skillId = data.skill.id) {
     try {
       await invalidate("organization:skills");
+      if (!isCurrentSkill(skillId)) return;
       refreshWarning = false;
     } catch {
+      if (!isCurrentSkill(skillId)) return;
       refreshWarning = true;
     }
   }
@@ -165,6 +196,203 @@
     if (open || publicationSaving) return;
     publicationAction = null;
     publicationError = null;
+  }
+
+  function openPublicationDialog(action: PublicationAction) {
+    publicationAction = action;
+    publicationError = null;
+    if (action === "publish") {
+      updateBindingsOnPublish = true;
+    }
+  }
+
+  function isCurrentRollout(run: RolloutState): boolean {
+    if (!componentActive) return false;
+    const currentPublishedRevisionId = data.published?.revision_id ?? null;
+    return (
+      data.skill.id === run.skillId &&
+      (currentPublishedRevisionId === run.publishedRevisionId ||
+        currentPublishedRevisionId === run.previousPublishedRevisionId) &&
+      rollout?.generation === run.generation &&
+      rollout.publishedRevisionId === run.publishedRevisionId
+    );
+  }
+
+  function updateCurrentRollout(run: RolloutState, update: Partial<RolloutState>) {
+    if (!isCurrentRollout(run) || rollout === null) return;
+    rollout = { ...rollout, ...update };
+  }
+
+  function addAssistantChunk(run: RolloutState, chunk: AssistantFleetAdvancePublic) {
+    if (!isCurrentRollout(run) || rollout === null) return;
+    const activationUnavailable = chunk.outcomes.filter(
+      (outcome) => outcome.outcome === "incompatible" && outcome.reason === "activation_unavailable"
+    ).length;
+    const contextWindow = chunk.outcomes.filter(
+      (outcome) => outcome.outcome === "incompatible" && outcome.reason === "context_window"
+    ).length;
+    rollout = {
+      ...rollout,
+      advanced: rollout.advanced + chunk.counts.advanced,
+      concurrentChange: rollout.concurrentChange + chunk.counts.concurrent_change,
+      activationUnavailable: rollout.activationUnavailable + activationUnavailable,
+      contextWindow: rollout.contextWindow + contextWindow
+    };
+  }
+
+  async function advanceReviewedPersonalChat(run: RolloutState, pinnedRevisionId: string | null) {
+    if (pinnedRevisionId === null) return;
+    try {
+      await data.eneo.skills.organization.advancePersonalChat({
+        skillId: run.skillId,
+        expected_pinned_revision_id: pinnedRevisionId,
+        expected_published_revision_id: run.publishedRevisionId
+      });
+      updateCurrentRollout(run, { personalChat: "advanced" });
+    } catch {
+      updateCurrentRollout(run, { personalChat: "failed" });
+    }
+  }
+
+  async function walkAssistantBindings(
+    run: RolloutState
+  ): Promise<"completed" | "stopped" | "failed" | "stale"> {
+    let cursor: string | null = null;
+    while (isCurrentRollout(run)) {
+      let chunk: AssistantFleetAdvancePublic;
+      try {
+        chunk = await data.eneo.skills.organization.advanceAssistants({
+          skillId: run.skillId,
+          expected_published_revision_id: run.publishedRevisionId,
+          cursor
+        });
+      } catch {
+        updateCurrentRollout(run, { status: "failed" });
+        return "failed";
+      }
+      if (!isCurrentRollout(run)) return "stale";
+      addAssistantChunk(run, chunk);
+      if (!isCurrentRollout(run) || rollout === null) return "stale";
+      if (rollout.stopRequested) {
+        updateCurrentRollout(run, { status: "stopped" });
+        return "stopped";
+      }
+      if (chunk.next_cursor === null) {
+        return "completed";
+      }
+      cursor = chunk.next_cursor;
+    }
+    return "stale";
+  }
+
+  async function runPublishedBindingUpdate(run: RolloutState, pinnedRevisionId: string | null) {
+    const [, assistantStatus] = await Promise.all([
+      advanceReviewedPersonalChat(run, pinnedRevisionId),
+      walkAssistantBindings(run)
+    ]);
+    if (!isCurrentRollout(run)) return;
+    if (assistantStatus === "completed") {
+      updateCurrentRollout(run, { status: "completed" });
+    }
+    await refreshOrganizationSkills(run.skillId);
+  }
+
+  function startPublishedBindingUpdate(
+    skillId: string,
+    publishedRevisionId: string,
+    previousPublishedRevisionId: string | null,
+    adoption: ReviewedAdoption
+  ) {
+    const summary = adoption.status === "loaded" ? adoption.page.summary : null;
+    const personalChat = summary?.personal_chat;
+    const pinnedRevisionId =
+      personalChat !== undefined &&
+      personalChat !== null &&
+      personalChat.revision_id !== publishedRevisionId
+        ? personalChat.revision_id
+        : null;
+    const provisionalTotal =
+      summary?.revision_counts.reduce(
+        (total, revision) =>
+          revision.revision_id === publishedRevisionId ? total : total + revision.assistant_count,
+        0
+      ) ?? 0;
+    const run: RolloutState = {
+      generation: ++rolloutGeneration,
+      skillId,
+      publishedRevisionId,
+      previousPublishedRevisionId,
+      stopRequested: false,
+      status: "running",
+      provisionalTotal,
+      advanced: 0,
+      concurrentChange: 0,
+      activationUnavailable: 0,
+      contextWindow: 0,
+      personalChat:
+        adoption.status === "unavailable" || summary === null
+          ? "failed"
+          : pinnedRevisionId === null
+            ? "not_applicable"
+            : "pending"
+    };
+    rollout = run;
+    void runPublishedBindingUpdate(run, pinnedRevisionId);
+  }
+
+  function stopPublishedBindingUpdate() {
+    if (rollout === null || rollout.status !== "running") return;
+    rollout = { ...rollout, stopRequested: true };
+  }
+
+  function startSavedBindingUpdate(adoption: SkillAdoptionProjectionPagePublic) {
+    const publishedRevisionId = data.published?.revision_id;
+    if (
+      publishedRevisionId === undefined ||
+      rolloutMutationInFlight ||
+      executionBlock.block !== null
+    ) {
+      return;
+    }
+    startPublishedBindingUpdate(data.skill.id, publishedRevisionId, null, {
+      status: "loaded",
+      page: adoption
+    });
+  }
+
+  function restartPublishedBindingUpdate() {
+    const prior = rollout;
+    const currentPublishedRevisionId = data.published?.revision_id ?? null;
+    if (
+      prior === null ||
+      (prior.status !== "stopped" && prior.status !== "failed") ||
+      prior.personalChat === "pending" ||
+      data.skill.id !== prior.skillId ||
+      (currentPublishedRevisionId !== prior.publishedRevisionId &&
+        currentPublishedRevisionId !== prior.previousPublishedRevisionId)
+    ) {
+      return;
+    }
+    const run: RolloutState = {
+      ...prior,
+      generation: ++rolloutGeneration,
+      stopRequested: false,
+      status: "running",
+      provisionalTotal: Math.max(prior.provisionalTotal - prior.advanced, 0),
+      advanced: 0,
+      concurrentChange: 0,
+      activationUnavailable: 0,
+      contextWindow: 0
+    };
+    rollout = run;
+    void (async () => {
+      const assistantStatus = await walkAssistantBindings(run);
+      if (!isCurrentRollout(run)) return;
+      if (assistantStatus === "completed") {
+        updateCurrentRollout(run, { status: "completed" });
+      }
+      await refreshOrganizationSkills(run.skillId);
+    })();
   }
 
   function setExecutionDialogOpen(open: boolean) {
@@ -244,12 +472,31 @@
 
   async function changePublication(event: MouseEvent) {
     event.preventDefault();
-    if (publicationAction === null || publicationSaving) return;
+    if (publicationAction === null || publicationSaving || rolloutMutationInFlight) return;
     const skill = data.skill;
+    const action = publicationAction;
+    const updateBindings = action === "publish" && updateBindingsOnPublish;
+    const previousPublishedRevisionId = data.published?.revision_id ?? null;
+    let adoption: ReviewedAdoption = { status: "unavailable" };
     publicationSaving = true;
     publicationError = null;
+    if (updateBindings) {
+      try {
+        adoption = { status: "loaded", page: await data.adoptionPage };
+      } catch {
+        try {
+          adoption = {
+            status: "loaded",
+            page: await getOrganizationSkillAdoption(skill.id, { limit: 1, cursor: null })
+          };
+        } catch {
+          adoption = { status: "unavailable" };
+        }
+      }
+      if (!isCurrentSkill(skill.id)) return;
+    }
     try {
-      if (publicationAction === "publish") {
+      if (action === "publish") {
         await data.eneo.skills.organization.publish({
           skillId: skill.id,
           expected_revision_id: skill.current_revision_id
@@ -258,13 +505,28 @@
         await data.eneo.skills.organization.unpublish({ skillId: skill.id });
       }
     } catch (error) {
+      if (!isCurrentSkill(skill.id)) return;
       publicationError = getErrorMessage(error, m.organization_skills_publication_error());
       publicationSaving = false;
       return;
     }
+    if (!isCurrentSkill(skill.id)) return;
+    if (action === "unpublish") {
+      rolloutGeneration += 1;
+      rollout = null;
+    }
     publicationAction = null;
     publicationSaving = false;
-    await refreshOrganizationSkills();
+    if (updateBindings) {
+      startPublishedBindingUpdate(
+        skill.id,
+        skill.current_revision_id,
+        previousPublishedRevisionId,
+        adoption
+      );
+      return;
+    }
+    await refreshOrganizationSkills(skill.id);
   }
 
   function openAdvanceDialog(pinned: { revisionId: string; revisionNumber: number }) {
@@ -281,15 +543,33 @@
   let advanceObservedSkillId = untrack(() => data.skill.id);
   $effect(() => {
     const nextSkillId = data.skill.id;
-    if (nextSkillId === advanceObservedSkillId) return;
-    advanceObservedSkillId = nextSkillId;
-    advancePinned = null;
-    advanceError = null;
-    advanceAnnouncement = "";
+    if (nextSkillId !== advanceObservedSkillId) {
+      advanceObservedSkillId = nextSkillId;
+      rolloutGeneration += 1;
+      rollout = null;
+      publicationAction = null;
+      publicationSaving = false;
+      publicationError = null;
+      advancePinned = null;
+      advanceError = null;
+      advanceAnnouncement = "";
+      return;
+    }
+    if (rollout !== null && !isCurrentRollout(rollout)) {
+      rolloutGeneration += 1;
+      rollout = null;
+    }
   });
 
   const onAdvancePersonalChat = $derived(
-    data.published !== null && executionBlock.block === null ? openAdvanceDialog : undefined
+    data.published !== null && executionBlock.block === null && !rolloutMutationInFlight
+      ? openAdvanceDialog
+      : undefined
+  );
+  const onStartBindingUpdate = $derived(
+    data.published !== null && executionBlock.block === null && !rolloutMutationInFlight
+      ? startSavedBindingUpdate
+      : undefined
   );
 
   function setAdvanceDialogOpen(open: boolean) {
@@ -314,12 +594,12 @@
       movedToVersion = advance.to_revision_number;
     } catch (error) {
       advanceSaving = false;
-      if (data.skill.id !== pinned.skillId) return;
+      if (!isCurrentSkill(pinned.skillId)) return;
       advanceError = getErrorMessage(error, m.organization_skills_advance_error());
       return;
     }
     advanceSaving = false;
-    if (data.skill.id !== pinned.skillId) return;
+    if (!isCurrentSkill(pinned.skillId)) return;
     advancePinned = null;
     advanceAnnouncement = "";
     await tick();
@@ -496,7 +776,10 @@
 
             <div class="flex flex-wrap items-center gap-2">
               {#if data.skill.publication_state !== "published"}
-                <Button disabled={formDirty} onclick={() => (publicationAction = "publish")}>
+                <Button
+                  disabled={formDirty || rolloutMutationInFlight}
+                  onclick={() => openPublicationDialog("publish")}
+                >
                   <ShieldCheck aria-hidden="true" />
                   {data.skill.publication_state === "update_pending"
                     ? m.organization_skills_publish_update_action()
@@ -506,8 +789,8 @@
               {#if data.skill.publication_state === "published" || data.skill.publication_state === "update_pending"}
                 <Button
                   variant="outline"
-                  disabled={formDirty}
-                  onclick={() => (publicationAction = "unpublish")}
+                  disabled={formDirty || rolloutMutationInFlight}
+                  onclick={() => openPublicationDialog("unpublish")}
                 >
                   {m.organization_skills_unpublish_action()}
                 </Button>
@@ -591,6 +874,11 @@
           initialLoading
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
+          publishedRevisionId={data.published?.revision_id ?? null}
+          {onStartBindingUpdate}
+          run={rollout}
+          onStop={stopPublishedBindingUpdate}
+          onRestart={restartPublishedBindingUpdate}
         />
       {:then adoptionPage}
         <SkillAdoptionProjection
@@ -598,6 +886,11 @@
           initialPage={adoptionPage}
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
+          publishedRevisionId={data.published?.revision_id ?? null}
+          {onStartBindingUpdate}
+          run={rollout}
+          onStop={stopPublishedBindingUpdate}
+          onRestart={restartPublishedBindingUpdate}
         />
         <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
       {:catch}
@@ -607,6 +900,11 @@
           initialError
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
+          publishedRevisionId={data.published?.revision_id ?? null}
+          {onStartBindingUpdate}
+          run={rollout}
+          onStop={stopPublishedBindingUpdate}
+          onRestart={restartPublishedBindingUpdate}
         />
         <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
       {/await}
@@ -642,7 +940,7 @@
 </Page.Root>
 
 <AlertDialog.Root open={publicationAction !== null} onOpenChange={setPublicationDialogOpen}>
-  <AlertDialog.Content>
+  <AlertDialog.Content class={publicationAction === "publish" ? "sm:max-w-md" : undefined}>
     <AlertDialog.Header>
       <AlertDialog.Title>
         {publicationAction === "unpublish"
@@ -657,6 +955,24 @@
             })}
       </AlertDialog.Description>
     </AlertDialog.Header>
+    {#if publicationAction === "publish"}
+      <Field.Field orientation="horizontal" class="border-border rounded-lg border p-3">
+        <Checkbox
+          id="update-bindings-on-publish"
+          bind:checked={updateBindingsOnPublish}
+          disabled={publicationSaving}
+          aria-describedby="update-bindings-on-publish-description"
+        />
+        <Field.Content>
+          <Field.Label for="update-bindings-on-publish">
+            {m.organization_skills_publish_update_bindings_label()}
+          </Field.Label>
+          <Field.Description id="update-bindings-on-publish-description">
+            {m.organization_skills_publish_update_bindings_description()}
+          </Field.Description>
+        </Field.Content>
+      </Field.Field>
+    {/if}
     {#if publicationError}
       <Alert.Root variant="destructive">
         <Alert.Title>{m.organization_skills_publication_error_title()}</Alert.Title>
