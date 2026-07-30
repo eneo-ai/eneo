@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-30 | **Honest Builder execution profile**: proposals now expose an output-only static profile for completion-model, transcription-model, deterministic, schema-constrained, and authored mapped work; one pure mapped-execution owner aligns validation, runtime dispatch, and projection while rejecting invalid or dual configurations as structured Builder feedback; the advanced Swedish/English UI explains overlapping categories and avoids provider-call claims; five disproven lints were deleted while the two source-proven structural-waste critic rules remain (`5509eef84..fb6934b5a`, gate green 8/10 after four focused passes, no findings) |
 | 2026-07-30 | **Bounded Builder persistence and replayable terminal failures**: locally detected oversized planning state now commits one typed terminal outcome that preserves the last valid state and replays without another provider call, while genuine unknown provider outcomes remain untouched; immutable proposal snapshots have one current-only top-level schema version, a 1 MiB serialized bound, and canonical fail-closed hydration that rejects unknown or normalized persisted values without weakening provider-input normalization; the established draft-title path remains intact (`c606411f7..48e9be497`, gate green 8/10 after two passes, no findings) |
 | 2026-07-29 | **Bounded interactive attempt evidence**: current and recent attempt candidates stop at 500 rows plus one truncation sentinel before ranking, aggregation, and payload hydration; every attempt-derived count is explicitly exact or a lower bound through the API and Swedish/English UI; unlimited exports remain complete; narrow PostgreSQL indexes are resumable and reject wrong, mixed-direction, or widened definitions (`acf340e9a..f82a2419a`, gate green 8/10 after three total passes, no findings) |
 | 2026-07-29 | **Canonical completion-model capability**: every Flow output mode now has one typed completion-backed classification shared by runtime disclosure, retrieval validation, the capability manifest, authoring, and materialization; deterministic template-fill steps shed unused completion-model bindings, and new output modes must be explicitly classified (`4b0796152`, gate green 9/10, no findings) |
@@ -90,11 +91,16 @@ external release gate (item 10); BM0.2 is external (item 10).
    terminal outcome without rewriting genuine unknown provider outcomes;
    current-only proposal snapshots are versioned, bounded, and canonical on
    hydration while preserving the draft-title JSON path.
-4b. **Honest static execution shape** *(medium, after item 4)* — add critic
-   invariants for hard structural waste and one factual proposal projection:
-   model-backed versus deterministic steps, mapped upper bound, and
-   schema-constrained outputs. No token/currency estimates, numeric step-count
-   knob, or per-step rationale prose.
+4b. ~~Honest static execution shape~~ — **LANDED**
+   `5509eef84..fb6934b5a`. An output-only proposal projection distinguishes
+   completion-model, transcription-model, and deterministic work, makes model
+   overlap explicit, reports schema-constrained outputs and authored mapped
+   cardinality, and never estimates provider calls or cost. One shared resolver
+   owns mapped eligibility for validation, runtime dispatch, and projection;
+   invalid, unbounded, unsupported, and dual configurations fail as structured
+   Builder feedback. Five disproven heuristic lints were deleted. The two
+   source-proven structural-waste critic rules remain; adding new critic
+   topology is recorded as `measured_no_change`.
 5. **Operational attachment semantics** *(large)* — the conversion happens
    at the post-flow-creation materialization seam, inside the existing
    atomic apply transaction: the Builder carries one typed
@@ -214,8 +220,9 @@ controls all other ordering.
   the critic share one canonical requested-versus-compiled checkpoint predicate.
   No parallel HITL classifier or duplicate matching rule. *(M)*
 - **B5a** (= item 2d): **LANDED** `4b0796152`. *(S)*
-- **B5b** (= item 4b): after B1, add structural-waste invariants and the factual
-  execution-shape projection. *(M)*
+- **B5b** (= item 4b): **LANDED** `5509eef84..fb6934b5a`. Factual execution
+  shape, shared mapped-execution ownership, heuristic-lint deletion, and
+  `measured_no_change` for speculative new critic invariants. *(M)*
 - Generated-flow proof is not a standalone B6 slice. Each owning slice carries
   its behavior tests: form variables (inmatningsfält), targeted underlag per
   step, enforced JSON input/output schemas, unusual-input resilience, and
