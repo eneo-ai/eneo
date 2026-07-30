@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposalContent
+from eneo.flows.domain.step_mapped_execution import resolve_step_mapped_execution
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -10,7 +11,6 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.step_mapped_execution import resolve_step_mapped_execution
 
 
 def _step(

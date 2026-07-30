@@ -245,9 +245,9 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
     _owner(
         "flow_template_assets",
         "placeholders",
-        owner_module="eneo.flows.flow_template_asset_service",
+        owner_module="eneo.flows.runtime.docx_template_runtime",
         envelope_name="TemplateAssetPlaceholders",
-        owner_symbols=("_unique_placeholder_names",),
+        owner_symbols=("docx_template_placeholder_names",),
         storage_category=FlowJsonbStorageCategory.DERIVED_INDEX,
         schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
         corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
@@ -398,15 +398,16 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
     _owner(
         "flow_step_results",
         "model_parameters_json",
-        owner_module="eneo.flows.flow_run_provenance",
-        envelope_name="FlowStepModelParameters",
-        owner_symbols=("ModelParameterSnapshot", "normalize_model_parameters_payload"),
-        storage_category=FlowJsonbStorageCategory.PROVENANCE_EVIDENCE,
+        owner_module="eneo.flows.runtime.step_result_builder",
+        envelope_name="FlowStepResultModelParametersProjection",
+        owner_symbols=("build_completed_step_result",),
+        storage_category=FlowJsonbStorageCategory.RUNTIME_PAYLOAD,
         schema_version_policy=FlowJsonbSchemaVersionPolicy.PROVIDER_DEFINED,
-        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
+        corruption_behavior="No dedicated corruption behavior is currently enforced.",
         rationale=(
-            "Model parameters are provider-facing provenance, not relational "
-            "business state, and may vary by model vendor."
+            "The mutable current-result projection exposes model parameters to the "
+            "existing evidence UI. The immutable attempt input is the forensic owner; "
+            "this projection is removed with the later column-convergence migration."
         ),
     ),
     _owner(
@@ -489,29 +490,32 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
         corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
         rationale=(
-            "Attempt provenance v2 excludes facts reconstructed from immutable attempt "
+            "Attempt provenance v3 excludes facts reconstructed from immutable attempt "
             "payloads, relational result files, provider-call rows, or the published "
-            "definition. Its remaining LLM and attempt-start context is diagnostic "
-            "until those scalars converge on a typed immutable attempt owner; exact "
-            "retrieval evidence and bounded completion, tool-call, admission, and "
-            "citation observations have no other reconstruction path."
+            "definition. Exact retrieval evidence and bounded completion, tool-call, "
+            "and citation observations have no other reconstruction path."
         ),
     ),
     _owner(
         "flow_step_attempts",
         "input_payload_json",
-        owner_module="eneo.flows.runtime.step_result_builder",
-        envelope_name="FlowStepAttemptInputPayload",
+        owner_module="eneo.flows.domain.flow_step_attempt_input",
+        envelope_name="FlowStepAttemptInput",
         owner_symbols=(
-            "build_completed_step_input_payload",
-            "build_failed_step_result",
+            "FlowStepAttemptInput",
+            "parse_flow_step_attempt_input",
+            "merge_flow_step_attempt_input",
         ),
         storage_category=FlowJsonbStorageCategory.RUNTIME_PAYLOAD,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
         corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_RUN_OR_STEP,
         rationale=(
-            "Attempt input is the immutable execution snapshot for a single try "
-            "and differs from the current step result during reruns."
+            "The strict immutable envelope freezes the resolved input, each call's "
+            "question, prompt and context version, and one shared preferred/"
+            "capability-safe fallback model configuration before provider work. "
+            "Terminal paths add resolved input only when provider-call activation "
+            "never occurred. It differs from the mutable current step result during "
+            "reruns and review."
         ),
     ),
     _owner(

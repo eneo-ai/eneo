@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from eneo.flows.runtime_input import parse_runtime_input_config
+from eneo.flows.domain.runtime_input import parse_runtime_input_config
 from eneo.main.exceptions import BadRequestException
 
 

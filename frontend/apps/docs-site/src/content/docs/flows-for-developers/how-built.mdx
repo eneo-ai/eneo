@@ -30,7 +30,7 @@ Import-linter enforces package dependency boundaries. Runtime policies enforce t
 
 | Contract                                                 | Type        | Source                                | Forbidden                           | Ignored edges                                                           |
 | -------------------------------------------------------- | ----------- | ------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
-| `Flows engine must not import AI Builder`                | `forbidden` | 74 Flow engine root entries           | `eneo.flows.ai_builder`             | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
+| `Flows engine must not import AI Builder`                | `forbidden` | 71 Flow engine root entries           | `eneo.flows.ai_builder`             | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
 | `FCM must not import AI Builder`                         | `forbidden` | `eneo.flows.flow_capability_manifest` | `eneo.flows.ai_builder`             | none                                                                    |
 | `Flow package application must not import AI Builder`    | `forbidden` | `eneo.flow_packages.application`      | `eneo.flows.ai_builder`             | none                                                                    |
 | `Flow package domain must not import AI Builder`         | `forbidden` | `eneo.flow_packages.domain`           | `eneo.flows.ai_builder`             | none                                                                    |
@@ -141,7 +141,7 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 </details>
 
 <details>
-<summary><code>domain</code> (47 entries)</summary>
+<summary><code>domain</code> (46 entries)</summary>
 
 | Entry                               | Kind     | Owns / start here                                                             |
 | ----------------------------------- | -------- | ----------------------------------------------------------------------------- |
@@ -187,7 +187,6 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 | `source_display`                    | `module` | Source display values are Flow domain presentation.                           |
 | `source_identity`                   | `module` | Runtime source identity fields and schema projection are Flow contract rules. |
 | `step_chain_rules`                  | `module` | Step chain rules are domain invariants.                                       |
-| `step_item_map`                     | `module` | Item-map configuration and validation are Flow step contract rules.           |
 | `step_lineage`                      | `module` | Step lineage is domain metadata.                                              |
 | `template_reference_analyzer`       | `module` | Template reference analysis enforces domain contracts.                        |
 | `transcription_config`              | `module` | Transcription config is a domain contract.                                    |
@@ -216,7 +215,7 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 </details>
 
 <details>
-<summary><code>runtime</code> (9 entries)</summary>
+<summary><code>runtime</code> (8 entries)</summary>
 
 | Entry                          | Kind      | Owns / start here                                              |
 | ------------------------------ | --------- | -------------------------------------------------------------- |
@@ -226,7 +225,6 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 | `flow_runtime_file_integrity`  | `module`  | Runtime file integrity is execution/runtime safety.            |
 | `output_processing`            | `module`  | Output processing is runtime execution behavior.               |
 | `published_runtime`            | `module`  | Published runtime parsing feeds execution.                     |
-| `runtime_input`                | `module`  | Runtime input resolution feeds execution.                      |
 | `variable_resolver`            | `module`  | Variable resolution is runtime execution behavior.             |
 | `http_transport`               | `package` | HTTP transport belongs under runtime step handling.            |
 

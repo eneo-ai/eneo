@@ -20,6 +20,7 @@ from eneo.flows.domain.runtime import (
     StepDiagnostic,
     StepExecutionOutput,
 )
+from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     MappedProviderCallProvenance,
@@ -45,7 +46,6 @@ from eneo.flows.runtime.step_handlers.mapped_outputs import (
     mapped_admission_payload,
     mapped_output_diagnostics,
 )
-from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.source_identity import without_runtime_source_identity_json_fields
 from eneo.main.exceptions import TypedIOValidationException
 

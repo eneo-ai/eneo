@@ -13133,7 +13133,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v14";
+      schema_version: "flow-evidence-export.v15";
       /** App Version */
       app_version: string;
       /** Provenance Schema Version Min */
@@ -16104,28 +16104,6 @@ export interface components {
      *       "finish_reason": "stop",
      *       "num_tokens_input": 321,
      *       "num_tokens_output": 118,
-     *       "provenance_json": {
-     *         "llm": {
-     *           "model_parameters": {
-     *             "model_name": "gpt-4.1-mini",
-     *             "parameter_semantics": {
-     *               "reasoning_effort": {
-     *                 "mode": "model_default"
-     *               },
-     *               "temperature": {
-     *                 "mode": "model_default"
-     *               },
-     *               "top_p": {
-     *                 "mode": "model_default"
-     *               },
-     *               "verbosity": {
-     *                 "mode": "model_default"
-     *               }
-     *             },
-     *             "provider": "openai"
-     *           }
-     *         }
-     *       },
      *       "provider": "openai",
      *       "provider_response_id": "resp_123",
      *       "requested_model": "gpt-4.1",
@@ -16156,10 +16134,6 @@ export interface components {
       num_tokens_input?: number | null;
       /** Num Tokens Output */
       num_tokens_output?: number | null;
-      /** Provenance Json */
-      provenance_json?: {
-        [key: string]: unknown;
-      } | null;
     };
     /** FlowRunDebugDefinition */
     FlowRunDebugDefinition: {
@@ -17272,8 +17246,8 @@ export interface components {
      *         "flow_version": 3,
      *         "masked_fields_count": 2,
      *         "provenance_persisted_version_status": "not_tracked",
-     *         "provenance_schema_version_current": "flow-attempt-provenance.v2",
-     *         "provenance_schema_version_min": "flow-attempt-provenance.v2",
+     *         "provenance_schema_version_current": "flow-attempt-provenance.v3",
+     *         "provenance_schema_version_min": "flow-attempt-provenance.v3",
      *         "redaction_applied": true,
      *         "redaction_policy_version": "flow-evidence-redaction.v3",
      *         "retention_state_summary": {
@@ -17300,7 +17274,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v14",
+     *         "schema_version": "flow-evidence-export.v15",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -17320,7 +17294,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v14",
+     *       "schema_version": "flow-evidence-export.v15",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -17646,7 +17620,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v14";
+      schema_version: "flow-evidence-export.v15";
       /**
        * Generated At
        * Format: date-time

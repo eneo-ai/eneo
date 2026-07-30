@@ -3721,7 +3721,7 @@ def test_flow_api_guide_documents_evidence_export_actor_contract() -> None:
         maxsplit=1,
     )[0]
 
-    assert "`flow-evidence-export.v14`" in evidence_export
+    assert "`flow-evidence-export.v15`" in evidence_export
     assert "`actor.type`" in evidence_export
     assert "`user_id`" in evidence_export
     assert "`key_id`" in evidence_export

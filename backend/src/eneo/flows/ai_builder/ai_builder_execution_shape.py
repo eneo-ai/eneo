@@ -6,17 +6,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.step_mapped_execution import (
+    FlowStepMappedExecutionConfigurationError,
+    resolve_step_mapped_execution,
+)
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowPrimaryOutputExecutionKind,
     flow_output_mode_primary_execution_kind,
 )
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, InputType, StepSpec
-from eneo.flows.runtime_input import build_runtime_input_config
-from eneo.flows.step_mapped_execution import (
-    FlowStepMappedExecutionConfigurationError,
-    resolve_step_mapped_execution,
-)
 
 
 class FlowBuilderMappedStepUpperBound(BaseModel):

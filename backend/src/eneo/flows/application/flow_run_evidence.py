@@ -325,19 +325,6 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
             0,
             int((finished_at - started_at).total_seconds() * 1000),
         )
-    model_parameters = None
-    if isinstance(attempt.provenance_json, dict):
-        llm_payload = attempt.provenance_json.get("llm")
-        if isinstance(llm_payload, dict):
-            llm_payload_dict = cast(FlowPersistedJsonObject, llm_payload)
-            raw_model_parameters = llm_payload_dict.get("model_parameters")
-            if isinstance(raw_model_parameters, dict):
-                model_parameters = cast(FlowPersistedJsonObject, raw_model_parameters)
-    provider = attempt.provider
-    if provider is None and isinstance(model_parameters, dict):
-        raw_provider = model_parameters.get("provider")
-        if isinstance(raw_provider, str) and raw_provider.strip():
-            provider = raw_provider.strip()
     return DebugAttemptProjection(
         attempt_no=attempt_no,
         status=_normalize_status(attempt.status),
@@ -345,7 +332,7 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
         error_code=attempt.error_code,
         requested_model=attempt.requested_model,
         response_model=attempt.response_model,
-        provider=provider,
+        provider=attempt.provider,
         finish_reason=attempt.finish_reason,
         provider_response_id=attempt.provider_response_id,
         num_tokens_input=attempt.num_tokens_input,
@@ -374,18 +361,6 @@ def _collect_models_used(step_attempts: list[FlowStepAttempt]) -> list[str]:
     models: list[str] = []
     for attempt in step_attempts:
         candidate = attempt.response_model or attempt.requested_model
-        if candidate is None and isinstance(attempt.provenance_json, dict):
-            llm_payload = attempt.provenance_json.get("llm")
-            if isinstance(llm_payload, dict):
-                llm_payload_dict = cast(FlowPersistedJsonObject, llm_payload)
-                model_parameters = llm_payload_dict.get("model_parameters")
-                if isinstance(model_parameters, dict):
-                    model_parameters_dict = cast(
-                        FlowPersistedJsonObject, model_parameters
-                    )
-                    raw_model_name = model_parameters_dict.get("model_name")
-                    if isinstance(raw_model_name, str) and raw_model_name.strip():
-                        candidate = raw_model_name.strip()
         if isinstance(candidate, str) and candidate.strip():
             models.append(candidate.strip())
     return list(dict.fromkeys(models))

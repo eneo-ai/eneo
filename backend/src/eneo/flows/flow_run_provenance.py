@@ -4,7 +4,6 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Annotated, Any, Literal, TypeAlias, TypeVar, cast
 from uuid import UUID
 
@@ -20,6 +19,7 @@ from pydantic import (
 
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow_step_attempt_input import MappedExecutionMode
 from eneo.flows.domain.rag_evidence import SourceUsageState
 from eneo.flows.flow_retention_tombstone import (
     FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
@@ -36,8 +36,8 @@ TEXT_PREVIEW_MAX_BYTES = 16 * 1024
 JSON_PREVIEW_MAX_BYTES = 16 * 1024
 ModelT = TypeVar("ModelT", bound=BaseModel)
 DEFAULT_RAG_SELECTION_BASIS = "semantic_search_ranked_chunks_grouped_by_source"
-FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION: Literal["flow-attempt-provenance.v2"] = (
-    "flow-attempt-provenance.v2"
+FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION: Literal["flow-attempt-provenance.v3"] = (
+    "flow-attempt-provenance.v3"
 )
 FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION: Literal[
     "flow-attempt-provenance-marker.v1"
@@ -416,51 +416,10 @@ class PayloadPreview(BaseModel):
 
 
 class LlmProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
-    effective_prompt: PayloadPreview | None = None
-    model_parameters: dict[str, Any] | None = None
     tool_calls: PayloadPreview | None = None
     raw_completion_text: PayloadPreview | None = None
-
-
-class ModelParameterSnapshot(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    temperature: float | None = None
-    top_p: float | None = None
-    reasoning_effort: str | None = None
-    verbosity: str | None = None
-
-
-MappedExecutionMode: TypeAlias = Literal["per_item", "per_source_reader"]
-
-
-class MappedAdmissionProvenance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    version: Literal[1] = 1
-    execution_mode: MappedExecutionMode
-    prospective_provider_calls: int = Field(ge=1)
-    estimated_input_tokens: int = Field(ge=0)
-    per_call_estimated_input_tokens: tuple[int, ...]
-    max_estimated_input_tokens: int | None = Field(default=None, ge=1)
-    policy_source: Literal["configured", "unset"]
-    knowledge_included: Literal[False] = False
-
-    @model_validator(mode="after")
-    def _estimates_are_coherent(self) -> "MappedAdmissionProvenance":
-        if len(self.per_call_estimated_input_tokens) != self.prospective_provider_calls:
-            raise ValueError(
-                "mapped admission call count must match per-call estimates"
-            )
-        if any(value < 0 for value in self.per_call_estimated_input_tokens):
-            raise ValueError("mapped admission estimates cannot be negative")
-        if sum(self.per_call_estimated_input_tokens) != self.estimated_input_tokens:
-            raise ValueError("mapped admission total must equal per-call estimates")
-        if (self.max_estimated_input_tokens is None) != (self.policy_source == "unset"):
-            raise ValueError("mapped admission policy source must match its ceiling")
-        return self
 
 
 class MappedProviderCallProvenance(BaseModel):
@@ -479,20 +438,6 @@ class MappedProviderCallProvenance(BaseModel):
         elif self.source_index is None or self.item_index is not None:
             raise ValueError("per-source calls require only a source index")
         return self
-
-
-class AttemptStartProvenance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    requested_model: str | None = None
-    provider: str | None = None
-    deadline_at: datetime
-    resolved_timeout_seconds: int
-    effective_prompt_length: int
-    input_text_length: int
-    input_tokens_estimate: int | None = None
-    model_parameter_snapshot: ModelParameterSnapshot
-    mapped_admission: MappedAdmissionProvenance | None = None
 
 
 TokenCountSource = Literal[
@@ -522,11 +467,10 @@ class CitationsProvenance(BaseModel):
 class FlowAttemptProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["flow-attempt-provenance.v2"] = (
+    schema_version: Literal["flow-attempt-provenance.v3"] = (
         FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
     )
     llm: LlmProvenance | None = None
-    attempt_start: AttemptStartProvenance | None = None
     rag: RagProvenance | None = None
     citations: CitationsProvenance | None = None
 
@@ -618,24 +562,22 @@ class FlowAttemptProvenanceParseResult:
         return None
 
 
-class FlowAttemptProvenanceWriteError(RuntimeError):
+class FlowAttemptRuntimeEvidencePurgedError(RuntimeError):
     def __init__(
         self,
         *,
-        status: Literal["corrupt", "retention_purged"],
         run_id: UUID,
         step_id: UUID,
         attempt_no: int,
         tenant_id: UUID,
     ):
-        self.status = status
         self.run_id = run_id
         self.step_id = step_id
         self.attempt_no = attempt_no
         self.tenant_id = tenant_id
         super().__init__(
-            "Attempt provenance cannot be updated because persisted evidence is "
-            f"{status} (run_id={run_id}, step_id={step_id}, "
+            "Attempt runtime evidence cannot be written after retention purge "
+            f"(run_id={run_id}, step_id={step_id}, "
             f"attempt_no={attempt_no}, tenant_id={tenant_id})."
         )
 
@@ -706,27 +648,23 @@ def normalize_attempt_provenance(
     return parse_result.provenance if parse_result.status == "tracked" else None
 
 
-def attempt_provenance_for_write(
+def require_attempt_runtime_evidence_not_purged(
     raw: Any,
     *,
     run_id: UUID,
     step_id: UUID,
     attempt_no: int,
     tenant_id: UUID,
-) -> FlowAttemptProvenance:
-    """Return writable provenance without repairing unavailable evidence."""
+) -> None:
+    """Reject writes that would resurrect an attempt's purged runtime evidence."""
     parsed = parse_attempt_provenance(raw)
-    if parsed.status in ("corrupt", "retention_purged"):
-        raise FlowAttemptProvenanceWriteError(
-            status=parsed.status,
+    if parsed.status == "retention_purged":
+        raise FlowAttemptRuntimeEvidencePurgedError(
             run_id=run_id,
             step_id=step_id,
             attempt_no=attempt_no,
             tenant_id=tenant_id,
         )
-    if parsed.provenance is None:
-        return FlowAttemptProvenance()
-    return parsed.provenance
 
 
 def resolve_attempt_terminalization_evidence(
@@ -833,7 +771,7 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
 
     try:
         return FlowAttemptProvenanceParseResult.tracked(
-            _normalize_attempt_provenance_v2(raw_payload)
+            _normalize_attempt_provenance_v3(raw_payload)
         )
     except (TypeError, ValueError, ValidationError):
         return FlowAttemptProvenanceParseResult.corrupt(
@@ -846,16 +784,13 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
         )
 
 
-def _normalize_attempt_provenance_v2(raw: dict[str, Any]) -> FlowAttemptProvenance:
+def _normalize_attempt_provenance_v3(raw: dict[str, Any]) -> FlowAttemptProvenance:
     llm_raw = raw.get("llm")
     llm: LlmProvenance | None = None
     if isinstance(llm_raw, dict):
         llm_payload: FlowPersistedJsonObject = dict(
             cast(FlowPersistedJsonObject, llm_raw)
         )
-        effective_prompt = llm_payload.get("effective_prompt")
-        if isinstance(effective_prompt, str):
-            llm_payload["effective_prompt"] = normalize_text_preview(effective_prompt)
         tool_calls = llm_payload.get("tool_calls")
         if tool_calls is not None:
             llm_payload["tool_calls"] = normalize_json_preview(tool_calls)
@@ -864,19 +799,11 @@ def _normalize_attempt_provenance_v2(raw: dict[str, Any]) -> FlowAttemptProvenan
             llm_payload["raw_completion_text"] = normalize_text_preview(
                 raw_completion_text
             )
-        model_parameters = llm_payload.get("model_parameters")
-        if isinstance(model_parameters, dict):
-            llm_payload["model_parameters"] = normalize_model_parameters_payload(
-                cast(FlowPersistedJsonObject, model_parameters)
-            )
         llm = LlmProvenance.model_validate(llm_payload)
 
     return FlowAttemptProvenance(
         schema_version=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
         llm=llm,
-        attempt_start=_validate_extra_model(
-            AttemptStartProvenance, raw.get("attempt_start")
-        ),
         rag=_normalize_rag_provenance(raw.get("rag")),
         citations=_validate_extra_model(CitationsProvenance, raw.get("citations")),
     )
@@ -1046,22 +973,6 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
     return truncated.decode("utf-8", errors="ignore")
 
 
-def normalize_model_parameters_payload(
-    model_parameters: dict[str, Any],
-) -> dict[str, Any]:
-    payload = dict(model_parameters)
-    semantics = payload.get("parameter_semantics")
-    payload["parameter_semantics"] = _normalize_parameter_semantics(
-        payload,
-        cast(FlowPersistedJsonObject, semantics)
-        if isinstance(semantics, dict)
-        else None,
-    )
-    for key in ("temperature", "top_p", "reasoning_effort", "verbosity"):
-        payload.setdefault(key, None)
-    return payload
-
-
 def _normalize_rag_tracking(value: Any) -> dict[str, Any]:
     defaults = default_rag_tracking()
     if not isinstance(value, dict):
@@ -1151,28 +1062,3 @@ def _coerce_non_negative_int(value: Any) -> int | None:
     if isinstance(value, float) and value.is_integer():
         return max(0, int(value))
     return None
-
-
-def _normalize_parameter_semantics(
-    model_parameters: dict[str, Any],
-    semantics: dict[str, Any] | None,
-) -> dict[str, Any]:
-    normalized: dict[str, Any] = {}
-    semantics_dict = semantics or {}
-    for key in ("temperature", "top_p", "reasoning_effort", "verbosity"):
-        existing = semantics_dict.get(key)
-        if isinstance(existing, dict):
-            existing_dict = cast(FlowPersistedJsonObject, existing)
-            existing_mode = existing_dict.get("mode")
-        else:
-            existing_mode = None
-        if isinstance(existing_mode, str):
-            mode = existing_mode
-        else:
-            mode = (
-                "configured"
-                if model_parameters.get(key) is not None
-                else "model_default"
-            )
-        normalized[key] = {"mode": mode}
-    return normalized

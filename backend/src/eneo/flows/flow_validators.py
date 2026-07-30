@@ -31,6 +31,11 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationView,
     flow_step_validation_views_from_flow_steps,
 )
+from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.step_mapped_execution import (
+    FlowStepMappedExecutionConfigurationError,
+    resolve_step_mapped_execution,
+)
 from eneo.flows.flow_capability_manifest import (
     FlowOutputMode,
     FlowOutputType,
@@ -73,13 +78,8 @@ from eneo.flows.output_processing import (
     schema_expects_structured,
     validate_schema_syntax,
 )
-from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.step_chain_rules import iter_step_chain_violations
 from eneo.flows.step_lineage import build_step_ref_mapping
-from eneo.flows.step_mapped_execution import (
-    FlowStepMappedExecutionConfigurationError,
-    resolve_step_mapped_execution,
-)
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,

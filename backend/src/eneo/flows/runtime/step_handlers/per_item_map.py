@@ -20,6 +20,7 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.domain.step_item_map import build_step_item_map_config
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputJsonPath,
@@ -51,7 +52,6 @@ from eneo.flows.source_identity import (
     runtime_source_identity_fields_for_array_items,
     without_runtime_source_identity_json_fields,
 )
-from eneo.flows.step_item_map import build_step_item_map_config
 from eneo.main.exceptions import TypedIOValidationException
 
 PER_ITEM_METADATA_PREVIEW_CHARS = 2000

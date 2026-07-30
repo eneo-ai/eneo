@@ -45,6 +45,14 @@ from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantErr
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
 )
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptInputConflictError,
+    FlowStepAttemptInputWriteError,
+    FlowStepAttemptStart,
+    parse_flow_step_attempt_input,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_retention_tombstone import (
@@ -63,12 +71,10 @@ from eneo.flows.flow_run_input_envelope import (
     FlowRunInputEnvelopePatch,
 )
 from eneo.flows.flow_run_provenance import (
-    AttemptStartProvenance,
-    FlowAttemptProvenanceWriteError,
+    FlowAttemptRuntimeEvidencePurgedError,
     FlowResolvedInputEdges,
     FlowResolvedInputEdgesConflictError,
     FlowResolvedInputEdgesUnavailableError,
-    ModelParameterSnapshot,
     parse_attempt_provenance,
 )
 from eneo.flows.infrastructure.flow_run_repo import (
@@ -81,6 +87,10 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
 from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.step_result_builder import (
+    build_activated_attempt_input,
+    build_terminal_attempt_input,
+)
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
     _capture_queries,
     _decode_explain,
@@ -217,7 +227,7 @@ class _AttemptProvenanceTestContext:
     step_id: UUID
     tenant_id: UUID
     trace_id: UUID
-    attempt_start: AttemptStartProvenance
+    attempt_start: FlowStepAttemptStart
 
 
 def _resolved_input_aggregate(*, binding_ref: str) -> FlowResolvedInputEdges:
@@ -247,7 +257,7 @@ async def _activate_test_attempt(
     repo: FlowRunRepository,
     context: _AttemptProvenanceTestContext,
     aggregate: FlowResolvedInputEdges,
-    attempt_start: AttemptStartProvenance | None = None,
+    attempt_start: FlowStepAttemptStart | None = None,
 ) -> FlowStepAttempt | None:
     return await repo.activate_step_attempt(
         run_id=context.run_id,
@@ -255,7 +265,25 @@ async def _activate_test_attempt(
         attempt_no=1,
         tenant_id=context.tenant_id,
         resolved_input_edges=aggregate,
-        attempt_start=attempt_start,
+        attempt_input=build_activated_attempt_input(
+            start=attempt_start,
+            completion_configuration=(
+                FlowStepAttemptCompletionConfiguration(
+                    preferred_model_parameters={"temperature": 0.2}
+                )
+                if attempt_start is not None
+                else None
+            ),
+            execution_inputs=(
+                FlowStepAttemptExecutionInput(
+                    question="Exact repository test question",
+                    effective_prompt="Exact repository test prompt",
+                    assistant_context_version=1,
+                ),
+            )
+            if attempt_start is not None
+            else (),
+        ),
     )
 
 
@@ -321,15 +349,12 @@ async def attempt_provenance_context(
             step_id=flow.steps[0].id,
             tenant_id=admin_user.tenant_id,
             trace_id=run.trace_id,
-            attempt_start=AttemptStartProvenance(
+            attempt_start=FlowStepAttemptStart(
                 requested_model="openai/gpt-4o-mini",
                 provider="openai",
-                deadline_at=datetime.now(timezone.utc) + timedelta(minutes=10),
                 resolved_timeout_seconds=600,
-                effective_prompt_length=20,
                 input_text_length=10,
                 input_tokens_estimate=3,
-                model_parameter_snapshot=ModelParameterSnapshot(),
             ),
         )
 
@@ -2524,7 +2549,7 @@ async def test_create_or_get_attempt_started_is_idempotent(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.parametrize("unavailable_status", ["corrupt", "retention_purged"])
-async def test_attempt_provenance_writers_preserve_unavailable_evidence(
+async def test_attempt_evidence_writers_preserve_unavailable_provenance(
     attempt_provenance_context,
     unavailable_status,
 ):
@@ -2542,7 +2567,7 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
         )
         if unavailable_status == "corrupt":
             persisted_provenance = {
-                "schema_version": "flow-attempt-provenance.v2",
+                "schema_version": "flow-attempt-provenance.v3",
                 "unexpected": {},
             }
         else:
@@ -2558,8 +2583,26 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
             .values(provenance_json=persisted_provenance)
         )
 
-        with pytest.raises(FlowAttemptProvenanceWriteError) as start_error:
-            await run_repo.activate_step_attempt(
+        if unavailable_status == "retention_purged":
+            with pytest.raises(FlowAttemptRuntimeEvidencePurgedError) as start_error:
+                await run_repo.activate_step_attempt(
+                    run_id=context.run_id,
+                    step_id=context.step_id,
+                    attempt_no=1,
+                    tenant_id=context.tenant_id,
+                    resolved_input_edges=_resolved_input_aggregate(
+                        binding_ref="unavailable-input"
+                    ),
+                    attempt_input=build_activated_attempt_input(
+                        start=context.attempt_start
+                    ),
+                )
+            assert start_error.value.run_id == context.run_id
+            assert start_error.value.step_id == context.step_id
+            assert start_error.value.attempt_no == 1
+            assert start_error.value.tenant_id == context.tenant_id
+        else:
+            activated = await run_repo.activate_step_attempt(
                 run_id=context.run_id,
                 step_id=context.step_id,
                 attempt_no=1,
@@ -2567,20 +2610,30 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
                 resolved_input_edges=_resolved_input_aggregate(
                     binding_ref="unavailable-input"
                 ),
-                attempt_start=context.attempt_start,
+                attempt_input=build_activated_attempt_input(
+                    start=context.attempt_start
+                ),
             )
-        assert start_error.value.status == unavailable_status
-        assert start_error.value.run_id == context.run_id
-        assert start_error.value.step_id == context.step_id
-        assert start_error.value.attempt_no == 1
-        assert start_error.value.tenant_id == context.tenant_id
+            assert activated is not None
 
         persisted = await session.get(FlowStepAttempts, attempt.id)
         assert persisted is not None
         assert persisted.provenance_json == persisted_provenance
-        assert (await session.get(FlowStepAttemptResolvedInputs, attempt.id)) is None
-        assert persisted.requested_model is None
-        assert persisted.provider is None
+        resolved_input_row = await session.get(
+            FlowStepAttemptResolvedInputs, attempt.id
+        )
+        if unavailable_status == "retention_purged":
+            assert resolved_input_row is None
+            assert persisted.input_payload_json is None
+            assert persisted.requested_model is None
+            assert persisted.provider is None
+        else:
+            assert resolved_input_row is not None
+            parsed_activated_input = parse_flow_step_attempt_input(
+                persisted.input_payload_json
+            )
+            assert parsed_activated_input.attempt_input is not None
+            assert parsed_activated_input.attempt_input.start == context.attempt_start
 
         finished = await run_repo.finish_attempt(
             run_id=context.run_id,
@@ -2589,10 +2642,13 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
             tenant_id=context.tenant_id,
             status=FlowStepAttemptStatus.FAILED,
             provenance_json={
-                "schema_version": "flow-attempt-provenance.v2",
+                "schema_version": "flow-attempt-provenance.v3",
                 "citations": {"citation_observed": True},
             },
-            input_payload_json={"secret": "runtime-input"},
+            attempt_input=build_terminal_attempt_input(
+                start=context.attempt_start,
+                resolved_input={"secret": "runtime-input"},
+            ),
             output_payload_json={"secret": "runtime-output"},
         )
 
@@ -2602,7 +2658,13 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
             assert finished.input_payload_json is None
             assert finished.output_payload_json is None
         else:
-            assert finished.input_payload_json == {"secret": "runtime-input"}
+            parsed_attempt_input = parse_flow_step_attempt_input(
+                finished.input_payload_json
+            )
+            assert parsed_attempt_input.attempt_input is not None
+            assert parsed_attempt_input.attempt_input.resolved_input == {
+                "secret": "runtime-input"
+            }
             assert finished.output_payload_json == {"secret": "runtime-output"}
 
 
@@ -2628,7 +2690,7 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
             .where(FlowStepAttempts.id == attempt.id)
             .values(
                 provenance_json={
-                    "schema_version": "flow-attempt-provenance.v2",
+                    "schema_version": "flow-attempt-provenance.v3",
                     "citations": {"citation_observed": True},
                 }
             )
@@ -2642,7 +2704,9 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
                 resolved_input_edges=_resolved_input_aggregate(
                     binding_ref="tracked-input"
                 ),
-                attempt_start=context.attempt_start,
+                attempt_input=build_activated_attempt_input(
+                    start=context.attempt_start
+                ),
             )
             assert updated is not None
 
@@ -2652,7 +2716,11 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
         assert parsed.provenance is not None
         assert parsed.provenance.citations is not None
         assert parsed.provenance.citations.model_dump() == {"citation_observed": True}
-        assert parsed.provenance.attempt_start == context.attempt_start
+        parsed_attempt_input = parse_flow_step_attempt_input(
+            persisted.input_payload_json
+        )
+        assert parsed_attempt_input.attempt_input is not None
+        assert parsed_attempt_input.attempt_input.start == context.attempt_start
         resolved_input = await run_repo.get_resolved_input_edges(
             attempt_id=attempt.id,
             tenant_id=context.tenant_id,
@@ -2707,12 +2775,7 @@ async def test_resolved_input_edges_are_written_once_with_idempotent_retry(
             aggregate=FlowResolvedInputEdges.model_validate(
                 aggregate.model_dump(mode="json")
             ),
-            attempt_start=context.attempt_start.model_copy(
-                update={
-                    "deadline_at": context.attempt_start.deadline_at
-                    + timedelta(minutes=5)
-                }
-            ),
+            attempt_start=context.attempt_start,
         )
         assert identical_retry is not None
         assert (
@@ -2725,11 +2788,26 @@ async def test_resolved_input_edges_are_written_once_with_idempotent_retry(
         )
         persisted_attempt = await session.get(FlowStepAttempts, attempt.id)
         assert persisted_attempt is not None
-        persisted_provenance = parse_attempt_provenance(
-            persisted_attempt.provenance_json
+        persisted_attempt_input = parse_flow_step_attempt_input(
+            persisted_attempt.input_payload_json
         )
-        assert persisted_provenance.provenance is not None
-        assert persisted_provenance.provenance.attempt_start == context.attempt_start
+        assert persisted_attempt_input.attempt_input is not None
+        assert persisted_attempt_input.attempt_input.start == context.attempt_start
+
+        with pytest.raises(FlowStepAttemptInputConflictError) as start_conflict:
+            await _activate_test_attempt(
+                repo=repo,
+                context=context,
+                aggregate=aggregate,
+                attempt_start=context.attempt_start.model_copy(
+                    update={
+                        "resolved_timeout_seconds": (
+                            context.attempt_start.resolved_timeout_seconds + 1
+                        )
+                    }
+                ),
+            )
+        assert start_conflict.value.field == "start"
 
         with pytest.raises(FlowResolvedInputEdgesConflictError) as exc_info:
             await _activate_test_attempt(
@@ -2746,6 +2824,50 @@ async def test_resolved_input_edges_are_written_once_with_idempotent_retry(
         )
         assert persisted is not None
         assert persisted.aggregate == aggregate
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_attempt_input_writes_reject_corrupt_persisted_envelope(
+    attempt_provenance_context,
+) -> None:
+    context = attempt_provenance_context
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="corrupt-attempt-input",
+        )
+        corrupt_input = {
+            "schema_version": "flow-step-attempt-input.v1",
+            "unexpected": {},
+        }
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == attempt.id)
+            .values(input_payload_json=corrupt_input)
+        )
+
+        with pytest.raises(FlowStepAttemptInputWriteError) as error:
+            await _activate_test_attempt(
+                repo=repo,
+                context=context,
+                aggregate=_resolved_input_aggregate(binding_ref="corrupt-input"),
+                attempt_start=context.attempt_start,
+            )
+
+        assert error.value.error_code == (
+            "flow_step_attempt_input_unknown_top_level_keys"
+        )
+        persisted_attempt = await session.get(FlowStepAttempts, attempt.id)
+        assert persisted_attempt is not None
+        assert persisted_attempt.input_payload_json == corrupt_input
+        assert (await session.get(FlowStepAttemptResolvedInputs, attempt.id)) is None
 
 
 @pytest.mark.asyncio
@@ -3412,6 +3534,37 @@ async def test_finish_attempt_is_idempotent(
             attempt_no=1,
             celery_task_id="task-finish-1",
         )
+        attempt_start = FlowStepAttemptStart(
+            requested_model="openai/gpt-4o-mini",
+            provider="openai",
+            resolved_timeout_seconds=600,
+            input_text_length=8,
+            input_tokens_estimate=2,
+        )
+        activated = await run_repo.activate_step_attempt(
+            run_id=run.id,
+            step_id=step_id,
+            attempt_no=1,
+            tenant_id=admin_user.tenant_id,
+            resolved_input_edges=FlowResolvedInputEdges(
+                schema_version=1,
+                edges=(),
+            ),
+            attempt_input=build_activated_attempt_input(
+                start=attempt_start,
+                completion_configuration=FlowStepAttemptCompletionConfiguration(
+                    preferred_model_parameters={"temperature": 0.2}
+                ),
+                execution_inputs=(
+                    FlowStepAttemptExecutionInput(
+                        question="Exact question",
+                        effective_prompt="Exact prompt",
+                        assistant_context_version=1,
+                    ),
+                ),
+            ),
+        )
+        assert activated is not None
 
         first = await run_repo.finish_attempt(
             run_id=run.id,
@@ -3419,7 +3572,15 @@ async def test_finish_attempt_is_idempotent(
             attempt_no=1,
             tenant_id=admin_user.tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
-            input_payload_json={"question": "original", "api_key": "super-secret"},
+            requested_model="conflicting-terminal-model",
+            provider="conflicting-terminal-provider",
+            attempt_input=build_terminal_attempt_input(
+                start=attempt_start,
+                resolved_input={
+                    "question": "original",
+                    "api_key": "super-secret",
+                },
+            ),
             output_payload_json={"summary": "done"},
         )
         second = await run_repo.finish_attempt(
@@ -3428,16 +3589,37 @@ async def test_finish_attempt_is_idempotent(
             attempt_no=1,
             tenant_id=admin_user.tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
-            input_payload_json={"question": "overwritten"},
+            attempt_input=build_terminal_attempt_input(
+                start=attempt_start,
+                resolved_input={"question": "overwritten"},
+            ),
             output_payload_json={"summary": "overwritten"},
         )
 
         assert first is not None
         assert first.finished_at is not None
-        assert first.input_payload_json == {
+        parsed_first_input = parse_flow_step_attempt_input(first.input_payload_json)
+        assert parsed_first_input.attempt_input is not None
+        assert parsed_first_input.attempt_input.start == attempt_start
+        assert parsed_first_input.attempt_input.resolved_input == {
             "question": "original",
             "api_key": "super-secret",
         }
+        assert parsed_first_input.attempt_input.execution_inputs is not None
+        assert (
+            parsed_first_input.attempt_input.execution_inputs[0].effective_prompt
+            == "Exact prompt"
+        )
+        assert parsed_first_input.attempt_input.execution_inputs[0].question == (
+            "Exact question"
+        )
+        assert parsed_first_input.attempt_input.completion_configuration is not None
+        assert (
+            parsed_first_input.attempt_input.completion_configuration.preferred_model_parameters
+            == {"temperature": 0.2}
+        )
+        assert first.requested_model == "openai/gpt-4o-mini"
+        assert first.provider == "openai"
         assert first.output_payload_json == {"summary": "done"}
         assert second is None
         stored_attempt = await session.scalar(
@@ -3447,7 +3629,11 @@ async def test_finish_attempt_is_idempotent(
             .where(FlowStepAttempts.attempt_no == 1)
         )
         assert stored_attempt is not None
-        assert stored_attempt.input_payload_json == {
+        parsed_stored_input = parse_flow_step_attempt_input(
+            stored_attempt.input_payload_json
+        )
+        assert parsed_stored_input.attempt_input is not None
+        assert parsed_stored_input.attempt_input.resolved_input == {
             "question": "original",
             "api_key": "super-secret",
         }
@@ -4024,7 +4210,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
                 .where(FlowStepAttempts.attempt_no == attempt_no)
                 .values(
                     provenance_json={
-                        "schema_version": "flow-attempt-provenance.v2",
+                        "schema_version": "flow-attempt-provenance.v3",
                         "rag": {
                             "status": "success",
                             "recorded_passage_bytes": passage_bytes,
@@ -4126,7 +4312,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             .where(FlowStepAttempts.attempt_no == 1)
             .values(
                 provenance_json={
-                    "schema_version": "flow-attempt-provenance.v2",
+                    "schema_version": "flow-attempt-provenance.v3",
                     "rag": {"status": "success", "recorded_passage_bytes": "12abc"},
                 }
             )
@@ -4138,7 +4324,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             .where(FlowStepAttempts.attempt_no == 2)
             .values(
                 provenance_json={
-                    "schema_version": "flow-attempt-provenance.v2",
+                    "schema_version": "flow-attempt-provenance.v3",
                     "rag": {"status": "success", "recorded_passage_bytes": -500},
                 }
             )

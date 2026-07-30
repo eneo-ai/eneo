@@ -13,6 +13,12 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptStart,
+    parse_flow_step_attempt_input,
+)
 from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic, StepExecutionOutput
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
@@ -35,8 +41,10 @@ from eneo.flows.runtime.step_execution_result import (
     WebhookPayloadRef,
 )
 from eneo.flows.runtime.step_result_builder import (
+    build_activated_attempt_input,
     build_attempt_provenance,
     build_completed_step_result,
+    build_terminal_attempt_input,
 )
 
 
@@ -398,16 +406,111 @@ def test_build_attempt_provenance_omits_retired_runtime_projections() -> None:
         "citations",
     }
     assert set(provenance_payload["llm"]) <= {
-        "effective_prompt",
-        "model_parameters",
         "tool_calls",
         "raw_completion_text",
     }
 
 
+def test_attempt_input_builders_preserve_exact_start_and_runtime_input() -> None:
+    start = FlowStepAttemptStart(
+        requested_model="openai/gpt-5.4-nano",
+        provider="openai",
+        resolved_timeout_seconds=1200,
+        input_text_length=5,
+        input_tokens_estimate=2,
+    )
+    output = _step_output()
+    activated = build_activated_attempt_input(
+        start=start,
+        resolved_input={"text": "hello", "input_source": "flow_input"},
+        completion_configuration=FlowStepAttemptCompletionConfiguration(
+            preferred_model_parameters=output.model_parameters_json,
+        ),
+        execution_inputs=(
+            FlowStepAttemptExecutionInput(
+                question="hello",
+                effective_prompt=output.effective_prompt,
+                assistant_context_version=1,
+            ),
+        ),
+    )
+
+    assert activated is not None
+    completed = build_terminal_attempt_input(
+        start=start,
+        resolved_input={"text": "hello", "input_source": "flow_input"},
+    )
+    parsed = parse_flow_step_attempt_input(completed.to_payload())
+
+    assert parsed.status == "tracked"
+    assert parsed.attempt_input is not None
+    assert parsed.attempt_input.start == start
+    assert parsed.attempt_input.resolved_input == {
+        "text": "hello",
+        "input_source": "flow_input",
+    }
+    assert activated.completion_configuration is not None
+    assert activated.completion_configuration.preferred_model_parameters == {
+        "temperature": 0.2
+    }
+    assert activated.execution_inputs is not None
+    assert activated.execution_inputs[0].question == "hello"
+    assert activated.execution_inputs[0].effective_prompt == "prompt"
+
+
+@pytest.mark.parametrize(
+    ("raw", "error_code"),
+    [
+        ([], "flow_step_attempt_input_invalid_type"),
+        ({"resolved_input": {}}, "flow_step_attempt_input_schema_version_missing"),
+        (
+            {"schema_version": "flow-step-attempt-input.v0", "resolved_input": {}},
+            "flow_step_attempt_input_schema_version_unsupported",
+        ),
+        (
+            {
+                "schema_version": "flow-step-attempt-input.v1",
+                "resolved_input": {},
+                "unexpected": True,
+            },
+            "flow_step_attempt_input_unknown_top_level_keys",
+        ),
+        (
+            {
+                "schema_version": "flow-step-attempt-input.v1",
+                "execution_inputs": [],
+            },
+            "flow_step_attempt_input_invalid_payload",
+        ),
+    ],
+)
+def test_attempt_input_parser_exports_explicit_corruption(
+    raw: object,
+    error_code: str,
+) -> None:
+    parsed = parse_flow_step_attempt_input(raw)
+
+    assert parsed.status == "corrupt"
+    assert parsed.marker is not None
+    assert parsed.marker.error_code == error_code
+    export_payload = parsed.to_export_payload()
+    assert export_payload is not None
+    assert export_payload["schema_version"] == "flow-step-attempt-input-marker.v1"
+    assert export_payload["error_code"] == error_code
+
+
+def test_attempt_provenance_omits_empty_llm_section() -> None:
+    output = _step_output()
+    output.tool_calls_metadata = None
+    output.raw_completion_text = None
+
+    assert build_attempt_provenance(output=output) is None
+
+
 @pytest.mark.parametrize(
     "retired_key",
     [
+        "attempt_start",
         "artifacts",
         "template",
         "runtime_input",
@@ -423,6 +526,16 @@ def test_attempt_provenance_rejects_retired_parallel_owners(
 ) -> None:
     with pytest.raises(ValidationError):
         FlowAttemptProvenance.model_validate({retired_key: {}})
+
+
+@pytest.mark.parametrize("retired_llm_key", ["effective_prompt", "model_parameters"])
+def test_attempt_provenance_rejects_retired_llm_owners(
+    retired_llm_key: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowAttemptProvenance.model_validate(
+            {"llm": {retired_llm_key: {"preview": "retired"}}}
+        )
 
 
 def test_runtime_tool_calls_land_in_attempt_provenance_not_step_result() -> None:

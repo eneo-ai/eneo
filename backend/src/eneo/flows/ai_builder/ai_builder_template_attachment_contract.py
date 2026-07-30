@@ -10,6 +10,7 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
 )
 from eneo.flows.domain.flow import clone_json_object
+from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -26,7 +27,6 @@ from eneo.flows.flow_variable_definitions import (
     form_field_reference_expression,
     template_placeholder_form_field_name,
 )
-from eneo.flows.runtime_input import build_runtime_input_config
 
 _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
     {

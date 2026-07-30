@@ -41,7 +41,7 @@ or content into Flow package code. Public adapters project the closed
 provenance value instead of creating another omission model.
 
 | Entry | Kind | Target home | Rationale |
-| --- | --- | --- | --- |
+| --------------------------------- | ------- | -------------- | ------------------------------------------------------------------------------------- |
 | ai_builder | package | plugin | Flow AI Builder plugin boundary; only shared contracts should cross into Flow proper. |
 | api | package | canonical-home | HTTP adapters and API schemas already live here. |
 | application | package | canonical-home | Flow use cases and application services already live here. |
@@ -106,11 +106,9 @@ provenance value instead of creating another omission model.
 | principal | module | domain | Flow principal identity is a domain contract. |
 | published_definition | module | domain | Published definition parsing owns snapshot invariants. |
 | published_runtime | module | runtime | Published runtime parsing feeds execution. |
-| runtime_input | module | runtime | Runtime input resolution feeds execution. |
 | source_display | module | domain | Source display values are Flow domain presentation. |
 | source_identity | module | domain | Runtime source identity fields and schema projection are Flow contract rules. |
 | step_chain_rules | module | domain | Step chain rules are domain invariants. |
-| step_item_map | module | domain | Item-map configuration and validation are Flow step contract rules. |
 | step_lineage | module | domain | Step lineage is domain metadata. |
 | template_reference_analyzer | module | domain | Template reference analysis enforces domain contracts. |
 | transcription_config | module | domain | Transcription config is a domain contract. |

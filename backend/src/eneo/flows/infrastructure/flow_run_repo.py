@@ -42,6 +42,11 @@ from eneo.flows.domain.flow_run_recovery_policy import (
     flow_dispatch_retry_delay_seconds,
     start_flow_dispatch_epoch,
 )
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptInput,
+    merge_flow_step_attempt_input,
+    parse_flow_step_attempt_input,
+)
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
     ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
@@ -59,13 +64,12 @@ from eneo.flows.flow_run_input_envelope import (
     FlowRunInputEnvelopePatch,
 )
 from eneo.flows.flow_run_provenance import (
-    AttemptStartProvenance,
     FlowResolvedInputEdges,
     FlowResolvedInputEdgesConflictError,
     FlowResolvedInputEdgesParseResult,
     FlowResolvedInputEdgesUnavailableError,
-    attempt_provenance_for_write,
     parse_resolved_input_edges,
+    require_attempt_runtime_evidence_not_purged,
     resolve_attempt_terminalization_evidence,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
@@ -2285,7 +2289,7 @@ class FlowRunRepository:
         attempt_no: int,
         tenant_id: UUID,
         resolved_input_edges: FlowResolvedInputEdges,
-        attempt_start: AttemptStartProvenance | None,
+        attempt_input: FlowStepAttemptInput | None,
     ) -> FlowStepAttempt | None:
         row = await self.session.scalar(
             sa.select(FlowStepAttempts)
@@ -2299,18 +2303,23 @@ class FlowRunRepository:
         )
         if row is None:
             return None
-        activated_provenance_json: dict[str, Any] | None = None
-        if attempt_start is not None:
-            provenance = attempt_provenance_for_write(
+        merged_attempt_input: FlowStepAttemptInput | None = None
+        if attempt_input is not None:
+            require_attempt_runtime_evidence_not_purged(
                 row.provenance_json,
                 run_id=run_id,
                 step_id=step_id,
                 attempt_no=attempt_no,
                 tenant_id=tenant_id,
             )
-            activated_provenance_json = provenance.model_copy(
-                update={"attempt_start": attempt_start}
-            ).to_payload()
+            merged_attempt_input = merge_flow_step_attempt_input(
+                row.input_payload_json,
+                attempt_input,
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                tenant_id=tenant_id,
+            )
         created = await self._record_resolved_input_edges_for_locked_attempt(
             attempt_id=row.id,
             attempt_status=row.status,
@@ -2319,10 +2328,11 @@ class FlowRunRepository:
         )
         if created is None:
             return None
-        if created and attempt_start is not None:
-            row.requested_model = attempt_start.requested_model
-            row.provider = attempt_start.provider
-            row.provenance_json = activated_provenance_json
+        if merged_attempt_input is not None:
+            row.input_payload_json = merged_attempt_input.to_payload()
+            if merged_attempt_input.start is not None:
+                row.requested_model = merged_attempt_input.start.requested_model
+                row.provider = merged_attempt_input.start.provider
         await self.session.flush()
         await self.session.refresh(row)
         return FlowStepAttempt.model_validate(row)
@@ -2408,7 +2418,7 @@ class FlowRunRepository:
         num_tokens_input: int | None = None,
         num_tokens_output: int | None = None,
         provenance_json: dict[str, Any] | None = None,
-        input_payload_json: FlowPersistedJsonObject | None = None,
+        attempt_input: FlowStepAttemptInput | None = None,
         output_payload_json: FlowPersistedJsonObject | None = None,
     ) -> FlowStepAttempt | None:
         row = await self.session.scalar(
@@ -2427,19 +2437,49 @@ class FlowRunRepository:
             row.provenance_json,
             provenance_json,
         )
+        merged_attempt_input = (
+            merge_flow_step_attempt_input(
+                row.input_payload_json,
+                attempt_input,
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                tenant_id=tenant_id,
+            )
+            if attempt_input is not None
+            and terminalization_evidence.write_runtime_payloads
+            else None
+        )
+        canonical_attempt_input = merged_attempt_input
+        if canonical_attempt_input is None:
+            canonical_attempt_input = parse_flow_step_attempt_input(
+                row.input_payload_json
+            ).attempt_input
+        canonical_start = (
+            canonical_attempt_input.start
+            if canonical_attempt_input is not None
+            else None
+        )
         row.status = status.value
         row.error_code = error_code
         row.error_message = error_message
-        row.requested_model = requested_model
+        row.requested_model = (
+            canonical_start.requested_model
+            if canonical_start is not None
+            else requested_model
+        )
         row.response_model = response_model
-        row.provider = provider
+        row.provider = (
+            canonical_start.provider if canonical_start is not None else provider
+        )
         row.finish_reason = finish_reason
         row.provider_response_id = provider_response_id
         row.num_tokens_input = num_tokens_input
         row.num_tokens_output = num_tokens_output
         row.provenance_json = terminalization_evidence.provenance_json
         if terminalization_evidence.write_runtime_payloads:
-            row.input_payload_json = input_payload_json
+            if merged_attempt_input is not None:
+                row.input_payload_json = merged_attempt_input.to_payload()
             row.output_payload_json = output_payload_json
         row.finished_at = datetime.now(timezone.utc)
         await self.session.flush()

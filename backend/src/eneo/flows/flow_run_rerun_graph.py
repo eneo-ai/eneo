@@ -7,11 +7,11 @@ from typing import cast
 from uuid import UUID
 
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.enums import FlowInputSource, RerunDependencyKind
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.http_transport import HttpAuthMode, HttpBodyMode, is_authored_config
 from eneo.flows.input_binding_contract_rules import effective_question_binding
-from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.step_lineage import build_step_ref_mapping
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,

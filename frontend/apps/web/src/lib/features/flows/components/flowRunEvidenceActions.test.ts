@@ -59,7 +59,7 @@ test("downloadJsonArtifact triggers anchor download and deferred URL revocation"
 
 test("downloadEvidenceExport fetches canonical evidence export before download", async () => {
   const exportEvidence = vi.fn(async () => ({
-    schema_version: "flow-evidence-export.v14",
+    schema_version: "flow-evidence-export.v15",
     content_hash: "abc123"
   }));
   const triggerDownload = vi.fn();
@@ -81,7 +81,7 @@ test("downloadEvidenceExport fetches canonical evidence export before download",
 
   expect(exportEvidence).toHaveBeenCalledWith({ id: "run-1", flowId: "flow-1", format: "json" });
   expect(triggerDownload).toHaveBeenCalledWith("flow-run-evidence-run-1.json", {
-    schema_version: "flow-evidence-export.v14",
+    schema_version: "flow-evidence-export.v15",
     content_hash: "abc123"
   });
 });

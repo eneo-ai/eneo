@@ -33,9 +33,9 @@ For the underlying auth model, see:
 - <a href="/guides/authentication">Authentication & OIDC</a>
 
 <Callout type="warning">
-  Service keys do not get broad operator access. If a service key needs access
-  to its own run evidence, it needs <code>flows &gt;= read</code> plus the
-  appropriate explicit <code>flow_evidence</code> capability on the key.
+  Service keys do not get broad operator access. If a service key needs access to its own run
+  evidence, it needs <code>flows &gt;= read</code> plus the appropriate explicit{" "}
+  <code>flow_evidence</code> capability on the key.
 </Callout>
 
 ## Authentication and principal model
@@ -351,9 +351,8 @@ Example response:
 ```
 
 <Callout type="info">
-  Runtime paths are <strong>server-relative</strong> (for example{" "}
-  <code>/api/v1/...</code>), so callers should prepend their API base URL when
-  needed.
+  Runtime paths are <strong>server-relative</strong> (for example <code>/api/v1/...</code>), so
+  callers should prepend their API base URL when needed.
 </Callout>
 
 The full `runtime_paths` object includes `run_contract`, `graph`,
@@ -373,9 +372,8 @@ GET /api/v1/flows/{flow_id}/run-contract/
 ```
 
 <Callout type="info">
-  If you are integrating with a service key, the recommended discovery path is:
-  list published flows in the scoped space, fetch{" "}
-  <code>GET /api/v1/flows/{"{flow_id}"}/published/</code>, then call{" "}
+  If you are integrating with a service key, the recommended discovery path is: list published flows
+  in the scoped space, fetch <code>GET /api/v1/flows/{"{flow_id}"}/published/</code>, then call{" "}
   <code>run-contract</code>. Do not build service-key discovery around{" "}
   <code>GET /api/v1/flows/{"{flow_id}"}/</code>.
 </Callout>
@@ -475,8 +473,8 @@ Response shape:
 ```
 
 <Callout type="info">
-  If your UI caches flow configuration, pass <code>published_flow_version</code>{" "}
-  back into run creation so the server can reject stale submissions cleanly.
+  If your UI caches flow configuration, pass <code>published_flow_version</code> back into run
+  creation so the server can reject stale submissions cleanly.
 </Callout>
 
 ### 2) Upload files
@@ -603,22 +601,20 @@ Example:
 
 ```js
 const stepInputs = {
-  [stepId]: { file_ids: [runtimeUpload.id] },
+  [stepId]: { file_ids: [runtimeUpload.id] }
 };
 
-const idempotencyKey = await client.flows.runs.deriveUploadIntentIdempotencyKey(
-  {
+const idempotencyKey = await client.flows.runs.deriveUploadIntentIdempotencyKey({
     flowId,
     expectedFlowVersion: runContract.published_flow_version,
-    step_inputs: stepInputs,
-  },
-);
+  step_inputs: stepInputs
+});
 
 await client.flows.runs.create({
   flow: { id: flowId },
   expected_flow_version: runContract.published_flow_version,
   step_inputs: stepInputs,
-  idempotencyKey,
+  idempotencyKey
 });
 ```
 
@@ -673,7 +669,7 @@ const page = await client.flows.runs.list({
   flowId,
   status: ["completed", "failed", "completed"],
   limit: 50,
-  offset: 0,
+  offset: 0
 });
 ```
 
@@ -893,7 +889,7 @@ const rerun = await client.flows.runs.rerunStep({
   runId,
   stepId,
   expected_run_revision: latestRun.revision,
-  reason: "The reviewer corrected the transcription for step 1.",
+  reason: "The reviewer corrected the transcription for step 1."
 });
 ```
 
@@ -1139,7 +1135,7 @@ const page = await client.flows.runs.providerCalls({
   flowId,
   limit: 250,
   afterEventId,
-  attemptId,
+  attemptId
 });
 ```
 
@@ -1255,12 +1251,14 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
-The JSON response uses manifest schema `flow-evidence-export.v14`. Version 14
-removes attempt-provenance fields that duplicated canonical attempt payloads,
-result files, provider-call rows, and the published definition. Exact retrieval
-and bounded completion, tool-call, admission, and citation observations remain
-available as attempt provenance. The version and payload change intentionally
-produce different content hashes from version 13.
+The JSON response uses manifest schema `flow-evidence-export.v15`. Version 15
+moves the exact resolved input, per-call questions and prompts, shared initial and
+capability-fallback model configuration, mapped admission, and attempt-start facts
+into the strict immutable attempt-input envelope before provider work. Attempt
+provenance now retains only exact retrieval plus bounded completion, tool-call, and
+citation observations that cannot be reconstructed elsewhere. Invalid envelopes
+are exported as explicit corruption markers. The version and payload change
+intentionally produce different content hashes from version 14.
 A synchronous export includes all provider-call lifecycle rows and supports at
 most `10,000` such rows. Larger runs
 return `413` with code `flow_evidence_export_too_large`; consume the
@@ -1286,7 +1284,7 @@ const evidence = await client.flows.runs.exportEvidence({
   id: runId,
   flowId,
   detail: "raw",
-  reason: "Investigate incident 42",
+  reason: "Investigate incident 42"
 });
 ```
 

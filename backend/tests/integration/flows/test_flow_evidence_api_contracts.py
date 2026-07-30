@@ -43,6 +43,11 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.flow_run_input_revision import canonical_input_hash
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptInput,
+)
 from eneo.flows.domain.provider_call import (
     ProviderCallCompletion,
     ProviderCallRequest,
@@ -434,12 +439,31 @@ async def _seed_flow_run_contract_data(
             provider_response_id="resp_123",
             num_tokens_input=11,
             num_tokens_output=7,
+            input_payload_json=FlowStepAttemptInput(
+                completion_configuration=FlowStepAttemptCompletionConfiguration(
+                    preferred_model_parameters={
+                        "temperature": 0.2,
+                        "reasoning_effort": None,
+                        "parameter_semantics": {
+                            "temperature": {"mode": "configured"},
+                            "reasoning_effort": {"mode": "model_default"},
+                        },
+                    }
+                ),
+                execution_inputs=(
+                    FlowStepAttemptExecutionInput(
+                        question="What changed?",
+                        effective_prompt="Authorization: Bearer super-secret",
+                        assistant_context_version=1,
+                    ),
+                ),
+                resolved_input={"question": "What changed?"},
+            ).to_payload(),
             provenance_json=attempt_provenance_json
             or {
                 "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
                 "llm": {
-                    "prompt": "Authorization: Bearer super-secret",
-                    "params": {"temperature": 0.2},
+                    "raw_completion_text": "Completed evidence response",
                 },
                 "rag": {
                     "attempted": True,
@@ -665,14 +689,25 @@ async def _seed_flow_run_contract_data(
                 provider_response_id="resp_rerun_456",
                 num_tokens_input=13,
                 num_tokens_output=9,
+                input_payload_json=FlowStepAttemptInput(
+                    completion_configuration=FlowStepAttemptCompletionConfiguration(
+                        preferred_model_parameters={"temperature": 0.1}
+                    ),
+                    execution_inputs=(
+                        FlowStepAttemptExecutionInput(
+                            question="What changed?",
+                            effective_prompt="Rerun prompt with token super-secret",
+                            assistant_context_version=1,
+                        ),
+                    ),
+                    resolved_input={"question": "What changed?"},
+                ).to_payload(),
                 provenance_json={
                     "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
                     "llm": {
-                        "prompt": "Rerun prompt with token super-secret",
-                        "params": {"temperature": 0.1},
+                        "raw_completion_text": "Rerun completed response",
                     },
                 },
-                input_payload_json={"question": "What changed?"},
                 output_payload_json={"summary": "Looks good after rerun"},
                 flow_step_execution_hash="hash-2",
                 started_at=started_at,
@@ -1030,7 +1065,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
             attempt_no=attempt.attempt_no,
             tenant_id=admin_user.tenant_id,
             resolved_input_edges=FlowResolvedInputEdges(schema_version=1, edges=()),
-            attempt_start=None,
+            attempt_input=None,
         )
         assert activated is not None
         provider_call_repo = FlowProviderCallRepository(session=session)
@@ -1164,7 +1199,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     )
     assert export_response.status_code == 200, export_response.text
     evidence_export = export_response.json()
-    assert evidence_export["schema_version"] == "flow-evidence-export.v14"
+    assert evidence_export["schema_version"] == "flow-evidence-export.v15"
     assert (
         evidence_export["manifest"]["schema_version"]
         == evidence_export["schema_version"]
@@ -2187,15 +2222,23 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         == "Authorization: Bearer [REDACTED]"
     )
     assert (
+        payload["bundle"]["step_attempts"][0]["input_payload_json"]["execution_inputs"][
+            0
+        ]["effective_prompt"]
+        == "Authorization: Bearer [REDACTED]"
+    )
+    assert (
         payload["bundle"]["definition_snapshot"]["steps"][0]["output_config"][
             "headers"
         ]["Authorization"]
         == "[REDACTED]"
     )
     assert (
-        payload["bundle"]["step_attempts"][0]["provenance_json"]["llm"][
-            "model_parameters"
-        ]["parameter_semantics"]["reasoning_effort"]["mode"]
+        payload["bundle"]["step_attempts"][0]["input_payload_json"][
+            "completion_configuration"
+        ]["preferred_model_parameters"]["parameter_semantics"]["reasoning_effort"][
+            "mode"
+        ]
         == "model_default"
     )
 

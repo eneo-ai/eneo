@@ -41,6 +41,11 @@ from eneo.flows.domain.flow import (
     FlowVersion,
 )
 from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptInput,
+)
 from eneo.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
@@ -862,7 +867,6 @@ def test_normalize_attempt_provenance_truncates_large_text_and_json_payloads():
         {
             "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "llm": {
-                "effective_prompt": "x" * 20000,
                 "tool_calls": {
                     "result": "y" * 20000,
                 },
@@ -872,10 +876,6 @@ def test_normalize_attempt_provenance_truncates_large_text_and_json_payloads():
 
     assert normalized is not None
     assert normalized.llm is not None
-    assert normalized.llm.effective_prompt is not None
-    assert normalized.llm.effective_prompt.truncated is True
-    assert normalized.llm.effective_prompt.byte_size > 16000
-    assert normalized.llm.effective_prompt.sha256 is not None
     assert normalized.llm.tool_calls is not None
     assert normalized.llm.tool_calls.truncated is True
     assert normalized.llm.tool_calls.sha256 is not None
@@ -885,7 +885,7 @@ def test_parse_attempt_provenance_returns_tracked_current_payload() -> None:
     result = parse_attempt_provenance(
         {
             "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-            "llm": {"effective_prompt": "Hello"},
+            "llm": {"tool_calls": [{"name": "lookup"}]},
         }
     )
 
@@ -920,7 +920,7 @@ def test_complete_token_sum_is_unknown_when_any_count_is_unknown() -> None:
     assert sum_complete_token_counts((0, 0)) == 0
 
 
-def test_parse_attempt_provenance_accepts_attempt_start_section() -> None:
+def test_parse_attempt_provenance_rejects_retired_attempt_start_section() -> None:
     result = parse_attempt_provenance(
         {
             "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
@@ -942,14 +942,10 @@ def test_parse_attempt_provenance_accepts_attempt_start_section() -> None:
         }
     )
 
-    assert result.status == "tracked"
-    assert result.provenance is not None
-    assert result.provenance.attempt_start is not None
-    assert result.provenance.attempt_start.resolved_timeout_seconds == 1800
-    assert (
-        result.provenance.attempt_start.model_parameter_snapshot.reasoning_effort
-        == "high"
-    )
+    assert result.status == "corrupt"
+    assert result.marker is not None
+    assert result.marker.error_code == "flow_attempt_provenance_unknown_top_level_keys"
+    assert result.marker.unknown_keys == ("attempt_start",)
 
 
 @pytest.mark.parametrize(
@@ -1487,7 +1483,7 @@ def test_evidence_export_manifest_tracks_valid_and_absent_provenance() -> None:
         run,
         {
             "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-            "llm": {"effective_prompt": "Prompt"},
+            "llm": {"tool_calls": [{"name": "lookup"}]},
         },
     )
     absent_attempt = _attempt_with_provenance(run, None)
@@ -1548,7 +1544,7 @@ def test_evidence_export_manifest_retention_purged_precedes_tracked() -> None:
         run,
         {
             "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-            "llm": {"effective_prompt": "Prompt"},
+            "llm": {"tool_calls": [{"name": "lookup"}]},
         },
     )
     purged_attempt = _attempt_with_provenance(
@@ -1565,12 +1561,9 @@ def test_evidence_export_manifest_retention_purged_precedes_tracked() -> None:
     assert (
         export["manifest"]["provenance_persisted_version_status"] == "retention_purged"
     )
-    assert (
-        export["bundle"]["step_attempts"][0]["provenance_json"]["llm"][
-            "effective_prompt"
-        ]["preview"]
-        == "Prompt"
-    )
+    assert export["bundle"]["step_attempts"][0]["provenance_json"]["llm"]["tool_calls"][
+        "preview"
+    ] == [{"name": "lookup"}]
     assert export["manifest"]["retention_state_summary"]["retention_purged_count"] == 1
 
 
@@ -2416,8 +2409,8 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
     payload: dict[str, Any] = {
         "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
         "app_version": get_settings().app_version,
-        "provenance_schema_version_min": "flow-attempt-provenance.v2",
-        "provenance_schema_version_current": "flow-attempt-provenance.v2",
+        "provenance_schema_version_min": "flow-attempt-provenance.v3",
+        "provenance_schema_version_current": "flow-attempt-provenance.v3",
         "provenance_persisted_version_status": "not_tracked",
         "content_hash": "abc123",
         "content_hash_input": "redacted",
@@ -3387,10 +3380,9 @@ def test_render_evidence_json_export_adds_fallback_container_display_name_and_mo
         provider_response_id=None,
         num_tokens_input=1,
         num_tokens_output=1,
-        provenance_json={
-            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-            "llm": {
-                "model_parameters": {
+        input_payload_json=FlowStepAttemptInput(
+            completion_configuration=FlowStepAttemptCompletionConfiguration(
+                preferred_model_parameters={
                     "model_id": str(uuid4()),
                     "provider": "openai",
                     "model_name": "gpt-5.4-nano",
@@ -3403,7 +3395,17 @@ def test_render_evidence_json_export_adds_fallback_container_display_name_and_mo
                         "verbosity": {"mode": "model_default"},
                     },
                 }
-            },
+            ),
+            execution_inputs=(
+                FlowStepAttemptExecutionInput(
+                    question="source text",
+                    effective_prompt="Analyse the source",
+                    assistant_context_version=1,
+                ),
+            ),
+        ).to_payload(),
+        provenance_json={
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "rag": {
                 "status": "success",
                 "references": [
@@ -3445,13 +3447,16 @@ def test_render_evidence_json_export_adds_fallback_container_display_name_and_mo
         export["summary"]["rag_sources"][0]["source_container_display_name"]
         == "psykologi.se"
     )
-    llm = export["bundle"]["step_attempts"][0]["provenance_json"]["llm"][
-        "model_parameters"
-    ]
-    assert llm["temperature"] is None
-    assert llm["reasoning_effort"] is None
-    assert llm["verbosity"] is None
-    assert llm["parameter_semantics"]["temperature"]["mode"] == "model_default"
+    model_parameters = export["bundle"]["step_attempts"][0]["input_payload_json"][
+        "completion_configuration"
+    ]["preferred_model_parameters"]
+    assert model_parameters["temperature"] is None
+    assert model_parameters["reasoning_effort"] is None
+    assert model_parameters["verbosity"] is None
+    assert (
+        model_parameters["parameter_semantics"]["temperature"]["mode"]
+        == "model_default"
+    )
 
 
 def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_summary() -> (

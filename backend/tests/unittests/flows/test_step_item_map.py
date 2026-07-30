@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from eneo.flows.step_item_map import build_step_item_map_config
+from eneo.flows.domain.step_item_map import build_step_item_map_config
 from eneo.main.exceptions import BadRequestException
 
 

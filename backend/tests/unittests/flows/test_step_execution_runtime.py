@@ -11,14 +11,22 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
+    CompletionModel,
+    Context,
     ModelKwargs,
+    ResponseType,
     TokenUsage,
 )
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
 from eneo.completion_models.domain.provider_call_observer import (
     ProviderCallRequestFacts,
     ProviderCallResultFacts,
 )
+from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
 )
@@ -57,9 +65,11 @@ from eneo.flows.runtime.step_execution_runtime import (
     apply_prompt_context_trace,
     attach_typed_failure_context,
     build_output_payload,
+    build_prepared_completion_call,
     citation_mode_for_step,
     complete_step_execution,
     detect_native_json_output_support,
+    effective_completion_prompt,
     effective_model_parameters,
     execution_hash,
     json_mode_cache_key,
@@ -109,6 +119,34 @@ def _typed_output_result(
         structured_output=structured_output,
         artifacts=artifacts,
         diagnostics=diagnostics or [],
+    )
+
+
+def _completion_model(
+    *, supported_model_kwargs: SupportedModelKwargs
+) -> CompletionModel:
+    now = datetime.now(timezone.utc)
+    return CompletionModel(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="gpt-test",
+        nickname="gpt-test",
+        family="openai",
+        max_input_tokens=8_000,
+        max_output_tokens=4_000,
+        is_deprecated=False,
+        stability="stable",
+        hosting="eu",
+        vision=False,
+        reasoning=False,
+        supports_tool_calling=True,
+        is_org_enabled=True,
+        is_org_default=False,
+        tenant_id=uuid4(),
+        provider_id=uuid4(),
+        provider_type="openai",
+        model_kwargs_capabilities=supported_model_kwargs,
     )
 
 
@@ -642,6 +680,7 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     step = _step(output_type="json")
     original_kwargs = ModelKwargs(
         temperature=0.2,
+        top_p=0.8,
         response_format={"type": "stored_provider_format"},
     )
     assistant = MagicMock()
@@ -650,6 +689,9 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         litellm_model_name="openai/gpt-test",
         name="gpt-test",
         provider_type="openai",
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
     )
     assistant.completion_model_kwargs = original_kwargs
     assistant.get_response = AsyncMock(
@@ -692,6 +734,22 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
     )
 
+    prepared.completion_call = build_prepared_completion_call(
+        step=step,
+        state=state,
+        prepared=prepared,
+    )
+    assert prepared.completion_call.preferred_model_parameters["response_format"] == {
+        "type": "json_object"
+    }
+    assert prepared.completion_call.preferred_model_parameters["temperature"] == 0.2
+    assert prepared.completion_call.preferred_model_parameters["top_p"] is None
+    assert prepared.completion_call.capability_fallback_model_parameters is not None
+    assert (
+        prepared.completion_call.capability_fallback_model_parameters["response_format"]
+        is None
+    )
+
     output = await complete_step_execution(
         step=step,
         run=run,
@@ -704,11 +762,75 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     first_kwargs = assistant.get_response.await_args_list[0].kwargs
     second_kwargs = assistant.get_response.await_args_list[1].kwargs
     assert first_kwargs["model_kwargs"].response_format == {"type": "json_object"}
+    assert first_kwargs["model_kwargs"].top_p is None
     assert second_kwargs["model_kwargs"].response_format is None
     assert second_kwargs["model_kwargs"].temperature == 0.2
+    assert second_kwargs["model_kwargs"].top_p is None
     assert state.json_mode_supported["openai:gpt-test:none"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'
+    assert (
+        output.model_parameters_json
+        == prepared.completion_call.capability_fallback_model_parameters
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepared_model_parameters_equal_completion_adapter_kwargs() -> None:
+    supported_model_kwargs = SupportedModelKwargs(
+        temperature=ModelKwargCapability(supported=True)
+    )
+    completion_model = _completion_model(supported_model_kwargs=supported_model_kwargs)
+    assistant = MagicMock()
+    assistant.completion_model = completion_model
+    assistant.completion_model_kwargs = ModelKwargs(temperature=0.2, top_p=0.8)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    completion_call = build_prepared_completion_call(
+        step=_step(output_type="text"),
+        state=_state(),
+        prepared=prepared,
+    )
+
+    context_builder = MagicMock()
+    context_builder.build_context.return_value = Context(input="hello", token_count=1)
+    adapter = MagicMock()
+    adapter.get_token_limit_of_model.return_value = 8_000
+    adapter.get_model_route.return_value = "openai/gpt-test"
+    adapter.get_response = AsyncMock(
+        return_value=Completion(response_type=ResponseType.TEXT, text="ok")
+    )
+    completion_service = CompletionService(
+        context_builder=context_builder,
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    completion_service._get_adapter = AsyncMock(return_value=adapter)
+
+    await completion_service.get_response(
+        model=completion_model,
+        text_input=completion_call.question,
+        model_kwargs=completion_call.preferred_model_kwargs,
+        prompt=completion_call.effective_prompt,
+    )
+
+    adapter_model_kwargs = adapter.get_response.await_args.kwargs["model_kwargs"]
+    assert adapter_model_kwargs.model_dump(exclude_none=True) == {"temperature": 0.2}
+    assert (
+        effective_model_parameters(assistant, model_kwargs=adapter_model_kwargs)
+        == completion_call.preferred_model_parameters
+    )
 
 
 @pytest.mark.asyncio
@@ -732,6 +854,9 @@ async def test_complete_step_execution_strips_known_unsupported_stored_response_
         litellm_model_name="anthropic/claude-test",
         name="claude-test",
         provider_type="anthropic",
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
     )
     assistant.completion_model_kwargs = original_kwargs
     assistant.get_response = AsyncMock(
@@ -766,6 +891,16 @@ async def test_complete_step_execution_strips_known_unsupported_stored_response_
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
     )
 
+    prepared.completion_call = build_prepared_completion_call(
+        step=step,
+        state=state,
+        prepared=prepared,
+    )
+    assert (
+        prepared.completion_call.preferred_model_parameters["response_format"] is None
+    )
+    assert prepared.completion_call.capability_fallback_model_parameters is None
+
     output = await complete_step_execution(
         step=step,
         run=run,
@@ -780,6 +915,9 @@ async def test_complete_step_execution_strips_known_unsupported_stored_response_
     assert sent_kwargs.temperature == 0.2
     assert state.json_mode_supported["anthropic:claude-test:none"] is False
     assert output.structured_output == {"ok": True}
+    assert output.model_parameters_json == (
+        prepared.completion_call.preferred_model_parameters
+    )
 
 
 @pytest.mark.asyncio
@@ -804,8 +942,9 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
         litellm_model_name="openai/gpt-test",
         name="gpt-test",
         provider_type="openai",
+        supported_model_kwargs=SupportedModelKwargs(),
     )
-    assistant.completion_model_kwargs = None
+    assistant.completion_model_kwargs = ModelKwargs()
     observer = SimpleNamespace(
         started=AsyncMock(return_value=uuid4()),
         completed=AsyncMock(),
@@ -925,8 +1064,12 @@ async def test_complete_step_execution_does_not_repeat_non_capability_error_with
         litellm_model_name="openai/gpt-test",
         name="gpt-test",
         provider_type="openai",
+        supported_model_kwargs=SupportedModelKwargs(),
     )
     assistant.completion_model_kwargs = MagicMock(name="original_kwargs")
+    assistant.completion_model_kwargs.filter_unsupported.return_value = (
+        assistant.completion_model_kwargs
+    )
     assistant.get_response = AsyncMock(
         side_effect=RuntimeError(
             "Connection failed after logging request parameters: response_format=json_object"
@@ -980,8 +1123,12 @@ async def test_complete_step_execution_does_not_repeat_late_json_mode_rejection(
         litellm_model_name="openai/gpt-test",
         name="gpt-test",
         provider_type="openai",
+        supported_model_kwargs=SupportedModelKwargs(),
     )
     assistant.completion_model_kwargs = MagicMock(name="original_kwargs")
+    assistant.completion_model_kwargs.filter_unsupported.return_value = (
+        assistant.completion_model_kwargs
+    )
     assistant.get_response = AsyncMock(
         side_effect=ProviderCapabilityRejectedException(
             "The provider rejected JSON mode after earlier provider work.",
@@ -1463,8 +1610,10 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
         litellm_model_name="openai/gpt-4.1",
         name="gpt-4.1",
         provider_type="openai",
+        supported_model_kwargs=SupportedModelKwargs(),
     )
     assistant.completion_model_kwargs = original_kwargs
+    original_kwargs.filter_unsupported.return_value = original_kwargs
     assistant.completion_model_kwargs.model_copy.side_effect = RuntimeError(
         "bad kwargs"
     )
@@ -1537,6 +1686,7 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
         litellm_model_name=None,
         name="claude-3-5-haiku",
         provider_type="anthropic",
+        supported_model_kwargs=SupportedModelKwargs(),
     )
     assistant.completion_model_kwargs = original_kwargs
     assistant.get_response = AsyncMock(
@@ -1611,6 +1761,7 @@ async def test_complete_step_execution_does_not_force_json_object_for_array_docu
     original_kwargs = MagicMock(name="original_kwargs")
     assistant = MagicMock()
     assistant.completion_model_kwargs = original_kwargs
+    original_kwargs.filter_unsupported.return_value = original_kwargs
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
             total_token_count=4,
@@ -2252,6 +2403,11 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
     assert (
         "Inherited source catalog"
         in assistant.get_response.await_args.kwargs["prompt_override"]
+    )
+    assert output.effective_prompt == effective_completion_prompt(
+        step=step,
+        state=state,
+        prepared=prepared,
     )
     assert output.full_text == "Slutrapport"
     assert output.persisted_text == "Slutrapport"

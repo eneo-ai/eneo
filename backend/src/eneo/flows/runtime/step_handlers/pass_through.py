@@ -9,6 +9,10 @@ from eneo.flows.domain.mapped_execution_policy import (
 )
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
+from eneo.flows.domain.step_mapped_execution import (
+    FlowStepMappedExecutionConfigurationError,
+    resolve_step_mapped_execution,
+)
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
@@ -22,10 +26,6 @@ from eneo.flows.runtime.step_handlers.base import (
 from eneo.flows.runtime.step_handlers.per_item_map import execute_per_item_map
 from eneo.flows.runtime.step_handlers.per_source_reader import (
     execute_per_source_reader,
-)
-from eneo.flows.step_mapped_execution import (
-    FlowStepMappedExecutionConfigurationError,
-    resolve_step_mapped_execution,
 )
 from eneo.main.exceptions import TypedIOValidationException
 

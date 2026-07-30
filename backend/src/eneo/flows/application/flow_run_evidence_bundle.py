@@ -21,13 +21,12 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowVersion,
 )
+from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_provenance import (
-    FlowAttemptProvenance,
     FlowAttemptProvenanceParseResult,
-    normalize_model_parameters_payload,
     parse_attempt_provenance,
 )
 from eneo.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
@@ -555,53 +554,7 @@ def _dump_attempt_record(
 ) -> tuple[dict[str, Any], FlowAttemptProvenanceParseResult]:
     dumped = item.model_dump(mode="json")
     parse_result = parse_attempt_provenance(item.provenance_json)
-    export_provenance = _enrich_attempt_provenance_for_export(
-        parse_result.provenance,
-        item,
-    )
-    dumped["provenance_json"] = (
-        export_provenance.to_payload()
-        if export_provenance is not None
-        else parse_result.to_export_payload()
-    )
-    if dumped.get("provider") is None and export_provenance is not None:
-        model_parameters = (
-            export_provenance.llm.model_parameters
-            if export_provenance.llm is not None
-            else None
-        )
-        if isinstance(model_parameters, dict):
-            raw_provider = model_parameters.get("provider")
-            if isinstance(raw_provider, str) and raw_provider.strip():
-                dumped["provider"] = raw_provider.strip()
+    dumped["provenance_json"] = parse_result.to_export_payload()
+    input_parse_result = parse_flow_step_attempt_input(item.input_payload_json)
+    dumped["input_payload_json"] = input_parse_result.to_export_payload()
     return dumped, parse_result
-
-
-def _enrich_attempt_provenance_for_export(
-    provenance: FlowAttemptProvenance | None,
-    item: FlowStepAttempt,
-) -> FlowAttemptProvenance | None:
-    if provenance is None or provenance.llm is None:
-        return provenance
-    llm_payload = provenance.llm
-    model_parameters = llm_payload.model_parameters
-    if not isinstance(model_parameters, dict):
-        model_parameters = {}
-    model_parameters = {
-        **model_parameters,
-        "model_name": model_parameters.get("model_name")
-        or item.response_model
-        or item.requested_model,
-        "provider": model_parameters.get("provider") or item.provider,
-    }
-    return provenance.model_copy(
-        update={
-            "llm": llm_payload.model_copy(
-                update={
-                    "model_parameters": normalize_model_parameters_payload(
-                        model_parameters
-                    )
-                }
-            )
-        }
-    )

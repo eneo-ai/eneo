@@ -13,6 +13,10 @@ from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
 )
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.runtime_input import (
+    build_runtime_input_config,
+    runtime_input_accept_mimetypes,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
@@ -22,10 +26,6 @@ from eneo.flows.flow_input_limits import (
     effective_runtime_max_files,
 )
 from eneo.flows.principal import FlowPrincipal
-from eneo.flows.runtime_input import (
-    build_runtime_input_config,
-    runtime_input_accept_mimetypes,
-)
 
 
 class _FileRepositoryProtocol(Protocol):

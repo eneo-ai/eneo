@@ -17,6 +17,7 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelResponse,
     ModelKwargs,
 )
+from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionContextPreview,
     CompletionService,
@@ -49,6 +50,9 @@ class RuntimeCompletionModelProtocol(Protocol):
     name: str
     provider_type: str | None
     litellm_model_name: str | None
+
+    @property
+    def supported_model_kwargs(self) -> SupportedModelKwargs: ...
 
 
 class RuntimeAssistantProtocol(Protocol):

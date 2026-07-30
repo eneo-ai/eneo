@@ -1575,23 +1575,6 @@ class FlowRunDebugAttempt(BaseModel):
                 "provider_response_id": "resp_123",
                 "num_tokens_input": 321,
                 "num_tokens_output": 118,
-                "provenance_json": {
-                    "llm": {
-                        "model_parameters": {
-                            "model_name": "gpt-4.1-mini",
-                            "provider": "openai",
-                            "temperature": None,
-                            "reasoning_effort": None,
-                            "verbosity": None,
-                            "parameter_semantics": {
-                                "temperature": {"mode": "model_default"},
-                                "top_p": {"mode": "model_default"},
-                                "reasoning_effort": {"mode": "model_default"},
-                                "verbosity": {"mode": "model_default"},
-                            },
-                        }
-                    }
-                },
             }
         }
     )
@@ -1607,7 +1590,6 @@ class FlowRunDebugAttempt(BaseModel):
     provider_response_id: str | None = None
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
-    provenance_json: dict[str, Any] | None = None
 
 
 class FlowRunDebugStep(BaseModel):
@@ -2175,14 +2157,14 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v14",
+                "schema_version": "flow-evidence-export.v15",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "5ff9c2925588426dc669df439fd12a7aeaa1d3a5f977c6cc29b43fcca747bb73",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v14",
+                    "schema_version": "flow-evidence-export.v15",
                     "app_version": "DEV",
-                    "provenance_schema_version_min": "flow-attempt-provenance.v2",
-                    "provenance_schema_version_current": "flow-attempt-provenance.v2",
+                    "provenance_schema_version_min": "flow-attempt-provenance.v3",
+                    "provenance_schema_version_current": "flow-attempt-provenance.v3",
                     "provenance_persisted_version_status": "not_tracked",
                     "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
                     "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
@@ -2565,7 +2547,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v14"]
+    schema_version: Literal["flow-evidence-export.v15"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

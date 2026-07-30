@@ -4,7 +4,7 @@ import hashlib
 import logging
 import os
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Iterable, Sequence, assert_never, cast
 from uuid import UUID
 
@@ -38,6 +38,12 @@ from eneo.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResult,
 )
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptStart,
+    parse_flow_step_attempt_input,
+)
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     resolve_flow_mapped_execution_policy,
@@ -60,6 +66,7 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.enums import (
     FlowOutputMode,
@@ -75,13 +82,10 @@ from eneo.flows.flow_api_error_code import (
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
 from eneo.flows.flow_run_provenance import (
-    AttemptStartProvenance,
     FlowResolvedInputEdge,
     FlowResolvedInputEdgeGrouping,
     FlowResolvedInputEdges,
-    ModelParameterSnapshot,
     group_resolved_input_edges,
-    parse_attempt_provenance,
 )
 from eneo.flows.flow_run_step_result_file import build_step_result_file_references
 from eneo.flows.flow_runtime_policy import (
@@ -163,6 +167,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
     StepExecutionRuntimeDeps,
     build_output_payload,
+    build_prepared_completion_call,
     execution_hash,
     prepare_step_execution,
 )
@@ -181,16 +186,18 @@ from eneo.flows.runtime.step_input_resolution import (
     resolve_step_input as resolve_step_input_runtime,
 )
 from eneo.flows.runtime.step_result_builder import (
+    build_activated_attempt_input,
     build_attempt_provenance,
     build_default_failed_input_payload,
     build_incomplete_attempt_provenance,
+    build_terminal_attempt_input,
 )
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
 )
-from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.variable_resolver import FlowVariableContext, FlowVariableResolver
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from eneo.json_types import JsonObject
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -368,25 +375,46 @@ def _provider_from_assistant(assistant: RuntimeAssistantProtocol) -> str | None:
     return provider if isinstance(provider, str) else None
 
 
-def _model_parameter_snapshot(
-    assistant: RuntimeAssistantProtocol,
-) -> ModelParameterSnapshot:
-    kwargs = assistant.completion_model_kwargs.model_dump(exclude_none=False)
-    temperature = kwargs.get("temperature")
-    top_p = kwargs.get("top_p")
-    reasoning_effort = kwargs.get("reasoning_effort")
-    verbosity = kwargs.get("verbosity")
-    return ModelParameterSnapshot(
-        temperature=temperature
-        if isinstance(temperature, int | float) and not isinstance(temperature, bool)
-        else None,
-        top_p=top_p
-        if isinstance(top_p, int | float) and not isinstance(top_p, bool)
-        else None,
-        reasoning_effort=reasoning_effort
-        if isinstance(reasoning_effort, str)
-        else None,
-        verbosity=verbosity if isinstance(verbosity, str) else None,
+def _attempt_completion_evidence(
+    prepared_steps: Sequence[PreparedAssistantStep],
+) -> tuple[
+    FlowStepAttemptCompletionConfiguration,
+    tuple[FlowStepAttemptExecutionInput, ...],
+]:
+    calls = tuple(step.prepared.completion_call for step in prepared_steps)
+    if not calls or any(call is None for call in calls):
+        raise FlowRuntimeInvariantError(
+            "Flow provider-call inputs must be frozen before attempt activation."
+        )
+    frozen_calls = tuple(call for call in calls if call is not None)
+    first = frozen_calls[0]
+    if any(
+        call.preferred_model_parameters != first.preferred_model_parameters
+        or call.capability_fallback_model_parameters
+        != first.capability_fallback_model_parameters
+        for call in frozen_calls[1:]
+    ):
+        raise FlowRuntimeInvariantError(
+            "Mapped Flow calls must share one completion configuration."
+        )
+    return (
+        FlowStepAttemptCompletionConfiguration(
+            preferred_model_parameters=cast(
+                JsonObject, first.preferred_model_parameters
+            ),
+            capability_fallback_model_parameters=cast(
+                JsonObject | None,
+                first.capability_fallback_model_parameters,
+            ),
+        ),
+        tuple(
+            FlowStepAttemptExecutionInput(
+                question=call.question,
+                effective_prompt=call.effective_prompt,
+                assistant_context_version=call.assistant_context_version,
+            )
+            for call in frozen_calls
+        ),
     )
 
 
@@ -394,7 +422,7 @@ def _attempt_start_for_step(
     *,
     state: RunExecutionState | None,
     step: RuntimeStep,
-) -> AttemptStartProvenance | None:
+) -> FlowStepAttemptStart | None:
     if state is None:
         return None
     return state.attempt_start_by_step.get(step.step_id)
@@ -1319,8 +1347,16 @@ class FlowRunExecutor:
             deps=execution_deps,
             step_input_override=step_input_override,
         )
+        prepared = replace(
+            prepared,
+            completion_call=build_prepared_completion_call(
+                step=step,
+                state=state,
+                prepared=prepared,
+            ),
+        )
         prepared_step = PreparedAssistantStep(prepared=prepared, deps=execution_deps)
-        attempt_start = self._build_attempt_start_provenance(
+        attempt_start = self._build_attempt_start(
             step=step,
             state=state,
             prepared_step=prepared_step,
@@ -1349,6 +1385,9 @@ class FlowRunExecutor:
             contract_validation.get("parse_succeeded"),
         )
         grouping = _group_attempt_resolved_inputs(prepared.resolved_input_edges)
+        completion_configuration, execution_inputs = _attempt_completion_evidence(
+            (prepared_step,)
+        )
         await self._activate_step_attempt(
             run=run,
             step=step,
@@ -1356,6 +1395,9 @@ class FlowRunExecutor:
             attempt_no=attempt_no,
             resolved_input_edges=grouping.aggregate,
             attempt_start=attempt_start,
+            resolved_input=cast(JsonObject, prepared.input_payload_for_result),
+            completion_configuration=completion_configuration,
+            execution_inputs=execution_inputs,
         )
         return PreparedAssistantStep(
             prepared=replace(
@@ -1366,24 +1408,20 @@ class FlowRunExecutor:
         )
 
     @staticmethod
-    def _build_attempt_start_provenance(
+    def _build_attempt_start(
         *,
         step: RuntimeStep,
         state: RunExecutionState,
         prepared_step: PreparedAssistantStep,
-    ) -> AttemptStartProvenance:
+    ) -> FlowStepAttemptStart:
         prepared = prepared_step.prepared
         resolved_timeout_seconds = int(prepared_step.deps.llm_request_timeout_seconds)
-        return AttemptStartProvenance(
+        return FlowStepAttemptStart(
             requested_model=_requested_model_from_assistant(prepared.assistant),
             provider=_provider_from_assistant(prepared.assistant),
-            deadline_at=datetime.now(timezone.utc)
-            + timedelta(seconds=resolved_timeout_seconds),
             resolved_timeout_seconds=resolved_timeout_seconds,
-            effective_prompt_length=len(prepared.effective_prompt),
             input_text_length=len(prepared.step_input.text),
             input_tokens_estimate=count_tokens(prepared.step_input.text),
-            model_parameter_snapshot=_model_parameter_snapshot(prepared.assistant),
             mapped_admission=state.mapped_admission_by_step.get(step.step_id),
         )
 
@@ -1402,17 +1440,22 @@ class FlowRunExecutor:
         grouping = _group_attempt_resolved_inputs(
             *(prepared.prepared.resolved_input_edges for prepared in prepared_steps)
         )
+        completion_configuration, execution_inputs = _attempt_completion_evidence(
+            prepared_steps
+        )
         await self._activate_step_attempt(
             run=run,
             step=step,
             state=state,
             attempt_no=attempt_no,
             resolved_input_edges=grouping.aggregate,
-            attempt_start=self._build_attempt_start_provenance(
+            attempt_start=self._build_attempt_start(
                 step=step,
                 state=state,
                 prepared_step=prepared_steps[0],
             ),
+            completion_configuration=completion_configuration,
+            execution_inputs=execution_inputs,
         )
         return tuple(
             PreparedAssistantStep(
@@ -1437,7 +1480,10 @@ class FlowRunExecutor:
         state: RunExecutionState,
         attempt_no: int,
         resolved_input_edges: FlowResolvedInputEdges,
-        attempt_start: AttemptStartProvenance | None,
+        attempt_start: FlowStepAttemptStart | None,
+        resolved_input: JsonObject | None = None,
+        completion_configuration: FlowStepAttemptCompletionConfiguration | None = None,
+        execution_inputs: tuple[FlowStepAttemptExecutionInput, ...] = (),
     ) -> None:
         activation_key = (step.step_id, attempt_no)
         if activation_key in state.activated_attempts:
@@ -1451,7 +1497,12 @@ class FlowRunExecutor:
             attempt_no=attempt_no,
             tenant_id=run.tenant_id,
             resolved_input_edges=resolved_input_edges,
-            attempt_start=attempt_start,
+            attempt_input=build_activated_attempt_input(
+                start=attempt_start,
+                resolved_input=resolved_input,
+                completion_configuration=completion_configuration,
+                execution_inputs=execution_inputs,
+            ),
         )
         if activated is None:
             raise FlowRuntimeInvariantError(
@@ -1460,20 +1511,19 @@ class FlowRunExecutor:
             )
         await self._commit()
         if attempt_start is not None:
-            persisted_provenance = parse_attempt_provenance(
-                activated.provenance_json
-            ).provenance
+            persisted_attempt_input = parse_flow_step_attempt_input(
+                activated.input_payload_json
+            ).attempt_input
             if (
-                persisted_provenance is None
-                or persisted_provenance.attempt_start is None
+                persisted_attempt_input is None
+                or persisted_attempt_input.start is None
+                or persisted_attempt_input.execution_inputs is None
             ):
                 raise FlowRuntimeInvariantError(
                     "Flow step attempt input evidence was activated without "
-                    "attempt-start provenance."
+                    "its start and exact execution inputs."
                 )
-            state.attempt_start_by_step[step.step_id] = (
-                persisted_provenance.attempt_start
-            )
+            state.attempt_start_by_step[step.step_id] = persisted_attempt_input.start
         state.activated_attempts.add(activation_key)
 
     async def _activate_resolved_input_edges(
@@ -1528,6 +1578,14 @@ class FlowRunExecutor:
             requested_file_ids=requested_file_ids,
             deps=execution_deps,
             step_input_override=step_input_override,
+        )
+        prepared = replace(
+            prepared,
+            completion_call=build_prepared_completion_call(
+                step=step,
+                state=state,
+                prepared=prepared,
+            ),
         )
         return PreparedAssistantStep(prepared=prepared, deps=execution_deps)
 
@@ -1716,9 +1774,7 @@ class FlowRunExecutor:
             error_message="Run was cancelled during step execution.",
             requested_model=requested_model,
             provider=provider,
-            provenance_json=build_incomplete_attempt_provenance(
-                attempt_start=attempt_start,
-            ),
+            provenance_json=build_incomplete_attempt_provenance(),
         )
         await self._commit()
         return {"status": "skipped", "reason": "run_cancelled"}
@@ -1785,10 +1841,16 @@ class FlowRunExecutor:
             else None,
             provider=provider if isinstance(provider, str) else None,
             provenance_json=build_incomplete_attempt_provenance(
-                attempt_start=attempt_start,
                 rag_metadata=getattr(typed_exc, "rag_metadata", None),
             ),
-            input_payload_json=failure_plan.failed_result.input_payload_json,
+            attempt_input=build_terminal_attempt_input(
+                start=attempt_start,
+                resolved_input=(
+                    failure_plan.failed_result.input_payload_json
+                    if attempt_start is None
+                    else None
+                ),
+            ),
             output_payload_json=failure_plan.failed_result.output_payload_json,
         )
         await self.flow_run_repo.save_step_result(
@@ -1891,10 +1953,16 @@ class FlowRunExecutor:
             requested_model=requested_model,
             provider=provider,
             provenance_json=build_incomplete_attempt_provenance(
-                attempt_start=attempt_start,
                 rag_metadata=getattr(exc, "rag_metadata", None),
             ),
-            input_payload_json=failure_plan.failed_result.input_payload_json,
+            attempt_input=build_terminal_attempt_input(
+                start=attempt_start,
+                resolved_input=(
+                    failure_plan.failed_result.input_payload_json
+                    if attempt_start is None
+                    else None
+                ),
+            ),
             output_payload_json=failure_plan.failed_result.output_payload_json,
         )
         await self.flow_run_repo.save_step_result(
@@ -1934,7 +2002,7 @@ class FlowRunExecutor:
         output: StepExecutionOutput,
         step_result: FlowStepResult,
         attempt_no: int,
-        attempt_start: AttemptStartProvenance | None,
+        attempt_start: FlowStepAttemptStart | None,
         commit: bool = True,
     ) -> FlowStepResult | None:
         saved_result = await self.flow_run_repo.save_step_result(
@@ -1970,9 +2038,13 @@ class FlowRunExecutor:
             num_tokens_output=output.num_tokens_output,
             provenance_json=build_attempt_provenance(
                 output=output,
-                attempt_start=attempt_start,
             ),
-            input_payload_json=saved_result.input_payload_json,
+            attempt_input=build_terminal_attempt_input(
+                start=attempt_start,
+                resolved_input=(
+                    saved_result.input_payload_json if attempt_start is None else None
+                ),
+            ),
             output_payload_json=saved_result.output_payload_json,
         )
         if commit:

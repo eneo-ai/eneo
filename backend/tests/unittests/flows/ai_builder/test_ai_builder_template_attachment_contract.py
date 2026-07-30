@@ -8,6 +8,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
 )
+from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -19,7 +20,6 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
-from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.variable_resolver import FlowVariableResolver
 
 

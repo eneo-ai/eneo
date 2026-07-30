@@ -3522,7 +3522,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v14"}
+    ) == {"flow-evidence-export.v15"}
     assert "actor" in manifest.get("required", [])
     assert "exported_by_user_id" not in manifest_properties
     actor_schema = cast(dict[str, Any], manifest_properties["actor"])

@@ -21,6 +21,7 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionContextPreview,
 )
@@ -43,7 +44,6 @@ from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
     build_rerun_execution_input_envelope,
 )
-from eneo.flows.flow_run_provenance import FlowAttemptProvenance
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
@@ -59,7 +59,11 @@ from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
 )
-from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ProviderCapabilityRejectedException,
+    TypedIOValidationException,
+)
 
 
 def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
@@ -94,10 +98,11 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
 
     async def _activate_step_attempt(**kwargs):
+        attempt_input = kwargs["attempt_input"]
         return SimpleNamespace(
-            provenance_json=FlowAttemptProvenance(
-                attempt_start=kwargs["attempt_start"]
-            ).to_payload()
+            input_payload_json=(
+                attempt_input.to_payload() if attempt_input is not None else None
+            )
         )
 
     flow_run_repo.activate_step_attempt = AsyncMock(side_effect=_activate_step_attempt)
@@ -243,6 +248,7 @@ def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
         name="test",
         provider_type="test",
         litellm_model_name=None,
+        supported_model_kwargs=SupportedModelKwargs(),
     )
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -2124,6 +2130,16 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     questions = [
         call.kwargs["question"] for call in assistant.get_response.await_args_list
     ]
+    attempt_input = activation["attempt_input"]
+    assert attempt_input.execution_inputs is not None
+    assert [item.question for item in attempt_input.execution_inputs] == questions
+    assert attempt_input.completion_configuration is not None
+    assert (
+        attempt_input.model_dump_json(exclude_none=True).count(
+            '"preferred_model_parameters"'
+        )
+        == 1
+    )
     assert any("Alpha document text" in question for question in questions)
     assert any("Beta document text" in question for question in questions)
     assert not any("source_label" in question for question in questions)
@@ -2153,6 +2169,119 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         str(second_file_id),
     ]
     assert len(output.runtime_input_metadata["per_source_calls"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_reuses_json_capability_rejection_across_calls(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    files_by_id = {
+        first_file_id: SimpleNamespace(
+            id=first_file_id,
+            text="Alpha document text",
+            name="alpha.pdf",
+            checksum="checksum-a",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        ),
+        second_file_id: SimpleNamespace(
+            id=second_file_id,
+            text="Beta document text",
+            name="beta.pdf",
+            checksum="checksum-b",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        ),
+    }
+
+    async def get_files_by_id(*, ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in ids]
+
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(side_effect=get_files_by_id)
+    flow_run_repo.list_step_input_file_ids = AsyncMock(
+        return_value=[first_file_id, second_file_id]
+    )
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(
+        side_effect=[
+            ProviderCapabilityRejectedException(
+                "The provider rejected JSON mode.",
+                capability="response_format",
+                retry_without_capability_safe=True,
+                code="provider_capability_rejected",
+            ),
+            SimpleNamespace(
+                completion='{"documents":[{"title":"Alpha"}]}',
+                total_token_count=11,
+            ),
+            SimpleNamespace(
+                completion='{"documents":[{"title":"Beta"}]}',
+                total_token_count=13,
+            ),
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                        "required": ["title"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+
+    await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert assistant.get_response.await_count == 3
+    sent_kwargs = [
+        call.kwargs["model_kwargs"] for call in assistant.get_response.await_args_list
+    ]
+    assert [kwargs.response_format for kwargs in sent_kwargs] == [
+        {"type": "json_object"},
+        None,
+        None,
+    ]
+    assert [
+        call.kwargs["provider_call_reason"]
+        for call in assistant.get_response.await_args_list
+    ] == ["initial", "capability_fallback", "capability_fallback"]
+    assert state.json_mode_supported[json_mode_cache_key(assistant)] is False
 
 
 @pytest.mark.asyncio
@@ -2561,6 +2690,12 @@ async def test_per_item_map_executes_one_model_call_per_previous_document_at_sca
         39,
     )
     assert resolved_edges[0].selection.sha256 == canonical_json_hash(documents[0])
+    attempt_input = activation["attempt_input"]
+    assert attempt_input.execution_inputs is not None
+    assert [item.question for item in attempt_input.execution_inputs] == [
+        call.kwargs["question"] for call in assistant.get_response.await_args_list
+    ]
+    assert attempt_input.completion_configuration is not None
     assert [
         call.kwargs["provider_call_observer"].resolved_input_edge_indexes
         for call in assistant.get_response.await_args_list

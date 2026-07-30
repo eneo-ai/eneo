@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
 
-from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.ai_models.completion_models.completion_model import Completion, ModelKwargs
 from eneo.completion_models.domain.provider_call_observer import (
     ProviderCallObserver,
     ProviderCallReason,
@@ -283,6 +283,19 @@ class PreparedStepExecution:
     llm_files: list[File]
     resolved_input_edges: tuple[FlowResolvedInputEdge, ...] = ()
     resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes | None = None
+    completion_call: PreparedCompletionCall | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCompletionCall:
+    question: str
+    effective_prompt: str
+    preferred_model_kwargs: ModelKwargs
+    preferred_model_parameters: dict[str, Any]
+    capability_fallback_model_kwargs: ModelKwargs | None
+    capability_fallback_model_parameters: dict[str, Any] | None
+    assistant_context_version: int
+    preferred_native_json_object: bool
 
 
 @dataclass(frozen=True)
@@ -477,7 +490,8 @@ async def call_assistant_with_timeout(
     state: RunExecutionState,
     prepared: PreparedStepExecution,
     deps: StepExecutionRuntimeDeps,
-    model_kwargs: Any,
+    question: str,
+    model_kwargs: ModelKwargs,
     info_blob_chunks: list[InfoBlobChunkInDBWithScore],
     prompt_override: str,
     version: int,
@@ -510,7 +524,7 @@ async def call_assistant_with_timeout(
                 code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
             ),
             input_payload_for_result=prepared.input_payload_for_result,
-            effective_prompt=prepared.effective_prompt,
+            effective_prompt=prompt_override,
         )
 
     provider_call_observer: ProviderCallObserver | None = None
@@ -526,7 +540,7 @@ async def call_assistant_with_timeout(
 
     llm_task: asyncio.Task[Any] = asyncio.create_task(
         prepared.assistant.get_response(
-            question=prepared.step_input.text,
+            question=question,
             completion_service=deps.completion_service,
             model_kwargs=model_kwargs,
             files=prepared.llm_files,
@@ -630,7 +644,7 @@ async def call_assistant_with_timeout(
                         code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
                     ),
                     input_payload_for_result=prepared.input_payload_for_result,
-                    effective_prompt=prepared.effective_prompt,
+                    effective_prompt=prompt_override,
                 )
 
             wait_tasks: set[asyncio.Task[Any]] = {llm_task}
@@ -657,7 +671,7 @@ async def call_assistant_with_timeout(
                         code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
                     ),
                     input_payload_for_result=prepared.input_payload_for_result,
-                    effective_prompt=prepared.effective_prompt,
+                    effective_prompt=prompt_override,
                 )
             if llm_task in done:
                 try:
@@ -696,7 +710,7 @@ async def call_assistant_with_timeout(
                 code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
             ),
             input_payload_for_result=prepared.input_payload_for_result,
-            effective_prompt=prepared.effective_prompt,
+            effective_prompt=prompt_override,
         ) from exc
     finally:
         if cancel_watcher is not None:
@@ -724,8 +738,15 @@ def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
     return payload
 
 
-def effective_model_parameters(assistant: RuntimeAssistantProtocol) -> dict[str, Any]:
-    kwargs = assistant.completion_model_kwargs.model_dump(exclude_none=False)
+def effective_model_parameters(
+    assistant: RuntimeAssistantProtocol,
+    *,
+    model_kwargs: ModelKwargs | None = None,
+) -> dict[str, Any]:
+    selected_kwargs = (
+        model_kwargs if model_kwargs is not None else assistant.completion_model_kwargs
+    )
+    kwargs = selected_kwargs.model_dump(exclude_none=False)
     completion_model = assistant.completion_model
     parameter_semantics = {
         key: {"mode": "configured" if kwargs.get(key) is not None else "model_default"}
@@ -1156,12 +1177,18 @@ async def prepare_step_execution(
     )
 
 
-def _completion_prompt_override(
+def effective_completion_prompt(
     *,
+    step: RuntimeStep,
+    state: RunExecutionState,
     prepared: PreparedStepExecution,
-    citation_mode: str,
-    inherited_citation_context: dict[str, Any] | None,
 ) -> str:
+    citation_mode = citation_mode_for_step(step)
+    inherited_citation_context = (
+        collect_inherited_citation_context(step=step, state=state)
+        if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        else None
+    )
     prompt_override = prepared.effective_prompt
     if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR:
         inherited_appendix = build_inherited_citation_prompt_appendix(
@@ -1174,6 +1201,79 @@ def _completion_prompt_override(
                 else inherited_appendix
             )
     return prompt_override
+
+
+def build_prepared_completion_call(
+    *,
+    step: RuntimeStep,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+) -> PreparedCompletionCall:
+    """Freeze the provider-call inputs that activation persists and dispatch uses."""
+
+    original_kwargs = prepared.assistant.completion_model_kwargs
+    completion_model = prepared.assistant.completion_model
+    if completion_model is not None:
+        original_kwargs = original_kwargs.filter_unsupported(
+            completion_model.supported_model_kwargs
+        )
+    preferred_kwargs = original_kwargs
+    response_format_plan = resolve_json_response_format_plan(
+        step=step,
+        assistant=prepared.assistant,
+        state=state,
+    )
+    native_json_object_attempted = response_format_plan.native_json_object_attempted
+    fallback_call_possible = response_format_plan.fallback_call_possible
+    cache_key = json_mode_cache_key(prepared.assistant)
+    if native_json_object_attempted:
+        try:
+            preferred_kwargs = original_kwargs.model_copy(
+                update={"response_format": {"type": "json_object"}}
+            )
+        except Exception:
+            logger.warning(
+                "Failed to enable native JSON mode for flow step execution.",
+                extra={"step_order": step.step_order, "cache_key": cache_key},
+                exc_info=True,
+            )
+            state.json_mode_supported[cache_key] = False
+            native_json_object_attempted = False
+            fallback_call_possible = False
+    elif response_format_plan.strip_stored_response_format:
+        preferred_kwargs = original_kwargs.model_copy(update={"response_format": None})
+
+    fallback_kwargs = None
+    if fallback_call_possible and preferred_kwargs.response_format is not None:
+        fallback_kwargs = original_kwargs.model_copy(update={"response_format": None})
+
+    citation_mode = citation_mode_for_step(step)
+    return PreparedCompletionCall(
+        question=prepared.step_input.text,
+        effective_prompt=effective_completion_prompt(
+            step=step,
+            state=state,
+            prepared=prepared,
+        ),
+        preferred_model_kwargs=preferred_kwargs,
+        preferred_model_parameters=effective_model_parameters(
+            prepared.assistant,
+            model_kwargs=preferred_kwargs,
+        ),
+        capability_fallback_model_kwargs=fallback_kwargs,
+        capability_fallback_model_parameters=(
+            effective_model_parameters(
+                prepared.assistant,
+                model_kwargs=fallback_kwargs,
+            )
+            if fallback_kwargs is not None
+            else None
+        ),
+        assistant_context_version=(
+            2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1
+        ),
+        preferred_native_json_object=native_json_object_attempted,
+    )
 
 
 async def preview_step_execution_context(
@@ -1200,15 +1300,10 @@ async def preview_step_execution_context(
             code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
         )
     citation_mode = citation_mode_for_step(step)
-    inherited_citation_context = (
-        collect_inherited_citation_context(step=step, state=state)
-        if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
-        else None
-    )
-    prompt_override = _completion_prompt_override(
+    prompt_override = effective_completion_prompt(
+        step=step,
+        state=state,
         prepared=prepared,
-        citation_mode=citation_mode,
-        inherited_citation_context=inherited_citation_context,
     )
     try:
         preview = await prepared.assistant.preview_response_context(
@@ -1274,6 +1369,11 @@ async def _complete_step_execution(
 ) -> StepExecutionOutput:
     diagnostics = list(prepared.diagnostics)
     citation_mode = citation_mode_for_step(step)
+    completion_call = prepared.completion_call or build_prepared_completion_call(
+        step=step,
+        state=state,
+        prepared=prepared,
+    )
     inherited_citation_context = (
         collect_inherited_citation_context(step=step, state=state)
         if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
@@ -1361,42 +1461,25 @@ async def _complete_step_execution(
                 code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
             ),
             input_payload_for_result=failed_input_payload,
-            effective_prompt=prepared.effective_prompt,
+            effective_prompt=completion_call.effective_prompt,
         )
 
-    model_kwargs = prepared.assistant.completion_model_kwargs
-    original_kwargs = model_kwargs
     cache_key = json_mode_cache_key(prepared.assistant)
-    response_format_plan = resolve_json_response_format_plan(
-        step=step,
-        assistant=prepared.assistant,
-        state=state,
+    use_capability_fallback = (
+        completion_call.capability_fallback_model_kwargs is not None
+        and state.json_mode_supported.get(cache_key) is False
     )
-    native_json_object_attempted = response_format_plan.native_json_object_attempted
-    if native_json_object_attempted:
-        try:
-            model_kwargs = prepared.assistant.completion_model_kwargs.model_copy(
-                update={"response_format": {"type": "json_object"}}
-            )
-        except Exception:
-            logger.warning(
-                "Failed to enable native JSON mode for flow step execution.",
-                extra={
-                    "run_id": str(run.id),
-                    "step_order": step.step_order,
-                    "cache_key": cache_key,
-                },
-                exc_info=True,
-            )
-            state.json_mode_supported[cache_key] = False
-            # The plan keeps fallback available because the original kwargs may
-            # still carry an authored response format.
-            native_json_object_attempted = False
-    elif response_format_plan.strip_stored_response_format:
-        model_kwargs = prepared.assistant.completion_model_kwargs.model_copy(
-            update={"response_format": None}
-        )
-
+    if use_capability_fallback:
+        selected_model_kwargs = completion_call.capability_fallback_model_kwargs
+        selected_model_parameters = completion_call.capability_fallback_model_parameters
+        assert selected_model_kwargs is not None
+        assert selected_model_parameters is not None
+    else:
+        selected_model_kwargs = completion_call.preferred_model_kwargs
+        selected_model_parameters = completion_call.preferred_model_parameters
+    native_json_object_attempted = (
+        completion_call.preferred_native_json_object and not use_capability_fallback
+    )
     if deps.logger is not None:
         deps.logger.info(
             "flow_executor.llm_call run_id=%s step_order=%d timeout=%s "
@@ -1406,11 +1489,7 @@ async def _complete_step_execution(
             deps.llm_request_timeout_seconds,
             native_json_object_attempted,
         )
-    prompt_override = _completion_prompt_override(
-        prepared=prepared,
-        citation_mode=citation_mode,
-        inherited_citation_context=inherited_citation_context,
-    )
+    actual_model_parameters = selected_model_parameters
     step_deadline_monotonic = (
         asyncio.get_event_loop().time() + deps.llm_request_timeout_seconds
     )
@@ -1421,33 +1500,42 @@ async def _complete_step_execution(
             state=state,
             prepared=prepared,
             deps=deps,
-            model_kwargs=model_kwargs,
+            question=completion_call.question,
+            model_kwargs=selected_model_kwargs,
             info_blob_chunks=info_blob_chunks,
-            prompt_override=prompt_override,
-            version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
-            provider_call_reason="initial",
+            prompt_override=completion_call.effective_prompt,
+            version=completion_call.assistant_context_version,
+            provider_call_reason=(
+                "capability_fallback" if use_capability_fallback else "initial"
+            ),
             step_deadline_monotonic=step_deadline_monotonic,
         )
     except ProviderCapabilityRejectedException as model_exc:
         if (
-            response_format_plan.fallback_call_possible
+            not use_capability_fallback
+            and completion_call.capability_fallback_model_kwargs is not None
             and model_exc.capability == "response_format"
             and model_exc.retry_without_capability_safe
         ):
             state.json_mode_supported[cache_key] = False
-            fallback_kwargs = original_kwargs.model_copy(
-                update={"response_format": None}
+            fallback_kwargs = completion_call.capability_fallback_model_kwargs
+            assert fallback_kwargs is not None
+            fallback_model_parameters = (
+                completion_call.capability_fallback_model_parameters
             )
+            assert fallback_model_parameters is not None
+            actual_model_parameters = fallback_model_parameters
             response = await call_assistant_with_timeout(
                 step=step,
                 run=run,
                 state=state,
                 prepared=prepared,
                 deps=deps,
+                question=completion_call.question,
                 model_kwargs=fallback_kwargs,
                 info_blob_chunks=info_blob_chunks,
-                prompt_override=prompt_override,
-                version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
+                prompt_override=completion_call.effective_prompt,
+                version=completion_call.assistant_context_version,
                 provider_call_reason="capability_fallback",
                 step_deadline_monotonic=step_deadline_monotonic,
             )
@@ -1531,7 +1619,7 @@ async def _complete_step_execution(
         raise attach_typed_failure_context(
             exc,
             input_payload_for_result=prepared.input_payload_for_result,
-            effective_prompt=prompt_override,
+            effective_prompt=completion_call.effective_prompt,
         ) from exc
 
     diagnostics.extend(typed_output.diagnostics)
@@ -1566,8 +1654,8 @@ async def _complete_step_execution(
         tool_calls_metadata=tool_calls,
         num_tokens_input=num_tokens_input,
         num_tokens_output=num_tokens_output,
-        effective_prompt=prompt_override,
-        model_parameters_json=effective_model_parameters(prepared.assistant),
+        effective_prompt=completion_call.effective_prompt,
+        model_parameters_json=actual_model_parameters,
         requested_model=requested_model_name(prepared.assistant),
         response_model=getattr(response_model_info, "name", None),
         provider=getattr(response_model_info, "provider_type", None),

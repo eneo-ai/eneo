@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptMappedAdmission,
+    MappedExecutionMode,
+)
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.rag_evidence import (
     MAPPED_CALLS_COMPLETE_KEY,
@@ -13,10 +17,6 @@ from eneo.flows.domain.rag_evidence import (
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import StepDiagnostic, StepExecutionOutput
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_provenance import (
-    MappedAdmissionProvenance,
-    MappedExecutionMode,
-)
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -26,7 +26,7 @@ def mapped_admission_payload(
     estimates: list[int],
     native_json_fallback_possible: bool,
     policy: FlowMappedExecutionPolicy,
-) -> MappedAdmissionProvenance:
+) -> FlowStepAttemptMappedAdmission:
     provider_call_upper_bound = len(estimates) + int(native_json_fallback_possible)
     call_ceiling = policy.max_provider_calls_per_mapped_step
     if call_ceiling is not None and provider_call_upper_bound > call_ceiling:
@@ -45,7 +45,7 @@ def mapped_admission_payload(
             f"the organization ceiling of {ceiling} tokens.",
             code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
         )
-    return MappedAdmissionProvenance(
+    return FlowStepAttemptMappedAdmission(
         version=policy.version,
         execution_mode=execution_mode,
         prospective_provider_calls=len(estimates),

@@ -4449,7 +4449,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v14"
+        assert export["schema_version"] == "flow-evidence-export.v15"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert isinstance(export["manifest"]["app_version"], str)
         assert export["manifest"]["app_version"]
@@ -4536,7 +4536,7 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
 
 
 @pytest.mark.asyncio
-async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
+async def test_get_evidence_normalizes_irreconstructible_attempt_provenance(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
@@ -4566,7 +4566,6 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
                 provenance_json={
                     "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
                     "llm": {
-                        "effective_prompt": "Bearer secret " + ("x" * 20000),
                         "tool_calls": {"result": "y" * 20000},
                     },
                 },
@@ -4589,8 +4588,6 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     llm_provenance = evidence["step_attempts"][0]["provenance_json"]["llm"]
-    assert llm_provenance["effective_prompt"]["truncated"] is True
-    assert llm_provenance["effective_prompt"]["sha256"] is not None
     assert llm_provenance["tool_calls"]["truncated"] is True
 
 

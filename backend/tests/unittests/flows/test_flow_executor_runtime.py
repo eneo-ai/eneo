@@ -21,6 +21,7 @@ from eneo.authentication.auth_models import (
     ServicePrincipalState,
 )
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
 from eneo.completion_models.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
@@ -45,6 +46,9 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
 from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptStart,
+)
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
@@ -68,12 +72,9 @@ from eneo.flows.enums import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_provenance import (
-    AttemptStartProvenance,
-    FlowAttemptProvenance,
     FlowResolvedInputEdges,
     FlowResolvedInputFlowInputSource,
     FlowResolvedInputJsonPath,
-    ModelParameterSnapshot,
     build_resolved_input_edge,
 )
 from eneo.flows.flow_runtime_policy import FlowRuntimePolicy
@@ -425,12 +426,16 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     flow_run_repo.create_or_get_attempt_started = AsyncMock(
         side_effect=_create_or_get_attempt_started
     )
+    flow_run_repo.save_step_result = AsyncMock(
+        side_effect=lambda _run_id, result, **_kwargs: result
+    )
 
     async def _activate_step_attempt(**kwargs):
+        attempt_input = kwargs["attempt_input"]
         return SimpleNamespace(
-            provenance_json=FlowAttemptProvenance(
-                attempt_start=kwargs["attempt_start"]
-            ).to_payload()
+            input_payload_json=(
+                attempt_input.to_payload() if attempt_input is not None else None
+            )
         )
 
     flow_run_repo.activate_step_attempt = AsyncMock(side_effect=_activate_step_attempt)
@@ -791,6 +796,7 @@ def test_executor_accepts_grouped_config(user):
 def _assistant_for_execute_step(*, has_knowledge: bool):
     model_kwargs = MagicMock()
     model_kwargs.model_dump.return_value = {}
+    model_kwargs.filter_unsupported.return_value = model_kwargs
     assistant = MagicMock()
     assistant.has_knowledge.return_value = has_knowledge
     assistant.collections = [MagicMock()] if has_knowledge else []
@@ -799,7 +805,10 @@ def _assistant_for_execute_step(*, has_knowledge: bool):
     assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = model_kwargs
     assistant.completion_model = SimpleNamespace(
-        id=uuid4(), name="gpt-4o-mini", provider_type="openai"
+        id=uuid4(),
+        name="gpt-4o-mini",
+        provider_type="openai",
+        supported_model_kwargs=SupportedModelKwargs(),
     )
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -810,16 +819,13 @@ def _assistant_for_execute_step(*, has_knowledge: bool):
     return assistant
 
 
-def _attempt_start_provenance() -> AttemptStartProvenance:
-    return AttemptStartProvenance(
+def _attempt_start() -> FlowStepAttemptStart:
+    return FlowStepAttemptStart(
         requested_model="openai/gpt-5.4-nano",
         provider="openai",
-        deadline_at=datetime.now(timezone.utc),
         resolved_timeout_seconds=1200,
-        effective_prompt_length=42,
         input_text_length=12,
         input_tokens_estimate=3,
-        model_parameter_snapshot=ModelParameterSnapshot(reasoning_effort="high"),
     )
 
 
@@ -1424,6 +1430,12 @@ async def test_zero_call_compose_failure_has_no_provider_work_disclosure(user):
         tenant_id=user.tenant_id,
         step_id=step.step_id,
         assistant_id=step.assistant_id,
+    ).model_copy(
+        update={
+            "input_payload_json": {"text": "resolved compose input"},
+            "effective_prompt": "Resolved compose prompt",
+            "model_parameters_json": {"mode": "compose_text"},
+        }
     )
 
     await executor._handle_generic_step_failure(
@@ -1438,6 +1450,10 @@ async def test_zero_call_compose_failure_has_no_provider_work_disclosure(user):
 
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert finish_kwargs["error_message"] == "Flow step 1 execution failed."
+    terminal_input = finish_kwargs["attempt_input"]
+    assert terminal_input.resolved_input == {"text": "resolved compose input"}
+    assert terminal_input.completion_configuration is None
+    assert terminal_input.execution_inputs is None
     terminal_error = executor._terminalize_run.await_args.kwargs["error"]
     assert "Provider work" not in terminal_error.message
 
@@ -2193,14 +2209,14 @@ async def test_typed_validation_failure_unknown_code_uses_cataloged_fallback(use
 
 
 @pytest.mark.asyncio
-async def test_cancelled_step_retains_attempt_start_provenance(user):
+async def test_cancelled_step_preserves_activated_attempt_input(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
     executor._rollback = AsyncMock()
     executor._commit = AsyncMock()
     step = _step_for_execute_step()
     state = _empty_execution_state()
-    attempt_start = _attempt_start_provenance()
+    attempt_start = _attempt_start()
     state.attempt_start_by_step[step.step_id] = attempt_start
 
     result = await executor._handle_cancelled_step(
@@ -2216,15 +2232,12 @@ async def test_cancelled_step_retains_attempt_start_provenance(user):
     assert finish_kwargs["status"] == FlowStepAttemptStatus.CANCELLED
     assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
     assert finish_kwargs["provider"] == "openai"
-    assert (
-        finish_kwargs["provenance_json"]["attempt_start"]["requested_model"]
-        == "openai/gpt-5.4-nano"
-    )
-    assert "deadline_at" in finish_kwargs["provenance_json"]["attempt_start"]
+    assert finish_kwargs["provenance_json"] is None
+    assert "attempt_input" not in finish_kwargs
 
 
 @pytest.mark.asyncio
-async def test_llm_timeout_failure_retains_attempt_start_provenance(user):
+async def test_llm_timeout_failure_preserves_activated_attempt_input(user):
     executor, flow_repo, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.save_step_result = AsyncMock()
@@ -2232,7 +2245,7 @@ async def test_llm_timeout_failure_retains_attempt_start_provenance(user):
     executor._rollback = AsyncMock()
     step = _step_for_execute_step()
     state = _empty_execution_state()
-    attempt_start = _attempt_start_provenance()
+    attempt_start = _attempt_start()
     state.attempt_start_by_step[step.step_id] = attempt_start
     claimed = _claimed_step_result(
         run_id=uuid4(),
@@ -2261,12 +2274,10 @@ async def test_llm_timeout_failure_retains_attempt_start_provenance(user):
     assert finish_kwargs["error_code"] == "flow_llm_request_timeout"
     assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
     assert finish_kwargs["provider"] == "openai"
-    persisted_attempt_start = finish_kwargs["provenance_json"]["attempt_start"]
-    assert persisted_attempt_start["resolved_timeout_seconds"] == 1200
-    assert (
-        persisted_attempt_start["deadline_at"]
-        == attempt_start.model_dump(mode="json")["deadline_at"]
-    )
+    terminal_input = finish_kwargs["attempt_input"]
+    assert terminal_input.start == attempt_start
+    assert terminal_input.resolved_input is None
+    assert finish_kwargs["provenance_json"] is None
 
 
 @pytest.mark.asyncio
@@ -4603,6 +4614,25 @@ async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
     async def _get_response(**kwargs):
         flow_run_repo.activate_step_attempt.assert_awaited_once()
         executor._commit.assert_awaited_once()
+        persisted_input = flow_run_repo.activate_step_attempt.await_args.kwargs[
+            "attempt_input"
+        ]
+        assert persisted_input.execution_inputs is not None
+        assert persisted_input.execution_inputs[0].question == kwargs["question"]
+        assert (
+            persisted_input.execution_inputs[0].effective_prompt
+            == kwargs["prompt_override"]
+        )
+        assert (
+            persisted_input.execution_inputs[0].assistant_context_version
+            == kwargs["version"]
+        )
+        assert persisted_input.completion_configuration is not None
+        persisted_parameters = (
+            persisted_input.completion_configuration.preferred_model_parameters
+        )
+        for key, value in kwargs["model_kwargs"].model_dump(exclude_none=False).items():
+            assert persisted_parameters[key] == value
         assert kwargs["provider_call_observer"].resolved_input_edge_indexes == (0,)
         return SimpleNamespace(completion="answer", total_token_count=42)
 
@@ -4634,12 +4664,19 @@ async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
     await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
     record_kwargs = flow_run_repo.activate_step_attempt.await_args.kwargs
-    attempt_start = record_kwargs["attempt_start"]
+    attempt_input = record_kwargs["attempt_input"]
+    assert attempt_input is not None
+    attempt_start = attempt_input.start
+    assert attempt_start is not None
     assert attempt_start.requested_model == "gpt-4o-mini"
     assert attempt_start.provider == "openai"
     assert attempt_start.resolved_timeout_seconds == 600
     assert attempt_start.input_text_length == 5
-    assert attempt_start.effective_prompt_length >= 5
+    assert attempt_input.resolved_input is not None
+    assert attempt_input.resolved_input["text"] == "hello"
+    assert attempt_input.execution_inputs is not None
+    assert len(attempt_input.execution_inputs) == 1
+    assert len(attempt_input.execution_inputs[0].effective_prompt) >= 5
     assert record_kwargs["resolved_input_edges"].edges[0].binding_ref == "input"
     assert state.attempt_start_by_step[step.step_id] == attempt_start
     assert state.activated_attempts == {(step.step_id, 1)}
@@ -5093,6 +5130,18 @@ async def test_execute_step_fail_closed_retrieval_outcomes_fail_before_provider_
     with pytest.raises(TypedIOValidationException) as exc_info:
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
+    activated_input = flow_run_repo.activate_step_attempt.await_args.kwargs[
+        "attempt_input"
+    ]
+    assert activated_input.resolved_input is not None
+    assert activated_input.resolved_input["text"] == (
+        "" if retrieval_outcome == "no_input" else "hello"
+    )
+    assert activated_input.execution_inputs is not None
+    assert activated_input.execution_inputs[0].question == (
+        "" if retrieval_outcome == "no_input" else "hello"
+    )
+
     assistant.get_response.assert_not_awaited()
     executor.webhook_delivery_repo.insert_pending_delivery.assert_not_awaited()
     assert exc_info.value.code == "typed_io_validation_failed"
@@ -5139,8 +5188,10 @@ async def test_execute_step_fail_closed_retrieval_outcomes_fail_before_provider_
         item["code"] for item in saved_result.input_payload_json["diagnostics"]
     }
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
-    assert finish_kwargs["input_payload_json"] == saved_result.input_payload_json
-    assert finish_kwargs["provenance_json"]["attempt_start"]
+    terminal_input = finish_kwargs["attempt_input"]
+    assert terminal_input.start == state.attempt_start_by_step[step.step_id]
+    assert terminal_input.resolved_input is None
+    assert finish_kwargs["provenance_json"]["rag"]
 
 
 @pytest.mark.asyncio

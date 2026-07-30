@@ -15,6 +15,7 @@ from eneo.flows.domain.runtime import (
     StepDiagnostic,
     StepInputValue,
 )
+from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
@@ -49,7 +50,6 @@ from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeRequest,
     resolve_transcribe_and_attach_audio_input,
 )
-from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,

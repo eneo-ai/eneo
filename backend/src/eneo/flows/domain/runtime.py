@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepRetrievalPolicy
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptMappedAdmission,
+    FlowStepAttemptStart,
+)
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
@@ -15,9 +19,7 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_provenance import (
-    AttemptStartProvenance,
     FlowResolvedInputEdge,
-    MappedAdmissionProvenance,
 )
 
 if TYPE_CHECKING:
@@ -37,7 +39,7 @@ def _empty_step_ref_mapping() -> dict[str, int]:
     return {}
 
 
-def _empty_attempt_start_by_step() -> dict[UUID, AttemptStartProvenance]:
+def _empty_attempt_start_by_step() -> dict[UUID, FlowStepAttemptStart]:
     return {}
 
 
@@ -45,7 +47,7 @@ def _empty_space_cache() -> dict[UUID, Space]:
     return {}
 
 
-def _empty_mapped_admission_by_step() -> dict[UUID, MappedAdmissionProvenance]:
+def _empty_mapped_admission_by_step() -> dict[UUID, FlowStepAttemptMappedAdmission]:
     return {}
 
 
@@ -142,11 +144,11 @@ class RunExecutionState:
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[Any]]
     space_cache: dict[UUID, Space] = field(default_factory=_empty_space_cache)
-    attempt_start_by_step: dict[UUID, AttemptStartProvenance] = field(
+    attempt_start_by_step: dict[UUID, FlowStepAttemptStart] = field(
         default_factory=_empty_attempt_start_by_step
     )
     in_flight_llm_task: asyncio.Task[Any] | None = None
-    mapped_admission_by_step: dict[UUID, MappedAdmissionProvenance] = field(
+    mapped_admission_by_step: dict[UUID, FlowStepAttemptMappedAdmission] = field(
         default_factory=_empty_mapped_admission_by_step
     )
     activated_attempts: set[tuple[UUID, int]] = field(

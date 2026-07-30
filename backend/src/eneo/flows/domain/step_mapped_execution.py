@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from eneo.flows.runtime_input import build_runtime_input_config
-from eneo.flows.step_item_map import build_step_item_map_config
+from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.step_item_map import build_step_item_map_config
 
 FlowStepMappedExecutionMode = Literal["per_source", "per_item"]
 

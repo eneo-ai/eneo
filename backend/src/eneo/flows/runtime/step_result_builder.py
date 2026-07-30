@@ -1,16 +1,21 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptInput,
+    FlowStepAttemptStart,
+)
 from eneo.flows.domain.rag_evidence import (
     RetrievedKnowledgeEvidence,
     build_step_result_citation_state,
 )
 from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
 from eneo.flows.flow_run_provenance import (
-    AttemptStartProvenance,
     CitationsProvenance,
     FlowAttemptProvenance,
     LlmProvenance,
@@ -18,11 +23,46 @@ from eneo.flows.flow_run_provenance import (
     normalize_json_preview,
     normalize_text_preview,
 )
+from eneo.json_types import JsonObject
+
+
+def build_activated_attempt_input(
+    *,
+    start: FlowStepAttemptStart | None,
+    resolved_input: JsonObject | None = None,
+    completion_configuration: FlowStepAttemptCompletionConfiguration | None = None,
+    execution_inputs: tuple[FlowStepAttemptExecutionInput, ...] = (),
+) -> FlowStepAttemptInput | None:
+    if (
+        start is None
+        and resolved_input is None
+        and completion_configuration is None
+        and not execution_inputs
+    ):
+        return None
+    return FlowStepAttemptInput(
+        start=start,
+        resolved_input=resolved_input,
+        completion_configuration=completion_configuration,
+        execution_inputs=execution_inputs or None,
+    )
+
+
+def build_terminal_attempt_input(
+    *,
+    start: FlowStepAttemptStart | None,
+    resolved_input: JsonObject | None = None,
+) -> FlowStepAttemptInput | None:
+    if start is None and resolved_input is None:
+        return None
+    return FlowStepAttemptInput(
+        start=start,
+        resolved_input=resolved_input,
+    )
 
 
 def build_incomplete_attempt_provenance(
     *,
-    attempt_start: AttemptStartProvenance | None,
     rag_metadata: object = None,
 ) -> dict[str, Any] | None:
     """Build evidence captured before an attempt produced a complete output."""
@@ -31,44 +71,50 @@ def build_incomplete_attempt_provenance(
         if isinstance(rag_metadata, dict)
         else None
     )
-    if attempt_start is None and rag is None:
+    if rag is None:
         return None
-    return FlowAttemptProvenance(attempt_start=attempt_start, rag=rag).to_payload()
+    return FlowAttemptProvenance(rag=rag).to_payload()
 
 
 def build_attempt_provenance(
     *,
     output: StepExecutionOutput,
-    attempt_start: AttemptStartProvenance | None = None,
-) -> dict[str, Any]:
-    """Build the v2 attempt-evidence projection from completed runtime output."""
+) -> dict[str, Any] | None:
+    """Build irreconstructible evidence from completed runtime output."""
+    tool_calls = (
+        normalize_json_preview(output.tool_calls_metadata)
+        if output.tool_calls_metadata is not None
+        else None
+    )
+    raw_completion_text = (
+        normalize_text_preview(output.raw_completion_text)
+        if isinstance(output.raw_completion_text, str) and output.raw_completion_text
+        else None
+    )
+    llm = (
+        LlmProvenance(
+            tool_calls=tool_calls,
+            raw_completion_text=raw_completion_text,
+        )
+        if tool_calls is not None or raw_completion_text is not None
+        else None
+    )
+    rag = (
+        RagProvenance.model_validate(output.rag_metadata)
+        if output.rag_metadata is not None
+        else None
+    )
+    citations = (
+        CitationsProvenance.model_validate(output.citation_sidecar)
+        if output.citation_sidecar is not None
+        else None
+    )
+    if llm is None and rag is None and citations is None:
+        return None
     return FlowAttemptProvenance(
-        llm=LlmProvenance(
-            effective_prompt=normalize_text_preview(output.effective_prompt),
-            model_parameters=output.model_parameters_json,
-            tool_calls=(
-                normalize_json_preview(output.tool_calls_metadata)
-                if output.tool_calls_metadata is not None
-                else None
-            ),
-            raw_completion_text=(
-                normalize_text_preview(output.raw_completion_text)
-                if isinstance(output.raw_completion_text, str)
-                and output.raw_completion_text
-                else None
-            ),
-        ),
-        attempt_start=attempt_start,
-        rag=(
-            RagProvenance.model_validate(output.rag_metadata)
-            if output.rag_metadata is not None
-            else None
-        ),
-        citations=(
-            CitationsProvenance.model_validate(output.citation_sidecar)
-            if output.citation_sidecar is not None
-            else None
-        ),
+        llm=llm,
+        rag=rag,
+        citations=citations,
     ).to_payload()
 
 
@@ -101,7 +147,7 @@ def build_failed_step_result(
     return claimed.model_copy(update=updates, deep=True)
 
 
-def build_completed_step_input_payload(output: StepExecutionOutput) -> dict[str, Any]:
+def build_completed_step_input_payload(output: StepExecutionOutput) -> JsonObject:
     payload: dict[str, Any] = {
         "text": output.input_text,
         "source_text": output.source_text,
@@ -127,7 +173,7 @@ def build_completed_step_input_payload(output: StepExecutionOutput) -> dict[str,
             }
             for diagnostic in output.diagnostics
         ]
-    return payload
+    return cast(JsonObject, payload)
 
 
 def build_completed_step_result(
