@@ -93,12 +93,14 @@ describe("Skill adoption projection", () => {
       getOrganizationSkillAdoption: vi.fn(),
       run: {
         status: "running",
+        assistantsIncluded: true,
         provisionalTotal: 5,
         advanced: 3,
         concurrentChange: 1,
         activationUnavailable: 1,
         contextWindow: 1,
-        personalChat: "failed"
+        personalChat: "failed",
+        apps: null
       },
       onStop,
       onRestart
@@ -144,12 +146,14 @@ describe("Skill adoption projection", () => {
       getOrganizationSkillAdoption: vi.fn(),
       run: {
         status: "stopped",
+        assistantsIncluded: true,
         provisionalTotal: 5,
         advanced: 3,
         concurrentChange: 1,
         activationUnavailable: 1,
         contextWindow: 1,
-        personalChat: "failed"
+        personalChat: "failed",
+        apps: null
       },
       onStop,
       onRestart
@@ -170,12 +174,14 @@ describe("Skill adoption projection", () => {
       getOrganizationSkillAdoption: vi.fn(),
       run: {
         status: "completed",
+        assistantsIncluded: true,
         provisionalTotal: 5,
         advanced: 3,
         concurrentChange: 1,
         activationUnavailable: 1,
         contextWindow: 1,
-        personalChat: "not_applicable"
+        personalChat: "not_applicable",
+        apps: null
       },
       onStop,
       onRestart
@@ -200,12 +206,14 @@ describe("Skill adoption projection", () => {
       getOrganizationSkillAdoption: vi.fn(),
       run: {
         status: "failed",
+        assistantsIncluded: true,
         provisionalTotal: 5,
         advanced: 3,
         concurrentChange: 1,
         activationUnavailable: 1,
         contextWindow: 1,
-        personalChat: "advanced"
+        personalChat: "advanced",
+        apps: null
       },
       onStop,
       onRestart
@@ -217,6 +225,90 @@ describe("Skill adoption projection", () => {
     await expect
       .element(page.getByRole("button", { name: m.organization_skills_rollout_restart() }))
       .toBeVisible();
+  });
+
+  test("shows App rollout results", async () => {
+    const appProjection = adoptionPage({
+      items: [
+        {
+          kind: "app",
+          resource_id: "app-1",
+          name: "Payroll workflow",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind"
+        }
+      ]
+    });
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: appProjection,
+      getOrganizationSkillAdoption: vi.fn(),
+      publishedRevisionId: "revision-2",
+      run: {
+        status: "completed",
+        assistantsIncluded: false,
+        provisionalTotal: 0,
+        advanced: 0,
+        concurrentChange: 0,
+        activationUnavailable: 0,
+        contextWindow: 0,
+        personalChat: "not_applicable",
+        apps: {
+          status: "completed",
+          provisionalTotal: 2,
+          advanced: 1,
+          concurrentChange: 0,
+          contextWindow: 1
+        }
+      }
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_apps_title(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_apps_progress({ updated: "1", total: "2" }))
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_apps_queued_runs_unchanged()))
+      .toBeVisible();
+  });
+
+  test("offers explicit recovery for outdated App bindings", async () => {
+    const appProjection = adoptionPage({
+      items: [
+        {
+          kind: "app",
+          resource_id: "app-1",
+          name: "Payroll workflow",
+          space_id: "space-1",
+          space_name: "People and culture",
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind"
+        }
+      ]
+    });
+    const onStartAppUpdate = vi.fn();
+
+    render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: appProjection,
+      getOrganizationSkillAdoption: vi.fn(),
+      publishedRevisionId: "revision-2",
+      onStartAppUpdate,
+      run: null
+    });
+    await page
+      .getByRole("button", { name: m.organization_skills_rollout_apps_recovery_action() })
+      .click();
+    expect(onStartAppUpdate).toHaveBeenCalledOnce();
+    expect(onStartAppUpdate.mock.calls[0]?.[0].items[0]?.resource_id).toBe("app-1");
   });
 
   test("shows server-owned summary, Personal Chat pin, revision counts, and resource drift", async () => {

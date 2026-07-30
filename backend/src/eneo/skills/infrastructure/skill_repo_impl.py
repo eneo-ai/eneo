@@ -29,6 +29,9 @@ from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     SKILL_RUNTIME_POLICY_DEFAULTS,
+    AppPinAdvanceOutcome,
+    AppPinAdvanceTarget,
+    AppPinAdvanceTargetResult,
     AssistantPinAdvanceOutcome,
     AssistantPinAdvanceTarget,
     AssistantPinAdvanceTargetResult,
@@ -992,7 +995,7 @@ class SkillRepoImpl:
         next_after = targets[-1].assistant_id if len(rows) > limit and targets else None
         return targets, next_after
 
-    async def get_assistant_fleet_advance_candidate(
+    async def get_fleet_advance_candidate(
         self,
         *,
         tenant_id: UUID,
@@ -1170,6 +1173,212 @@ class SkillRepoImpl:
             )
             for target in ordered_targets
         ]
+
+    async def list_app_pin_advance_targets(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        after_app_id: UUID | None,
+        limit: int,
+    ) -> tuple[list[AppPinAdvanceTarget], UUID | None]:
+        organization_space = aliased(Spaces, name="organization_skill_space")
+        statement = (
+            sa.select(
+                AppSkillBindings.app_id,
+                AppSkillBindings.skill_revision_id,
+                self._APP_ROW_VERSION,
+            )
+            .select_from(AppSkillBindings)
+            .join(
+                Apps,
+                sa.and_(
+                    Apps.id == AppSkillBindings.app_id,
+                    Apps.space_id == AppSkillBindings.space_id,
+                ),
+            )
+            .join(Spaces, Spaces.id == AppSkillBindings.space_id)
+            .join(
+                Skills,
+                sa.and_(
+                    Skills.id == AppSkillBindings.skill_id,
+                    Skills.space_id == AppSkillBindings.skill_space_id,
+                ),
+            )
+            .join(organization_space, organization_space.id == Skills.space_id)
+            .where(
+                AppSkillBindings.tenant_id == tenant_id,
+                AppSkillBindings.skill_id == skill_id,
+                AppSkillBindings.skill_revision_id != expected_published_revision_id,
+                Apps.tenant_id == tenant_id,
+                Spaces.tenant_id == tenant_id,
+                organization_space.tenant_id == tenant_id,
+                organization_space.user_id.is_(None),
+                organization_space.tenant_space_id.is_(None),
+            )
+            .order_by(AppSkillBindings.app_id)
+            .limit(limit + 1)
+        )
+        if after_app_id is not None:
+            statement = statement.where(AppSkillBindings.app_id > after_app_id)
+        rows = (await self.session.execute(statement)).all()
+        visible = rows[:limit]
+        targets = [
+            AppPinAdvanceTarget(
+                app_id=row.app_id,
+                from_revision_id=row.skill_revision_id,
+                app_row_version=row.app_row_version,
+            )
+            for row in visible
+        ]
+        next_after = targets[-1].app_id if len(rows) > limit and targets else None
+        return targets, next_after
+
+    async def advance_app_skill_pins(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        targets: Sequence[AppPinAdvanceTarget],
+    ) -> list[AppPinAdvanceTargetResult]:
+        ordered_targets = sorted(targets, key=lambda target: target.app_id)
+        target_ids = [target.app_id for target in ordered_targets]
+        locked_parent_rows = (
+            await self.session.execute(
+                sa.select(Apps.id, self._APP_ROW_VERSION)
+                .where(
+                    Apps.id.in_(target_ids),
+                    Apps.tenant_id == tenant_id,
+                )
+                .order_by(Apps.id)
+                .with_for_update(of=Apps)
+            )
+        ).all()
+        locked_parent_versions = {
+            app_id: row_version for app_id, row_version in locked_parent_rows
+        }
+
+        skill_row = await self._lock_organization_skill(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+        )
+        if skill_row is None or skill_row.published_revision_number is None:
+            raise SkillNotPublishedForBindingError
+        published_revision_id = await self.session.scalar(
+            sa.select(SkillRevisions.id).where(
+                SkillRevisions.skill_id == skill_id,
+                SkillRevisions.revision_number == skill_row.published_revision_number,
+            )
+        )
+        if published_revision_id != expected_published_revision_id:
+            raise SkillRevisionConflictError
+        if (
+            await self.get_active_execution_block(
+                tenant_id=tenant_id,
+                skill_id=skill_id,
+            )
+            is not None
+        ):
+            raise SkillBlockedForBindingError
+
+        binding_rows = (
+            await self.session.execute(
+                sa.select(
+                    AppSkillBindings.app_id,
+                    AppSkillBindings.skill_revision_id,
+                )
+                .where(
+                    AppSkillBindings.tenant_id == tenant_id,
+                    AppSkillBindings.app_id.in_(target_ids),
+                    AppSkillBindings.skill_id == skill_id,
+                )
+                .order_by(AppSkillBindings.app_id)
+                .with_for_update(of=AppSkillBindings)
+            )
+        ).all()
+        binding_revisions = {
+            app_id: revision_id for app_id, revision_id in binding_rows
+        }
+        safe_targets = [
+            target
+            for target in ordered_targets
+            if locked_parent_versions.get(target.app_id) == target.app_row_version
+            and binding_revisions.get(target.app_id) == target.from_revision_id
+        ]
+        safe_target_ids = {target.app_id for target in safe_targets}
+        compatible_targets = [
+            target for target in safe_targets if target.incompatible_reason is None
+        ]
+        advanced_ids: set[UUID] = set()
+        if compatible_targets:
+            advanced_ids = set(
+                (
+                    await self.session.execute(
+                        sa.text(
+                            """
+                            UPDATE app_skill_bindings AS binding
+                            SET skill_revision_id = :published_revision_id
+                            FROM unnest(
+                                CAST(:app_ids AS uuid[]),
+                                CAST(:from_revision_ids AS uuid[])
+                            ) AS expected(app_id, from_revision_id)
+                            WHERE binding.tenant_id = :tenant_id
+                              AND binding.skill_id = :skill_id
+                              AND binding.app_id = expected.app_id
+                              AND binding.skill_revision_id =
+                                  expected.from_revision_id
+                            RETURNING binding.app_id
+                            """
+                        ).columns(app_id=sa.Uuid),
+                        {
+                            "tenant_id": tenant_id,
+                            "skill_id": skill_id,
+                            "published_revision_id": expected_published_revision_id,
+                            "app_ids": [target.app_id for target in compatible_targets],
+                            "from_revision_ids": [
+                                target.from_revision_id for target in compatible_targets
+                            ],
+                        },
+                    )
+                ).scalars()
+            )
+        if advanced_ids:
+            await self.session.execute(
+                sa.update(Apps)
+                .where(Apps.id.in_(advanced_ids))
+                .values(updated_at=sa.func.now())
+            )
+        results: list[AppPinAdvanceTargetResult] = []
+        for target in ordered_targets:
+            if target.app_id not in safe_target_ids:
+                results.append(
+                    AppPinAdvanceTargetResult(
+                        app_id=target.app_id,
+                        outcome=AppPinAdvanceOutcome.CONCURRENT_CHANGE,
+                    )
+                )
+            elif target.incompatible_reason is not None:
+                results.append(
+                    AppPinAdvanceTargetResult(
+                        app_id=target.app_id,
+                        outcome=AppPinAdvanceOutcome.INCOMPATIBLE,
+                        reason=target.incompatible_reason,
+                    )
+                )
+            else:
+                results.append(
+                    AppPinAdvanceTargetResult(
+                        app_id=target.app_id,
+                        outcome=(
+                            AppPinAdvanceOutcome.ADVANCED
+                            if target.app_id in advanced_ids
+                            else AppPinAdvanceOutcome.CONCURRENT_CHANGE
+                        ),
+                    )
+                )
+        return results
 
     async def list_published_for_tenant(
         self,
@@ -1458,6 +1667,9 @@ class SkillRepoImpl:
     _ASSISTANT_ROW_VERSION = sa.cast(
         sa.literal_column("assistants.xmin"), sa.Text
     ).label("assistant_row_version")
+    _APP_ROW_VERSION = sa.cast(sa.literal_column("apps.xmin"), sa.Text).label(
+        "app_row_version"
+    )
     _RUNTIME_POLICY_ROW_VERSION = sa.cast(
         sa.literal_column("skill_runtime_policies.xmin"), sa.Text
     ).label("runtime_policy_version")
@@ -2465,6 +2677,42 @@ class SkillRepoImpl:
             ) in rows.all()
         ]
 
+    async def list_app_bindings_batch(
+        self, *, app_ids: Sequence[UUID]
+    ) -> dict[UUID, list[ResolvedSkillBinding]]:
+        unique_app_ids = dict.fromkeys(app_ids)
+        if not unique_app_ids:
+            return {}
+        grouped: dict[UUID, list[ResolvedSkillBinding]] = {
+            app_id: [] for app_id in unique_app_ids
+        }
+        rows = await self.session.execute(
+            self._resolved_query(AppSkillBindings)
+            .where(AppSkillBindings.app_id.in_(unique_app_ids))
+            .order_by(AppSkillBindings.app_id, AppSkillBindings.position)
+        )
+        for (
+            binding,
+            skill,
+            revision,
+            current_revision_id,
+            is_organization,
+            attachable_revision_id,
+            attachable_revision_number,
+        ) in rows.all():
+            grouped[binding.app_id].append(
+                self._to_resolved(
+                    skill,
+                    revision,
+                    current_revision_id,
+                    is_organization,
+                    attachable_revision_id,
+                    attachable_revision_number,
+                    binding.position,
+                )
+            )
+        return grouped
+
     async def list_app_bindings_for_execution_plan(
         self, *, app_id: UUID
     ) -> list[ResolvedSkillBinding]:
@@ -2522,6 +2770,11 @@ class SkillRepoImpl:
                     for position, binding in enumerate(bindings)
                 ],
             )
+        await self.session.execute(
+            sa.update(Apps)
+            .where(Apps.id == app_id, Apps.tenant_id == tenant_id)
+            .values(updated_at=sa.func.now())
+        )
 
     async def list_policy_bindings(
         self, *, policy_id: UUID

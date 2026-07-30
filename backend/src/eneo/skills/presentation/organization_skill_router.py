@@ -21,6 +21,10 @@ from eneo.skills.presentation.skill_audit import (
     skill_audit_extra,
 )
 from eneo.skills.presentation.skill_models import (
+    AppFleetAdvanceCountsPublic,
+    AppFleetAdvancePublic,
+    AppFleetAdvanceRequest,
+    AppPinAdvanceOutcomePublic,
     AssistantFleetAdvanceCountsPublic,
     AssistantFleetAdvancePublic,
     AssistantFleetAdvanceRequest,
@@ -507,6 +511,44 @@ async def advance_assistant_bindings(
         outcomes=[
             AssistantPinAdvanceOutcomePublic(
                 assistant_id=result.assistant_id,
+                outcome=result.outcome,
+                reason=result.reason,
+            )
+            for result in outcome.results
+        ],
+    )
+
+
+@router.post(
+    "/organization/{skill_id}/apps/advance/",
+    response_model=AppFleetAdvancePublic,
+    description=(
+        "Move one bounded chunk of App bindings to the reviewed published "
+        "Skill revision. Existing queued App runs keep their retained revision."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def advance_app_bindings(
+    skill_id: UUID,
+    payload: AppFleetAdvanceRequest,
+    container: _ContainerWithUser,
+) -> AppFleetAdvancePublic:
+    outcome = await container.organization_skill_service().advance_app_bindings(
+        skill_id=skill_id,
+        expected_published_revision_id=payload.expected_published_revision_id,
+        cursor=payload.cursor,
+    )
+    return AppFleetAdvancePublic(
+        run_id=outcome.run_id,
+        next_cursor=outcome.cursor.serialize() if outcome.cursor is not None else None,
+        counts=AppFleetAdvanceCountsPublic(
+            advanced=outcome.advanced_count,
+            concurrent_change=outcome.concurrent_change_count,
+            incompatible=outcome.incompatible_count,
+        ),
+        outcomes=[
+            AppPinAdvanceOutcomePublic(
+                app_id=result.app_id,
                 outcome=result.outcome,
                 reason=result.reason,
             )

@@ -1,4 +1,5 @@
 import {
+  type AppFleetAdvancePublic,
   type AssistantFleetAdvancePublic,
   EneoError,
   type OrganizationSkillPublic,
@@ -124,6 +125,7 @@ function unblockedState(): SkillExecutionBlockState {
 function publicationLifecycleData({
   skill = updatePendingSkill(),
   adoption = Promise.resolve(adoptionPage()),
+  advanceApps = vi.fn(),
   advanceAssistants = vi.fn(),
   advancePersonalChat = vi.fn(),
   getAdoption = vi.fn(),
@@ -132,6 +134,7 @@ function publicationLifecycleData({
 }: {
   skill?: OrganizationSkillPublic;
   adoption?: Promise<unknown>;
+  advanceApps?: unknown;
   advanceAssistants?: unknown;
   advancePersonalChat?: unknown;
   getAdoption?: unknown;
@@ -157,6 +160,7 @@ function publicationLifecycleData({
       },
       skills: {
         organization: {
+          advanceApps,
           advanceAssistants,
           advancePersonalChat,
           createRevision: vi.fn(),
@@ -788,6 +792,7 @@ describe("organisation Skill detail page", () => {
   test("offers binding updates only for publish and respects an unchecked choice", async () => {
     const pendingPublish = deferred<void>();
     const publish = vi.fn(() => pendingPublish.promise);
+    const advanceApps = vi.fn();
     const advancePersonalChat = vi.fn();
     const advanceAssistants = vi.fn();
 
@@ -811,6 +816,7 @@ describe("organisation Skill detail page", () => {
           },
           skills: {
             organization: {
+              advanceApps,
               advanceAssistants,
               advancePersonalChat,
               createRevision: vi.fn(),
@@ -834,8 +840,16 @@ describe("organisation Skill detail page", () => {
     await expect
       .element(page.getByText(m.organization_skills_publish_update_bindings_description()))
       .toBeVisible();
+    const updateApps = page.getByRole("checkbox", {
+      name: m.organization_skills_publish_update_apps_label()
+    });
+    await expect.element(updateApps).not.toBeChecked();
+    await expect
+      .element(page.getByText(m.organization_skills_publish_update_apps_description()))
+      .toBeVisible();
     await updateBindings.click();
     await expect.element(updateBindings).not.toBeChecked();
+    await expect.element(updateApps).toBeDisabled();
     await page.getByRole("button", { name: m.cancel() }).click();
     await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
     await expect.element(updateBindings).toBeChecked();
@@ -856,6 +870,7 @@ describe("organisation Skill detail page", () => {
     );
     expect(advancePersonalChat).not.toHaveBeenCalled();
     expect(advanceAssistants).not.toHaveBeenCalled();
+    expect(advanceApps).not.toHaveBeenCalled();
 
     await page
       .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
@@ -1027,7 +1042,9 @@ describe("organisation Skill detail page", () => {
     });
 
     await expect
-      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
       .toBeVisible();
     await expect
       .element(
@@ -1064,6 +1081,198 @@ describe("organisation Skill detail page", () => {
       .element(page.getByText(m.organization_skills_rollout_personal_chat_advanced()))
       .toBeVisible();
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+  });
+
+  test("updates App bindings only after explicit acknowledgement and the Assistant walk", async () => {
+    const assistantChunk = deferred<AssistantFleetAdvancePublic>();
+    const advanceAssistants = vi.fn(() => assistantChunk.promise);
+    const advanceApps = vi.fn(async (): Promise<AppFleetAdvancePublic> => ({
+      run_id: "app-run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 1
+      },
+      outcomes: [
+        { app_id: "app-1", outcome: "advanced" },
+        {
+          app_id: "app-2",
+          outcome: "incompatible",
+          reason: "context_window"
+        }
+      ]
+    }));
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        assistant_count: 1,
+        app_count: 2,
+        distinct_space_count: 1,
+        behind_published_count: 3,
+        personal_chat: null,
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 1,
+            app_count: 2,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceApps,
+        advanceAssistants
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("checkbox", { name: m.organization_skills_publish_update_apps_label() })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledOnce());
+    expect(advanceApps).not.toHaveBeenCalled();
+
+    assistantChunk.resolve({
+      run_id: "assistant-run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
+    });
+
+    await vi.waitFor(() =>
+      expect(advanceApps).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_published_revision_id: "revision-2",
+        cursor: null
+      })
+    );
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_apps_title(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_apps_progress({ updated: "1", total: "2" }))
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_apps_queued_runs_unchanged()))
+      .toBeVisible();
+  });
+
+  test("stops after an App chunk and restarts with a fresh stateless walk", async () => {
+    const firstAppChunk = deferred<AppFleetAdvancePublic>();
+    const advanceApps = vi
+      .fn()
+      .mockReturnValueOnce(firstAppChunk.promise)
+      .mockResolvedValueOnce({
+        run_id: "app-run-2",
+        next_cursor: null,
+        counts: {
+          advanced: 1,
+          concurrent_change: 0,
+          incompatible: 0
+        },
+        outcomes: [{ app_id: "app-2", outcome: "advanced" }]
+      });
+    const advanceAssistants = vi.fn(async (): Promise<AssistantFleetAdvancePublic> => ({
+      run_id: "assistant-run-1",
+      next_cursor: null,
+      counts: {
+        advanced: 0,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: []
+    }));
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        assistant_count: 0,
+        app_count: 2,
+        distinct_space_count: 1,
+        behind_published_count: 2,
+        personal_chat: null,
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 0,
+            app_count: 2,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceApps,
+        advanceAssistants
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("checkbox", { name: m.organization_skills_publish_update_apps_label() })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await vi.waitFor(() => expect(advanceApps).toHaveBeenCalledOnce());
+    await page.getByRole("button", { name: m.organization_skills_rollout_stop() }).click();
+    firstAppChunk.resolve({
+      run_id: "app-run-1",
+      next_cursor: "cursor-2",
+      counts: {
+        advanced: 1,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [{ app_id: "app-1", outcome: "advanced" }]
+    });
+
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_status_stopped(), { exact: true }).first()
+      )
+      .toBeVisible();
+    expect(advanceApps).toHaveBeenCalledTimes(1);
+
+    await page.getByRole("button", { name: m.organization_skills_rollout_restart() }).click();
+    await vi.waitFor(() => expect(advanceApps).toHaveBeenCalledTimes(2));
+    expect(advanceApps).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: null
+    });
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_apps_progress({ updated: "1", total: "1" }))
+      )
+      .toBeVisible();
   });
 
   test("continues publication and the Assistant walk when adoption could not be read", async () => {

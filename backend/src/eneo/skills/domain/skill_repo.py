@@ -3,6 +3,8 @@ from typing import Protocol
 from uuid import UUID
 
 from eneo.skills.domain.skill import (
+    AppPinAdvanceTarget,
+    AppPinAdvanceTargetResult,
     AssistantPinAdvanceTarget,
     AssistantPinAdvanceTargetResult,
     PersonalChatPinAdvanceStage,
@@ -97,7 +99,7 @@ class SkillRepo(Protocol):
         limit: int,
     ) -> tuple[list[AssistantPinAdvanceTarget], UUID | None]: ...
 
-    async def get_assistant_fleet_advance_candidate(
+    async def get_fleet_advance_candidate(
         self,
         *,
         tenant_id: UUID,
@@ -114,6 +116,25 @@ class SkillRepo(Protocol):
         expected_runtime_policy_version: str,
         targets: Sequence[AssistantPinAdvanceTarget],
     ) -> list[AssistantPinAdvanceTargetResult]: ...
+
+    async def list_app_pin_advance_targets(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        after_app_id: UUID | None,
+        limit: int,
+    ) -> tuple[list[AppPinAdvanceTarget], UUID | None]: ...
+
+    async def advance_app_skill_pins(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        targets: Sequence[AppPinAdvanceTarget],
+    ) -> list[AppPinAdvanceTargetResult]: ...
 
     async def list_published_for_tenant(
         self,
@@ -312,6 +333,10 @@ class SkillRepo(Protocol):
     async def list_app_bindings(
         self, *, app_id: UUID
     ) -> list[ResolvedSkillBinding]: ...
+
+    async def list_app_bindings_batch(
+        self, *, app_ids: Sequence[UUID]
+    ) -> dict[UUID, list[ResolvedSkillBinding]]: ...
 
     async def list_app_bindings_for_execution_plan(
         self, *, app_id: UUID

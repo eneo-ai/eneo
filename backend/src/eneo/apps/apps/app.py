@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union, cast
 from uuid import UUID
@@ -13,7 +14,7 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.apps.apps.api.app_models import InputField, InputFieldType
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.files.audio import AudioMimeTypes
-from eneo.files.file_models import File, FileInfo
+from eneo.files.file_models import File, FileInfo, FileMetadata
 from eneo.files.image import ImageMimeTypes
 from eneo.files.text import TextMimeTypes
 from eneo.files.transcriber import Transcriber
@@ -56,6 +57,15 @@ MAX_FILES_MAPPING = {
     InputFieldType.AUDIO_RECORDER: 1,
     InputFieldType.IMAGE_UPLOAD: 2,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class AppContextValidationInput:
+    app_id: UUID
+    prompt_text: str
+    completion_model: CompletionModelSparse | None
+    completion_file_metadata: tuple[FileMetadata, ...]
+    completion_files_stable: bool
 
 
 class App:

@@ -536,10 +536,12 @@ parent row version, so re-running a pass is equivalent to resuming it and no
 durable operation rows, idempotency keys, or lifecycle states are stored.
 Each chunk returns bounded, body-free target outcomes behind a stable cursor
 and commits atomically with its audit receipt. It is not a generic jobs SDK.
-The first slice covers Assistants and Governance Policy for Personal Chat; a
-second slice adds Apps with explicit acknowledgement and queued-snapshot
-non-interference. Publication change, unpublication, or execution block stops
-future chunks with a typed terminal failure and requires a fresh preview.
+The first slice covers Assistants and Governance Policy for Personal Chat. The
+App extension is an explicit, default-off eager-only scope with a separate
+acknowledgement: advancing an App binding affects only new runs, while queued
+and running snapshots retain the exact revision captured at creation.
+Publication change, unpublication, or execution block stops future chunks with
+a typed terminal failure and requires a fresh preview.
 Durable operation rows return only if scale, compliance, or operator evidence
 disproves the stateless design.
 

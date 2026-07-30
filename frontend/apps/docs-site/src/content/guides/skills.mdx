@@ -182,6 +182,26 @@ The run works through the fleet in chunks:
 - each chunk that changes anything writes one audit event with the run
   identity and the counts of moved, skipped, and excluded Assistants.
 
+### Moving App bindings to the published version
+
+App bindings are eager: every new App run includes the exact Skill versions
+attached to the App. When publishing a version, a tenant admin can explicitly
+include Apps in the binding update. This option is off by default because it
+changes which Skill version future App runs use.
+
+The App update follows the same bounded, restartable pattern as the Assistant
+update, with two important guarantees:
+
+- each App is checked against the published version before its binding moves;
+  Apps whose resulting context is too large stay on their previous version;
+- runs that are already queued or running keep the Skill snapshot captured when
+  they were created. Only new runs use the updated binding.
+
+Concurrent App or binding edits are skipped instead of overwritten. Stopping
+between chunks is safe, and starting again picks up bindings that are still
+behind. Unpublishing, publishing a different version, or blocking the Skill
+ends the update and requires a fresh run.
+
 These are structural configuration facts:
 
 | Evidence   | Meaning                                                           |
