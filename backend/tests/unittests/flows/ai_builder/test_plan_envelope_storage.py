@@ -204,6 +204,18 @@ def test_persisted_proposal_parser_accepts_current_version() -> None:
     assert FlowBuilderProposal.from_persisted_json(proposal.storage_json()) == proposal
 
 
+def test_execution_shape_is_derived_for_responses_but_not_persisted() -> None:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
+
+    assert "execution_shape" in proposal.content.model_dump(mode="json")
+    assert "execution_shape" not in proposal.storage_json()["content"]
+
+    hydrated = FlowBuilderProposal.from_persisted_json(proposal.storage_json())
+    assert hydrated.content.execution_shape == proposal.content.execution_shape
+
+
 @pytest.mark.parametrize(
     ("mutate", "match"),
     [

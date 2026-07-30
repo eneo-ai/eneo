@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_api_models import PlanResponse
 from eneo.server.main import get_application
 
 
@@ -185,6 +188,27 @@ def test_openapi_plan_response_and_plan_event_share_proposal_schema(
     assert "#/components/schemas/FlowBuilderProposalContent" in plan_proposal_refs
 
     public_proposal = schemas["FlowBuilderProposalContent"]
+    assert public_proposal["properties"]["execution_shape"] == {
+        "$ref": "#/components/schemas/FlowBuilderExecutionShape",
+        "readOnly": True,
+    }
+    assert "execution_shape" in public_proposal["required"]
+    execution_shape = schemas["FlowBuilderExecutionShape"]
+    assert set(execution_shape["required"]) == {
+        "completion_model_step_count",
+        "transcription_model_step_count",
+        "deterministic_step_count",
+        "schema_constrained_step_count",
+    }
+    assert execution_shape["properties"]["mapped_step_upper_bounds"]["items"] == {
+        "$ref": "#/components/schemas/FlowBuilderMappedStepUpperBound"
+    }
+    serialized_example = deepcopy(plan_response["example"])
+    serialized_shape = serialized_example["proposal"].pop("execution_shape")
+    parsed_example = PlanResponse.model_validate(serialized_example)
+    assert parsed_example.proposal.execution_shape.model_dump(mode="json") == (
+        serialized_shape
+    )
     assert "#/components/schemas/FlowBuilderEditApproval" in _schema_refs(
         public_proposal["properties"]["edit"]
     )

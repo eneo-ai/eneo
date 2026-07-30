@@ -4,13 +4,8 @@ from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.ai_builder_validation_quality import (
-    lint_all_previous_steps_overuse,
-    lint_all_previous_with_specific_refs,
-    lint_contract_instruction_alignment,
     lint_json_output_without_contract,
-    lint_multi_goal_prompts,
     lint_shadowed_form_field_bare_references,
-    lint_single_step_flow,
     lint_unfiltered_structured_interpolation,
     lint_unused_form_fields,
     lint_vague_step_names,
@@ -119,15 +114,10 @@ def validate_spec(
 
     # Quality lint (only if hard validation passes)
     if result.valid:
-        lint_all_previous_steps_overuse(spec, result)
         lint_vague_step_names(spec, result)
-        lint_multi_goal_prompts(spec, result)
-        lint_single_step_flow(spec, result)
         lint_json_output_without_contract(spec, result)
-        lint_contract_instruction_alignment(spec, result)
         lint_unused_form_fields(spec, result)
         lint_shadowed_form_field_bare_references(spec, result)
-        lint_all_previous_with_specific_refs(spec, result)
         lint_unfiltered_structured_interpolation(spec, result)
 
     return result

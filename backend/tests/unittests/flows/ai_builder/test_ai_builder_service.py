@@ -153,8 +153,8 @@ def _route(
 def test_quality_retry_codes_exclude_informational_policy_warnings() -> None:
     assert (
         not {
-            "multi_goal_prompt",
-            "contract_instruction_mismatch",
+            "vague_step_name",
+            "unused_form_field",
         }
         & QUALITY_RETRY_WARNING_CODES
     )

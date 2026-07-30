@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from eneo.flows.ai_builder.ai_builder_domain_models import (
-    LintSeverity,
-)
 from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
     SpecValidationResult,
@@ -1055,8 +1052,8 @@ class TestProductionParityValidation:
         )
 
 
-class TestContractInstructionLint:
-    def test_warns_when_output_contract_fields_missing_from_instructions(self) -> None:
+class TestOutputContractValidation:
+    def test_contract_fields_do_not_need_to_be_duplicated_in_instructions(self) -> None:
         result = validate_spec(
             _spec(
                 [
@@ -1077,37 +1074,9 @@ class TestContractInstructionLint:
             )
         )
         assert result.valid
-        assert any(w.code == "contract_instruction_mismatch" for w in result.warnings)
-
-    def test_warns_when_only_nested_output_contract_fields_are_in_instructions(
-        self,
-    ) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(
-                        ref="step_a",
-                        name="Extract JSON",
-                        instructions="Return JSON with rubrik.",
-                        output_type=OutputType.JSON,
-                        output_contract={
-                            "type": "object",
-                            "properties": {
-                                "risker": {
-                                    "type": "object",
-                                    "properties": {
-                                        "rubrik": {"type": "string"},
-                                    },
-                                },
-                            },
-                        },
-                    )
-                ]
-            )
+        assert not any(
+            w.code == "contract_instruction_mismatch" for w in result.warnings
         )
-
-        assert result.valid
-        assert any(w.code == "contract_instruction_mismatch" for w in result.warnings)
 
     def test_json_incompatible_with_all_previous_steps(self) -> None:
         result = validate_spec(
@@ -1589,7 +1558,7 @@ class TestReferenceValidation:
 
 
 class TestQualityLint:
-    def test_all_previous_steps_overuse_warned(self) -> None:
+    def test_repeated_all_previous_steps_does_not_imply_waste(self) -> None:
         result = validate_spec(
             _spec(
                 [
@@ -1602,22 +1571,6 @@ class TestQualityLint:
                     _step(
                         ref="step_c",
                         name="Third",
-                        input_source=InputSource.ALL_PREVIOUS_STEPS,
-                    ),
-                ]
-            )
-        )
-        assert result.valid
-        assert any(w.code == "all_previous_overuse" for w in result.warnings)
-
-    def test_single_all_previous_no_warning(self) -> None:
-        result = validate_spec(
-            _spec(
-                [
-                    _step(ref="step_a", name="First"),
-                    _step(
-                        ref="step_b",
-                        name="Second",
                         input_source=InputSource.ALL_PREVIOUS_STEPS,
                     ),
                 ]
@@ -1641,150 +1594,21 @@ class TestQualityLint:
         assert result.valid
         assert not any(w.code == "vague_step_name" for w in result.warnings)
 
-    def test_document_body_writer_with_ordered_clauses_no_multi_goal_warning(
-        self,
-    ) -> None:
-        instructions = (
-            "Skriv rapporten från det föregående dokumentunderlaget. "
-            "Ordna innehållet under tydliga rubriker för bakgrund, centrala "
-            "iakttagelser, risker och rekommendationer. Redovisa varje slutsats "
-            "med stöd i källmaterialet och skilj fakta från bedömningar. Avsluta "
-            "därefter med en kort gemensam slutsats som binder ihop källorna och "
-            "kontrollera att inga påståenden saknar stöd. Markera uttryckligen "
-            "när underlaget inte räcker för en slutsats och behåll ett "
-            "konsekvent, professionellt språk genom hela rapporten."
-        )
-        spec = FlowDraftSpecCore(
-            flow_name="Dokumentrapport",
-            steps=[
-                _step(ref="step_a", name="Läs dokument"),
-                _step(
-                    ref="step_b",
-                    name="Skriv rapporten",
-                    instructions=instructions,
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.TEXT,
-                    output_mode=OutputMode.PASS_THROUGH,
-                    output_type=OutputType.TEXT,
-                    input_bindings={
-                        "source_refs": [{"step_ref": "step_a", "output": "text"}]
-                    },
-                ),
-                _step(
-                    ref="step_c",
-                    name="Rendera PDF",
-                    instructions="Rendera rapporttexten som PDF.",
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.TEXT,
-                    output_mode=OutputMode.RENDER_VERBATIM,
-                    output_type=OutputType.PDF,
-                ),
-            ],
-            document_body_writer_step_refs=("step_b",),
-        )
-
-        result = validate_spec(spec)
-
-        assert result.valid
-        assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
-
-    def test_multi_goal_prompt_warned(self) -> None:
+    def test_long_multi_goal_prompt_does_not_imply_bad_topology(self) -> None:
         long_instructions = (
             "Extrahera alla viktiga fakta och sedan bedöm konsekvenserna "
             + ("x " * 150)
         )
         result = validate_spec(_spec([_step(instructions=long_instructions)]))
         assert result.valid
-        assert any(w.code == "multi_goal_prompt" for w in result.warnings)
-
-    def test_short_multi_goal_no_warning(self) -> None:
-        """Short prompts with 'och sedan' are fine — it's the combo with length."""
-        result = validate_spec(
-            _spec([_step(instructions="Extrahera data och sedan summera")])
-        )
-        assert result.valid
         assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
 
-    def test_section_writer_table_format_no_multi_goal_warning(self) -> None:
-        instructions = (
-            "Skriv avsnittet Resursåtgång i form av tidsuppskattning och "
-            "personella resurser. Inled med en kort sammanfattning och skapa "
-            "därefter en tabell med kolumnerna Roll/kompetens, Ansvar/aktivitet, "
-            "Intern/extern resurs, Uppskattad tidsåtgång, Timkostnad, Beräknad "
-            "kostnad och Kommentar. Använd roller som nämns i dokumentet. Om "
-            "roller inte nämns men tydligt kan härledas, markera dem som "
-            "'Bedömd roll utifrån underlaget'. Om timmar eller kostnader saknas, "
-            "skriv [Behöver kompletteras: tidsuppskattning] respektive "
-            "[Behöver kompletteras: kostnadsuppgift]."
-        )
-        result = validate_spec(
-            FlowDraftSpecCore(
-                flow_name="Resursrapport",
-                steps=[
-                    _step(
-                        name="Skriv Resursåtgång",
-                        instructions=instructions,
-                    )
-                ],
-                document_body_writer_step_refs=("step_a",),
-            )
-        )
-        assert result.valid
-        assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
-
-    def test_report_assembler_quality_check_no_multi_goal_warning(self) -> None:
-        instructions = (
-            "Granska samtliga skrivna avsnitt som en helhet och säkerställ att "
-            "problem/nuläge leder vidare till lösningsförslag/nyläge, att "
-            "resursåtgång, tidplan, kostnader, nyttor, finansiering, ansvar "
-            "för nyttorealisering, förändringskomplexitet och plan för "
-            "nyttorealisering hänger ihop logiskt, att inga fakta har lagts "
-            "till utan stöd i underlaget och att alla saknade uppgifter är "
-            "tydligt markerade. Sammanställ därefter ett sammanhållet "
-            "beslutsunderlag med de rubriker som användaren efterfrågat, redo "
-            "för generering som Word-dokument."
-        )
-        result = validate_spec(
-            FlowDraftSpecCore(
-                flow_name="Beslutsunderlag",
-                steps=[
-                    _step(
-                        name="Kvalitetsgranska och sammanställ beslutsunderlaget",
-                        instructions=instructions,
-                    )
-                ],
-                document_body_writer_step_refs=("step_a",),
-            )
-        )
-        assert result.valid
-        assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
-
-    def test_real_multi_goal_prompt_still_warns_with_report_words(self) -> None:
-        instructions = (
-            "Skriv en rapport med bakgrund, risker och rekommendationer och sedan "
-            "extrahera alla datum, kostnader, ansvariga och avvikande villkor till "
-            "separata strukturerade fält och därefter kontrollera varje källa mot "
-            "en extern policy innan sluttexten skrivs. Beskriv också hur varje "
-            "fält ska användas i nästa steg och skapa en separat lista över "
-            "saknade uppgifter som användaren ska komplettera."
-        )
-
-        result = validate_spec(
-            _spec([_step(name="Skriv rapport", instructions=instructions)])
-        )
-
-        assert result.valid
-        assert any(w.code == "multi_goal_prompt" for w in result.warnings)
-
-    def test_single_step_flow_info(self) -> None:
+    def test_single_step_flow_does_not_encourage_extra_work(self) -> None:
         result = validate_spec(_spec([_step(name="Sammanfatta")]))
         assert result.valid
-        assert any(
-            w.code == "single_step_flow" and w.severity == LintSeverity.INFO
-            for w in result.warnings
-        )
+        assert not any(w.code == "single_step_flow" for w in result.warnings)
 
-    def test_multi_step_no_single_step_warning(self) -> None:
+    def test_explicit_question_replaces_implicit_all_previous_input(self) -> None:
         result = validate_spec(
             _spec(
                 [
@@ -1794,11 +1618,23 @@ class TestQualityLint:
                         name="Second",
                         input_source=InputSource.PREVIOUS_STEP,
                     ),
+                    _step(
+                        ref="step_c",
+                        name="Third",
+                        input_source=InputSource.ALL_PREVIOUS_STEPS,
+                        input_bindings={
+                            "question": (
+                                "{{ step_a.output.text }} {{ step_b.output.text }}"
+                            )
+                        },
+                    ),
                 ]
             )
         )
         assert result.valid
-        assert not any(w.code == "single_step_flow" for w in result.warnings)
+        assert not any(
+            w.code == "all_previous_with_specific_refs" for w in result.warnings
+        )
 
     def test_lint_only_runs_on_valid_spec(self) -> None:
         """Lint should NOT run if hard validation fails."""

@@ -69,8 +69,38 @@ class FlowOutputMode(str, Enum):
     RENDER_VERBATIM = "render_verbatim"
 
 
+class FlowPrimaryOutputExecutionKind(str, Enum):
+    COMPLETION_MODEL = "completion_model"
+    TRANSCRIPTION_MODEL = "transcription_model"
+    DETERMINISTIC = "deterministic"
+
+
+FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE: Mapping[
+    FlowOutputMode, FlowPrimaryOutputExecutionKind
+] = MappingProxyType(
+    {
+        FlowOutputMode.PASS_THROUGH: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
+        FlowOutputMode.COMPOSE_TEXT: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.HTTP_POST: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
+        FlowOutputMode.TRANSCRIBE_ONLY: (
+            FlowPrimaryOutputExecutionKind.TRANSCRIPTION_MODEL
+        ),
+        FlowOutputMode.TEMPLATE_FILL: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.RENDER_VERBATIM: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+    }
+)
+
+
+def flow_output_mode_primary_execution_kind(
+    mode: FlowOutputMode | str,
+) -> FlowPrimaryOutputExecutionKind:
+    return FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE[FlowOutputMode(mode)]
+
+
 FLOW_COMPLETION_MODEL_OUTPUT_MODES: frozenset[FlowOutputMode] = frozenset(
-    {FlowOutputMode.PASS_THROUGH, FlowOutputMode.HTTP_POST}
+    mode
+    for mode, execution_kind in FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE.items()
+    if execution_kind is FlowPrimaryOutputExecutionKind.COMPLETION_MODEL
 )
 
 

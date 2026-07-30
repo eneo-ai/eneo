@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 from eneo.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummary
+from eneo.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposalContent
 from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
@@ -10,10 +12,20 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 )
 from eneo.flows.ai_builder.ai_builder_events import (
     build_done_event,
+    build_plan_event,
     build_question_event,
     build_requirements_summary_event,
     build_usage_event,
     encode_ai_builder_stream_event,
+)
+from eneo.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
 )
 
 
@@ -42,6 +54,37 @@ def test_usage_event_serializes_typed_telemetry() -> None:
     assert data["total_tokens_total"] == 150
     assert data["last_request_id"] == "request-1"
     assert data["last_model"] == "gpt-5.4"
+
+
+def test_plan_event_serializes_derived_execution_shape() -> None:
+    proposal = FlowBuilderProposalContent(
+        spec=FlowDraftSpecCore(
+            flow_name="Summarize",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    name="Summarize",
+                    assistant_spec=AssistantSpec(instructions="Summarize the input."),
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.TEXT,
+                )
+            ],
+        )
+    )
+
+    event = encode_ai_builder_stream_event(
+        build_plan_event(plan_id=uuid4(), proposal=proposal)
+    )
+
+    assert json.loads(event["data"])["proposal"]["execution_shape"] == {
+        "completion_model_step_count": 1,
+        "transcription_model_step_count": 0,
+        "deterministic_step_count": 0,
+        "schema_constrained_step_count": 0,
+        "mapped_step_upper_bounds": [],
+    }
 
 
 def test_question_event_serializes_typed_payload_without_none_options() -> None:

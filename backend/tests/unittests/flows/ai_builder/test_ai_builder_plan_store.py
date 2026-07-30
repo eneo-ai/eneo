@@ -93,8 +93,8 @@ def test_build_lint_warnings_hides_internal_info_level_quality_lints() -> None:
             ),
             LintWarning(
                 step_ref="step_e",
-                code="all_previous_overuse",
-                message="Too many steps use all_previous_steps.",
+                code="visible_warning",
+                message="User action is required.",
                 severity=LintSeverity.WARNING,
             ),
         ]
@@ -105,8 +105,8 @@ def test_build_lint_warnings_hides_internal_info_level_quality_lints() -> None:
     assert visible_warnings == [
         LintWarning(
             step_ref="step_e",
-            code="all_previous_overuse",
-            message="Too many steps use all_previous_steps.",
+            code="visible_warning",
+            message="User action is required.",
             severity=LintSeverity.WARNING,
         )
     ]

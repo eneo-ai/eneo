@@ -27,11 +27,13 @@ from eneo.flows.api.flow_models import (
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.enums import (
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
+    FlowPrimaryOutputExecutionKind,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
+    flow_output_mode_primary_execution_kind,
     flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_authoring_spec import (
@@ -93,6 +95,23 @@ def test_output_mode_completion_model_capability_covers_every_mode() -> None:
         FlowOutputMode.TRANSCRIBE_ONLY: False,
         FlowOutputMode.TEMPLATE_FILL: False,
         FlowOutputMode.RENDER_VERBATIM: False,
+    }
+
+
+def test_primary_output_execution_kind_covers_every_mode() -> None:
+    actual = {
+        mode: flow_output_mode_primary_execution_kind(mode) for mode in FlowOutputMode
+    }
+
+    assert actual == {
+        FlowOutputMode.PASS_THROUGH: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
+        FlowOutputMode.HTTP_POST: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
+        FlowOutputMode.TRANSCRIBE_ONLY: (
+            FlowPrimaryOutputExecutionKind.TRANSCRIPTION_MODEL
+        ),
+        FlowOutputMode.COMPOSE_TEXT: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.TEMPLATE_FILL: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.RENDER_VERBATIM: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
     }
 
 

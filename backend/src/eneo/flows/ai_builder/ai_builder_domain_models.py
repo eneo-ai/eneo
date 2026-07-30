@@ -14,7 +14,7 @@ from typing import Literal
 from uuid import UUID
 
 import uuid_utils
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
 
 from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
@@ -22,6 +22,10 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderPublicError
+from eneo.flows.ai_builder.ai_builder_execution_shape import (
+    FlowBuilderExecutionShape,
+    build_flow_builder_execution_shape,
+)
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     FlowInputFieldProvenance,
 )
@@ -234,6 +238,11 @@ class FlowBuilderProposalContent(BaseModel):
     plan_rationale: str | None = None
     description_override_manual: bool = False
     edit: FlowBuilderEditApproval | None = None
+
+    @computed_field(repr=False)
+    @property
+    def execution_shape(self) -> FlowBuilderExecutionShape:
+        return build_flow_builder_execution_shape(self.spec)
 
 
 class FlowBuilderProposal(BaseModel):

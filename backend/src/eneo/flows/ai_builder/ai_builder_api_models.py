@@ -152,17 +152,40 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
                 },
                 {
                     "plan_step_ref": "step_b",
-                    "name": "Create PDF summary",
+                    "name": "Write review summary",
                     "assistant_spec": {
-                        "instructions": "Summarize the transcription into a professional PDF.",
+                        "instructions": "Summarize the transcription for the named employee.",
                         "model_ref": "model.gpt-5-4",
                         "knowledge_refs": [],
                     },
                     "input_source": "previous_step",
                     "input_type": "text",
                     "output_mode": "pass_through",
+                    "output_type": "text",
+                    "input_bindings": {
+                        "question": (
+                            "Employee: {{ flow_input.employee_name }}\n\n"
+                            "Transcript: {{ step_a.output.text }}"
+                        )
+                    },
+                    "input_contract": None,
+                    "output_contract": None,
+                    "input_config": None,
+                    "output_config": None,
+                },
+                {
+                    "plan_step_ref": "step_c",
+                    "name": "Render PDF",
+                    "assistant_spec": {
+                        "instructions": "Render the completed summary as a PDF.",
+                        "model_ref": None,
+                        "knowledge_refs": [],
+                    },
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "render_verbatim",
                     "output_type": "pdf",
-                    "input_bindings": {"question": "{{ step_a.output.text }}"},
+                    "input_bindings": None,
                     "input_contract": None,
                     "output_contract": None,
                     "input_config": None,
@@ -181,7 +204,14 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
         },
         "assumptions": ["Uploaded audio is clear enough to transcribe."],
         "lint_warnings": [],
-        "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
+        "plan_rationale": "The flow separates transcription, summary writing, and deterministic PDF rendering.",
+        "execution_shape": {
+            "completion_model_step_count": 1,
+            "transcription_model_step_count": 1,
+            "deterministic_step_count": 1,
+            "schema_constrained_step_count": 0,
+            "mapped_step_upper_bounds": [],
+        },
     },
     "created_at": "2026-03-17T10:02:00Z",
     "updated_at": "2026-03-17T10:02:00Z",
