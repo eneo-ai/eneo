@@ -211,7 +211,6 @@
     const currentPublishedRevisionId = data.published?.revision_id ?? null;
     return (
       data.skill.id === run.skillId &&
-      data.skill.current_revision_id === run.publishedRevisionId &&
       (currentPublishedRevisionId === run.publishedRevisionId ||
         currentPublishedRevisionId === run.previousPublishedRevisionId) &&
       rollout?.generation === run.generation &&
@@ -299,7 +298,8 @@
   }
 
   function startPublishedBindingUpdate(
-    skill: OrganizationSkillPublic,
+    skillId: string,
+    publishedRevisionId: string,
     previousPublishedRevisionId: string | null,
     adoption: ReviewedAdoption
   ) {
@@ -308,21 +308,19 @@
     const pinnedRevisionId =
       personalChat !== undefined &&
       personalChat !== null &&
-      personalChat.revision_id !== skill.current_revision_id
+      personalChat.revision_id !== publishedRevisionId
         ? personalChat.revision_id
         : null;
     const provisionalTotal =
       summary?.revision_counts.reduce(
         (total, revision) =>
-          revision.revision_id === skill.current_revision_id
-            ? total
-            : total + revision.assistant_count,
+          revision.revision_id === publishedRevisionId ? total : total + revision.assistant_count,
         0
       ) ?? 0;
     const run: RolloutState = {
       generation: ++rolloutGeneration,
-      skillId: skill.id,
-      publishedRevisionId: skill.current_revision_id,
+      skillId,
+      publishedRevisionId,
       previousPublishedRevisionId,
       stopRequested: false,
       status: "running",
@@ -347,6 +345,21 @@
     rollout = { ...rollout, stopRequested: true };
   }
 
+  function startSavedBindingUpdate(adoption: SkillAdoptionProjectionPagePublic) {
+    const publishedRevisionId = data.published?.revision_id;
+    if (
+      publishedRevisionId === undefined ||
+      rolloutMutationInFlight ||
+      executionBlock.block !== null
+    ) {
+      return;
+    }
+    startPublishedBindingUpdate(data.skill.id, publishedRevisionId, null, {
+      status: "loaded",
+      page: adoption
+    });
+  }
+
   function restartPublishedBindingUpdate() {
     const prior = rollout;
     const currentPublishedRevisionId = data.published?.revision_id ?? null;
@@ -355,7 +368,6 @@
       (prior.status !== "stopped" && prior.status !== "failed") ||
       prior.personalChat === "pending" ||
       data.skill.id !== prior.skillId ||
-      data.skill.current_revision_id !== prior.publishedRevisionId ||
       (currentPublishedRevisionId !== prior.publishedRevisionId &&
         currentPublishedRevisionId !== prior.previousPublishedRevisionId)
     ) {
@@ -502,7 +514,12 @@
     publicationAction = null;
     publicationSaving = false;
     if (updateBindings) {
-      startPublishedBindingUpdate(skill, previousPublishedRevisionId, adoption);
+      startPublishedBindingUpdate(
+        skill.id,
+        skill.current_revision_id,
+        previousPublishedRevisionId,
+        adoption
+      );
       return;
     }
     await refreshOrganizationSkills(skill.id);
@@ -542,6 +559,9 @@
 
   const onAdvancePersonalChat = $derived(
     data.published !== null && executionBlock.block === null ? openAdvanceDialog : undefined
+  );
+  const onStartBindingUpdate = $derived(
+    data.published !== null && executionBlock.block === null ? startSavedBindingUpdate : undefined
   );
 
   function setAdvanceDialogOpen(open: boolean) {
@@ -846,6 +866,8 @@
           initialLoading
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
+          publishedRevisionId={data.published?.revision_id ?? null}
+          {onStartBindingUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}
@@ -856,6 +878,8 @@
           initialPage={adoptionPage}
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
+          publishedRevisionId={data.published?.revision_id ?? null}
+          {onStartBindingUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}
@@ -868,6 +892,8 @@
           initialError
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
+          publishedRevisionId={data.published?.revision_id ?? null}
+          {onStartBindingUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}

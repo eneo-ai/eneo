@@ -78,8 +78,8 @@ function updatePendingSkill(): OrganizationSkillPublic {
   };
 }
 
-function publishedSkill(): PublishedSkillPublic {
-  const publishedRevision = revision(1);
+function publishedSkillAt(revisionNumber: number): PublishedSkillPublic {
+  const publishedRevision = revision(revisionNumber);
   return {
     id: "skill-1",
     slug: "hr-support",
@@ -92,6 +92,10 @@ function publishedSkill(): PublishedSkillPublic {
     execution_blocked: false,
     revision: publishedRevision
   };
+}
+
+function publishedSkill(): PublishedSkillPublic {
+  return publishedSkillAt(1);
 }
 
 function adoptionPage() {
@@ -1453,9 +1457,21 @@ describe("organisation Skill detail page", () => {
     expect(invalidate).not.toHaveBeenCalled();
   });
 
-  test("discards an old rollout when the current Skill revision changes", async () => {
-    const lateChunk = deferred<AssistantFleetAdvancePublic>();
-    const advanceAssistants = vi.fn(() => lateChunk.promise);
+  test("continues a rollout when a new draft leaves its target published", async () => {
+    const firstChunk = deferred<AssistantFleetAdvancePublic>();
+    const advanceAssistants = vi
+      .fn()
+      .mockReturnValueOnce(firstChunk.promise)
+      .mockResolvedValueOnce({
+        run_id: "run-1",
+        next_cursor: null,
+        counts: {
+          advanced: 1,
+          concurrent_change: 0,
+          incompatible: 0
+        },
+        outcomes: [{ assistant_id: "assistant-2", outcome: "advanced" }]
+      });
     const firstData = publicationLifecycleData({ advanceAssistants });
     const rendered = render(OrganizationSkillDetailPage, { data: firstData as never });
 
@@ -1468,26 +1484,26 @@ describe("organisation Skill detail page", () => {
 
     const nextRevision = revision(3);
     await rendered.rerender({
-      data: publicationLifecycleData({
-        skill: {
-          ...updatePendingSkill(),
-          current_revision_id: nextRevision.id,
-          current_revision_number: nextRevision.revision_number,
-          display_name: nextRevision.display_name,
-          description: nextRevision.description,
-          content_digest: nextRevision.content_digest,
-          current_revision: nextRevision
-        },
-        advanceAssistants
-      }) as never
+      data: {
+        ...publicationLifecycleData({
+          skill: {
+            ...updatePendingSkill(),
+            current_revision_id: nextRevision.id,
+            current_revision_number: nextRevision.revision_number,
+            display_name: nextRevision.display_name,
+            description: nextRevision.description,
+            content_digest: nextRevision.content_digest,
+            current_revision: nextRevision
+          },
+          advanceAssistants
+        }),
+        published: publishedSkillAt(2)
+      } as never
     });
-    await expect
-      .element(page.getByText(m.organization_skills_rollout_title()))
-      .not.toBeInTheDocument();
 
-    lateChunk.resolve({
+    firstChunk.resolve({
       run_id: "run-1",
-      next_cursor: null,
+      next_cursor: "cursor-2",
       counts: {
         advanced: 1,
         concurrent_change: 0,
@@ -1496,10 +1512,81 @@ describe("organisation Skill detail page", () => {
       outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" }]
     });
 
+    await vi.waitFor(() => expect(advanceAssistants).toHaveBeenCalledTimes(2));
+    expect(advanceAssistants).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: "cursor-2"
+    });
     await expect
-      .element(page.getByText(m.organization_skills_rollout_title()))
-      .not.toBeInTheDocument();
-    expect(invalidate).not.toHaveBeenCalled();
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+  });
+
+  test("starts a fresh Assistant walk from saved adoption after a remount", async () => {
+    const advanceAssistants = vi.fn(async () => ({
+      run_id: "run-2",
+      next_cursor: null,
+      counts: {
+        advanced: 2,
+        concurrent_change: 0,
+        incompatible: 0
+      },
+      outcomes: [
+        { assistant_id: "assistant-1", outcome: "advanced" as const },
+        { assistant_id: "assistant-2", outcome: "advanced" as const }
+      ]
+    }));
+    const publishedRevision = revision(2);
+    const published = publishedSkillAt(2);
+    const adoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 2,
+        behind_published_count: 2,
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 2,
+            app_count: 0,
+            personal_chat_pinned: false
+          }
+        ]
+      }
+    };
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        ...publicationLifecycleData({
+          skill: {
+            ...updatePendingSkill(),
+            published_revision_number: 2,
+            publication_state: "published" as const,
+            current_revision: publishedRevision
+          },
+          adoption: Promise.resolve(adoption),
+          advanceAssistants
+        }),
+        published
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_rollout_recovery_action() })
+      .click();
+
+    await vi.waitFor(() =>
+      expect(advanceAssistants).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_published_revision_id: "revision-2",
+        cursor: null
+      })
+    );
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
   });
 
   test("keeps a publication change committed when refreshing the page data fails", async () => {

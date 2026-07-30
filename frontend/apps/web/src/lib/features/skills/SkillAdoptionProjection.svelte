@@ -39,6 +39,8 @@
       options: { limit: number; cursor: string | null }
     ) => Promise<SkillAdoptionProjectionPagePublic>;
     onAdvancePersonalChat?: (pinned: PersonalChatPin) => void;
+    publishedRevisionId?: string | null;
+    onStartBindingUpdate?: (projection: SkillAdoptionProjectionPagePublic) => void;
     run?: SkillAdoptionRun | null;
     onStop?: () => void;
     onRestart?: () => void;
@@ -51,6 +53,8 @@
     initialError = false,
     getOrganizationSkillAdoption,
     onAdvancePersonalChat,
+    publishedRevisionId = null,
+    onStartBindingUpdate,
     run = null,
     onStop,
     onRestart
@@ -75,6 +79,13 @@
       : run.advanced + run.concurrentChange + run.activationUnavailable + run.contextWindow
   );
   let rolloutTotal = $derived(run === null ? 0 : Math.max(run.provisionalTotal, rolloutProcessed));
+  let assistantUpdateAvailable = $derived(
+    publishedRevisionId !== null &&
+      summary !== null &&
+      summary.revision_counts.some(
+        (revision) => revision.revision_id !== publishedRevisionId && revision.assistant_count > 0
+      )
+  );
 
   $effect(() => {
     const nextSkillId = skillId;
@@ -107,6 +118,12 @@
     return kind === "assistant"
       ? m.organization_skills_adoption_resource_assistant()
       : m.organization_skills_adoption_resource_app();
+  }
+
+  function startBindingUpdate(): void {
+    const projection = page;
+    if (projection === null || onStartBindingUpdate === undefined) return;
+    onStartBindingUpdate(projection);
   }
 
   function driftLabel(drift: AdoptionDrift): string {
@@ -394,6 +411,20 @@
 
     {@render rolloutReceipt()}
 
+    {#if run === null && assistantUpdateAvailable && onStartBindingUpdate !== undefined}
+      <Alert.Root>
+        <Alert.Title>{m.organization_skills_rollout_recovery_title()}</Alert.Title>
+        <Alert.Description>
+          {m.organization_skills_rollout_recovery_description()}
+        </Alert.Description>
+        <div class="mt-3">
+          <Button variant="outline" size="sm" onclick={startBindingUpdate}>
+            {m.organization_skills_rollout_recovery_action()}
+          </Button>
+        </div>
+      </Alert.Root>
+    {/if}
+
     {#if summary.assistant_count === 0 && summary.app_count === 0 && summary.personal_chat === null}
       <div class="border-border flex flex-col items-center border-y px-6 py-8 text-center">
         <h3 class="text-foreground text-base font-medium">
@@ -427,7 +458,7 @@
                   {driftLabel(personalChat.drift)}
                 </Badge>
               </div>
-              {#if onAdvancePersonalChat !== undefined && personalChat.drift === "behind"}
+              {#if onAdvancePersonalChat !== undefined && personalChat.drift === "behind" && !assistantUpdateAvailable}
                 <Button
                   variant="outline"
                   size="sm"
