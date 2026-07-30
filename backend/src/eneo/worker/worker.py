@@ -359,7 +359,9 @@ class Worker:
 
         return decorator
 
-    def long_running_function(self, with_user: bool = True):
+    def long_running_function(
+        self, with_user: bool = True, *, keep_result: int | None = None
+    ):
         """Decorator for long-running tasks (crawls, batch jobs).
 
         Unlike function(), this does NOT hold a database session for the entire
@@ -453,7 +455,12 @@ class Worker:
                 assert job_id is not None
                 return await func(job_id, params, container=container)
 
-            self.functions.append(_traced_job("job", wrapper))
+            traced = _traced_job("job", wrapper)
+            self.functions.append(
+                arq_func(traced, keep_result=keep_result)
+                if keep_result is not None
+                else traced
+            )
             return wrapper
 
         return decorator

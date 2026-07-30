@@ -7,7 +7,7 @@ means "chunked before this column existed" and deliberately never counts as a
 mismatch, so upgrading cannot trigger a mass re-index.
 
 Revision ID: 202607301200
-Revises: 202607301000
+Revises: 202607301100
 Create Date: 2026-07-30 12:00:00.000000
 """
 
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202607301200"
-down_revision: str | None = "202607301000"
+down_revision: str | None = "202607301100"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

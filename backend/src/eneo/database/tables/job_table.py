@@ -21,3 +21,6 @@ class Jobs(BasePublic):
     dispatch_attempted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True)
     )
+    staging_cleaned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )

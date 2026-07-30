@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import TYPE_CHECKING, Optional
 
@@ -124,7 +125,9 @@ class Datastore:
         chunk_overlap: Optional[int] = None,
     ):
         logger.debug("Chunking text.")
-        info_blob_chunks = self._chunk_text(info_blob, chunk_size, chunk_overlap)
+        info_blob_chunks = await asyncio.to_thread(
+            self._chunk_text, info_blob, chunk_size, chunk_overlap
+        )
 
         if not info_blob_chunks:
             raise ValueError(

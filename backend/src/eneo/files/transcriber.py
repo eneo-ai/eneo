@@ -145,7 +145,23 @@ class Transcriber:
     async def transcribe_from_filepath(
         self, *, filepath: Path, transcription_model: "TranscriptionModel"
     ):
-        adapter = await self._get_adapter(transcription_model)
+        adapter = await self.prepare_transcription(transcription_model)
+        return await self.transcribe_prepared_from_filepath(
+            filepath=filepath,
+            adapter=adapter,
+        )
 
+    async def prepare_transcription(
+        self,
+        transcription_model: "TranscriptionModel",
+    ) -> LiteLLMTranscriptionAdapter:
+        return await self._get_adapter(transcription_model)
+
+    async def transcribe_prepared_from_filepath(
+        self,
+        *,
+        filepath: Path,
+        adapter: LiteLLMTranscriptionAdapter,
+    ) -> str:
         async with audio.to_wav(str(filepath)) as wav_file:
             return await adapter.get_text_from_file(wav_file)
