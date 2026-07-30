@@ -188,6 +188,78 @@ class AssistantFleetChunkOutcome:
     incompatible_count: int
 
 
+class AppPinAdvanceOutcome(str, Enum):
+    ADVANCED = "advanced"
+    CONCURRENT_CHANGE = "concurrent_change"
+    INCOMPATIBLE = "incompatible"
+
+
+class AppPinAdvanceIncompatibleReason(str, Enum):
+    CONTEXT_WINDOW = "context_window"
+
+
+@dataclass(frozen=True)
+class AppPinAdvanceTarget:
+    app_id: UUID
+    from_revision_id: UUID
+    app_row_version: str
+    incompatible_reason: AppPinAdvanceIncompatibleReason | None = None
+
+
+@dataclass(frozen=True)
+class AppPinAdvanceTargetResult:
+    app_id: UUID
+    outcome: AppPinAdvanceOutcome
+    reason: AppPinAdvanceIncompatibleReason | None = None
+
+
+@dataclass(frozen=True)
+class AppFleetAdvanceCursor:
+    skill_id: UUID
+    expected_published_revision_id: UUID
+    run_id: UUID
+    after_app_id: UUID | None
+
+    def serialize(self) -> str:
+        after = str(self.after_app_id) if self.after_app_id else ""
+        payload = (
+            f"{self.skill_id}:{self.expected_published_revision_id}:"
+            f"{self.run_id}:{after}"
+        ).encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+    @classmethod
+    def parse(cls, cursor: str | None) -> "AppFleetAdvanceCursor | None":
+        if cursor is None:
+            return None
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            decoded = base64.b64decode(
+                cursor + padding,
+                altchars=b"-_",
+                validate=True,
+            ).decode()
+            skill_id, revision_id, run_id, after_app_id = decoded.split(":")
+            return cls(
+                skill_id=UUID(skill_id),
+                expected_published_revision_id=UUID(revision_id),
+                run_id=UUID(run_id),
+                after_app_id=UUID(after_app_id) if after_app_id else None,
+            )
+        except (binascii.Error, UnicodeDecodeError, ValueError) as error:
+            raise BadRequestException("Invalid App fleet cursor") from error
+
+
+@dataclass(frozen=True)
+class AppFleetChunkOutcome:
+    run_id: UUID
+    cursor: AppFleetAdvanceCursor | None
+    results: tuple[AppPinAdvanceTargetResult, ...]
+    advanced_count: int
+    concurrent_change_count: int
+    incompatible_count: int
+
+
 def normalize_skill_content(
     *, display_name: str, description: str, instructions: str
 ) -> tuple[str, str, str]:

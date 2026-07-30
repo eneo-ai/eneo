@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    type AppFleetAdvancePublic,
     type AssistantFleetAdvancePublic,
     EneoError,
     type OrganizationSkillPublic,
@@ -39,6 +40,7 @@
     skillId: string;
     publishedRevisionId: string;
     previousPublishedRevisionId: string | null;
+    assistantStatus: "running" | "completed" | "stopped" | "failed";
     stopRequested: boolean;
   };
 
@@ -49,6 +51,7 @@
   let publicationSaving = $state(false);
   let publicationError = $state<string | null>(null);
   let updateBindingsOnPublish = $state(true);
+  let updateAppsOnPublish = $state(false);
   let rollout = $state<RolloutState | null>(null);
   let rolloutGeneration = 0;
   let componentActive = true;
@@ -203,6 +206,7 @@
     publicationError = null;
     if (action === "publish") {
       updateBindingsOnPublish = true;
+      updateAppsOnPublish = false;
     }
   }
 
@@ -223,6 +227,14 @@
     rollout = { ...rollout, ...update };
   }
 
+  function updateCurrentAppRollout(
+    run: RolloutState,
+    update: Partial<NonNullable<RolloutState["apps"]>>
+  ) {
+    if (!isCurrentRollout(run) || rollout?.apps === null || rollout?.apps === undefined) return;
+    rollout = { ...rollout, apps: { ...rollout.apps, ...update } };
+  }
+
   function addAssistantChunk(run: RolloutState, chunk: AssistantFleetAdvancePublic) {
     if (!isCurrentRollout(run) || rollout === null) return;
     const activationUnavailable = chunk.outcomes.filter(
@@ -237,6 +249,22 @@
       concurrentChange: rollout.concurrentChange + chunk.counts.concurrent_change,
       activationUnavailable: rollout.activationUnavailable + activationUnavailable,
       contextWindow: rollout.contextWindow + contextWindow
+    };
+  }
+
+  function addAppChunk(run: RolloutState, chunk: AppFleetAdvancePublic) {
+    if (!isCurrentRollout(run) || rollout?.apps === null || rollout?.apps === undefined) return;
+    const contextWindow = chunk.outcomes.filter(
+      (outcome) => outcome.outcome === "incompatible" && outcome.reason === "context_window"
+    ).length;
+    rollout = {
+      ...rollout,
+      apps: {
+        ...rollout.apps,
+        advanced: rollout.apps.advanced + chunk.counts.advanced,
+        concurrentChange: rollout.apps.concurrentChange + chunk.counts.concurrent_change,
+        contextWindow: rollout.apps.contextWindow + contextWindow
+      }
     };
   }
 
@@ -267,17 +295,55 @@
           cursor
         });
       } catch {
-        updateCurrentRollout(run, { status: "failed" });
+        updateCurrentRollout(run, { status: "failed", assistantStatus: "failed" });
         return "failed";
       }
       if (!isCurrentRollout(run)) return "stale";
       addAssistantChunk(run, chunk);
       if (!isCurrentRollout(run) || rollout === null) return "stale";
       if (rollout.stopRequested) {
+        updateCurrentRollout(run, { status: "stopped", assistantStatus: "stopped" });
+        return "stopped";
+      }
+      if (chunk.next_cursor === null) {
+        updateCurrentRollout(run, { assistantStatus: "completed" });
+        return "completed";
+      }
+      cursor = chunk.next_cursor;
+    }
+    return "stale";
+  }
+
+  async function walkAppBindings(
+    run: RolloutState
+  ): Promise<"completed" | "stopped" | "failed" | "stale"> {
+    let cursor: string | null = null;
+    updateCurrentAppRollout(run, { status: "running" });
+    while (isCurrentRollout(run)) {
+      let chunk: AppFleetAdvancePublic;
+      try {
+        chunk = await data.eneo.skills.organization.advanceApps({
+          skillId: run.skillId,
+          expected_published_revision_id: run.publishedRevisionId,
+          cursor
+        });
+      } catch {
+        updateCurrentAppRollout(run, { status: "failed" });
+        updateCurrentRollout(run, { status: "failed" });
+        return "failed";
+      }
+      if (!isCurrentRollout(run)) return "stale";
+      addAppChunk(run, chunk);
+      if (!isCurrentRollout(run) || rollout?.apps === null || rollout?.apps === undefined) {
+        return "stale";
+      }
+      if (rollout.stopRequested) {
+        updateCurrentAppRollout(run, { status: "stopped" });
         updateCurrentRollout(run, { status: "stopped" });
         return "stopped";
       }
       if (chunk.next_cursor === null) {
+        updateCurrentAppRollout(run, { status: "completed" });
         return "completed";
       }
       cursor = chunk.next_cursor;
@@ -286,12 +352,20 @@
   }
 
   async function runPublishedBindingUpdate(run: RolloutState, pinnedRevisionId: string | null) {
-    const [, assistantStatus] = await Promise.all([
-      advanceReviewedPersonalChat(run, pinnedRevisionId),
-      walkAssistantBindings(run)
-    ]);
+    const personalChatUpdate = run.assistantsIncluded
+      ? advanceReviewedPersonalChat(run, pinnedRevisionId)
+      : Promise.resolve();
+    let assistantStatus: "completed" | "stopped" | "failed" | "stale" = "completed";
+    if (run.assistantsIncluded && run.assistantStatus !== "completed") {
+      assistantStatus = await walkAssistantBindings(run);
+    }
+    let appStatus: "completed" | "stopped" | "failed" | "stale" = "completed";
+    if (assistantStatus === "completed" && run.apps !== null && run.apps.status !== "completed") {
+      appStatus = await walkAppBindings(run);
+    }
+    await personalChatUpdate;
     if (!isCurrentRollout(run)) return;
-    if (assistantStatus === "completed") {
+    if (assistantStatus === "completed" && appStatus === "completed") {
       updateCurrentRollout(run, { status: "completed" });
     }
     await refreshOrganizationSkills(run.skillId);
@@ -301,7 +375,8 @@
     skillId: string,
     publishedRevisionId: string,
     previousPublishedRevisionId: string | null,
-    adoption: ReviewedAdoption
+    adoption: ReviewedAdoption,
+    scope: { assistants: boolean; apps: boolean }
   ) {
     const summary = adoption.status === "loaded" ? adoption.page.summary : null;
     const personalChat = summary?.personal_chat;
@@ -311,26 +386,46 @@
       personalChat.revision_id !== publishedRevisionId
         ? personalChat.revision_id
         : null;
-    const provisionalTotal =
-      summary?.revision_counts.reduce(
-        (total, revision) =>
-          revision.revision_id === publishedRevisionId ? total : total + revision.assistant_count,
-        0
-      ) ?? 0;
+    const provisionalTotal = scope.assistants
+      ? (summary?.revision_counts.reduce(
+          (total, revision) =>
+            revision.revision_id === publishedRevisionId ? total : total + revision.assistant_count,
+          0
+        ) ?? 0)
+      : 0;
+    const provisionalAppTotal = scope.apps
+      ? (summary?.revision_counts.reduce(
+          (total, revision) =>
+            revision.revision_id === publishedRevisionId ? total : total + revision.app_count,
+          0
+        ) ?? 0)
+      : 0;
     const run: RolloutState = {
       generation: ++rolloutGeneration,
       skillId,
       publishedRevisionId,
       previousPublishedRevisionId,
+      assistantStatus: scope.assistants ? "running" : "completed",
       stopRequested: false,
       status: "running",
+      assistantsIncluded: scope.assistants,
       provisionalTotal,
       advanced: 0,
       concurrentChange: 0,
       activationUnavailable: 0,
       contextWindow: 0,
-      personalChat:
-        adoption.status === "unavailable" || summary === null
+      apps: scope.apps
+        ? {
+            status: scope.assistants ? "pending" : "running",
+            provisionalTotal: provisionalAppTotal,
+            advanced: 0,
+            concurrentChange: 0,
+            contextWindow: 0
+          }
+        : null,
+      personalChat: !scope.assistants
+        ? "not_applicable"
+        : adoption.status === "unavailable" || summary === null
           ? "failed"
           : pinnedRevisionId === null
             ? "not_applicable"
@@ -354,10 +449,37 @@
     ) {
       return;
     }
-    startPublishedBindingUpdate(data.skill.id, publishedRevisionId, null, {
-      status: "loaded",
-      page: adoption
-    });
+    startPublishedBindingUpdate(
+      data.skill.id,
+      publishedRevisionId,
+      null,
+      {
+        status: "loaded",
+        page: adoption
+      },
+      {
+        assistants: true,
+        apps: false
+      }
+    );
+  }
+
+  function startSavedAppBindingUpdate(adoption: SkillAdoptionProjectionPagePublic) {
+    const publishedRevisionId = data.published?.revision_id;
+    if (
+      publishedRevisionId === undefined ||
+      rolloutMutationInFlight ||
+      executionBlock.block !== null
+    ) {
+      return;
+    }
+    startPublishedBindingUpdate(
+      data.skill.id,
+      publishedRevisionId,
+      null,
+      { status: "loaded", page: adoption },
+      { assistants: false, apps: true }
+    );
   }
 
   function restartPublishedBindingUpdate() {
@@ -378,21 +500,30 @@
       generation: ++rolloutGeneration,
       stopRequested: false,
       status: "running",
-      provisionalTotal: Math.max(prior.provisionalTotal - prior.advanced, 0),
-      advanced: 0,
-      concurrentChange: 0,
-      activationUnavailable: 0,
-      contextWindow: 0
+      assistantStatus: prior.assistantStatus === "completed" ? "completed" : "running",
+      provisionalTotal:
+        prior.assistantStatus === "completed"
+          ? prior.provisionalTotal
+          : Math.max(prior.provisionalTotal - prior.advanced, 0),
+      advanced: prior.assistantStatus === "completed" ? prior.advanced : 0,
+      concurrentChange: prior.assistantStatus === "completed" ? prior.concurrentChange : 0,
+      activationUnavailable:
+        prior.assistantStatus === "completed" ? prior.activationUnavailable : 0,
+      contextWindow: prior.assistantStatus === "completed" ? prior.contextWindow : 0,
+      apps:
+        prior.apps === null || prior.apps.status === "completed"
+          ? prior.apps
+          : {
+              ...prior.apps,
+              status: "pending",
+              provisionalTotal: Math.max(prior.apps.provisionalTotal - prior.apps.advanced, 0),
+              advanced: 0,
+              concurrentChange: 0,
+              contextWindow: 0
+            }
     };
     rollout = run;
-    void (async () => {
-      const assistantStatus = await walkAssistantBindings(run);
-      if (!isCurrentRollout(run)) return;
-      if (assistantStatus === "completed") {
-        updateCurrentRollout(run, { status: "completed" });
-      }
-      await refreshOrganizationSkills(run.skillId);
-    })();
+    void runPublishedBindingUpdate(run, null);
   }
 
   function setExecutionDialogOpen(open: boolean) {
@@ -476,6 +607,7 @@
     const skill = data.skill;
     const action = publicationAction;
     const updateBindings = action === "publish" && updateBindingsOnPublish;
+    const updateApps = updateBindings && updateAppsOnPublish;
     const previousPublishedRevisionId = data.published?.revision_id ?? null;
     let adoption: ReviewedAdoption = { status: "unavailable" };
     publicationSaving = true;
@@ -522,7 +654,8 @@
         skill.id,
         skill.current_revision_id,
         previousPublishedRevisionId,
-        adoption
+        adoption,
+        { assistants: true, apps: updateApps }
       );
       return;
     }
@@ -569,6 +702,11 @@
   const onStartBindingUpdate = $derived(
     data.published !== null && executionBlock.block === null && !rolloutMutationInFlight
       ? startSavedBindingUpdate
+      : undefined
+  );
+  const onStartAppUpdate = $derived(
+    data.published !== null && executionBlock.block === null && !rolloutMutationInFlight
+      ? startSavedAppBindingUpdate
       : undefined
   );
 
@@ -876,6 +1014,7 @@
           {onAdvancePersonalChat}
           publishedRevisionId={data.published?.revision_id ?? null}
           {onStartBindingUpdate}
+          {onStartAppUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}
@@ -888,6 +1027,7 @@
           {onAdvancePersonalChat}
           publishedRevisionId={data.published?.revision_id ?? null}
           {onStartBindingUpdate}
+          {onStartAppUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}
@@ -902,6 +1042,7 @@
           {onAdvancePersonalChat}
           publishedRevisionId={data.published?.revision_id ?? null}
           {onStartBindingUpdate}
+          {onStartAppUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}
@@ -969,6 +1110,22 @@
           </Field.Label>
           <Field.Description id="update-bindings-on-publish-description">
             {m.organization_skills_publish_update_bindings_description()}
+          </Field.Description>
+        </Field.Content>
+      </Field.Field>
+      <Field.Field orientation="horizontal" class="bg-muted/40 ml-8 rounded-md p-3">
+        <Checkbox
+          id="update-apps-on-publish"
+          bind:checked={updateAppsOnPublish}
+          disabled={publicationSaving || !updateBindingsOnPublish}
+          aria-describedby="update-apps-on-publish-description"
+        />
+        <Field.Content>
+          <Field.Label for="update-apps-on-publish">
+            {m.organization_skills_publish_update_apps_label()}
+          </Field.Label>
+          <Field.Description id="update-apps-on-publish-description">
+            {m.organization_skills_publish_update_apps_description()}
           </Field.Description>
         </Field.Content>
       </Field.Field>

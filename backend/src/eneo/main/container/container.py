@@ -794,6 +794,7 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=app_factory,
         file_content_loader=file_content_loader,
+        file_repo=file_repo,
         prompt_repo=prompt_repo,
         transcription_model_repo=transcription_model_repo,
     )
@@ -1276,14 +1277,6 @@ class Container(containers.DeclarativeContainer):
         effective_config_service=effective_config_service,
         skill_service=skill_service,
     )
-    organization_skill_service = providers.Factory(
-        OrganizationSkillService,
-        user=user,
-        repo=skill_repo,
-        space_service=space_service,
-        assistant_service=assistant_service,
-        audit_service=audit_service,
-    )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,
         user=user,
@@ -1635,6 +1628,15 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
         skill_service=skill_service,
+    )
+    organization_skill_service = providers.Factory(
+        OrganizationSkillService,
+        user=user,
+        repo=skill_repo,
+        space_service=space_service,
+        assistant_service=assistant_service,
+        app_service=app_service,
+        audit_service=audit_service,
     )
     app_run_service = providers.Factory(
         AppRunService,

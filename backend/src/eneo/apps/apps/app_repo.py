@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import AsyncIterator, Sequence
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -7,14 +8,17 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import Executable
 from sqlalchemy.sql.base import ExecutableOption
 
+from eneo.ai_models.completion_models.completion_model import CompletionModelSparse
 from eneo.apps.apps.api.app_models import InputField
-from eneo.apps.apps.app import App
+from eneo.apps.apps.app import App, AppContextValidationInput
 from eneo.apps.apps.app_factory import AppFactory
 from eneo.database.database import AsyncSession
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import Apps, AppsFiles, AppsPrompts, InputFields
+from eneo.database.tables.prompts_table import Prompts
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
-from eneo.files.file_models import File, FileMetadata
+from eneo.files.file_models import File, FileMetadata, FileType
+from eneo.files.file_repo import FileRepository
 from eneo.prompts.prompt import Prompt
 from eneo.prompts.prompt_repo import PromptRepository
 from eneo.transcription_models.domain.transcription_model_repo import (
@@ -28,6 +32,7 @@ class AppRepository:
         session: AsyncSession,
         factory: AppFactory,
         file_content_loader: FileContentLoader,
+        file_repo: FileRepository,
         prompt_repo: PromptRepository,
         transcription_model_repo: TranscriptionModelRepository,
     ):
@@ -35,6 +40,7 @@ class AppRepository:
         self.session = session
         self.factory = factory
         self.file_content_loader = file_content_loader
+        self.file_repo = file_repo
         self.prompt_repo = prompt_repo
         self.transcription_model_repo = transcription_model_repo
 
@@ -56,6 +62,128 @@ class AppRepository:
         ]
         loaded = await self.file_content_loader.load_attachment_groups(groups)
         return {record.id: loaded[("app", record.id)] for record in records}
+
+    async def get_by_ids_for_context_validation(
+        self,
+        *,
+        app_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, AppContextValidationInput]:
+        if not app_ids:
+            return {}
+
+        selected_prompt_text = (
+            sa.select(Prompts.text)
+            .join(AppsPrompts, AppsPrompts.prompt_id == Prompts.id)
+            .where(
+                AppsPrompts.app_id == Apps.id,
+                AppsPrompts.is_selected.is_(True),
+            )
+            .limit(1)
+            .correlate(Apps)
+            .scalar_subquery()
+        )
+        statement = (
+            sa.select(Apps, selected_prompt_text.label("prompt_text"))
+            .where(
+                Apps.id.in_(app_ids),
+                Apps.tenant_id == tenant_id,
+            )
+            .options(
+                selectinload(Apps.completion_model).selectinload(
+                    CompletionModels.provider
+                ),
+                selectinload(Apps.attachments).selectinload(AppsFiles.file),
+            )
+        )
+        rows = (await self.session.execute(statement)).all()
+
+        metadata_by_app_id: dict[UUID, list[FileMetadata]] = {}
+        app_ids_by_parent_id: defaultdict[UUID, list[UUID]] = defaultdict(list)
+        parent_ids: list[UUID] = []
+        seen_parent_ids: set[UUID] = set()
+        models_by_app_id: dict[UUID, CompletionModelSparse | None] = {}
+        prompt_text_by_app_id: dict[UUID, str] = {}
+        for record, prompt_text in rows:
+            completion_model = (
+                self.factory.create_completion_model_sparse(record.completion_model)
+                if record.completion_model is not None
+                else None
+            )
+            models_by_app_id[record.id] = completion_model
+            prompt_text_by_app_id[record.id] = prompt_text or ""
+            metadata = [
+                FileMetadata.model_validate(attachment.file)
+                for attachment in record.attachments
+            ]
+            metadata_by_app_id[record.id] = metadata
+            if completion_model is None or not completion_model.vision:
+                continue
+            for file in metadata:
+                if file.file_type is not FileType.TEXT:
+                    continue
+                app_ids_by_parent_id[file.id].append(record.id)
+                if file.id not in seen_parent_ids:
+                    seen_parent_ids.add(file.id)
+                    parent_ids.append(file.id)
+
+        unstable_app_ids: set[UUID] = set()
+        if parent_ids:
+            projection = await self.file_repo.project_derived_images_for_attached_roots(
+                parent_ids=parent_ids,
+                tenant_id=tenant_id,
+            )
+            present_ids_by_app_id = {
+                app_id: {metadata.id for metadata in files}
+                for app_id, files in metadata_by_app_id.items()
+            }
+            for metadata in projection.derived_images:
+                assert metadata.parent_file_id is not None
+                for app_id in app_ids_by_parent_id[metadata.parent_file_id]:
+                    if metadata.id in present_ids_by_app_id[app_id]:
+                        continue
+                    metadata_by_app_id[app_id].append(metadata)
+                    present_ids_by_app_id[app_id].add(metadata.id)
+            unstable_app_ids = {
+                app_id
+                for parent_id in projection.unstable_parent_ids
+                for app_id in app_ids_by_parent_id[parent_id]
+            }
+
+        return {
+            app_id: AppContextValidationInput(
+                app_id=app_id,
+                prompt_text=prompt_text_by_app_id[app_id],
+                completion_model=models_by_app_id[app_id],
+                completion_file_metadata=tuple(metadata),
+                completion_files_stable=app_id not in unstable_app_ids,
+            )
+            for app_id, metadata in metadata_by_app_id.items()
+        }
+
+    async def iter_context_files_for_validation_batches(
+        self,
+        *,
+        validation_inputs: Sequence[AppContextValidationInput],
+        tenant_id: UUID,
+        max_batch_bytes: int,
+    ) -> AsyncIterator[dict[UUID, tuple[File, ...]]]:
+        groups = [
+            FileAttachmentGroup(
+                owner_kind="app",
+                owner_id=validation_input.app_id,
+                tenant_id=tenant_id,
+                files=validation_input.completion_file_metadata,
+            )
+            for validation_input in validation_inputs
+        ]
+        async for (
+            loaded_groups
+        ) in self.file_content_loader.load_attachment_groups_in_payload_batches(
+            groups,
+            max_batch_bytes=max_batch_bytes,
+        ):
+            yield {app_id: tuple(files) for (_, app_id), files in loaded_groups.items()}
 
     def _options(self) -> list[ExecutableOption]:
         return [

@@ -1,12 +1,22 @@
 <script lang="ts" module>
+  export type AppSkillAdoptionRun = {
+    status: "pending" | "running" | "completed" | "stopped" | "failed";
+    provisionalTotal: number;
+    advanced: number;
+    concurrentChange: number;
+    contextWindow: number;
+  };
+
   export type SkillAdoptionRun = {
     status: "running" | "completed" | "stopped" | "failed";
+    assistantsIncluded: boolean;
     provisionalTotal: number;
     advanced: number;
     concurrentChange: number;
     activationUnavailable: number;
     contextWindow: number;
     personalChat: "pending" | "advanced" | "failed" | "not_applicable";
+    apps: AppSkillAdoptionRun | null;
     stopRequested?: boolean;
   };
 </script>
@@ -41,6 +51,7 @@
     onAdvancePersonalChat?: (pinned: PersonalChatPin) => void;
     publishedRevisionId?: string | null;
     onStartBindingUpdate?: (projection: SkillAdoptionProjectionPagePublic) => void;
+    onStartAppUpdate?: (projection: SkillAdoptionProjectionPagePublic) => void;
     run?: SkillAdoptionRun | null;
     onStop?: () => void;
     onRestart?: () => void;
@@ -55,6 +66,7 @@
     onAdvancePersonalChat,
     publishedRevisionId = null,
     onStartBindingUpdate,
+    onStartAppUpdate,
     run = null,
     onStop,
     onRestart
@@ -79,6 +91,16 @@
       : run.advanced + run.concurrentChange + run.activationUnavailable + run.contextWindow
   );
   let rolloutTotal = $derived(run === null ? 0 : Math.max(run.provisionalTotal, rolloutProcessed));
+  let appRolloutProcessed = $derived(
+    run?.apps === null || run?.apps === undefined
+      ? 0
+      : run.apps.advanced + run.apps.concurrentChange + run.apps.contextWindow
+  );
+  let appRolloutTotal = $derived(
+    run?.apps === null || run?.apps === undefined
+      ? 0
+      : Math.max(run.apps.provisionalTotal, appRolloutProcessed)
+  );
   let assistantUpdateAvailable = $derived(
     publishedRevisionId !== null &&
       summary !== null &&
@@ -92,6 +114,20 @@
       run?.status !== "running" &&
       run?.personalChat !== "pending"
   );
+  let appUpdateAvailable = $derived(
+    publishedRevisionId !== null &&
+      summary !== null &&
+      summary.revision_counts.some(
+        (revision) => revision.revision_id !== publishedRevisionId && revision.app_count > 0
+      )
+  );
+  let appUpdateActionAvailable = $derived(
+    appUpdateAvailable &&
+      onStartAppUpdate !== undefined &&
+      run?.status !== "running" &&
+      run?.personalChat !== "pending"
+  );
+  let recoveryActionAvailable = $derived(bindingUpdateActionAvailable || appUpdateActionAvailable);
 
   $effect(() => {
     const nextSkillId = skillId;
@@ -130,6 +166,12 @@
     const projection = page;
     if (projection === null || onStartBindingUpdate === undefined) return;
     onStartBindingUpdate(projection);
+  }
+
+  function startAppUpdate(): void {
+    const projection = page;
+    if (projection === null || onStartAppUpdate === undefined) return;
+    onStartAppUpdate(projection);
   }
 
   function driftLabel(drift: AdoptionDrift): string {
@@ -196,6 +238,37 @@
         return m.organization_skills_rollout_personal_chat_failed();
       case "not_applicable":
         return m.organization_skills_rollout_personal_chat_not_applicable();
+    }
+  }
+
+  function appRolloutStatusLabel(status: AppSkillAdoptionRun["status"]): string {
+    switch (status) {
+      case "pending":
+        return m.organization_skills_rollout_apps_status_pending();
+      case "running":
+        return m.organization_skills_rollout_apps_status_running();
+      case "completed":
+        return m.organization_skills_rollout_apps_status_completed();
+      case "stopped":
+        return m.organization_skills_rollout_apps_status_stopped();
+      case "failed":
+        return m.organization_skills_rollout_apps_status_failed();
+    }
+  }
+
+  function appRolloutStatusVariant(
+    status: AppSkillAdoptionRun["status"]
+  ): "default" | "secondary" | "outline" | "destructive" {
+    switch (status) {
+      case "running":
+        return "default";
+      case "completed":
+        return "secondary";
+      case "pending":
+      case "stopped":
+        return "outline";
+      case "failed":
+        return "destructive";
     }
   }
 
@@ -269,46 +342,113 @@
         </div>
       </Alert.Title>
       <Alert.Description class="mt-2 flex flex-col gap-3 text-balance">
-        <p role="status" aria-live="polite" aria-atomic="true" class="font-medium tabular-nums">
-          {m.organization_skills_rollout_progress({
-            updated: String(run.advanced),
-            total: String(rolloutTotal)
-          })}
-        </p>
-        <div class="border-border border-y">
-          <Table.Root>
-            <Table.Header>
-              <Table.Row>
-                <Table.Head>{m.organization_skills_rollout_outcome_column()}</Table.Head>
-                <Table.Head class="w-20 text-right">
-                  {m.organization_skills_rollout_count_column()}
-                </Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              <Table.Row>
-                <Table.Cell>{m.organization_skills_rollout_updated()}</Table.Cell>
-                <Table.Cell class="text-right tabular-nums">{run.advanced}</Table.Cell>
-              </Table.Row>
-              <Table.Row>
-                <Table.Cell>{m.organization_skills_rollout_concurrent_change()}</Table.Cell>
-                <Table.Cell class="text-right tabular-nums">{run.concurrentChange}</Table.Cell>
-              </Table.Row>
-              <Table.Row>
-                <Table.Cell>{m.organization_skills_rollout_activation_unavailable()}</Table.Cell>
-                <Table.Cell class="text-right tabular-nums">{run.activationUnavailable}</Table.Cell>
-              </Table.Row>
-              <Table.Row>
-                <Table.Cell>{m.organization_skills_rollout_context_window()}</Table.Cell>
-                <Table.Cell class="text-right tabular-nums">{run.contextWindow}</Table.Cell>
-              </Table.Row>
-            </Table.Body>
-          </Table.Root>
-        </div>
-        <p>{m.organization_skills_rollout_exclusions()}</p>
-        <p>{personalChatResultLabel(run.personalChat)}</p>
-        {#if run.status === "failed"}
-          <p>{m.organization_skills_rollout_failure()}</p>
+        {#if run.assistantsIncluded}
+          <p role="status" aria-live="polite" aria-atomic="true" class="font-medium tabular-nums">
+            {m.organization_skills_rollout_progress({
+              updated: String(run.advanced),
+              total: String(rolloutTotal)
+            })}
+          </p>
+          <div class="border-border border-y">
+            <Table.Root>
+              <Table.Header>
+                <Table.Row>
+                  <Table.Head>{m.organization_skills_rollout_outcome_column()}</Table.Head>
+                  <Table.Head class="w-20 text-right">
+                    {m.organization_skills_rollout_count_column()}
+                  </Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                <Table.Row>
+                  <Table.Cell>{m.organization_skills_rollout_updated()}</Table.Cell>
+                  <Table.Cell class="text-right tabular-nums">{run.advanced}</Table.Cell>
+                </Table.Row>
+                <Table.Row>
+                  <Table.Cell>{m.organization_skills_rollout_concurrent_change()}</Table.Cell>
+                  <Table.Cell class="text-right tabular-nums">{run.concurrentChange}</Table.Cell>
+                </Table.Row>
+                <Table.Row>
+                  <Table.Cell>{m.organization_skills_rollout_activation_unavailable()}</Table.Cell>
+                  <Table.Cell class="text-right tabular-nums"
+                    >{run.activationUnavailable}</Table.Cell
+                  >
+                </Table.Row>
+                <Table.Row>
+                  <Table.Cell>{m.organization_skills_rollout_context_window()}</Table.Cell>
+                  <Table.Cell class="text-right tabular-nums">{run.contextWindow}</Table.Cell>
+                </Table.Row>
+              </Table.Body>
+            </Table.Root>
+          </div>
+          <p>{m.organization_skills_rollout_exclusions()}</p>
+          <p>{personalChatResultLabel(run.personalChat)}</p>
+          {#if run.status === "failed" && run.apps?.status !== "failed"}
+            <p>{m.organization_skills_rollout_failure()}</p>
+          {/if}
+        {/if}
+        {#if run.apps !== null}
+          <section
+            class="border-border bg-muted/30 rounded-md border p-3"
+            aria-labelledby="organization-skill-app-rollout-heading"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 id="organization-skill-app-rollout-heading" class="text-foreground font-medium">
+                {m.organization_skills_rollout_apps_title()}
+              </h3>
+              <Badge variant={appRolloutStatusVariant(run.apps.status)}>
+                {appRolloutStatusLabel(run.apps.status)}
+              </Badge>
+            </div>
+            <p
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              class="mt-3 font-medium tabular-nums"
+            >
+              {m.organization_skills_rollout_apps_progress({
+                updated: String(run.apps.advanced),
+                total: String(appRolloutTotal)
+              })}
+            </p>
+            <div class="border-border mt-3 border-y">
+              <Table.Root>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>{m.organization_skills_rollout_outcome_column()}</Table.Head>
+                    <Table.Head class="w-20 text-right">
+                      {m.organization_skills_rollout_count_column()}
+                    </Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  <Table.Row>
+                    <Table.Cell>{m.organization_skills_rollout_updated()}</Table.Cell>
+                    <Table.Cell class="text-right tabular-nums">{run.apps.advanced}</Table.Cell>
+                  </Table.Row>
+                  <Table.Row>
+                    <Table.Cell>{m.organization_skills_rollout_concurrent_change()}</Table.Cell>
+                    <Table.Cell class="text-right tabular-nums">
+                      {run.apps.concurrentChange}
+                    </Table.Cell>
+                  </Table.Row>
+                  <Table.Row>
+                    <Table.Cell>{m.organization_skills_rollout_context_window()}</Table.Cell>
+                    <Table.Cell class="text-right tabular-nums">
+                      {run.apps.contextWindow}
+                    </Table.Cell>
+                  </Table.Row>
+                </Table.Body>
+              </Table.Root>
+            </div>
+            <div class="text-muted-foreground mt-3 space-y-2 text-sm leading-5">
+              <p>{m.organization_skills_rollout_apps_exclusions()}</p>
+              <p>{m.organization_skills_rollout_apps_queued_runs_unchanged()}</p>
+              {#if run.apps.status === "failed"}
+                <p>{m.organization_skills_rollout_apps_failure()}</p>
+              {/if}
+            </div>
+          </section>
         {/if}
         {#if run.status === "running" && onStop !== undefined}
           <div>
@@ -321,7 +461,7 @@
               {m.organization_skills_rollout_stop()}
             </Button>
           </div>
-        {:else if (run.status === "stopped" || run.status === "failed") && run.personalChat !== "pending" && onRestart !== undefined && !bindingUpdateActionAvailable}
+        {:else if (run.status === "stopped" || run.status === "failed") && run.personalChat !== "pending" && onRestart !== undefined && !recoveryActionAvailable}
           <div>
             <Button variant="outline" size="sm" onclick={onRestart}>
               {m.organization_skills_rollout_restart()}
@@ -426,6 +566,20 @@
         <div class="mt-3">
           <Button variant="outline" size="sm" onclick={startBindingUpdate}>
             {m.organization_skills_rollout_recovery_action()}
+          </Button>
+        </div>
+      </Alert.Root>
+    {/if}
+
+    {#if appUpdateActionAvailable}
+      <Alert.Root>
+        <Alert.Title>{m.organization_skills_rollout_apps_recovery_title()}</Alert.Title>
+        <Alert.Description>
+          {m.organization_skills_rollout_apps_recovery_description()}
+        </Alert.Description>
+        <div class="mt-3">
+          <Button variant="outline" size="sm" onclick={startAppUpdate}>
+            {m.organization_skills_rollout_apps_recovery_action()}
           </Button>
         </div>
       </Alert.Root>
