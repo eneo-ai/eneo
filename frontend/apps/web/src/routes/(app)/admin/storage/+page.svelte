@@ -56,8 +56,10 @@
   let deploymentPolicy = $state<DeploymentPolicy | null>(null);
   let contentInventory = $state<ObjectContentInventory | null>(null);
   let inventoryStatus = $state<InventoryStatus>("idle");
+  let inventoryRefreshedAt = $state<number | null>(null);
   let contentMoves = $state<ObjectContentMoves | null>(null);
   let moveStatus = $state<InventoryStatus>("idle");
+  let movesRefreshedAt = $state<number | null>(null);
   let moveTarget = $state<StorageKind>("object_store");
   let moveLimit = $state(25);
   let moveActionPending = $state<MoveAction>(null);
@@ -214,16 +216,17 @@
       inventoryStatus = "idle";
       return;
     }
+    if (inventoryStatus === "loading") return;
 
-    contentInventory = null;
     inventoryStatus = "loading";
     try {
       contentInventory = await eneo.objectContentPolicy.getInventory();
+      inventoryRefreshedAt = Date.now();
       inventoryStatus = "idle";
     } catch (error: unknown) {
-      contentInventory = null;
       if (hasStatus(error, 403)) {
         authorityRevoked = true;
+        contentInventory = null;
         inventoryStatus = "idle";
       } else {
         inventoryStatus = "error";
@@ -237,9 +240,9 @@
       moveStatus = "idle";
       return;
     }
+    if (moveStatus === "loading") return;
 
     const previousMoves = contentMoves;
-    contentMoves = null;
     moveStatus = "loading";
     try {
       const nextMoves = await eneo.objectContentPolicy.getMoves();
@@ -257,11 +260,12 @@
                 paused: deploymentPolicy.policy.moves_paused
               }
             : nextMoves;
+      movesRefreshedAt = Date.now();
       moveStatus = "idle";
     } catch (error: unknown) {
-      contentMoves = null;
       if (hasStatus(error, 403)) {
         authorityRevoked = true;
+        contentMoves = null;
         moveStatus = "idle";
       } else {
         moveStatus = "error";
@@ -511,6 +515,12 @@
     return new Intl.DateTimeFormat(storageLocale(), {
       dateStyle: "medium"
     }).format(date);
+  }
+
+  function storageTime(value: number): string {
+    return new Intl.DateTimeFormat(storageLocale(), {
+      timeStyle: "short"
+    }).format(value);
   }
 
   onMount(() => {
@@ -982,12 +992,19 @@
                 <ArrowRightLeft class="size-5" aria-hidden="true" />
               {/snippet}
 
-              <div class="flex justify-end">
+              <div class="flex flex-wrap items-center justify-end gap-3">
+                {#if movesRefreshedAt !== null}
+                  <span class="text-muted text-xs">
+                    {m.storage_last_refreshed({ time: storageTime(movesRefreshedAt) })}
+                  </span>
+                {/if}
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={moveStatus === "loading" || moveActionPending !== null}
+                  disabled={moveActionPending !== null}
+                  aria-disabled={moveStatus === "loading" || moveActionPending !== null}
                   aria-busy={moveStatus === "loading"}
+                  class={moveStatus === "loading" ? "pointer-events-none opacity-50" : undefined}
                   onclick={loadMoves}
                 >
                   <RefreshCw
@@ -1140,8 +1157,17 @@
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={contentMoves === null || moveStatus !== "idle" || policyMutationPending}
+                  disabled={(contentMoves === null ||
+                    moveStatus !== "idle" ||
+                    policyMutationPending) &&
+                    moveActionPending !== "pause"}
+                  aria-disabled={contentMoves === null ||
+                    moveStatus !== "idle" ||
+                    policyMutationPending}
                   aria-busy={moveActionPending === "pause"}
+                  class={moveActionPending === "pause"
+                    ? "pointer-events-none opacity-50"
+                    : undefined}
                   onclick={setMovesPaused}
                 >
                   {#if moveActionPending === "pause"}
@@ -1151,12 +1177,7 @@
                 </Button>
               </div>
 
-              {#if moveStatus === "loading"}
-                <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
-                  <Loader2 class="size-4 animate-spin" />
-                  {m.storage_moves_loading()}
-                </p>
-              {:else if moveStatus === "error"}
+              {#if moveStatus === "error"}
                 <Alert.Root
                   bind:ref={moveStatusAlertRef}
                   data-testid="move-status-recovery-alert"
@@ -1173,7 +1194,9 @@
                     </Button>
                   </Alert.Description>
                 </Alert.Root>
-              {:else if contentMoves?.moves.length === 0}
+              {/if}
+
+              {#if contentMoves?.moves.length === 0}
                 <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
                   {m.storage_moves_empty()}
                 </p>
@@ -1207,12 +1230,20 @@
                     </Table.Body>
                   </Table.Root>
                 </div>
+              {:else if moveStatus === "loading"}
+                <p class="text-secondary flex items-center gap-2 text-sm" aria-live="polite">
+                  <Loader2 class="size-4 animate-spin" />
+                  {m.storage_moves_loading()}
+                </p>
               {/if}
             </PolicySection>
 
             <StorageInventorySection
               inventory={contentInventory}
               status={inventoryStatus}
+              lastRefreshed={inventoryRefreshedAt === null
+                ? null
+                : storageTime(inventoryRefreshedAt)}
               onRetry={loadInventory}
               onRefresh={loadInventory}
               {storageTargetLabel}
