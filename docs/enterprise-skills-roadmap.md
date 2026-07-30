@@ -281,9 +281,10 @@ save-time fit/activatability condition, a tenant admin may start an explicit
 This is a narrow tenant-admin pin-advance authority owned by
 `OrganizationSkillService` and `SkillRepo`, not a parent-editor save or a
 generic jobs framework. The first slice covers Assistants and Personal Chat
-Governance Policy. A second slice adds Apps with a separate acknowledgement and
-queued-snapshot non-interference proof. Silent auto-update, a persistent
-`track_published` mode, and semantic merge remain deferred.
+Governance Policy. The App extension adds a separate, default-off eager-only
+scope: only new runs observe an advanced pin, while already queued or running
+snapshots remain unchanged. Silent auto-update, a persistent `track_published`
+mode, and semantic merge remain deferred.
 
 ### O2: optional install and update
 

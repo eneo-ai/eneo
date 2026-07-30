@@ -334,6 +334,63 @@ test("Assistant advance sends the reviewed published revision and opaque cursor"
   ]);
 });
 
+test("App advance sends the reviewed published revision and opaque cursor", async () => {
+  const calls = [];
+  const response = {
+    run_id: "run-1",
+    next_cursor: "run-1:next",
+    counts: {
+      advanced: 1,
+      concurrent_change: 1,
+      incompatible: 1
+    },
+    outcomes: [
+      {
+        app_id: "app-1",
+        outcome: "advanced"
+      },
+      {
+        app_id: "app-2",
+        outcome: "concurrent_change"
+      },
+      {
+        app_id: "app-3",
+        outcome: "incompatible",
+        reason: "context_window"
+      }
+    ]
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.advanceApps({
+    skillId: "skill-1",
+    expected_published_revision_id: "revision-2",
+    cursor: "run-1:current"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/apps/advance/",
+      request: {
+        method: "post",
+        params: { path: { skill_id: "skill-1" } },
+        requestBody: {
+          "application/json": {
+            expected_published_revision_id: "revision-2",
+            cursor: "run-1:current"
+          }
+        }
+      }
+    }
+  ]);
+});
+
 test("organisation revision summaries use the shared cursor contract", async () => {
   const page = {
     items: [],

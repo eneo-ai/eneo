@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
@@ -8,7 +8,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
 )
 from eneo.apps.apps.api.app_models import InputField, InputFieldType
-from eneo.apps.apps.app import App
+from eneo.apps.apps.app import App, AppContextValidationInput
 from eneo.apps.apps.app_factory import AppFactory
 from eneo.apps.apps.app_repo import AppRepository
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
@@ -18,11 +18,17 @@ from eneo.files.file_models import File
 from eneo.files.file_service import FileService
 from eneo.files.transcriber import Transcriber
 from eneo.icons.icon_repo import IconRepository
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.main.logging import get_logger
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
 from eneo.prompts.prompt_service import PromptService
 from eneo.skills.domain.skill import (
+    AppPinAdvanceIncompatibleReason,
+    ResolvedSkillBinding,
     SkillBindingReference,
     SkillComposition,
     SkillExecutionReference,
@@ -127,6 +133,12 @@ class AppService:
             base_instructions=base_instructions,
         )
 
+    async def _lock_app_for_context_validation(self, app_id: UUID) -> App:
+        app = await self.repo.get_for_update(app_id)
+        if app is None:
+            raise NotFoundException()
+        return app
+
     async def _validate_configured_context(
         self,
         *,
@@ -148,12 +160,73 @@ class AppService:
             )
         else:
             files_to_check = app.attachments
-        assert_prompt_and_files_fit_context(
-            max_input_tokens=model.max_input_tokens,
+        self._assert_context_fits(
             model_name=model.name,
+            max_input_tokens=model.max_input_tokens,
             prompt_text=composition.prompt,
             files=files_to_check,
         )
+
+    @staticmethod
+    def _assert_context_fits(
+        *,
+        model_name: str,
+        max_input_tokens: int,
+        prompt_text: str,
+        files: Sequence[File],
+    ) -> None:
+        assert_prompt_and_files_fit_context(
+            max_input_tokens=max_input_tokens,
+            model_name=model_name,
+            prompt_text=prompt_text,
+            files=list(files),
+        )
+
+    def candidate_pin_incompatible_reason(
+        self,
+        *,
+        validation_input: AppContextValidationInput,
+        bindings: Sequence[ResolvedSkillBinding],
+        skill_id: UUID,
+        from_revision_id: UUID,
+        candidate_binding: ResolvedSkillBinding,
+        completion_prompt_files: Sequence[File],
+    ) -> AppPinAdvanceIncompatibleReason | None:
+        current_binding = next(
+            (
+                binding
+                for binding in bindings
+                if binding.skill_id == skill_id
+                and binding.skill_revision_id == from_revision_id
+            ),
+            None,
+        )
+        assert current_binding is not None
+        resolved_candidate = replace(
+            candidate_binding,
+            position=current_binding.position,
+            activation_mode=current_binding.activation_mode,
+        )
+        composition = compose_skill_instructions(
+            base_instructions=validation_input.prompt_text,
+            bindings=[
+                resolved_candidate if binding is current_binding else binding
+                for binding in bindings
+            ],
+        )
+        model = validation_input.completion_model
+        if model is None:
+            return None
+        try:
+            self._assert_context_fits(
+                model_name=model.name,
+                max_input_tokens=model.max_input_tokens,
+                prompt_text=composition.prompt,
+                files=completion_prompt_files,
+            )
+        except BadRequestException:
+            return AppPinAdvanceIncompatibleReason.CONTEXT_WINDOW
+        return None
 
     async def create_app(
         self, name: str, space: Space, template_data: Optional["TemplateCreate"] = None
@@ -330,6 +403,15 @@ class AppService:
                     "auth_layer": "domain_policy",
                 },
             )
+
+        requires_context_validation = (
+            attachment_ids is not None
+            or completion_model_id is not None
+            or prompt_text is not None
+            or skill_references is not None
+        )
+        if requires_context_validation:
+            app = await self._lock_app_for_context_validation(app_id)
 
         completion_model = None
         if completion_model_id is not None:
@@ -579,6 +661,7 @@ class AppService:
             )
 
         if publish:
+            app = await self._lock_app_for_context_validation(app_id)
             composition = await self._compose_app_prompt(app)
             await self._validate_configured_context(app=app, composition=composition)
 

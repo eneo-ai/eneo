@@ -6373,6 +6373,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/skills/organization/{skill_id}/apps/advance/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Advance App Bindings
+     * @description Move one bounded chunk of App bindings to the reviewed published Skill revision. Existing queued App runs keep their retained revision.
+     */
+    post: operations["advance_app_bindings_api_v1_skills_organization__skill_id__apps_advance__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/skills/organization/{skill_id}/unpublish/": {
     parameters: {
       query?: never;
@@ -8762,6 +8782,38 @@ export interface components {
       /** Hash Version */
       hash_version: string;
     };
+    /** AppFleetAdvanceCountsPublic */
+    AppFleetAdvanceCountsPublic: {
+      /** Advanced */
+      advanced: number;
+      /** Concurrent Change */
+      concurrent_change: number;
+      /** Incompatible */
+      incompatible: number;
+    };
+    /** AppFleetAdvancePublic */
+    AppFleetAdvancePublic: {
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Next Cursor */
+      next_cursor: string | null;
+      counts: components["schemas"]["AppFleetAdvanceCountsPublic"];
+      /** Outcomes */
+      outcomes: components["schemas"]["AppPinAdvanceOutcomePublic"][];
+    };
+    /** AppFleetAdvanceRequest */
+    AppFleetAdvanceRequest: {
+      /**
+       * Expected Published Revision Id
+       * Format: uuid
+       */
+      expected_published_revision_id: string;
+      /** Cursor */
+      cursor?: string | null;
+    };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
       /** Name */
@@ -8776,6 +8828,26 @@ export interface components {
       input_description: string | null;
       /** Input Type */
       input_type: string;
+    };
+    /**
+     * AppPinAdvanceIncompatibleReason
+     * @enum {string}
+     */
+    AppPinAdvanceIncompatibleReason: "context_window";
+    /**
+     * AppPinAdvanceOutcome
+     * @enum {string}
+     */
+    AppPinAdvanceOutcome: "advanced" | "concurrent_change" | "incompatible";
+    /** AppPinAdvanceOutcomePublic */
+    AppPinAdvanceOutcomePublic: {
+      /**
+       * App Id
+       * Format: uuid
+       */
+      app_id: string;
+      outcome: components["schemas"]["AppPinAdvanceOutcome"];
+      reason?: components["schemas"]["AppPinAdvanceIncompatibleReason"] | null;
     };
     /** AppPublic */
     AppPublic: {
@@ -42082,6 +42154,77 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AssistantFleetAdvancePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  advance_app_bindings_api_v1_skills_organization__skill_id__apps_advance__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppFleetAdvanceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppFleetAdvancePublic"];
         };
       };
       /** @description Bad Request */

@@ -13,6 +13,11 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
+    AppFleetAdvanceCursor,
+    AppFleetChunkOutcome,
+    AppPinAdvanceOutcome,
+    AppPinAdvanceTarget,
+    AppPinAdvanceTargetResult,
     AssistantFleetAdvanceCursor,
     AssistantFleetChunkOutcome,
     AssistantPinAdvanceIncompatibleReason,
@@ -56,6 +61,8 @@ if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
         CompletionModel as AICompletionModel,
     )
+    from eneo.apps.apps.app import AppContextValidationInput
+    from eneo.apps.apps.app_service import AppService
     from eneo.assistants.assistant_service import AssistantService
     from eneo.audit.application.audit_service import AuditService
     from eneo.spaces.space_service import SpaceService
@@ -72,6 +79,7 @@ class OrganizationSkillService:
         repo: SkillRepo,
         space_service: "SpaceService",
         assistant_service: "AssistantService",
+        app_service: "AppService",
         audit_service: "AuditService",
     ) -> None:
         self.user = user
@@ -81,6 +89,7 @@ class OrganizationSkillService:
         # this module keeps no dependency on the assistants package at import
         # time; only the pin-advance operation needs it.
         self.assistant_service = assistant_service
+        self.app_service = app_service
         self.audit_service = audit_service
 
     def _require_catalogue_read(self) -> None:
@@ -502,7 +511,7 @@ class OrganizationSkillService:
             raise BadRequestException("Assistant fleet cursor does not match request")
         run_id = parsed_cursor.run_id if parsed_cursor is not None else uuid4()
         try:
-            skill = await self.repo.get_assistant_fleet_advance_candidate(
+            skill = await self.repo.get_fleet_advance_candidate(
                 tenant_id=self.user.tenant_id,
                 skill_id=skill_id,
                 expected_published_revision_id=expected_published_revision_id,
@@ -766,6 +775,212 @@ class OrganizationSkillService:
                     extra={
                         **skill_audit_extra(skill),
                         "surface": "assistant",
+                        "run_id": str(run_id),
+                    },
+                ),
+            )
+        return outcome
+
+    async def advance_app_bindings(
+        self,
+        *,
+        skill_id: UUID,
+        expected_published_revision_id: UUID,
+        cursor: str | None,
+    ) -> AppFleetChunkOutcome:
+        self._require_admin()
+        parsed_cursor = AppFleetAdvanceCursor.parse(cursor)
+        if parsed_cursor is not None and (
+            parsed_cursor.skill_id != skill_id
+            or parsed_cursor.expected_published_revision_id
+            != expected_published_revision_id
+        ):
+            raise BadRequestException("App fleet cursor does not match request")
+        run_id = parsed_cursor.run_id if parsed_cursor is not None else uuid4()
+        try:
+            skill = await self.repo.get_fleet_advance_candidate(
+                tenant_id=self.user.tenant_id,
+                skill_id=skill_id,
+                expected_published_revision_id=expected_published_revision_id,
+            )
+        except SkillRevisionConflictError as error:
+            raise SkillRevisionConflictException(
+                "The Skill's published version changed after you reviewed it. "
+                "Reload the Skill and review again."
+            ) from error
+        if skill is None:
+            raise NotFoundException()
+
+        targets, next_after = await self.repo.list_app_pin_advance_targets(
+            tenant_id=self.user.tenant_id,
+            skill_id=skill_id,
+            expected_published_revision_id=expected_published_revision_id,
+            after_app_id=(
+                parsed_cursor.after_app_id if parsed_cursor is not None else None
+            ),
+            limit=_FLEET_ADVANCE_CHUNK_SIZE,
+        )
+        if not targets:
+            return AppFleetChunkOutcome(
+                run_id=run_id,
+                cursor=None,
+                results=(),
+                advanced_count=0,
+                concurrent_change_count=0,
+                incompatible_count=0,
+            )
+
+        app_ids = [target.app_id for target in targets]
+        validation_inputs = (
+            await self.app_service.repo.get_by_ids_for_context_validation(
+                app_ids=app_ids,
+                tenant_id=self.user.tenant_id,
+            )
+        )
+        bindings_by_app_id = await self.repo.list_app_bindings_batch(app_ids=app_ids)
+        candidate_bindings = await self.repo.resolve_references_for_execution_snapshot(
+            tenant_id=self.user.tenant_id,
+            parent_space_id=skill.space_id,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill_id,
+                    skill_revision_id=expected_published_revision_id,
+                )
+            ],
+        )
+        if len(candidate_bindings) != 1:
+            raise SkillRevisionConflictException(
+                "The Skill's published version changed after you reviewed it. "
+                "Reload the Skill and review again."
+            )
+        candidate_binding = candidate_bindings[0]
+
+        validation_results: list[AppPinAdvanceTargetResult] = []
+        validation_target_by_app_id: dict[UUID, AppPinAdvanceTarget] = {}
+        file_validation_inputs: list["AppContextValidationInput"] = []
+        for target in targets:
+            validation_input = validation_inputs.get(target.app_id)
+            bindings = bindings_by_app_id.get(target.app_id)
+            source_binding_present = bindings is not None and any(
+                binding.skill_id == skill_id
+                and binding.skill_revision_id == target.from_revision_id
+                for binding in bindings
+            )
+            if (
+                validation_input is None
+                or not validation_input.completion_files_stable
+                or not source_binding_present
+            ):
+                validation_results.append(
+                    AppPinAdvanceTargetResult(
+                        app_id=target.app_id,
+                        outcome=AppPinAdvanceOutcome.CONCURRENT_CHANGE,
+                    )
+                )
+                continue
+            validation_target_by_app_id[target.app_id] = target
+            file_validation_inputs.append(validation_input)
+
+        confirmed_targets: list[AppPinAdvanceTarget] = []
+        async for (
+            files_by_app_id
+        ) in self.app_service.repo.iter_context_files_for_validation_batches(
+            validation_inputs=file_validation_inputs,
+            tenant_id=self.user.tenant_id,
+            max_batch_bytes=get_settings().attachment_max_size_bytes,
+        ):
+            for app_id, completion_files in files_by_app_id.items():
+                target = validation_target_by_app_id[app_id]
+                incompatible_reason = (
+                    self.app_service.candidate_pin_incompatible_reason(
+                        validation_input=validation_inputs[app_id],
+                        bindings=bindings_by_app_id[app_id],
+                        skill_id=skill_id,
+                        from_revision_id=target.from_revision_id,
+                        candidate_binding=candidate_binding,
+                        completion_prompt_files=completion_files,
+                    )
+                )
+                confirmed_targets.append(
+                    AppPinAdvanceTarget(
+                        app_id=target.app_id,
+                        from_revision_id=target.from_revision_id,
+                        app_row_version=target.app_row_version,
+                        incompatible_reason=incompatible_reason,
+                    )
+                )
+
+        try:
+            write_results = await self.repo.advance_app_skill_pins(
+                tenant_id=self.user.tenant_id,
+                skill_id=skill_id,
+                expected_published_revision_id=expected_published_revision_id,
+                targets=confirmed_targets,
+            )
+        except SkillRevisionConflictError as error:
+            raise SkillRevisionConflictException(
+                "The Skill's published version changed after you reviewed it. "
+                "Reload the Skill and review again."
+            ) from error
+
+        results = tuple(
+            sorted(
+                [*validation_results, *write_results],
+                key=lambda result: result.app_id,
+            )
+        )
+        advanced_count = sum(
+            result.outcome is AppPinAdvanceOutcome.ADVANCED for result in results
+        )
+        concurrent_change_count = sum(
+            result.outcome is AppPinAdvanceOutcome.CONCURRENT_CHANGE
+            for result in results
+        )
+        incompatible_count = sum(
+            result.outcome is AppPinAdvanceOutcome.INCOMPATIBLE for result in results
+        )
+        next_cursor = (
+            AppFleetAdvanceCursor(
+                skill_id=skill_id,
+                expected_published_revision_id=expected_published_revision_id,
+                run_id=run_id,
+                after_app_id=next_after,
+            )
+            if next_after is not None
+            else None
+        )
+        outcome = AppFleetChunkOutcome(
+            run_id=run_id,
+            cursor=next_cursor,
+            results=results,
+            advanced_count=advanced_count,
+            concurrent_change_count=concurrent_change_count,
+            incompatible_count=incompatible_count,
+        )
+        if advanced_count:
+            assert skill.published_revision_number is not None
+            await self.audit_service.log(
+                tenant_id=self.user.tenant_id,
+                user=self.user,
+                action=ActionType.SKILL_BINDINGS_ADVANCED,
+                entity_type=EntityType.SKILL,
+                entity_id=skill.id,
+                description=(
+                    f"Moved App bindings of Skill "
+                    f"'{candidate_binding.display_name}' to published "
+                    f"revision {candidate_binding.revision_number}"
+                ),
+                metadata=AuditMetadata.standard(
+                    actor=self.user,
+                    target=skill,
+                    changes={
+                        "advanced": advanced_count,
+                        "concurrent_change": concurrent_change_count,
+                        "incompatible": incompatible_count,
+                    },
+                    extra={
+                        **skill_audit_extra(skill),
+                        "surface": "app",
                         "run_id": str(run_id),
                     },
                 ),
