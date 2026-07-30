@@ -86,6 +86,12 @@
         (revision) => revision.revision_id !== publishedRevisionId && revision.assistant_count > 0
       )
   );
+  let bindingUpdateActionAvailable = $derived(
+    assistantUpdateAvailable &&
+      onStartBindingUpdate !== undefined &&
+      run?.status !== "running" &&
+      run?.personalChat !== "pending"
+  );
 
   $effect(() => {
     const nextSkillId = skillId;
@@ -315,7 +321,7 @@
               {m.organization_skills_rollout_stop()}
             </Button>
           </div>
-        {:else if (run.status === "stopped" || run.status === "failed") && run.personalChat !== "pending" && onRestart !== undefined}
+        {:else if (run.status === "stopped" || run.status === "failed") && run.personalChat !== "pending" && onRestart !== undefined && !bindingUpdateActionAvailable}
           <div>
             <Button variant="outline" size="sm" onclick={onRestart}>
               {m.organization_skills_rollout_restart()}
@@ -411,7 +417,7 @@
 
     {@render rolloutReceipt()}
 
-    {#if run === null && assistantUpdateAvailable && onStartBindingUpdate !== undefined}
+    {#if bindingUpdateActionAvailable}
       <Alert.Root>
         <Alert.Title>{m.organization_skills_rollout_recovery_title()}</Alert.Title>
         <Alert.Description>
@@ -458,7 +464,7 @@
                   {driftLabel(personalChat.drift)}
                 </Badge>
               </div>
-              {#if onAdvancePersonalChat !== undefined && personalChat.drift === "behind" && !assistantUpdateAvailable}
+              {#if onAdvancePersonalChat !== undefined && personalChat.drift === "behind" && !bindingUpdateActionAvailable}
                 <Button
                   variant="outline"
                   size="sm"

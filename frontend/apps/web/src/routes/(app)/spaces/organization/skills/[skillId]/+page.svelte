@@ -558,10 +558,14 @@
   });
 
   const onAdvancePersonalChat = $derived(
-    data.published !== null && executionBlock.block === null ? openAdvanceDialog : undefined
+    data.published !== null && executionBlock.block === null && !rolloutMutationInFlight
+      ? openAdvanceDialog
+      : undefined
   );
   const onStartBindingUpdate = $derived(
-    data.published !== null && executionBlock.block === null ? startSavedBindingUpdate : undefined
+    data.published !== null && executionBlock.block === null && !rolloutMutationInFlight
+      ? startSavedBindingUpdate
+      : undefined
   );
 
   function setAdvanceDialogOpen(open: boolean) {

@@ -1248,6 +1248,119 @@ describe("organisation Skill detail page", () => {
     expect(advanceAssistants).toHaveBeenCalledOnce();
   });
 
+  test("retries completed exclusions and a failed Personal Chat without a remount", async () => {
+    const advancePersonalChat = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Refused"))
+      .mockResolvedValueOnce({
+        outcome: "advanced" as const,
+        from_revision_number: 1,
+        to_revision_number: 2
+      });
+    const advanceAssistants = vi
+      .fn()
+      .mockResolvedValueOnce({
+        run_id: "run-1",
+        next_cursor: null,
+        counts: {
+          advanced: 0,
+          concurrent_change: 1,
+          incompatible: 0
+        },
+        outcomes: [{ assistant_id: "assistant-1", outcome: "concurrent_change" as const }]
+      })
+      .mockResolvedValueOnce({
+        run_id: "run-2",
+        next_cursor: null,
+        counts: {
+          advanced: 1,
+          concurrent_change: 0,
+          incompatible: 0
+        },
+        outcomes: [{ assistant_id: "assistant-1", outcome: "advanced" as const }]
+      });
+    const reviewedAdoption = {
+      ...adoptionPage(),
+      summary: {
+        ...adoptionPage().summary,
+        assistant_count: 1,
+        behind_published_count: 1,
+        personal_chat: {
+          revision_id: "revision-1",
+          revision_number: 1,
+          drift: "behind" as const
+        },
+        revision_counts: [
+          {
+            revision_id: "revision-1",
+            revision_number: 1,
+            assistant_count: 1,
+            app_count: 0,
+            personal_chat_pinned: true
+          }
+        ]
+      }
+    };
+    const rendered = render(OrganizationSkillDetailPage, {
+      data: publicationLifecycleData({
+        adoption: Promise.resolve(reviewedAdoption),
+        advanceAssistants,
+        advancePersonalChat
+      }) as never
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
+      .last()
+      .click();
+
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
+      .toBeVisible();
+
+    await rendered.rerender({
+      data: {
+        ...publicationLifecycleData({
+          skill: {
+            ...updatePendingSkill(),
+            published_revision_number: 2,
+            publication_state: "published" as const
+          },
+          adoption: Promise.resolve(reviewedAdoption),
+          advanceAssistants,
+          advancePersonalChat
+        }),
+        published: publishedSkillAt(2)
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_rollout_recovery_action() })
+      .click();
+
+    await vi.waitFor(() => {
+      expect(advanceAssistants).toHaveBeenCalledTimes(2);
+      expect(advancePersonalChat).toHaveBeenCalledTimes(2);
+    });
+    expect(advanceAssistants).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_published_revision_id: "revision-2",
+      cursor: null
+    });
+    expect(advancePersonalChat).toHaveBeenLastCalledWith({
+      skillId: "skill-1",
+      expected_pinned_revision_id: "revision-1",
+      expected_published_revision_id: "revision-2"
+    });
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_personal_chat_advanced()))
+      .toBeVisible();
+  });
+
   test("retains completed Assistant counts when a later chunk fails", async () => {
     const advanceAssistants = vi
       .fn()
