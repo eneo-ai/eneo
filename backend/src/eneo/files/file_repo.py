@@ -110,6 +110,33 @@ class FileRepository:
             raise NotFoundException()
         return File.model_validate(file)
 
+    async def get_by_id_for_owner_for_key_share(
+        self,
+        *,
+        file_id: UUID,
+        owner_type: str,
+        owner_user_id: UUID | None = None,
+        owner_service_id: UUID | None = None,
+        tenant_id: UUID,
+    ) -> File | None:
+        """Lock an owned File against deletion for the caller's transaction."""
+
+        stmt = (
+            sa.select(Files)
+            .where(
+                Files.id == file_id,
+                Files.owner_type == owner_type,
+                Files.tenant_id == tenant_id,
+            )
+            .with_for_update(read=True, key_share=True)
+        )
+        if owner_user_id is not None:
+            stmt = stmt.where(Files.owner_user_id == owner_user_id)
+        if owner_service_id is not None:
+            stmt = stmt.where(Files.owner_service_id == owner_service_id)
+        row = await self.session.scalar(stmt)
+        return File.model_validate(row) if row is not None else None
+
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
         stmt = (
             sa.select(Files)

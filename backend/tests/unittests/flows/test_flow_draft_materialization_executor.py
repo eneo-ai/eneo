@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate,
     FlowDraftAssistantToDelete,
@@ -19,7 +21,7 @@ from eneo.flows.application.flow_draft_materialization import (
 from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
-from eneo.flows.domain.flow import Flow
+from eneo.flows.domain.flow import Flow, FlowTemplateAsset
 from eneo.flows.flow_authoring_spec import AssistantSpec
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -55,6 +57,7 @@ def _compiled_step(
     assistant_id: UUID | None = None,
     output_mode: str = "pass_through",
     output_type: str = "text",
+    output_config: dict[str, object] | None = None,
 ) -> FlowDraftCompiledStep:
     return FlowDraftCompiledStep(
         plan_step_ref=plan_step_ref,
@@ -66,6 +69,7 @@ def _compiled_step(
         input_type="text",
         output_mode=output_mode,
         output_type=output_type,
+        output_config=output_config,
     )
 
 
@@ -139,6 +143,95 @@ async def test_create_mode_materializes_flow_and_resource_bindings() -> None:
     assert result.flow_id == flow_id
     assert result.flow_name == "Created flow"
     assert result.steps_created == 1
+
+
+@pytest.mark.asyncio
+async def test_create_mode_resolves_template_intent_after_flow_creation() -> None:
+    flow_id = uuid4()
+    space_id = uuid4()
+    file_id = uuid4()
+    assistant_ids = iter((uuid4(), uuid4()))
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id, space_id=space_id)
+    promoted = False
+
+    async def create_assistant(**_kwargs):
+        assert promoted is True
+        assistant = MagicMock()
+        assistant.id = next(assistant_ids)
+        return assistant, []
+
+    service.create_flow_assistant.side_effect = create_assistant
+    template_asset_service = AsyncMock()
+    now = datetime.now(timezone.utc)
+    asset = FlowTemplateAsset(
+        id=uuid4(),
+        flow_id=flow_id,
+        space_id=space_id,
+        tenant_id=uuid4(),
+        file_id=file_id,
+        name="template.docx",
+        checksum="checksum",
+        placeholders=["case_id"],
+        created_at=now,
+        updated_at=now,
+    )
+
+    async def promote(**_kwargs):
+        nonlocal promoted
+        service.create_flow.assert_awaited_once()
+        promoted = True
+        return asset
+
+    template_asset_service.create_from_existing_attached_file.side_effect = promote
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Template flow",
+            flow_description="",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="step_a",
+                    assistant_spec=AssistantSpec(instructions="Prepare."),
+                ),
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="step_b",
+                    assistant_spec=AssistantSpec(instructions="Fill."),
+                ),
+            ],
+            compiled_steps=[
+                _compiled_step(plan_step_ref="step_a", step_order=1),
+                _compiled_step(
+                    plan_step_ref="step_b",
+                    step_order=2,
+                    output_mode="template_fill",
+                    output_type="docx",
+                    output_config={"bindings": {"case_id": "{{ flow_input.case_id }}"}},
+                ),
+            ],
+        ),
+        flow_service=service,
+        space_id=space_id,
+        flow_id=None,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
+        template_attachment_intent=TemplateAttachmentIntent(
+            file_id=file_id,
+            terminal_plan_step_ref="step_b",
+        ),
+        template_asset_service=template_asset_service,
+    )
+
+    update = service.update_flow.await_args.kwargs
+    assert update["steps"][-1].output_config == {
+        "template_asset_id": str(asset.id),
+        "bindings": {"case_id": "{{ flow_input.case_id }}"},
+    }
+    assert "metadata_json" not in update
+    template_binding = service.replace_resource_bindings.await_args.kwargs["bindings"][
+        -1
+    ]
+    assert template_binding.local_kind is LocalResourceKind.TEMPLATE_ASSET
+    assert template_binding.local_id == asset.id
 
 
 @pytest.mark.asyncio

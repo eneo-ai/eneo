@@ -23,6 +23,11 @@ class VariableShape(str, Enum):
     SEQUENCE = "sequence"
 
 
+FLOW_INPUT_TEXT_ALIAS = "indata_text"
+FLOW_INPUT_JSON_ALIAS = "indata_json"
+PREVIOUS_STEP_TEXT_ALIAS = "föregående_steg"
+
+
 RESERVED_RUNTIME_VARIABLES: frozenset[str] = frozenset(
     {
         "datum",
@@ -30,9 +35,9 @@ RESERVED_RUNTIME_VARIABLES: frozenset[str] = frozenset(
         "flow_input",
         "step_input",
         FLOW_INPUT_TRANSCRIPTION_KEY,
-        "föregående_steg",
-        "indata_text",
-        "indata_json",
+        PREVIOUS_STEP_TEXT_ALIAS,
+        FLOW_INPUT_TEXT_ALIAS,
+        FLOW_INPUT_JSON_ALIAS,
     }
 )
 
@@ -74,9 +79,9 @@ RUNTIME_VARIABLE_SHAPES: dict[str, VariableShape] = {
     "flow": VariableShape.MAPPING,
     "flow_input": VariableShape.MAPPING,
     FLOW_INPUT_TRANSCRIPTION_KEY: VariableShape.SCALAR,
-    "föregående_steg": VariableShape.SCALAR,
-    "indata_text": VariableShape.SCALAR,
-    "indata_json": VariableShape.MAPPING,
+    PREVIOUS_STEP_TEXT_ALIAS: VariableShape.SCALAR,
+    FLOW_INPUT_TEXT_ALIAS: VariableShape.SCALAR,
+    FLOW_INPUT_JSON_ALIAS: VariableShape.MAPPING,
 }
 
 STEP_INPUT_KEY_SHAPES: dict[str, VariableShape] = {
@@ -132,6 +137,21 @@ def can_expose_form_field_bare_alias(name: str) -> bool:
 
 def form_field_reference_expression(field_name: str) -> str:
     return f"{{{{ flow_input.{field_name.strip()} }}}}"
+
+
+def template_placeholder_form_field_name(placeholder: str) -> str | None:
+    """Return the Flow input field declared by a safe template placeholder."""
+
+    candidate = " ".join(placeholder.strip().split())
+    if not candidate:
+        return None
+
+    normalized = candidate.casefold()
+    for prefix in ("flow_input.", "flow.input."):
+        if normalized.startswith(prefix):
+            candidate = candidate[len(prefix) :].strip()
+            break
+    return candidate if can_expose_form_field_bare_alias(candidate) else None
 
 
 def flow_variable_definition_manifest() -> FlowVariableDefinitionManifest:

@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from eneo.database.database import AsyncSession
 from eneo.database.tables.flow_tables import FlowTemplateAssets
 from eneo.database.tables.users_table import Users
-from eneo.flows.domain.flow import FlowTemplateAsset
+from eneo.flows.domain.flow import FlowTemplateAsset, FlowTemplateAssetStatus
 from eneo.main.exceptions import NotFoundException
 
 
@@ -79,6 +79,30 @@ class FlowTemplateAssetRepository:
             )
         )
         return [self._to_domain(item) for item in rows.mappings().all()]
+
+    async def find_ready_for_file(
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+        file_id: UUID,
+        checksum: str,
+    ) -> FlowTemplateAsset | None:
+        row = await self.session.execute(
+            self._base_query()
+            .where(FlowTemplateAssets.flow_id == flow_id)
+            .where(FlowTemplateAssets.tenant_id == tenant_id)
+            .where(FlowTemplateAssets.file_id == file_id)
+            .where(FlowTemplateAssets.checksum == checksum)
+            .where(FlowTemplateAssets.status == FlowTemplateAssetStatus.READY.value)
+            .order_by(
+                FlowTemplateAssets.updated_at.desc(),
+                FlowTemplateAssets.created_at.desc(),
+            )
+            .limit(1)
+        )
+        item = row.mappings().one_or_none()
+        return self._to_domain(item) if item is not None else None
 
     async def soft_delete(
         self,

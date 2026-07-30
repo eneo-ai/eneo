@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import replace
@@ -12,6 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
+from docx import Document
 from litellm.exceptions import (
     APIConnectionError,
     APIError,
@@ -27,6 +29,7 @@ from sse_starlette import ServerSentEvent
 from starlette.requests import Request
 from starlette.types import Message, Scope
 
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -44,13 +47,16 @@ from eneo.database.database import (
     sessionmanager,
 )
 from eneo.database.tables.ai_models_table import TranscriptionModels
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     BuilderPlans,
     BuilderSessionFiles,
     BuilderSessions,
+    FlowResourceBindings,
     Flows,
+    FlowTemplateAssets,
 )
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.spaces_table import (
@@ -63,6 +69,7 @@ from eneo.database.tables.spaces_table import (
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import usergroups_users_table
+from eneo.files.file_models import FileType
 from eneo.flows.ai_builder import ai_builder_error_contract as error_contract_module
 from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
@@ -121,6 +128,7 @@ from eneo.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
+    FileRoleEvidence,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -133,6 +141,7 @@ from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
+    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
@@ -146,6 +155,8 @@ from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def _route(
@@ -617,6 +628,7 @@ async def _create_proposed_ai_builder_plan(
     bearer_token: str,
     db_container,
     space_id: str,
+    spec: FlowDraftSpecCore | None = None,
 ) -> tuple[UUID, UUID, UUID, SessionSendLease]:
     from eneo.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
@@ -656,7 +668,7 @@ async def _create_proposed_ai_builder_plan(
             tool_name=PROPOSE_FLOW_TOOL_NAME,
             arguments={},
             compiled=_compiled_builder_plan(
-                _make_builder_plan_spec(existing_step_ref=None)
+                spec or _make_builder_plan_spec(existing_step_ref=None)
             ),
             flow=None,
         )
@@ -8252,6 +8264,256 @@ async def test_approve_and_create_rolls_back_everything_and_recovers_on_retry(
             .all()
         )
     assert [str(flow_id) for flow_id in flow_ids] == [created_flow_id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_create_rolls_back_then_retries_and_replays_one_asset(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder template attachment atomic apply",
+    )
+    template_spec = FlowDraftSpecCore(
+        flow_name="Template attachment flow",
+        form_fields=[
+            FormFieldSpec(
+                name="case_id",
+                type="text",
+                label="Case ID",
+                required=True,
+            )
+        ],
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Fill template",
+                assistant_spec=AssistantSpec(instructions="Fill the template."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_type=OutputType.DOCX,
+                output_config={"bindings": {"case_id": "{{ flow_input.case_id }}"}},
+            )
+        ],
+    )
+    session_id, tenant_id, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+        spec=template_spec,
+    )
+
+    document = Document()
+    document.add_paragraph("Case: {{ case_id }}")
+    payload = io.BytesIO()
+    document.save(payload)
+    template_bytes = payload.getvalue()
+    template_file_id = UUID(
+        await _upload_reference_file(
+            client=client,
+            bearer_token=bearer_token,
+            filename="case-template.docx",
+            content=template_bytes,
+            mimetype=DOCX_MIME,
+        )
+    )
+    async with db_container() as container:
+        template_file = await container.file_service().get_file_by_id(template_file_id)
+        assert template_file.file_type is FileType.TEXT
+        assert template_file.mimetype == DOCX_MIME
+        assert template_file.blob == template_bytes
+        assert template_file.text is not None
+        assert "case_id" in template_file.text
+        await container.session().execute(
+            insert(BuilderSessionFiles).values(
+                session_id=session_id,
+                file_id=template_file.id,
+                tenant_id=tenant_id,
+            )
+        )
+        repo = AIBuilderRepository(container.session())
+        planning_state = await repo.load_planning_state(
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        assert planning_state is not None
+        base_version = (
+            await container.session().execute(
+                select(BuilderSessions.planning_state_version).where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        await repo.save_planning_state(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=planning_state.model_copy(
+                update={
+                    "file_roles": [
+                        FileRoleEvidence(
+                            file_id=template_file.id,
+                            filename=template_file.name,
+                            file_type=template_file.file_type,
+                            mimetype=DOCX_MIME,
+                            role="template",
+                            has_readable_text=True,
+                            coverage="fully_seen",
+                            source="heuristic",
+                            confidence="high",
+                            evidence=["docx:byte_inspected"],
+                            template_placeholders=["case_id"],
+                        )
+                    ]
+                }
+            ),
+            base_version=base_version,
+        )
+
+    async def snapshot() -> tuple[
+        list[UUID],
+        list[UUID],
+        list[UUID],
+        list[UUID],
+        str,
+        str,
+        int,
+    ]:
+        async with db_container() as container:
+            flow_ids = list(
+                (
+                    await container.session().execute(
+                        select(Flows.id).where(Flows.space_id == UUID(space_id))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            asset_ids = list(
+                (
+                    await container.session().execute(
+                        select(FlowTemplateAssets.id).where(
+                            FlowTemplateAssets.space_id == UUID(space_id)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            binding_asset_ids = list(
+                (
+                    await container.session().execute(
+                        select(FlowResourceBindings.local_resource_id).where(
+                            FlowResourceBindings.space_id == UUID(space_id),
+                            FlowResourceBindings.local_resource_kind
+                            == "template_asset",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assistant_ids = list(
+                (
+                    await container.session().execute(
+                        select(Assistants.id).where(
+                            Assistants.space_id == UUID(space_id),
+                            Assistants.origin == AssistantOrigin.FLOW_MANAGED.value,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            plan_status = (
+                await container.session().execute(
+                    select(BuilderPlans.status).where(
+                        BuilderPlans.id == plan_id,
+                        BuilderPlans.tenant_id == tenant_id,
+                    )
+                )
+            ).scalar_one()
+            session_status = (
+                await container.session().execute(
+                    select(BuilderSessions.status).where(
+                        BuilderSessions.id == session_id,
+                        BuilderSessions.tenant_id == tenant_id,
+                    )
+                )
+            ).scalar_one()
+            file_count = (
+                await container.session().execute(
+                    select(sa.func.count(Files.id)).where(Files.id == template_file.id)
+                )
+            ).scalar_one()
+        return (
+            flow_ids,
+            asset_ids,
+            binding_asset_ids,
+            assistant_ids,
+            plan_status,
+            session_status,
+            file_count,
+        )
+
+    async def fail_terminalization(self, **_kwargs: object) -> None:
+        raise BadRequestException("forced template apply failure")
+
+    with pytest.MonkeyPatch.context() as failure_patch:
+        failure_patch.setattr(
+            AIBuilderRepository,
+            "mark_plan_applied",
+            fail_terminalization,
+        )
+        failed = await client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+
+    assert failed.status_code == 400, failed.text
+    assert await snapshot() == (
+        [],
+        [],
+        [],
+        [],
+        PlanStatus.PROPOSED.value,
+        SessionStatus.AWAITING_APPROVAL.value,
+        1,
+    )
+
+    created = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert created.status_code == 200, created.text
+    created_flow_id = UUID(created.json()["flow_id"])
+    after_create = await snapshot()
+    assert after_create[0] == [created_flow_id]
+    assert len(after_create[1]) == 1
+    assert after_create[2] == after_create[1]
+    assert len(after_create[3]) == 1
+    assert after_create[4:] == (
+        PlanStatus.APPLIED.value,
+        SessionStatus.APPLIED.value,
+        1,
+    )
+
+    replay = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == created.json()
+    assert await snapshot() == after_create
 
 
 @pytest.mark.integration

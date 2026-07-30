@@ -11,12 +11,16 @@ import pytest
 from docx import Document
 from fastapi import UploadFile
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileCreate, FileType
 from eneo.files.file_protocol import FileProtocol
 from eneo.files.file_service import FileService
 from eneo.flows.domain.flow import Flow, FlowTemplateAsset
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+from eneo.flows.flow_template_asset_service import (
+    AttachedTemplateFileUnavailableError,
+    FlowTemplateAssetService,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
@@ -265,6 +269,184 @@ async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
     assert exc_info.value.code == "flow_template_invalid_archive"
     file_repo.add.assert_not_awaited()
     template_asset_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_from_existing_attached_file_reuses_authorized_file(user) -> None:
+    template_bytes = _build_template_bytes()
+    flow = _flow_for_user(user)
+    now = datetime.now(timezone.utc)
+    attached_file = File(
+        id=uuid4(),
+        name="template.docx",
+        checksum=hashlib.sha256(template_bytes).hexdigest(),
+        size=len(template_bytes),
+        mimetype=DOCX_MIME,
+        file_type=FileType.DOCUMENT,
+        blob=template_bytes,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
+        tenant_id=user.tenant_id,
+        created_at=now,
+        updated_at=now,
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = flow
+    file_service = AsyncMock()
+    file_service.get_owned_file_for_key_share.return_value = attached_file
+    template_asset_repo = AsyncMock()
+    template_asset_repo.find_ready_for_file.return_value = None
+
+    async def create_asset(**kwargs) -> FlowTemplateAsset:
+        return FlowTemplateAsset(
+            id=uuid4(),
+            created_at=now,
+            updated_at=now,
+            **kwargs,
+        )
+
+    template_asset_repo.create.side_effect = create_asset
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=AsyncMock(),
+        file_service=file_service,
+        template_asset_repo=template_asset_repo,
+        flow_version_repo=AsyncMock(),
+    )
+
+    asset = await service.create_from_existing_attached_file(
+        flow_id=flow.id,
+        file_id=attached_file.id,
+    )
+
+    file_service.get_owned_file_for_key_share.assert_awaited_once_with(attached_file.id)
+    file_service.save_file_content.assert_not_awaited()
+    template_asset_repo.create.assert_awaited_once_with(
+        flow_id=flow.id,
+        space_id=flow.space_id,
+        tenant_id=user.tenant_id,
+        file_id=attached_file.id,
+        name=attached_file.name,
+        checksum=attached_file.checksum,
+        mimetype=attached_file.mimetype,
+        placeholders=["Body"],
+        created_by_user_id=user.id,
+        updated_by_user_id=user.id,
+        status="ready",
+    )
+    assert asset.file_id == attached_file.id
+    assert asset.placeholders == ["Body"]
+
+
+@pytest.mark.asyncio
+async def test_create_from_existing_attached_file_rejects_missing_content(user) -> None:
+    flow = _flow_for_user(user)
+    attached_file = MagicMock()
+    attached_file.id = uuid4()
+    attached_file.blob = None
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = flow
+    file_service = AsyncMock()
+    file_service.get_owned_file_for_key_share.return_value = attached_file
+    template_asset_repo = AsyncMock()
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=AsyncMock(),
+        file_service=file_service,
+        template_asset_repo=template_asset_repo,
+        flow_version_repo=AsyncMock(),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_from_existing_attached_file(
+            flow_id=flow.id,
+            file_id=attached_file.id,
+        )
+
+    assert exc_info.value.code == "flow_template_missing_content"
+    template_asset_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_from_existing_attached_file_reuses_active_same_file_asset(
+    user,
+) -> None:
+    template_bytes = _build_template_bytes()
+    flow = _flow_for_user(user)
+    now = datetime.now(timezone.utc)
+    attached_file = File(
+        id=uuid4(),
+        name="template.docx",
+        checksum=hashlib.sha256(template_bytes).hexdigest(),
+        size=len(template_bytes),
+        mimetype=DOCX_MIME,
+        file_type=FileType.DOCUMENT,
+        blob=template_bytes,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
+        tenant_id=user.tenant_id,
+        created_at=now,
+        updated_at=now,
+    )
+    reusable = _asset_for_flow(flow, user).model_copy(
+        update={
+            "file_id": attached_file.id,
+            "checksum": attached_file.checksum,
+        }
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = flow
+    file_service = AsyncMock()
+    file_service.get_owned_file_for_key_share.return_value = attached_file
+    template_asset_repo = AsyncMock()
+    template_asset_repo.find_ready_for_file.return_value = reusable
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=AsyncMock(),
+        file_service=file_service,
+        template_asset_repo=template_asset_repo,
+        flow_version_repo=AsyncMock(),
+    )
+
+    result = await service.create_from_existing_attached_file(
+        flow_id=flow.require_persisted_id(),
+        file_id=attached_file.id,
+    )
+
+    assert result == reusable
+    template_asset_repo.find_ready_for_file.assert_awaited_once_with(
+        flow_id=flow.require_persisted_id(),
+        tenant_id=user.tenant_id,
+        file_id=attached_file.id,
+        checksum=attached_file.checksum,
+    )
+    template_asset_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_from_existing_attached_file_reports_deleted_file(user) -> None:
+    flow = _flow_for_user(user)
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = flow
+    file_service = AsyncMock()
+    file_service.get_owned_file_for_key_share.side_effect = NotFoundException()
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=AsyncMock(),
+        file_service=file_service,
+        template_asset_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+    )
+
+    with pytest.raises(AttachedTemplateFileUnavailableError):
+        await service.create_from_existing_attached_file(
+            flow_id=flow.require_persisted_id(),
+            file_id=uuid4(),
+        )
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,11 @@ from eneo.flows.runtime.docx_template_runtime import (
     inspect_docx_template_bytes,
     render_docx_template,
 )
-from eneo.main.exceptions import FileNotSupportedException, TypedIOValidationException
+from eneo.main.exceptions import (
+    BadRequestException,
+    FileNotSupportedException,
+    TypedIOValidationException,
+)
 
 
 def _build_template_bytes() -> bytes:
@@ -143,6 +147,22 @@ def test_inspect_docx_template_bytes_rejects_macro_enabled_payloads() -> None:
         inspect_docx_template_bytes(mutated.getvalue(), filename="rapport.docm")
 
     assert exc_info.value.code == "flow_template_macro_not_allowed"
+
+
+def test_inspect_docx_template_bytes_normalizes_malformed_ooxml() -> None:
+    source = zipfile.ZipFile(io.BytesIO(_build_template_bytes()))
+    malformed = io.BytesIO()
+    with source, zipfile.ZipFile(malformed, mode="w") as target:
+        for info in source.infolist():
+            content = source.read(info.filename)
+            if info.filename == "word/document.xml":
+                content = b"<w:document><invalid"
+            target.writestr(info, content)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        inspect_docx_template_bytes(malformed.getvalue(), filename="rapport.docx")
+
+    assert exc_info.value.code == "flow_template_invalid_archive"
 
 
 def test_render_docx_template_rejects_missing_context_placeholders() -> None:

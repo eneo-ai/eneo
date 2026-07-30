@@ -2125,6 +2125,23 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
             "detailed_case_metadata",
         ),
     }
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID("00000000-0000-0000-0000-000000000901"),
+            filename="ärendemall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="heuristic",
+            confidence="high",
+            template_placeholders=["arendenummer"],
+        )
+    ]
     context = create_compile_context_from_planning_state(
         state,
         ui_language="sv",

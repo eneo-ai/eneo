@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import io
 import json
 from typing import get_args
 from uuid import UUID, uuid4
+
+import pytest
+from docx import Document
 
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
@@ -16,6 +20,10 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_slot_classification_input,
+)
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
     OUTPUT_SCHEMA_MAX_DEPTH,
@@ -36,6 +44,7 @@ def _make_file(
     file_type: FileType = FileType.TEXT,
     transcription: str | None = None,
     file_id: UUID | None = None,
+    blob: bytes | None = None,
 ) -> File:
     readable = text or transcription or ""
     return File(
@@ -46,7 +55,7 @@ def _make_file(
         mimetype=mimetype,
         file_type=file_type,
         text=text,
-        blob=b"x" if text is None else None,
+        blob=blob if blob is not None else (b"x" if text is None else None),
         transcription=transcription,
         owner_type=None,
         owner_user_id=uuid4(),
@@ -54,6 +63,14 @@ def _make_file(
         user_id=uuid4(),
         tenant_id=uuid4(),
     )
+
+
+def _docx_bytes(text: str) -> bytes:
+    document = Document()
+    document.add_paragraph(text)
+    payload = io.BytesIO()
+    document.save(payload)
+    return payload.getvalue()
 
 
 def test_build_ai_builder_attachment_context_truncates_per_file_and_total_budget() -> (
@@ -168,6 +185,7 @@ def test_build_ai_builder_attachment_context_detects_structural_template_placeho
         _make_file(
             name="avtalsmall.docx",
             text="Fyll i {{ kundnamn }} och {{ datum }}.",
+            blob=_docx_bytes("Fyll i {{ kundnamn }} och {{ datum }}."),
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             file_type=FileType.DOCUMENT,
         ),
@@ -193,12 +211,8 @@ def test_build_ai_builder_attachment_context_detects_structural_template_placeho
     assert "File role: context_only" in result.context
 
 
-def test_template_placeholder_evidence_reports_below_at_and_above_cap() -> None:
-    for total_count, expected_truncated, expected_confidence in (
-        (7, False, "high"),
-        (8, False, "high"),
-        (12, True, "medium"),
-    ):
+def test_template_placeholder_evidence_keeps_full_identity_beyond_display_cap() -> None:
+    for total_count in (7, 8, 12):
         placeholders = " ".join(
             f"{{{{ field_{index} }}}}" for index in range(total_count)
         )
@@ -207,6 +221,7 @@ def test_template_placeholder_evidence_reports_below_at_and_above_cap() -> None:
                 _make_file(
                     name=f"template-{total_count}.docx",
                     text=placeholders,
+                    blob=_docx_bytes(placeholders),
                     mimetype=(
                         "application/vnd.openxmlformats-officedocument."
                         "wordprocessingml.document"
@@ -225,11 +240,13 @@ def test_template_placeholder_evidence_reports_below_at_and_above_cap() -> None:
         assert evidence is not None
         assert result.output_schema_discovery.disposition == "none"
         assert evidence.total_count == total_count
-        assert evidence.truncated is expected_truncated
-        assert evidence.confidence == expected_confidence
+        assert evidence.truncated is (total_count > 8)
+        assert evidence.confidence == ("medium" if total_count > 8 else "high")
         properties = evidence.json_schema["properties"]
         assert isinstance(properties, dict)
         assert len(properties) == min(total_count, 8)
+        assert len(state.file_roles[0].template_placeholders or []) == total_count
+        assert len(result.evidence[0].role_evidence) <= 8
 
 
 def test_template_placeholder_total_deduplicates_across_multiple_templates() -> None:
@@ -239,11 +256,17 @@ def test_template_placeholder_total_deduplicates_across_multiple_templates() -> 
             _make_file(
                 name="first.docx",
                 text=f"{shared} " + " ".join(f"{{{{ first_{i} }}}}" for i in range(5)),
+                blob=_docx_bytes(
+                    f"{shared} " + " ".join(f"{{{{ first_{i} }}}}" for i in range(5))
+                ),
                 file_type=FileType.DOCUMENT,
             ),
             _make_file(
                 name="second.docx",
                 text=f"{shared} " + " ".join(f"{{{{ second_{i} }}}}" for i in range(5)),
+                blob=_docx_bytes(
+                    f"{shared} " + " ".join(f"{{{{ second_{i} }}}}" for i in range(5))
+                ),
                 file_type=FileType.DOCUMENT,
             ),
         ]
@@ -258,6 +281,15 @@ def test_template_placeholder_total_deduplicates_across_multiple_templates() -> 
     assert evidence is not None
     assert evidence.total_count == 11
     assert evidence.truncated is True
+    properties = evidence.json_schema["properties"]
+    assert isinstance(properties, dict)
+    assert len(properties) == 8
+    exact_names = {
+        placeholder
+        for role in state.file_roles
+        for placeholder in role.template_placeholders or []
+    }
+    assert len(exact_names) == 11
     assert (
         sum("template_placeholder:shared_field" in item for item in evidence.evidence)
         == 2
@@ -273,6 +305,7 @@ def test_long_template_placeholders_keep_complete_distinct_identity() -> None:
             _make_file(
                 name="template.docx",
                 text=f"{{{{ {first} }}}} {{{{ {second} }}}}",
+                blob=_docx_bytes(f"{{{{ {first} }}}} {{{{ {second} }}}}"),
                 file_type=FileType.DOCUMENT,
             )
         ]
@@ -301,6 +334,97 @@ def test_long_template_placeholders_keep_complete_distinct_identity() -> None:
     assert len(role_evidence_lines) == 2
     assert all("…" in line for line in role_evidence_lines)
     assert all(first not in line and second not in line for line in role_evidence_lines)
+
+
+def test_invalid_docx_text_can_signal_role_but_not_an_approved_contract() -> None:
+    file = _make_file(
+        name="invalid-template.docx",
+        text="Fyll i {{ case_id }}.",
+        blob=b"not-a-docx-archive",
+        mimetype=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        file_type=FileType.DOCUMENT,
+    )
+
+    result = build_ai_builder_attachment_context([file])
+
+    assert result is not None
+    assert result.evidence[0].inferred_role == "template"
+    assert result.evidence[0].template_placeholders is None
+    assert attachment_file_roles(result)[0].template_placeholders is None
+    assert result.output_schema_evidence is None
+
+
+@pytest.mark.parametrize(
+    ("policy", "files", "reason"),
+    [
+        (
+            AIBuilderAttachmentContextPolicy(max_template_docx_files=1),
+            [
+                _make_file(
+                    name="first.docx",
+                    text="{{ first }}",
+                    blob=_docx_bytes("{{ first }}"),
+                    file_type=FileType.DOCUMENT,
+                ),
+                _make_file(
+                    name="second.docx",
+                    text="{{ second }}",
+                    blob=_docx_bytes("{{ second }}"),
+                    file_type=FileType.DOCUMENT,
+                ),
+            ],
+            "docx_count",
+        ),
+        (
+            AIBuilderAttachmentContextPolicy(max_template_uncompressed_bytes=1),
+            [
+                _make_file(
+                    name="template.docx",
+                    text="{{ case_id }}",
+                    blob=_docx_bytes("{{ case_id }}"),
+                    file_type=FileType.DOCUMENT,
+                )
+            ],
+            "uncompressed_bytes",
+        ),
+        (
+            AIBuilderAttachmentContextPolicy(max_template_placeholders=1),
+            [
+                _make_file(
+                    name="template.docx",
+                    text="{{ first }} {{ second }}",
+                    blob=_docx_bytes("{{ first }} {{ second }}"),
+                    file_type=FileType.DOCUMENT,
+                )
+            ],
+            "placeholder_count",
+        ),
+        (
+            AIBuilderAttachmentContextPolicy(max_template_placeholder_chars=4),
+            [
+                _make_file(
+                    name="template.docx",
+                    text="{{ longer_name }}",
+                    blob=_docx_bytes("{{ longer_name }}"),
+                    file_type=FileType.DOCUMENT,
+                )
+            ],
+            "placeholder_length",
+        ),
+    ],
+)
+def test_template_inspection_budget_refuses_excess_before_planning(
+    policy: AIBuilderAttachmentContextPolicy,
+    files: list[File],
+    reason: str,
+) -> None:
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        build_ai_builder_attachment_context(files, policy=policy)
+
+    assert exc_info.value.code is AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE
+    assert exc_info.value.context == {"reason": reason}
 
 
 def test_non_template_transcription_does_not_become_placeholder_schema() -> None:

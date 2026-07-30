@@ -289,6 +289,7 @@ class FileRoleEvidence(_PlanningModel):
     confidence: SignalConfidence
     evidence: list[str] = Field(default_factory=list[str])
     candidate_roles: list[FileRole] = Field(default_factory=list[FileRole])
+    template_placeholders: list[str] | None = None
 
     @model_validator(mode="after")
     def _validate_role_evidence(self) -> FileRoleEvidence:
@@ -296,6 +297,11 @@ class FileRoleEvidence(_PlanningModel):
             raise ValueError(
                 "non-readable file role evidence must have inventory_only coverage"
             )
+        if self.template_placeholders is not None:
+            if len(self.template_placeholders) != len(set(self.template_placeholders)):
+                raise ValueError("template_placeholders must be unique")
+            if any(not item.strip() for item in self.template_placeholders):
+                raise ValueError("template_placeholders must be non-empty")
         if not self.candidate_roles:
             return self
         seen: set[FileRole] = set()

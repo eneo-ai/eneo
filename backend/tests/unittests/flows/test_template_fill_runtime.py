@@ -11,12 +11,23 @@ import pytest
 from docx import Document
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    apply_template_attachment_contract,
+)
+from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
+from eneo.flows.application.flow_draft_materialization import (
+    compile_flow_draft_changeset,
+)
+from eneo.flows.application.flow_template_attachment_materialization import (
+    materialize_template_attachment,
+)
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
+    FlowTemplateAsset,
 )
 from eneo.flows.domain.runtime import (
     RunExecutionState,
@@ -24,6 +35,16 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
+from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
 from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
@@ -43,6 +64,20 @@ def _build_template_bytes() -> bytes:
     document.add_paragraph("Titel: {{title}}")
     document.add_paragraph("Författare: {{author}}")
     document.add_paragraph("Sammanfattning: {{summary}}")
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _build_builder_template_bytes() -> bytes:
+    document = Document()
+    document.add_paragraph("Titel: {{title}}")
+    document.add_paragraph("Författare: {{author}}")
+    document.add_paragraph("Sammanfattning: {{step_a.output.text}}")
+    document.add_paragraph("Kund: {{customer   name}}")
+    document.add_paragraph("Transkribering: {{transkribering}}")
+    document.add_paragraph("Flow-indata: {{flow_input.transkribering}}")
+    document.add_paragraph("Flow: {{flow.input.transkribering}}")
     buffer = io.BytesIO()
     document.save(buffer)
     return buffer.getvalue()
@@ -80,6 +115,7 @@ def _run() -> FlowRun:
         input_payload_json={
             "title": "Social medias påverkan",
             "author": "Anders Svensson",
+            "customer name": "Ada Lovelace",
         },
         created_at=now,
         updated_at=now,
@@ -409,6 +445,137 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
         asset_id=template_asset_id,
         tenant_id=run.tenant_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_builder_approved_template_contract_materializes_and_renders_without_tokens() -> (
+    None
+):
+    run = _run()
+    run.input_payload_json = FlowRunInputEnvelopePatch.transcription(
+        transcript="Verifierad transkribering",
+    ).apply_to(run.input_payload_json)
+    prior_result = _completed_result(run=run)
+    state = _state(result=prior_result)
+    flow_id = run.flow_id
+    file_id = uuid4()
+    template_bytes = _build_builder_template_bytes()
+    placeholders = (
+        "title",
+        "author",
+        "step_a.output.text",
+        "customer   name",
+        "transkribering",
+        "flow_input.transkribering",
+        "flow.input.transkribering",
+    )
+    approved_spec = apply_template_attachment_contract(
+        FlowDraftSpecCore(
+            flow_name="Builder template flow",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    name="Summarize",
+                    assistant_spec=AssistantSpec(instructions="Summarize."),
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.AUDIO,
+                    output_type=OutputType.TEXT,
+                ),
+                StepSpec(
+                    plan_step_ref="step_b",
+                    name="Fill",
+                    assistant_spec=AssistantSpec(instructions="Fill the template."),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        ),
+        selected_template_count=1,
+        placeholders=placeholders,
+    )
+    changeset = compile_flow_draft_changeset(approved_spec, current_flow=None)
+    now = datetime.now(timezone.utc)
+    asset = FlowTemplateAsset(
+        id=uuid4(),
+        flow_id=flow_id,
+        space_id=uuid4(),
+        tenant_id=run.tenant_id,
+        file_id=file_id,
+        name="builder-template.docx",
+        checksum="checksum",
+        placeholders=list(placeholders),
+        created_at=now,
+        updated_at=now,
+    )
+    template_asset_service = AsyncMock()
+    template_asset_service.create_from_existing_attached_file.return_value = asset
+    materialized = await materialize_template_attachment(
+        intent=TemplateAttachmentIntent(
+            file_id=file_id,
+            terminal_plan_step_ref="step_b",
+        ),
+        changeset=changeset,
+        flow_id=flow_id,
+        template_asset_service=template_asset_service,
+    )
+    terminal = materialized.changeset.compiled_steps[-1]
+    runtime_step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=terminal.step_order,
+        assistant_id=uuid4(),
+        user_description=terminal.user_description,
+        input_source=terminal.input_source,
+        input_bindings=terminal.input_bindings,
+        input_config=terminal.input_config,
+        output_mode=terminal.output_mode,
+        output_config=terminal.output_config,
+        output_type=terminal.output_type,
+    )
+    file_repo = AsyncMock()
+    file_repo.get_list_by_id_and_tenant.return_value = [
+        SimpleNamespace(
+            id=file_id,
+            name="builder-template.docx",
+            checksum="checksum",
+            blob=template_bytes,
+        )
+    ]
+    file_repo.add.return_value = SimpleNamespace(id=uuid4())
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=file_id)
+
+    output = await execute_template_fill_step(
+        step=runtime_step,
+        run=run,
+        state=state,
+        deps=TemplateFillRuntimeDeps(
+            variable_resolver=FlowVariableResolver(),
+            file_repo=file_repo,
+            template_asset_repo=template_asset_repo,
+            principal=FlowPrincipal.from_run(run),
+            logger=_logger(),
+        ),
+    )
+
+    assert "Detta är sammanfattningen." in output.full_text
+    assert "Ada Lovelace" in output.full_text
+    assert output.full_text.count("Verifierad transkribering") == 3
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
+    assert terminal.output_config == {
+        "bindings": {
+            "title": "{{ flow_input.title }}",
+            "author": "{{ flow_input.author }}",
+            "step_a.output.text": "{{ step_1.output.text }}",
+            "customer   name": "{{ flow_input.customer name }}",
+            "transkribering": "{{ transkribering }}",
+            "flow_input.transkribering": "{{ flow_input.transkribering }}",
+            "flow.input.transkribering": "{{ flow.input.transkribering }}",
+        },
+        "template_asset_id": str(asset.id),
+    }
 
 
 @pytest.mark.asyncio

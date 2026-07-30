@@ -327,6 +327,7 @@ def _make_service(
         flow_service=flow_service or AsyncMock(),
         completion_service=resolved_completion_service,
         space_service=space_service or _make_space_service(),
+        template_asset_service=AsyncMock(),
     )
 
 
@@ -1222,6 +1223,7 @@ class TestPlannerContextPreparation:
             flow_service=AsyncMock(),
             completion_service=completion_service,
             space_service=AsyncMock(),
+            template_asset_service=AsyncMock(),
             file_service=file_service,
         )
 
@@ -1263,6 +1265,7 @@ class TestPlannerContextPreparation:
             flow_service=AsyncMock(),
             completion_service=completion_service,
             space_service=AsyncMock(),
+            template_asset_service=AsyncMock(),
             file_service=file_service,
         )
 
@@ -2532,6 +2535,7 @@ async def test_prepare_message_context_stages_new_files_and_builds_attachment_co
         flow_service=AsyncMock(),
         completion_service=completion_service,
         space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
         file_service=file_service,
     )
 
@@ -2584,6 +2588,7 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
         flow_service=AsyncMock(),
         completion_service=completion_service,
         space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
         file_service=file_service,
     )
 
@@ -2637,6 +2642,7 @@ async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids()
         flow_service=AsyncMock(),
         completion_service=completion_service,
         space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
         file_service=file_service,
     )
 
@@ -2682,6 +2688,7 @@ async def test_get_session_attachment_snapshot_returns_warning_when_some_files_m
         flow_service=AsyncMock(),
         completion_service=AsyncMock(),
         space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
         file_service=file_service,
     )
 
@@ -2715,6 +2722,7 @@ async def test_get_session_attachment_snapshot_warns_when_attached_file_has_no_r
         flow_service=AsyncMock(),
         completion_service=AsyncMock(),
         space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
         file_service=file_service,
     )
 

@@ -94,6 +94,7 @@ if TYPE_CHECKING:
     from eneo.files.file_service import FileService
     from eneo.flows.application.flow_service import FlowService
     from eneo.flows.domain.flow import Flow
+    from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
     from eneo.spaces.space import Space
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
@@ -176,6 +177,7 @@ class AIBuilderService:
         flow_service: "FlowService",
         completion_service: "CompletionService",
         space_service: "SpaceService",
+        template_asset_service: "FlowTemplateAssetService",
         file_service: "FileService | None" = None,
     ) -> None:
         self.user = user
@@ -184,6 +186,7 @@ class AIBuilderService:
         self.completion_service = completion_service
         self.file_service = file_service
         self.space_service = space_service
+        self.template_asset_service = template_asset_service
 
     async def create_session(
         self,
@@ -598,4 +601,5 @@ class AIBuilderService:
             repo=self.repo,
             flow_service=self.flow_service,
             space_service=self.space_service,
+            template_asset_service=self.template_asset_service,
         )

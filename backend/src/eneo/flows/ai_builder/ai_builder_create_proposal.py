@@ -61,6 +61,8 @@ _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
     {
         "assembly_unsupported_architecture_hints",
         "section_writer_structured_source_ambiguous",
+        "template_attachment_selection_invalid",
+        "template_placeholder_unresolved",
     }
 )
 

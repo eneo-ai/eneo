@@ -31,6 +31,8 @@ _FAKE_SETTINGS = SimpleNamespace(
     transcription_max_file_size=AUDIO_MAX,
     upload_max_file_size=TEXT_MAX,
     upload_tmp_dir=Path("/tmp"),
+    attachment_image_extraction=False,
+    attachment_max_extracted_images=8,
 )
 
 
@@ -250,7 +252,52 @@ async def test_to_domain_keeps_docx_uploads_on_generic_text_path(protocol):
 
     assert result.file_type == FileType.TEXT
     assert result.text == "extracted text"
-    assert result.blob is None
+    assert result.blob == template_bytes
+    assert result.size == len(template_bytes)
+
+
+@pytest.mark.asyncio
+async def test_to_domain_preserves_named_docx_when_client_omits_mimetype(protocol):
+    template_bytes = _build_template_bytes()
+    upload = _make_upload_with_bytes(
+        filename="template.docx",
+        content_type="",
+        content=template_bytes,
+    )
+    protocol.file_size_service.get_file_size.return_value = len(template_bytes)
+
+    result = await protocol.to_domain(upload)
+
+    assert result.text == "extracted text"
+    assert result.blob == template_bytes
+    assert result.size == len(template_bytes)
+
+
+@pytest.mark.asyncio
+async def test_derivative_upload_path_preserves_docx_source_bytes(
+    protocol, monkeypatch
+):
+    template_bytes = _build_template_bytes()
+    upload = _make_upload_with_bytes(
+        filename="template.docx",
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        content=template_bytes,
+    )
+    protocol.file_size_service.get_file_size.return_value = len(template_bytes)
+    monkeypatch.setattr(_FAKE_SETTINGS, "attachment_image_extraction", True)
+    monkeypatch.setattr(
+        file_protocol_module,
+        "extract_images_from_office",
+        lambda *_args, **_kwargs: [],
+    )
+
+    result, derivatives = await protocol.to_domain_with_derivatives(upload)
+
+    assert result.file_type == FileType.TEXT
+    assert result.text == "extracted text"
+    assert result.blob == template_bytes
+    assert result.size == len(template_bytes)
+    assert derivatives == []
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -33,6 +33,9 @@ from eneo.flows.flow_resource_bindings import (
 )
 from eneo.main.exceptions import BadRequestException
 
+if TYPE_CHECKING:
+    from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+
 
 class AIBuilderFlowAuthoringOrigin(BaseModel):
     kind: Literal["ai_builder"] = "ai_builder"
@@ -56,6 +59,13 @@ FlowAuthoringOrigin: TypeAlias = Annotated[
 ]
 
 
+class TemplateAttachmentIntent(BaseModel):
+    """Internal intent resolved into a Flow-owned asset during materialization."""
+
+    file_id: UUID
+    terminal_plan_step_ref: str
+
+
 class CreateFlowAuthoringCommand(BaseModel):
     kind: Literal["create"] = "create"
     space_id: UUID
@@ -63,6 +73,7 @@ class CreateFlowAuthoringCommand(BaseModel):
     origin: FlowAuthoringOrigin
     resource_bindings: tuple[LocalResourceBinding, ...] = ()
     default_transcription_model_id: UUID | None = None
+    template_attachment_intent: TemplateAttachmentIntent | None = None
 
 
 class EditFlowAuthoringCommand(BaseModel):
@@ -75,6 +86,7 @@ class EditFlowAuthoringCommand(BaseModel):
     origin: FlowAuthoringOrigin
     resource_bindings: tuple[LocalResourceBinding, ...] = ()
     default_transcription_model_id: UUID | None = None
+    template_attachment_intent: TemplateAttachmentIntent | None = None
 
 
 FlowAuthoringCommand: TypeAlias = Annotated[
@@ -177,6 +189,7 @@ class FlowAuthoringCommandService:
         command: FlowAuthoringCommand,
         flow_service: FlowService,
         origin_policy: FlowAuthoringOriginPolicy | None = None,
+        template_asset_service: "FlowTemplateAssetService | None" = None,
         progress_callback: Callable[[FlowDraftMaterializationProgress], None]
         | None = None,
     ) -> FlowAuthoringResult:
@@ -188,6 +201,7 @@ class FlowAuthoringCommandService:
         return await self.apply_prepared(
             prepared=prepared,
             flow_service=flow_service,
+            template_asset_service=template_asset_service,
             progress_callback=progress_callback,
         )
 
@@ -196,6 +210,7 @@ class FlowAuthoringCommandService:
         *,
         prepared: PreparedFlowAuthoring,
         flow_service: FlowService,
+        template_asset_service: "FlowTemplateAssetService | None" = None,
         progress_callback: Callable[[FlowDraftMaterializationProgress], None]
         | None = None,
     ) -> FlowAuthoringResult:
@@ -208,6 +223,8 @@ class FlowAuthoringCommandService:
             expected_revision=_expected_revision(prepared.command),
             resource_bindings=prepared.command.resource_bindings,
             binding_source=_binding_source_for_origin(prepared.command.origin),
+            template_attachment_intent=(prepared.command.template_attachment_intent),
+            template_asset_service=template_asset_service,
             progress_callback=progress_callback,
         )
         return FlowAuthoringResult(

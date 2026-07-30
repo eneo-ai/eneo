@@ -102,6 +102,11 @@ async def process_edit_arguments(
             failure_kind="parse",
         )
     ui_language = resolve_ui_language(conversation)
+    selected_template_roles = (
+        []
+        if planning_state is None
+        else [role for role in planning_state.file_roles if role.role == "template"]
+    )
     try:
         edit_result = compile_edit_proposal(
             proposal,
@@ -117,6 +122,15 @@ async def process_edit_arguments(
                 conversation=conversation,
             ),
             ui_language=ui_language,
+            selected_template_count=(
+                None if planning_state is None else len(selected_template_roles)
+            ),
+            selected_template_placeholders=(
+                tuple(selected_template_roles[0].template_placeholders)
+                if len(selected_template_roles) == 1
+                and selected_template_roles[0].template_placeholders is not None
+                else None
+            ),
         )
     except BadRequestException as exc:
         return ToolProcessingResult(

@@ -50,6 +50,9 @@ from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
     normalize_ai_builder_spec,
 )
+from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    apply_template_attachment_contract,
+)
 from eneo.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
 )
@@ -116,6 +119,8 @@ def compile_edit_proposal(
     requested_primary_runtime_input_type: InputType | None = None,
     ui_language: str | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
+    selected_template_count: int | None = None,
+    selected_template_placeholders: tuple[str, ...] | None = None,
 ) -> EditCompilationResult:
     """Compile an ordered edit proposal into a concrete flow preview + diff."""
     primary_runtime_input_type = (
@@ -172,6 +177,12 @@ def compile_edit_proposal(
         ),
         ui_language=ui_language,
     )
+    if selected_template_count is not None:
+        normalized_spec = apply_template_attachment_contract(
+            normalized_spec,
+            selected_template_count=selected_template_count,
+            placeholders=selected_template_placeholders,
+        )
     compiled_steps = normalized_spec.steps
     final_name = normalized_spec.flow_name
     final_description = normalized_spec.flow_description

@@ -311,20 +311,23 @@ WI-MKT-02.
 
 ### 5. Attached templates require confirmed, transactional promotion
 
-- **Decision:** Auto-promote an attached template only when the file is authorized
-  and explicitly confirmed as the template, and when copy, binding, and cleanup
-  are transactional and idempotent. Otherwise return typed `needs_action` for
-  manual setup.
+- **Decision:** Promote an attached template only when the File is authorized
+  and explicitly confirmed as the one template. Reuse that File while creating
+  the Flow-owned template asset, binding, and plan transition in the existing
+  authoring transaction. Otherwise return a typed refusal and commit no
+  authoring effects.
 - **Consequences:** Builder may not produce a publishable-looking topology with an
-  unbound or unauthorized template. Retry must converge, and partial material must
-  be cleaned up through existing file and template-asset owners.
+  unbound or unauthorized template. Retry must converge, and a failed apply must
+  roll back the Flow, asset, binding, assistants, and plan transition together.
 - **Retained surface:** Confirmed Builder attachment roles, tenant-safe template
   assets and checksums, typed bindings, idempotent retry, and manual setup.
 - **Removed or unavailable surface:** Implicit template promotion, raw session file
   identifiers in published definitions, and silent success with unresolved
   placeholders or assets.
-- **Implementation owner:** WI-09 owns file-specific role confirmation; WI-10A
-  owns promotion and typed `needs_action`; WI-10B owns exact placeholder binding.
+- **Implementation owner:** Builder planning state owns confirmed file roles;
+  Builder plan lifecycle owns locked selection; the create/edit compilers own
+  the approved placeholder contract; `FlowTemplateAssetService` and the Flow
+  materializer own atomic File promotion and binding.
 - **Deferred trigger:** Attached-template portability in packages remains excluded
   until a separate portable asset contract is approved.
 - **Revision rule:** Relaxation requires equivalent authorization, transaction,

@@ -44,6 +44,7 @@ from eneo.flows.application.flow_authoring_command import (
     EditFlowAuthoringCommand,
     FlowAuthoringCommand,
     FlowAuthoringCommandService,
+    TemplateAttachmentIntent,
 )
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftMaterializationProgress,
@@ -52,12 +53,17 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
+    OutputMode,
     has_flow_mcp_unsupported_error,
 )
 from eneo.flows.flow_resource_bindings import LocalResourceBinding, LocalResourceKind
+from eneo.flows.flow_template_asset_service import (
+    AttachedTemplateFileUnavailableError,
+)
 
 if TYPE_CHECKING:
     from eneo.flows.application.flow_service import FlowService
+    from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
 
@@ -171,12 +177,14 @@ class AIBuilderPlanLifecycle:
         flow_service: "FlowService",
         space_service: "SpaceService",
         authoring_service: FlowAuthoringCommandService | None = None,
+        template_asset_service: "FlowTemplateAssetService | None" = None,
     ) -> None:
         self.user = user
         self.repo = repo
         self.flow_service = flow_service
         self.space_service = space_service
         self.authoring_service = authoring_service or FlowAuthoringCommandService()
+        self.template_asset_service = template_asset_service
 
     async def _lock_session_then_plan(
         self, plan_id: UUID
@@ -453,6 +461,10 @@ class AIBuilderPlanLifecycle:
             plan=plan,
             spec=spec,
         )
+        template_attachment_intent = await self._template_attachment_intent_for_apply(
+            session=session,
+            spec=spec,
+        )
         command = self._build_authoring_command(
             session=session,
             plan=plan,
@@ -461,6 +473,7 @@ class AIBuilderPlanLifecycle:
             removed_existing_step_refs=removed_existing_step_refs,
             resource_bindings=resource_bindings,
             default_transcription_model_id=default_transcription_model_id,
+            template_attachment_intent=template_attachment_intent,
         )
 
         if command.origin.kind != "ai_builder":
@@ -506,6 +519,7 @@ class AIBuilderPlanLifecycle:
                 prepared=prepared,
                 flow_service=self.flow_service,
                 progress_callback=record_materializer_progress,
+                template_asset_service=self.template_asset_service,
             )
         except Exception as exc:
             log_apply_failed(
@@ -518,6 +532,12 @@ class AIBuilderPlanLifecycle:
                 changeset_counts=ChangesetCountSummary.from_preview(prepared.preview),
                 materializer_progress=materializer_progress,
             )
+            if isinstance(exc, AttachedTemplateFileUnavailableError):
+                raise AIBuilderBadRequestException(
+                    "The selected template attachment is no longer available. Attach it again and generate a new proposal.",
+                    code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE,
+                    context={"reason": "template_file_deleted_before_apply"},
+                ) from exc
             raise
 
         flow_id_for_create = (
@@ -550,6 +570,7 @@ class AIBuilderPlanLifecycle:
         removed_existing_step_refs: frozenset[str],
         resource_bindings: tuple[LocalResourceBinding, ...],
         default_transcription_model_id: UUID | None,
+        template_attachment_intent: TemplateAttachmentIntent | None,
     ) -> FlowAuthoringCommand:
         origin = AIBuilderFlowAuthoringOrigin(
             session_id=session.id,
@@ -565,6 +586,7 @@ class AIBuilderPlanLifecycle:
                 origin=origin,
                 resource_bindings=resource_bindings,
                 default_transcription_model_id=default_transcription_model_id,
+                template_attachment_intent=template_attachment_intent,
             )
         if session.flow_id is None:
             raise AIBuilderBadRequestException(
@@ -586,6 +608,63 @@ class AIBuilderPlanLifecycle:
             origin=origin,
             resource_bindings=resource_bindings,
             default_transcription_model_id=default_transcription_model_id,
+            template_attachment_intent=template_attachment_intent,
+        )
+
+    async def _template_attachment_intent_for_apply(
+        self,
+        *,
+        session: BuilderSession,
+        spec: FlowDraftSpecCore,
+    ) -> TemplateAttachmentIntent | None:
+        template_steps = [
+            step for step in spec.steps if step.output_mode is OutputMode.TEMPLATE_FILL
+        ]
+        if not template_steps:
+            return None
+        if len(template_steps) != 1 or template_steps[0] is not spec.steps[-1]:
+            raise AIBuilderBadRequestException(
+                "The approved plan has an invalid template-fill step position. Generate a new proposal and try again.",
+                code=AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED,
+                context={"reason": "invalid_template_fill_position"},
+            )
+
+        planning_state = await self.repo.load_planning_state(
+            session_id=session.id,
+            tenant_id=self.user.tenant_id,
+        )
+        attached_file_ids = set(
+            await self.repo.list_session_file_ids(
+                session_id=session.id,
+                tenant_id=self.user.tenant_id,
+            )
+        )
+        selected = (
+            []
+            if planning_state is None
+            else [
+                role
+                for role in planning_state.file_roles
+                if role.role == "template" and role.file_id in attached_file_ids
+            ]
+        )
+        if len(selected) != 1:
+            reason = (
+                "template_attachment_missing"
+                if not selected
+                else "template_attachment_ambiguous"
+            )
+            raise AIBuilderBadRequestException(
+                "Select exactly one attached DOCX template, confirm the plan, and try again.",
+                code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE,
+                context={
+                    "reason": reason,
+                    "template_count": len(selected),
+                },
+            )
+        return TemplateAttachmentIntent(
+            file_id=selected[0].file_id,
+            terminal_plan_step_ref=template_steps[0].plan_step_ref,
         )
 
     async def _resolve_default_transcription_model_id(

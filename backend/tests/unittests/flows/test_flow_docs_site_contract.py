@@ -781,6 +781,22 @@ def test_ai_builder_docs_define_per_source_identity_contract() -> None:
     assert "not model output" in contract_section
 
 
+def test_ai_builder_docs_define_template_attachment_lifecycle() -> None:
+    section = _heading_section(
+        _read(AI_BUILDER_DOC),
+        "## Template attachments and reference material",
+    )
+    normalized = " ".join(section.split())
+
+    assert "exactly one confirmed DOCX template" in normalized
+    assert "reuses the same uploaded File" in normalized
+    assert "inside the atomic plan-apply transaction" in normalized
+    assert "not materialized as Flow inputs or resources" in normalized
+    assert "not sent again at Flow runtime" in normalized
+    assert "audio input required" in normalized
+    assert "zero model calls and zero model tokens" in normalized
+
+
 def _flow_developer_meta_titles() -> dict[str, str]:
     meta = _read(FLOW_DEVELOPER_DOCS_META)
     return {

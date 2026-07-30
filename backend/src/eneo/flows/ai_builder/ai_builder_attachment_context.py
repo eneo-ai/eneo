@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from typing import Literal, cast
 from uuid import UUID
 
+from eneo.files.docx_template_validation import docx_template_archive_metrics
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
     OUTPUT_SCHEMA_MAX_JSON_BYTES,
     AIBuilderAttachmentOutputSchemaCandidate,
@@ -28,8 +33,12 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
     SignalConfidence,
 )
+from eneo.flows.runtime.docx_template_runtime import (
+    docx_template_placeholder_names,
+)
 from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.json_types import JsonObject
+from eneo.main.exceptions import BadRequestException
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +47,10 @@ class AIBuilderAttachmentContextPolicy:
     max_total_chars: int = 12000
     max_discovery_excerpt_chars: int = 800
     max_discovery_excerpt_chars_total: int = 4000
+    max_template_docx_files: int = 20
+    max_template_uncompressed_bytes: int = 200 * 1024 * 1024
+    max_template_placeholders: int = 1000
+    max_template_placeholder_chars: int = 256
 
 
 AI_BUILDER_MAX_ATTACHMENTS = 100
@@ -61,6 +74,7 @@ class AIBuilderAttachmentEvidence:
     role_confidence: SignalConfidence = "low"
     role_evidence: tuple[str, ...] = ()
     candidate_roles: tuple[FileRole, ...] = ()
+    template_placeholders: tuple[str, ...] | None = None
 
 
 AttachmentOutputSchemaDisposition = Literal["none", "single", "ambiguous"]
@@ -119,6 +133,11 @@ def attachment_file_roles(
             confidence=item.role_confidence,
             evidence=list(item.role_evidence),
             candidate_roles=list(item.candidate_roles),
+            template_placeholders=(
+                list(item.template_placeholders)
+                if item.template_placeholders is not None
+                else None
+            ),
         )
         for item in attachment_context.evidence
     ]
@@ -217,7 +236,7 @@ def _attachment_output_schema_discovery(
 def _selected_output_schema_evidence(
     discovery: AIBuilderAttachmentOutputSchemaDiscovery,
     files: list[File],
-    readable_text_by_file: Mapping[UUID, str | None],
+    template_placeholders_by_file: Mapping[UUID, tuple[str, ...] | None],
 ) -> OutputSchemaEvidence | None:
     if discovery.disposition == "ambiguous":
         return None
@@ -233,7 +252,9 @@ def _selected_output_schema_evidence(
                 for file_id in candidate.source_file_ids
             ),
         )
-    return _template_placeholder_output_schema_evidence(files, readable_text_by_file)
+    return _template_placeholder_output_schema_evidence(
+        files, template_placeholders_by_file
+    )
 
 
 def _is_json_attachment(file: File) -> bool:
@@ -252,7 +273,7 @@ def _is_declared_schema_attachment(file: File) -> bool:
 
 def _template_placeholder_output_schema_evidence(
     files: list[File],
-    readable_text_by_file: Mapping[UUID, str | None],
+    template_placeholders_by_file: Mapping[UUID, tuple[str, ...] | None],
 ) -> OutputSchemaEvidence | None:
     selected: list[str] = []
     all_placeholders: set[str] = set()
@@ -261,13 +282,11 @@ def _template_placeholder_output_schema_evidence(
     placeholder_markers: list[str] = []
 
     for file in sorted(files, key=lambda item: str(item.id)):
-        text = readable_text_by_file[file.id]
-        if text is None or _infer_file_role(file, text)[0] != "template":
+        placeholders = template_placeholders_by_file[file.id]
+        if not placeholders:
             continue
         file_placeholders: set[str] = set()
-        has_placeholder = False
-        for placeholder in _iter_normalized_template_placeholders(text):
-            has_placeholder = True
+        for placeholder in placeholders:
             if placeholder not in all_placeholders:
                 all_placeholders.add(placeholder)
                 if len(selected) < _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
@@ -277,11 +296,10 @@ def _template_placeholder_output_schema_evidence(
                     f"file:{file.id}:{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder}"
                 )
                 file_placeholders.add(placeholder)
-        if has_placeholder:
-            source_file_ids.append(file.id)
-            source_markers.append(
-                f"file:{file.id}{TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX}"
-            )
+        source_file_ids.append(file.id)
+        source_markers.append(
+            f"file:{file.id}{TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX}"
+        )
 
     if not selected:
         return None
@@ -503,6 +521,10 @@ def build_ai_builder_attachment_context(
     resolved_policy = policy or AIBuilderAttachmentContextPolicy()
     remaining = resolved_policy.max_total_chars
     readable_text_by_file = {file.id: readable_attachment_text(file) for file in files}
+    template_placeholders_by_file = _inspect_template_placeholders(
+        files,
+        policy=resolved_policy,
+    )
     output_schema_discovery = _attachment_output_schema_discovery(
         files,
         readable_text_by_file,
@@ -510,7 +532,7 @@ def build_ai_builder_attachment_context(
     output_schema_evidence = _selected_output_schema_evidence(
         output_schema_discovery,
         files,
-        readable_text_by_file,
+        template_placeholders_by_file,
     )
     discovery_excerpts = _fair_discovery_excerpts(
         readable_text_by_file,
@@ -544,6 +566,7 @@ def build_ai_builder_attachment_context(
             role_confidence=role_confidence,
             role_evidence=role_evidence,
             candidate_roles=candidate_roles,
+            template_placeholders=template_placeholders_by_file[file.id],
         )
         evidence.append(attachment_evidence)
 
@@ -585,6 +608,69 @@ def build_ai_builder_attachment_context(
         output_schema_evidence=output_schema_evidence,
         output_schema_discovery=output_schema_discovery,
     )
+
+
+def _is_docx_attachment(file: File) -> bool:
+    mimetype = (file.mimetype or "").casefold().split(";", maxsplit=1)[0].strip()
+    return file.name.casefold().endswith(".docx") or mimetype == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+
+def _template_inspection_limit_exceeded(reason: str) -> None:
+    raise AIBuilderBadRequestException(
+        "AI Builder cannot safely inspect all attached DOCX files. "
+        "Detach unnecessary templates or simplify their placeholders and try again.",
+        code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE,
+        context={"reason": reason},
+    )
+
+
+def _inspect_template_placeholders(
+    files: list[File],
+    *,
+    policy: AIBuilderAttachmentContextPolicy,
+) -> dict[UUID, tuple[str, ...] | None]:
+    placeholders_by_file: dict[UUID, tuple[str, ...] | None] = {}
+    docx_count = 0
+    total_uncompressed_bytes = 0
+    total_placeholders = 0
+
+    for file in sorted(files, key=lambda item: str(item.id)):
+        placeholders_by_file[file.id] = None
+        if not _is_docx_attachment(file) or file.blob is None:
+            continue
+
+        docx_count += 1
+        if docx_count > policy.max_template_docx_files:
+            _template_inspection_limit_exceeded("docx_count")
+
+        try:
+            metrics = docx_template_archive_metrics(file.blob, filename=file.name)
+        except BadRequestException:
+            continue
+        total_uncompressed_bytes += metrics.uncompressed_bytes
+        if total_uncompressed_bytes > policy.max_template_uncompressed_bytes:
+            _template_inspection_limit_exceeded("uncompressed_bytes")
+
+        try:
+            placeholders = docx_template_placeholder_names(
+                file.blob,
+                filename=file.name,
+            )
+        except BadRequestException:
+            continue
+        if any(
+            len(placeholder) > policy.max_template_placeholder_chars
+            for placeholder in placeholders
+        ):
+            _template_inspection_limit_exceeded("placeholder_length")
+        total_placeholders += len(placeholders)
+        if total_placeholders > policy.max_template_placeholders:
+            _template_inspection_limit_exceeded("placeholder_count")
+        placeholders_by_file[file.id] = placeholders
+
+    return placeholders_by_file
 
 
 def _render_reference_material(parts: list[str]) -> str | None:

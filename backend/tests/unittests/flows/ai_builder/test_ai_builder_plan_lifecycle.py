@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.files.file_models import FileType
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -31,12 +32,14 @@ from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecyc
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
+from eneo.flows.ai_builder.planning_state import FileRoleEvidence, PlanningState
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowAuthoringPreview,
     FlowAuthoringResult,
+    TemplateAttachmentIntent,
 )
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
@@ -49,6 +52,8 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
+    OutputMode,
+    OutputType,
     StepSpec,
 )
 from eneo.flows.flow_resource_bindings import (
@@ -56,6 +61,9 @@ from eneo.flows.flow_resource_bindings import (
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
+)
+from eneo.flows.flow_template_asset_service import (
+    AttachedTemplateFileUnavailableError,
 )
 from eneo.main.exceptions import BadRequestException
 
@@ -208,6 +216,53 @@ def _make_repeated_all_previous_spec() -> FlowDraftSpecCore:
             ),
         ],
     )
+
+
+def _make_template_fill_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Template Flow",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Prepare content",
+                assistant_spec=AssistantSpec(instructions="Prepare content."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Fill template",
+                assistant_spec=AssistantSpec(instructions="Fill the template."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+
+def _planning_state_with_template_files(*file_ids: UUID) -> PlanningState:
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename=f"template-{index}.docx",
+            file_type=FileType.DOCUMENT,
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="structured_answer",
+            confidence="high",
+            template_placeholders=["case_id"],
+        )
+        for index, file_id in enumerate(file_ids, start=1)
+    ]
+    return state
 
 
 def _make_plan(
@@ -639,6 +694,222 @@ class TestAIBuilderPlanLifecycle:
         command = authoring_service.prepare.await_args.kwargs["command"]
         assert isinstance(command, CreateFlowAuthoringCommand)
         assert command.spec == spec
+
+    @pytest.mark.anyio
+    async def test_apply_plan_carries_one_current_template_attachment_intent(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        template_file_id = uuid4()
+        reference_file_id = uuid4()
+        spec = _make_template_fill_spec()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
+        planning_state = _planning_state_with_template_files(template_file_id)
+        planning_state.file_roles.append(
+            FileRoleEvidence(
+                file_id=reference_file_id,
+                filename="guidance.pdf",
+                file_type=FileType.DOCUMENT,
+                mimetype="application/pdf",
+                has_readable_text=True,
+                coverage="fully_seen",
+                role="reference_material",
+                source="structured_answer",
+                confidence="high",
+            )
+        )
+        repo.load_planning_state.return_value = planning_state
+        repo.list_session_file_ids.return_value = [template_file_id, reference_file_id]
+        authoring_service = _make_authoring_service(steps_created=2, steps_updated=0)
+        template_asset_service = AsyncMock()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+            template_asset_service=template_asset_service,
+        )
+
+        await lifecycle.apply_plan(plan_id=plan.id)
+
+        command = authoring_service.prepare.await_args.kwargs["command"]
+        assert isinstance(command, CreateFlowAuthoringCommand)
+        assert command.template_attachment_intent == TemplateAttachmentIntent(
+            file_id=template_file_id,
+            terminal_plan_step_ref="step_b",
+        )
+        assert command.resource_bindings == ()
+        authoring_service.apply_prepared.assert_awaited_once()
+        assert (
+            authoring_service.apply_prepared.await_args.kwargs["template_asset_service"]
+            is template_asset_service
+        )
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("has_membership", [False, True])
+    async def test_apply_plan_refuses_missing_or_detached_template_before_authoring(
+        self,
+        has_membership: bool,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        template_file_id = uuid4()
+        spec = _make_template_fill_spec()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
+        repo.load_planning_state.return_value = (
+            PlanningState.empty()
+            if has_membership
+            else _planning_state_with_template_files(template_file_id)
+        )
+        repo.list_session_file_ids.return_value = (
+            [template_file_id] if has_membership else []
+        )
+        authoring_service = _make_authoring_service()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+            template_asset_service=AsyncMock(),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "builder_attachment_unavailable"
+        assert exc_info.value.context == {
+            "reason": "template_attachment_missing",
+            "template_count": 0,
+        }
+        authoring_service.prepare.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_apply_plan_translates_file_delete_race_to_attachment_error(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        template_file_id = uuid4()
+        spec = _make_template_fill_spec()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
+        repo.load_planning_state.return_value = _planning_state_with_template_files(
+            template_file_id
+        )
+        repo.list_session_file_ids.return_value = [template_file_id]
+        authoring_service = _make_authoring_service(steps_created=2, steps_updated=0)
+        authoring_service.apply_prepared.side_effect = (
+            AttachedTemplateFileUnavailableError()
+        )
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+            template_asset_service=AsyncMock(),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "builder_attachment_unavailable"
+        assert exc_info.value.context == {
+            "reason": "template_file_deleted_before_apply"
+        }
+        repo.mark_plan_applied.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_apply_plan_refuses_multiple_current_templates_before_authoring(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        template_file_ids = (uuid4(), uuid4())
+        spec = _make_template_fill_spec()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
+        repo.load_planning_state.return_value = _planning_state_with_template_files(
+            *template_file_ids
+        )
+        repo.list_session_file_ids.return_value = list(template_file_ids)
+        authoring_service = _make_authoring_service()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+            template_asset_service=AsyncMock(),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "builder_attachment_unavailable"
+        assert exc_info.value.context == {
+            "reason": "template_attachment_ambiguous",
+            "template_count": 2,
+        }
+        authoring_service.prepare.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_apply_plan_derives_removed_refs_from_persisted_edit_intent(

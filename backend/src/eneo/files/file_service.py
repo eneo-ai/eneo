@@ -142,6 +142,20 @@ class FileService:
 
         return file
 
+    async def get_owned_file_for_key_share(self, file_id: UUID) -> File:
+        """Read an owned File while fencing concurrent deletion until commit."""
+
+        file = await self.repo.get_by_id_for_owner_for_key_share(
+            file_id=file_id,
+            owner_type=self._owner_type().value,
+            owner_user_id=self._owner_user_id(),
+            owner_service_id=self._owner_service_id(),
+            tenant_id=self.user.tenant_id,
+        )
+        if file is None:
+            raise NotFoundException()
+        return file
+
     async def get_files_by_ids(
         self, file_ids: list[UUID], include_transcription: bool = True
     ):

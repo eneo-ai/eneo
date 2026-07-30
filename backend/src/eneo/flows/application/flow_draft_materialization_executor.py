@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping, Sequence
-from typing import assert_never
+from typing import TYPE_CHECKING, assert_never
 from uuid import UUID, uuid4
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
@@ -16,6 +16,9 @@ from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
 )
 from eneo.flows.application.flow_service import FlowService
+from eneo.flows.application.flow_template_attachment_materialization import (
+    materialize_template_attachment,
+)
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import AssistantSpec
@@ -35,6 +38,10 @@ from eneo.flows.flow_resource_bindings import (
 from eneo.main.exceptions import BadRequestException
 from eneo.prompts.api.prompt_models import PromptCreate
 
+if TYPE_CHECKING:
+    from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
+    from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+
 _MODEL_LOCAL_KINDS = frozenset({LocalResourceKind.COMPLETION_MODEL})
 
 
@@ -51,11 +58,18 @@ class FlowDraftMaterializer:
         expected_revision: int | None = None,
         resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
         binding_source: FlowResourceBindingSource,
+        template_attachment_intent: "TemplateAttachmentIntent | None" = None,
+        template_asset_service: "FlowTemplateAssetService | None" = None,
         progress_callback: Callable[[FlowDraftMaterializationProgress], None]
         | None = None,
     ) -> FlowDraftMaterializationResult:
         is_create = flow_id is None
         progress = _MaterializationProgressAccumulator(callback=progress_callback)
+
+        if template_attachment_intent is not None and template_asset_service is None:
+            raise RuntimeError(
+                "Template attachment materialization requires a template asset service."
+            )
 
         resource_bindings_by_slot_ref = index_and_validate_changeset_resource_bindings(
             changeset=changeset,
@@ -90,6 +104,23 @@ class FlowDraftMaterializer:
 
         if flow_id is None:
             raise BadRequestException("Flow id missing while executing changeset.")
+
+        if template_attachment_intent is not None:
+            assert template_asset_service is not None
+            resolved_template = await materialize_template_attachment(
+                intent=template_attachment_intent,
+                changeset=changeset,
+                flow_id=flow_id,
+                template_asset_service=template_asset_service,
+            )
+            changeset = resolved_template.changeset
+            resource_bindings = (*resource_bindings, resolved_template.binding)
+            resource_bindings_by_slot_ref = (
+                index_and_validate_changeset_resource_bindings(
+                    changeset=changeset,
+                    resource_bindings=resource_bindings,
+                )
+            )
 
         for assistant_to_create in changeset.assistants_to_create:
             assistant, _ = await flow_service.create_flow_assistant(

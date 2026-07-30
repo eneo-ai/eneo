@@ -41,6 +41,13 @@ def sanitize_filename(filename: str | None) -> str:
     return filename or "unnamed"
 
 
+def _is_docx_upload(upload_file: UploadFile) -> bool:
+    content_type = (upload_file.content_type or "").split(";", 1)[0].strip()
+    return content_type == TextMimeTypes.DOCX.value or sanitize_filename(
+        upload_file.filename
+    ).casefold().endswith(".docx")
+
+
 class FileProtocol:
     def __init__(
         self,
@@ -61,6 +68,7 @@ class FileProtocol:
         extractor: Callable[[Path, str, str | None], str | bytes],
         limit_setting_name: str | None = None,
         on_disk_hook: Callable[[Path], None] | None = None,
+        preserve_source_bytes: bool = False,
     ) -> FileBaseWithContent:
         self.validate_size(
             upload_file,
@@ -78,8 +86,11 @@ class FileProtocol:
             content_type: str = upload_file.content_type or ""
             content = extractor(filepath, content_type, upload_file.filename)
             checksum = self.file_size_service.get_file_checksum(filepath)
+            source_blob = filepath.read_bytes() if preserve_source_bytes else None
 
-            if isinstance(content, str):
+            if source_blob is not None:
+                size = len(source_blob)
+            elif isinstance(content, str):
                 size = len(content.encode("utf-8"))
             else:
                 size = len(content)
@@ -88,7 +99,12 @@ class FileProtocol:
                 on_disk_hook(filepath)
 
             return self._create_file_base(
-                upload_file, file_type, content, checksum, size
+                upload_file,
+                file_type,
+                content,
+                checksum,
+                size,
+                source_blob=source_blob,
             )
         finally:
             with contextlib.suppress(FileNotFoundError):
@@ -116,6 +132,7 @@ class FileProtocol:
         content: str | bytes,
         checksum: str,
         size: int,
+        source_blob: bytes | None = None,
     ) -> FileBaseWithContent:
         # Sanitize filename to prevent path traversal attacks
         sanitized_filename = sanitize_filename(upload_file.filename)
@@ -128,6 +145,7 @@ class FileProtocol:
                 file_type=file_type,
                 mimetype=upload_file.content_type,
                 text=content if isinstance(content, str) else None,
+                blob=source_blob,
             )
         else:
             return FileBaseWithContent(
@@ -145,6 +163,7 @@ class FileProtocol:
         max_size: int | None = None,
         limit_setting_name: str | None = None,
         on_disk_hook: Callable[[Path], None] | None = None,
+        preserve_source_bytes: bool = False,
     ) -> FileBaseWithContent:
         if max_size is None:
             max_size = get_settings().upload_file_to_session_max_size
@@ -158,6 +177,7 @@ class FileProtocol:
             extractor=self.text_extractor.extract,
             limit_setting_name=limit_setting_name,
             on_disk_hook=on_disk_hook,
+            preserve_source_bytes=preserve_source_bytes,
         )
 
     async def image_to_domain(
@@ -251,6 +271,7 @@ class FileProtocol:
             max_size=max_size,
             limit_setting_name=limit_setting_name,
             on_disk_hook=collect_images,
+            preserve_source_bytes=_is_docx_upload(upload_file),
         )
 
         derivatives: list[FileBaseWithContent] = []
@@ -316,7 +337,7 @@ class FileProtocol:
         max_size: int | None = None,
         limit_setting_name: str | None = None,
     ) -> FileBaseWithContent:
-        content_type = upload_file.content_type or ""
+        content_type = (upload_file.content_type or "").split(";", 1)[0].strip()
         if ImageMimeTypes.has_value(content_type):
             return await self.image_to_domain(
                 upload_file,
@@ -334,4 +355,5 @@ class FileProtocol:
             upload_file,
             max_size=max_size,
             limit_setting_name=limit_setting_name,
+            preserve_source_bytes=_is_docx_upload(upload_file),
         )

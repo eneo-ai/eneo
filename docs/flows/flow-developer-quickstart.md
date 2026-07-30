@@ -441,6 +441,17 @@ Yes, but semantic file roles need quoted evidence and confidence. Structural
 facts such as MIME type and template placeholders can be inferred
 deterministically. Semantic filename or phrase-list guessing should be avoided.
 
+When a user confirms exactly one DOCX as the terminal fill template, apply
+reuses that File to create the normal Flow template asset and binding inside the
+authoring transaction. The approved proposal already owns every exact
+placeholder binding; apply adds only the local asset identity after rechecking
+the document. Reference, context, and example-output attachments remain
+planning evidence: they are not materialized as Flow inputs or resources and
+are not resent at runtime. Runtime files, when the published Flow accepts them,
+are uploaded separately when a run starts. A template may bind `datum`; a
+transcription binding makes the Flow's audio input required. Template fill
+itself is deterministic and reports zero model tokens.
+
 ### Where should a developer start when changing Flow behavior?
 
 Start with the canonical owner table above. For API-facing runtime changes,

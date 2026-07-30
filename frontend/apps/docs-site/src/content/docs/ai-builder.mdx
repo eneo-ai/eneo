@@ -83,6 +83,33 @@ Resource names shown to AI Builder are prompt-visible aliases. The Builder resol
 
 The review step matters. A plan can be valid but still not be the best workflow for your organization. Check the input contract, final output, external tool access, and evidence requirements before publishing.
 
+## Template attachments and reference material
+
+Builder attachments do not all become Flow inputs. Reference documents and
+example outputs are planning evidence: they can shape the approved Flow, but
+they are not materialized as Flow inputs or resources and their content is not
+sent again at Flow runtime. A published Flow that accepts runtime files receives
+separately uploaded files when a run starts.
+
+A terminal DOCX template-fill Flow requires exactly one confirmed DOCX
+template. Before approval, AI Builder inspects the real document, compiles every
+exact placeholder into a required form field, an injected transcription value,
+the current date (`datum`), or a typed earlier-step output, and refuses
+placeholders it cannot prove will exist. A transcription placeholder also makes
+the Flow's audio input required. Zero or multiple selected templates produce a
+typed refusal instead of a publishable-looking incomplete Flow.
+
+When the plan is applied, Eneo reuses the same uploaded File and creates the
+Flow-owned template asset and binding inside the atomic plan-apply transaction.
+It does not copy the DOCX or leave a raw Builder-session file identifier in the
+published definition. A successful template asset remains available after the
+Builder session is deleted; a failed apply rolls back the Flow, asset, binding,
+and plan transition together.
+
+The final template-fill step is deterministic: it performs zero model calls and
+zero model tokens. Earlier preparation steps may still use a model when the
+workflow needs generated or transformed content for the template.
+
 Public AI Builder request bodies are closed contracts. Build payloads from the
 OpenAPI schema or generated Eneo client: an unknown or misspelled property
 returns HTTP `422` with code `request_validation_error`. Correct the payload

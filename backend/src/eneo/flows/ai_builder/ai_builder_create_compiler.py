@@ -44,6 +44,9 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     runtime_metadata_disables_declared_input_fields,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
+from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    apply_template_attachment_contract,
+)
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
@@ -58,7 +61,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
-from eneo.flows.flow_variable_definitions import can_expose_form_field_bare_alias
+from eneo.flows.flow_variable_definitions import template_placeholder_form_field_name
 from eneo.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -87,6 +90,8 @@ class CreateCompileContext:
     runtime_metadata_disables_declared_input_fields: bool = False
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     template_placeholder_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
+    selected_template_count: int | None = None
+    selected_template_placeholders: tuple[str, ...] | None = None
     aggregation_intent: AggregationIntent = "linear"
     terminal_output_schema: JsonObject | None = None
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
@@ -235,7 +240,13 @@ def compile_create_intent_to_spec(
             field_names=dropped_primary_input_field_names,
             runtime_input_type=runtime_input_type,
         )
-        return assembly_spec
+        if context is None or context.selected_template_count is None:
+            return assembly_spec
+        return apply_template_attachment_contract(
+            assembly_spec,
+            selected_template_count=context.selected_template_count,
+            placeholders=context.selected_template_placeholders,
+        )
 
 
 def _raise_for_unplaced_create_form_fields(
@@ -340,6 +351,11 @@ def create_compile_context_from_planning_state(
     template_placeholder_field_hints = (
         _template_placeholder_field_hints_from_planning_state(planning_state)
     )
+    selected_template_roles = (
+        []
+        if planning_state is None
+        else [role for role in planning_state.file_roles if role.role == "template"]
+    )
     if planning_state is None:
         if (
             ui_language is None
@@ -355,6 +371,7 @@ def create_compile_context_from_planning_state(
             ),
             runtime_input_field_hints=runtime_input_field_hints,
             template_placeholder_field_hints=template_placeholder_field_hints,
+            selected_template_count=None,
         )
     architecture = _architecture_envelope_from_planning_state(planning_state)
     runtime_input_type = _runtime_input_type_from_architecture(
@@ -377,6 +394,13 @@ def create_compile_context_from_planning_state(
         ),
         runtime_input_field_hints=runtime_input_field_hints,
         template_placeholder_field_hints=template_placeholder_field_hints,
+        selected_template_count=len(selected_template_roles),
+        selected_template_placeholders=(
+            tuple(selected_template_roles[0].template_placeholders)
+            if len(selected_template_roles) == 1
+            and selected_template_roles[0].template_placeholders is not None
+            else None
+        ),
         aggregation_intent=_aggregation_intent_for_compile_context(
             planning_state,
             architecture,
@@ -582,54 +606,38 @@ def _template_placeholder_field_hints_from_planning_state(
 ) -> tuple[RuntimeInputFieldHint, ...]:
     if planning_state is None:
         return ()
-    evidence = planning_state.output_schema_evidence
-    if evidence is None or evidence.source != "template_placeholders":
-        return ()
-    raw_properties = evidence.json_schema.get("properties")
-    if not isinstance(raw_properties, Mapping):
-        return ()
-
-    raw_required = evidence.json_schema.get("required")
-    required_names: set[str] = (
-        {item for item in raw_required if isinstance(item, str)}
-        if isinstance(raw_required, list)
-        else set()
-    )
+    selected_templates = [
+        role for role in planning_state.file_roles if role.role == "template"
+    ]
+    raw_placeholders: tuple[str, ...]
+    if len(selected_templates) == 1:
+        if selected_templates[0].template_placeholders is None:
+            return ()
+        raw_placeholders = tuple(selected_templates[0].template_placeholders)
+    else:
+        evidence = planning_state.output_schema_evidence
+        if evidence is None or evidence.source != "template_placeholders":
+            return ()
+        raw_properties = evidence.json_schema.get("properties")
+        if not isinstance(raw_properties, Mapping):
+            return ()
+        raw_placeholders = tuple(str(name) for name in raw_properties)
     hints: list[RuntimeInputFieldHint] = []
     seen: set[str] = set()
-    for raw_placeholder in raw_properties:
-        field_name = _template_placeholder_form_field_name(raw_placeholder)
+    for raw_placeholder in raw_placeholders:
+        field_name = template_placeholder_form_field_name(raw_placeholder)
         if field_name is None or field_name in seen:
             continue
         hints.append(
             RuntimeInputFieldHint(
                 variable_name=field_name,
                 label=field_name,
-                required=(
-                    raw_placeholder in required_names or field_name in required_names
-                ),
+                required=True,
                 provenance="template_derived",
             )
         )
         seen.add(field_name)
     return tuple(hints)
-
-
-def _template_placeholder_form_field_name(placeholder: str) -> str | None:
-    candidate = " ".join(placeholder.strip().split())
-    if not candidate:
-        return None
-
-    candidate_casefold = candidate.casefold()
-    for prefix in ("flow_input.", "flow.input."):
-        if not candidate_casefold.startswith(prefix):
-            continue
-        candidate = candidate[len(prefix) :].strip()
-        break
-
-    if not can_expose_form_field_bare_alias(candidate):
-        return None
-    return candidate
 
 
 def _runtime_input_type_from_planning_state(state: PlanningState) -> InputType | None:

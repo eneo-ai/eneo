@@ -15,6 +15,7 @@ from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.runtime.docx_template_runtime import (
+    docx_template_placeholder_names,
     extract_docx_template_text_preview,
     inspect_docx_template_bytes,
 )
@@ -24,6 +25,10 @@ from eneo.main.exceptions import (
     NotFoundException,
 )
 from eneo.users.user import UserInDB
+
+
+class AttachedTemplateFileUnavailableError(Exception):
+    """The selected Builder File disappeared before its retention fence."""
 
 
 class FlowTemplateAssetService:
@@ -70,7 +75,7 @@ class FlowTemplateAssetService:
                 "The uploaded DOCX template could not be saved with file content.",
                 code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
             )
-        placeholders = inspect_docx_template_bytes(
+        placeholders = docx_template_placeholder_names(
             document_file.blob,
             filename=document_file.name,
         )
@@ -83,12 +88,63 @@ class FlowTemplateAssetService:
             name=saved_file.name,
             checksum=saved_file.checksum,
             mimetype=saved_file.mimetype,
-            placeholders=_unique_placeholder_names(placeholders),
+            placeholders=list(placeholders),
             created_by_user_id=self.user.id,
             updated_by_user_id=self.user.id,
             status=FlowTemplateAssetStatus.READY.value,
         )
         return asset
+
+    async def create_from_existing_attached_file(
+        self,
+        *,
+        flow_id: UUID,
+        file_id: UUID,
+    ) -> FlowTemplateAsset:
+        """Promote an authorized existing File into a Flow template asset.
+
+        Builder attachments already own a durable File row. Reusing that row
+        keeps the asset foreign key as the retention boundary and avoids a
+        second copy whose lifecycle could drift from the selected attachment.
+        Session-membership validation remains the Builder lifecycle's concern.
+        """
+
+        flow = await self.flow_repo.get(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+        )
+        persisted_flow_id = flow.require_persisted_id()
+        try:
+            file = await self.file_service.get_owned_file_for_key_share(file_id)
+        except NotFoundException as exc:
+            raise AttachedTemplateFileUnavailableError from exc
+        if file.blob is None:
+            raise BadRequestException(
+                "The selected DOCX template could not be read because the file content is missing.",
+                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
+            )
+        placeholders = docx_template_placeholder_names(file.blob, filename=file.name)
+        reusable = await self.template_asset_repo.find_ready_for_file(
+            flow_id=persisted_flow_id,
+            tenant_id=self.user.tenant_id,
+            file_id=file.id,
+            checksum=file.checksum,
+        )
+        if reusable is not None:
+            return reusable
+        return await self.template_asset_repo.create(
+            flow_id=persisted_flow_id,
+            space_id=flow.space_id,
+            tenant_id=self.user.tenant_id,
+            file_id=file.id,
+            name=file.name,
+            checksum=file.checksum,
+            mimetype=file.mimetype,
+            placeholders=list(placeholders),
+            created_by_user_id=self.user.id,
+            updated_by_user_id=self.user.id,
+            status=FlowTemplateAssetStatus.READY.value,
+        )
 
     async def inspect_asset(
         self,
@@ -167,12 +223,3 @@ class FlowTemplateAssetService:
         if file.tenant_id != self.user.tenant_id:
             raise NotFoundException("Flow template asset file not found.")
         return asset, file
-
-
-def _unique_placeholder_names(placeholders: list[dict[str, str | None]]) -> list[str]:
-    names: list[str] = []
-    for item in placeholders:
-        name = str(item.get("name", "")).strip()
-        if name and name not in names:
-            names.append(name)
-    return names

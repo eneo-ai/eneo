@@ -11,7 +11,10 @@ from docx import Document
 from docx.oxml.ns import qn
 from jinja2.sandbox import SandboxedEnvironment
 
-from eneo.files.docx_template_validation import validate_docx_template_archive
+from eneo.files.docx_template_validation import (
+    normalize_template_extraction_error,
+    validate_docx_template_archive,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -81,6 +84,20 @@ def inspect_docx_template_bytes(
     *,
     filename: str,
 ) -> list[dict[str, str | None]]:
+    try:
+        return _inspect_docx_template_bytes(template_bytes, filename=filename)
+    except Exception as exc:
+        normalized = normalize_template_extraction_error(exc)
+        if normalized is exc:
+            raise
+        raise normalized from exc
+
+
+def _inspect_docx_template_bytes(
+    template_bytes: bytes,
+    *,
+    filename: str,
+) -> list[dict[str, str | None]]:
     validate_docx_template_archive(template_bytes, filename=filename)
     document = Document(io.BytesIO(template_bytes))
 
@@ -120,6 +137,24 @@ def inspect_docx_template_bytes(
                         record(cell.text, location="footer")
 
     return discovered
+
+
+def docx_template_placeholder_names(
+    template_bytes: bytes,
+    *,
+    filename: str,
+) -> tuple[str, ...]:
+    """Return each exact placeholder name once, in document discovery order."""
+
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in inspect_docx_template_bytes(template_bytes, filename=filename):
+        name = str(item.get("name", "")).strip()
+        if not name or name in seen:
+            continue
+        names.append(name)
+        seen.add(name)
+    return tuple(names)
 
 
 def render_docx_template(
