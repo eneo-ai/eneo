@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -92,14 +92,27 @@ class FileContentLoader:
         if not metadata:
             return {}
 
+        unique_metadata, selections = await self._select_content(
+            metadata,
+            include_transcription=include_transcription,
+        )
+        return await self._hydrate_selected_files(unique_metadata, selections)
+
+    async def _select_content(
+        self,
+        metadata: Sequence[FileMetadata],
+        *,
+        include_transcription: bool,
+    ) -> tuple[dict[UUID, FileMetadata], dict[UUID, _FileContentSelection]]:
         unique_metadata = {file.id: file for file in metadata}
+        if not unique_metadata:
+            return {}, {}
         references = await self._repo.get_content_references(list(unique_metadata))
         by_file: defaultdict[UUID, list[FileContentReferenceRecord]] = defaultdict(list)
         for reference in references:
             by_file[reference.file_id].append(reference)
 
         selections: dict[UUID, _FileContentSelection] = {}
-        grants: list[ContentReadGrant] = []
         for file in unique_metadata.values():
             file_references = by_file[file.id]
             primary = self._primary_reference(file, file_references)
@@ -139,6 +152,16 @@ class FileContentLoader:
                 transcription_reference=transcription_reference,
             )
             selections[file.id] = selection
+        return unique_metadata, selections
+
+    async def _hydrate_selected_files(
+        self,
+        metadata: dict[UUID, FileMetadata],
+        selections: dict[UUID, _FileContentSelection],
+    ) -> dict[UUID, File]:
+        grants: list[ContentReadGrant] = []
+        for file in metadata.values():
+            selection = selections[file.id]
             grants.extend(
                 ContentReadGrant(
                     content_id=reference.content_id,
@@ -150,7 +173,7 @@ class FileContentLoader:
 
         payloads = await self._object_content.read_content_bytes(grants)
         hydrated: dict[UUID, File] = {}
-        for file in unique_metadata.values():
+        for file in metadata.values():
             selection = selections[file.id]
             text = (
                 None
@@ -197,6 +220,90 @@ class FileContentLoader:
         include_transcription: bool = True,
     ) -> dict[tuple[str, UUID], list[File]]:
         """Validate, deduplicate, hydrate, and regroup concrete attachments."""
+        metadata_by_id, ids_by_group = self._index_attachment_groups(groups)
+        loaded = await self.load(
+            list(metadata_by_id.values()),
+            include_transcription=include_transcription,
+        )
+        return {
+            key: [loaded[file_id] for file_id in file_ids]
+            for key, file_ids in ids_by_group.items()
+        }
+
+    async def load_attachment_groups_in_payload_batches(
+        self,
+        groups: Sequence[FileAttachmentGroup],
+        *,
+        max_batch_bytes: int,
+        include_transcription: bool = True,
+    ) -> AsyncIterator[dict[tuple[str, UUID], list[File]]]:
+        """Hydrate groups incrementally after one content-reference lookup.
+
+        A group is never split, so one unusually large owner has the same peak
+        payload as the single-owner loader. Shared content counts once within a
+        batch and may keep several groups below the byte limit.
+        """
+        if max_batch_bytes <= 0:
+            raise ValueError("max_batch_bytes must be positive")
+
+        metadata_by_id, ids_by_group = self._index_attachment_groups(groups)
+        _, selections = await self._select_content(
+            list(metadata_by_id.values()),
+            include_transcription=include_transcription,
+        )
+        batch_keys: list[tuple[str, UUID]] = []
+        batch_file_ids: dict[UUID, None] = {}
+        batch_content_ids: set[UUID] = set()
+        batch_bytes = 0
+
+        for key, file_ids in ids_by_group.items():
+            group_content_sizes: dict[UUID, int] = {}
+            for file_id in file_ids:
+                for reference in selections[file_id].readable_references:
+                    group_content_sizes[reference.content_id] = reference.size_bytes
+            additional_bytes = sum(
+                size
+                for content_id, size in group_content_sizes.items()
+                if content_id not in batch_content_ids
+            )
+            if batch_keys and batch_bytes + additional_bytes > max_batch_bytes:
+                loaded_groups = await self._hydrate_attachment_group_batch(
+                    keys=batch_keys,
+                    ids_by_group=ids_by_group,
+                    metadata_by_id=metadata_by_id,
+                    selections=selections,
+                    file_ids=batch_file_ids,
+                )
+                yield loaded_groups
+                del loaded_groups
+                batch_keys = []
+                batch_file_ids = {}
+                batch_content_ids = set()
+                batch_bytes = 0
+
+            batch_keys.append(key)
+            batch_file_ids.update((file_id, None) for file_id in file_ids)
+            for content_id, size in group_content_sizes.items():
+                if content_id not in batch_content_ids:
+                    batch_content_ids.add(content_id)
+                    batch_bytes += size
+
+        if batch_keys:
+            yield await self._hydrate_attachment_group_batch(
+                keys=batch_keys,
+                ids_by_group=ids_by_group,
+                metadata_by_id=metadata_by_id,
+                selections=selections,
+                file_ids=batch_file_ids,
+            )
+
+    @staticmethod
+    def _index_attachment_groups(
+        groups: Sequence[FileAttachmentGroup],
+    ) -> tuple[
+        dict[UUID, FileMetadata],
+        dict[tuple[str, UUID], list[UUID]],
+    ]:
         metadata_by_id: dict[UUID, FileMetadata] = {}
         ids_by_group: dict[tuple[str, UUID], list[UUID]] = {}
         for group in groups:
@@ -210,15 +317,22 @@ class FileContentLoader:
                 metadata_by_id[metadata.id] = metadata
                 file_ids.append(metadata.id)
             ids_by_group[group.key] = file_ids
+        return metadata_by_id, ids_by_group
 
-        loaded = await self.load(
-            list(metadata_by_id.values()),
-            include_transcription=include_transcription,
+    async def _hydrate_attachment_group_batch(
+        self,
+        *,
+        keys: Sequence[tuple[str, UUID]],
+        ids_by_group: dict[tuple[str, UUID], list[UUID]],
+        metadata_by_id: dict[UUID, FileMetadata],
+        selections: dict[UUID, _FileContentSelection],
+        file_ids: dict[UUID, None],
+    ) -> dict[tuple[str, UUID], list[File]]:
+        loaded = await self._hydrate_selected_files(
+            {file_id: metadata_by_id[file_id] for file_id in file_ids},
+            selections,
         )
-        return {
-            key: [loaded[file_id] for file_id in file_ids]
-            for key, file_ids in ids_by_group.items()
-        }
+        return {key: [loaded[file_id] for file_id in ids_by_group[key]] for key in keys}
 
     @staticmethod
     def _first_reference(
