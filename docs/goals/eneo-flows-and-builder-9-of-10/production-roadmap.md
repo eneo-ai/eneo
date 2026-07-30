@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-30 | **Honest Builder attachment evidence**: persisted file-role evidence now retains independent readability and exact coverage through live refresh and classifier replay; inventory-only files cannot promote semantic roles; full placeholder identity survives persistence and compilation while shared prompt rendering is safely bounded; deterministic discovery records every valid schema candidate and refuses multiple candidates before provider work; a private full-evidence fingerprint invalidates confirmation even for omitted or display-colliding attachments, while Swedish/English summaries stay bounded (`caa17c3ef`, gate green 8/10 after four same-session passes, no findings) |
 | 2026-07-30 | **Honest Builder execution profile**: proposals now expose an output-only static profile for completion-model, transcription-model, deterministic, schema-constrained, and authored mapped work; one pure mapped-execution owner aligns validation, runtime dispatch, and projection while rejecting invalid or dual configurations as structured Builder feedback; the advanced Swedish/English UI explains overlapping categories and avoids provider-call claims; five disproven lints were deleted while the two source-proven structural-waste critic rules remain (`5509eef84..fb6934b5a`, gate green 8/10 after four focused passes, no findings) |
 | 2026-07-30 | **Bounded Builder persistence and replayable terminal failures**: locally detected oversized planning state now commits one typed terminal outcome that preserves the last valid state and replays without another provider call, while genuine unknown provider outcomes remain untouched; immutable proposal snapshots have one current-only top-level schema version, a 1 MiB serialized bound, and canonical fail-closed hydration that rejects unknown or normalized persisted values without weakening provider-input normalization; the established draft-title path remains intact (`c606411f7..48e9be497`, gate green 8/10 after two passes, no findings) |
 | 2026-07-29 | **Bounded interactive attempt evidence**: current and recent attempt candidates stop at 500 rows plus one truncation sentinel before ranking, aggregation, and payload hydration; every attempt-derived count is explicitly exact or a lower bound through the API and Swedish/English UI; unlimited exports remain complete; narrow PostgreSQL indexes are resumable and reject wrong, mixed-direction, or widened definitions (`acf340e9a..f82a2419a`, gate green 8/10 after three total passes, no findings) |
@@ -101,8 +102,15 @@ external release gate (item 10); BM0.2 is external (item 10).
    Builder feedback. Five disproven heuristic lints were deleted. The two
    source-proven structural-waste critic rules remain; adding new critic
    topology is recorded as `measured_no_change`.
-5. **Operational attachment semantics** *(large)* — the conversion happens
-   at the post-flow-creation materialization seam, inside the existing
+5. **Operational attachment semantics** *(large; evidence slice LANDED
+   `caa17c3ef`)* — actual readability and coverage now survive role selection
+   and replay; full placeholder identity remains canonical; all parseable JSON
+   schema candidates are discovered deterministically and multiple candidates
+   refuse before provider work; a private full-evidence fingerprint invalidates
+   stale confirmation independently of bounded presentation. Remaining work:
+   interpret and confirm bounded structure/style/schema constraints, then bind
+   exactly one selected template. The conversion happens at the
+   post-flow-creation materialization seam, inside the existing
    atomic apply transaction: the Builder carries one typed
    template-attachment INTENT through the authoring command; after the
    materializer creates/locks the Flow, a deepened
@@ -113,8 +121,7 @@ external release gate (item 10); BM0.2 is external (item 10).
    implemented; `upload_asset` requires a persisted flow, which create-mode
    only has mid-materialization). Exactly ONE selected template for the
    terminal template-fill step; zero or multiple → typed question/refusal.
-   JSON schema selection stops silently taking the first parseable file
-   (BM2.7). Tests: detach/retention races, tenant/space mismatch, replay,
+   Tests: detach/retention races, tenant/space mismatch, replay,
    rollback, publish, runtime rendering, survival after Builder-session
    deletion.
 6. **One canonical attempt-evidence projection** *(medium/large)* —
@@ -200,11 +207,12 @@ controls all other ordering.
 
 - **B1** (= item 4): **LANDED** `c606411f7..48e9be497`. Terminal replayable
   Builder persistence and bounded canonical proposal snapshots. *(L)*
-- **B2** (= item 5 deepened, three ordered owner slices): (a) preserve the
-  attachment owner's actual evidence contract —
-  `fully_seen/excerpt_truncated/inventory_only` plus readability — through
-  role selection, keep full placeholder identity with display-only clipping,
-  and stop selecting the first parseable schema; (b) derive and confirm bounded
+- **B2** (= item 5 deepened, three ordered owner slices): (a) **LANDED
+  `caa17c3ef`** — preserve the attachment owner's actual evidence contract
+  (`fully_seen/excerpt_truncated/inventory_only` plus readability) through role
+  selection and replay, keep full placeholder identity with display-only
+  clipping, discover all schema candidates, and refuse ambiguity before
+  provider work; (b) derive and confirm bounded
   structure/style/schema constraints, deduplicating identical schemas and asking
   on conflicts; (c) bind exactly one selected template at the atomic
   materialization seam and prove reference/context material is never resent at
