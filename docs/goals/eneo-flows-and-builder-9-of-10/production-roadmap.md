@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-30 | **Canonical Flow attempt input**: one strict immutable envelope now owns the activation start, resolved input, exact per-call question/effective prompt/context version, and one shared preferred/capability-safe model configuration; unsupported parameters are removed before the plan is frozen, mapped JSON capability learning preserves the admitted `N+1` provider-call bound, terminal projections cannot overwrite start truth, and attempt provenance retains only irreconstructible evidence (`2f1447446`, gate green 8/10 after four same-session passes, no findings) |
 | 2026-07-30 | **Model-aware Builder resource policy**: attachment text now shares the selected model's declared input window after output, safety, and conversation reserves instead of using fixed character quotas; admins own effective attachment, message, aggregate DOCX-inspection, placeholder, and token-reserve policy; fixed API, parser, and planning-state safety ceilings are returned through the typed settings contract and explained in Swedish/English; frontend/backend admission agrees, template failures are explicit before provider work, and shared settings writes are serialized with a lost-update regression proof (`478dfeb1c`, gate green 8/10 after three same-session passes, no findings) |
 | 2026-07-30 | **Atomic Builder template attachment binding**: exactly one confirmed DOCX is compiled into required, runtime-provable placeholder bindings before proposal hashing; transcription-dependent templates make audio input required; apply reuses the same uploaded File and atomically creates the Flow asset and normal resource binding; authorization, bounded inspection, rollback, retry, replay, deletion races, publish pinning, real DOCX rendering, and deterministic zero-token execution are proven, while reference/context/example attachments remain planning-only (`2d608b309`, gate green 9/10 after six same-session passes, no findings) |
 | 2026-07-30 | **Reliable Builder attachment interpretation**: canonically equal explicit schemas now merge with complete provenance, distinct schemas ask one replay-safe bounded question before provider work, and selected example outputs contribute cited structure/style guidance plus deliberately open inferred JSON shape without exact-fidelity or closed-world claims; one focused schema-evidence owner enforces strict JSON, byte/depth/field bounds, conservative inference, and shared field projection, while `PlanningState` owns one atomic attachment-interpretation transition (`f25b029e6`, gate green 8/10 after four same-session passes, no findings) |
@@ -116,24 +117,20 @@ external release gate (item 10); BM0.2 is external (item 10).
    cover required transcription input, detach/deletion races, authorization,
    rollback, retry, replay, publish pinning, session deletion, real DOCX render,
    and deterministic zero-token template fill.
-6. **One canonical attempt-evidence projection** *(medium/large)* —
-   **DELETION BOUNDARY LANDED** `a3d2ba41d`. Attempt provenance v2 rejects
-   duplicate artifact, template, runtime-input, transcription, guard, HTTP,
-   token-receipt, and agentic projections; relational provider calls and result
-   files remain canonical, original attempt payloads remain immutable, and
-   `step_result_builder` owns terminal evidence construction. Remaining work:
-   converge prompt, model-parameter, and attempt-start scalars on a typed
-   immutable attempt input, then type the surviving provenance envelopes.
-   Target ownership boundary: the immutable attempt input owns the exact execution
-   snapshot; relational result files own artifacts; attempt provenance owns
-   only what cannot be reconstructed (verbatim RAG, provider-call facts);
-   the mutable step result is a runtime projection, not a parallel forensic
-   store. `step_result_builder` becomes the sole projection builder,
-   executor orchestrates. Delete redundant fields FIRST, then type the
-   surviving envelopes (reuse `RetrievedKnowledgeEvidence`); typing before
-   deletion would formalize duplication. Acceptance: a survivor matrix
-   proving each exported fact has exactly one owner and retention-purged
-   output stays honest.
+6. ~~One canonical attempt-evidence projection~~ — **LANDED**
+   `a3d2ba41d..2f1447446`. The strict typed attempt input now owns the exact
+   execution snapshot known before provider work: immutable start policy,
+   resolved input, ordered per-call question/effective prompt/context version,
+   and one shared preferred/capability-safe model configuration. Completion
+   parameters are filtered through the selected model's canonical capabilities
+   before persistence and dispatch; mapped calls learn one JSON rejection and
+   remain inside the admitted `N+1` call bound. Relational provider calls and
+   result files remain canonical, terminal projections cannot replace activation
+   truth, and attempt provenance v3 retains only irreconstructible RAG,
+   completion/tool-call, and citation evidence. `step_result_builder` is the
+   terminal projection owner; the executor only orchestrates. The survivor
+   matrix, evidence/export readers, retention markers, SDK, and generated
+   developer schema all follow that ownership boundary.
 7. **Resolved-input lineage projection** *(medium)* — batch-project the
    persisted exact lineage into the existing evidence bundle for admitted
    attempts, under the item-1 snapshot, inside the item-2 aggregate
