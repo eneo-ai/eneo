@@ -290,6 +290,9 @@ class QuestionRepository:
         answer: str,
         num_tokens_question: int | None = None,
         num_tokens_answer: int | None = None,
+        context_prompt_tokens: int | None = None,
+        context_completion_tokens: int | None = None,
+        skill_context_tokens: int | None = None,
         completion_model_id: UUID | None = None,
         tool_calls: list["ToolCallInfo"] | None = None,
         reasoning: str | None = None,
@@ -325,6 +328,12 @@ class QuestionRepository:
             update_values["num_tokens_question"] = num_tokens_question
         if num_tokens_answer is not None:
             update_values["num_tokens_answer"] = num_tokens_answer
+        if context_prompt_tokens is not None:
+            update_values["context_prompt_tokens"] = context_prompt_tokens
+        if context_completion_tokens is not None:
+            update_values["context_completion_tokens"] = context_completion_tokens
+        if skill_context_tokens is not None:
+            update_values["skill_context_tokens"] = skill_context_tokens
         if completion_model_id is not None:
             update_values["completion_model_id"] = completion_model_id
         if tool_calls is not None:

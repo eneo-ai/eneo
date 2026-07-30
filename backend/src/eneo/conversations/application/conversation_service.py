@@ -222,21 +222,21 @@ class ConversationService:
 
         assistant_attachment_tokens = 0
         prompt_tokens = 0
+        skill_context_tokens = 0
         # The persistent baseline only makes sense for a bare assistant target
         # (the config page and a brand-new conversation). For an existing session
         # or group chat the prompt + attachments are already inside the history
         # the client tracks separately, so leave them at 0 and keep the hot chat
         # path cost identical to before.
         if assistant_id is not None and session_id is None and group_chat_id is None:
-            (
-                prompt_text,
-                attachments,
-            ) = await self.assistant_service.get_preflight_baseline(assistant_id)
-            if assistant_prompt is not None:
-                prompt_text = assistant_prompt
-            prompt_tokens = count_tokens(prompt_text or "", model_name)
+            baseline = await self.assistant_service.get_preflight_baseline(
+                assistant_id,
+                prompt_override=assistant_prompt,
+            )
+            prompt_tokens = baseline.prompt_tokens
+            skill_context_tokens = baseline.skill_context_tokens
             assistant_attachment_tokens, _ = await self._count_preflight_files(
-                files=attachments,
+                files=baseline.attachments,
                 model=model,
                 model_name=model_name,
             )
@@ -250,6 +250,7 @@ class ConversationService:
             context_reserve_tokens=get_settings().attachment_context_reserve_tokens,
             assistant_attachment_tokens=assistant_attachment_tokens,
             prompt_tokens=prompt_tokens,
+            skill_context_tokens=skill_context_tokens,
         )
 
     async def _count_preflight_files(

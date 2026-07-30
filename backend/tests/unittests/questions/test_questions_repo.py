@@ -168,10 +168,16 @@ async def test_answer_finalization_does_not_rewrite_frozen_skill_activation():
         answer="Completed",
         num_tokens_question=10,
         num_tokens_answer=5,
+        context_prompt_tokens=6,
+        context_completion_tokens=4,
+        skill_context_tokens=3,
     )
 
     statement = session.execute.await_args.args[0]
     compiled = statement.compile(dialect=postgresql.dialect())
+    assert compiled.params["context_prompt_tokens"] == 6
+    assert compiled.params["context_completion_tokens"] == 4
+    assert compiled.params["skill_context_tokens"] == 3
     assert "skill_activation" not in str(compiled)
     assert "skill_activation" not in compiled.params
 

@@ -29,6 +29,7 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     McpToolReference,
     ResponseType,
+    TokenUsage,
 )
 from eneo.sessions import session_service as session_service_module
 from eneo.sessions.session_service import (
@@ -84,7 +85,10 @@ def _skill_runtime_args(
         "skill_plan": SimpleNamespace(
             active_provenance=MagicMock(return_value=()),
             activation_evidence=MagicMock(
-                return_value=SimpleNamespace(effective_mode="selective")
+                return_value=SimpleNamespace(
+                    effective_mode="selective",
+                    skill_context_tokens=final_skill_context_tokens,
+                )
             ),
         ),
         "skill_runtime": SimpleNamespace(snapshot=MagicMock(return_value=snapshot)),
@@ -225,6 +229,9 @@ async def test_complete_question_with_answer_calls_repo_update():
         answer="Aborting an SSE stream is done by calling abort() on the AbortController.",
         num_tokens_question=42,
         num_tokens_answer=7,
+        context_prompt_tokens=24,
+        context_completion_tokens=5,
+        skill_context_tokens=11,
         completion_model=completion_model,
         info_blob_chunks=[],
         generated_files=None,
@@ -240,6 +247,9 @@ async def test_complete_question_with_answer_calls_repo_update():
     assert kwargs["answer"].startswith("Aborting an SSE stream")
     assert kwargs["num_tokens_question"] == 42
     assert kwargs["num_tokens_answer"] == 7
+    assert kwargs["context_prompt_tokens"] == 24
+    assert kwargs["context_completion_tokens"] == 5
+    assert kwargs["skill_context_tokens"] == 11
     assert kwargs["completion_model_id"] == completion_model.id
 
 
@@ -578,12 +588,77 @@ async def test_streaming_handle_response_persists_cumulative_input_estimate():
         yield Completion(
             reasoning_token_count=0,
             stop=True,
+            usage=TokenUsage(
+                prompt_tokens=None,
+                completion_tokens=20,
+                context_prompt_tokens=None,
+                context_completion_tokens=None,
+            ),
             input_token_estimate=41,
+            context_input_token_estimate=23,
         )
 
     response = SimpleNamespace(
         completion=fake_completion_stream(),
         total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from eneo.assistants.assistant_service import AssistantService
+
+    with patch("eneo.assistants.assistant_service.count_tokens", return_value=7):
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            assistant_selector_tokens=2,
+            **_skill_runtime_args(
+                initial_skill_context_tokens=2,
+                final_skill_context_tokens=7,
+            ),
+        )
+        async for _ in gen:
+            pass
+
+    persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
+    assert persisted["num_tokens_question"] == 43
+    assert persisted["num_tokens_answer"] == 20
+    assert persisted["context_prompt_tokens"] == 23
+    assert persisted["context_completion_tokens"] == 7
+
+
+@pytest.mark.asyncio
+async def test_streaming_handle_response_separates_billing_from_context_usage():
+    async def fake_completion_stream():
+        yield Completion(
+            reasoning_token_count=0,
+            response_type=ResponseType.TEXT,
+            text="ok",
+        )
+        yield Completion(
+            stop=True,
+            usage=TokenUsage(
+                prompt_tokens=1020,
+                completion_tokens=60,
+                context_prompt_tokens=520,
+                context_completion_tokens=40,
+            ),
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=500,
         usage=None,
         extended_logging=None,
     )
@@ -604,17 +679,97 @@ async def test_streaming_handle_response_persists_cumulative_input_estimate():
         stream=True,
         assistant_id=uuid4(),
         question_id=uuid4(),
-        assistant_selector_tokens=2,
-        **_skill_runtime_args(
-            initial_skill_context_tokens=2,
-            final_skill_context_tokens=7,
-        ),
+        **_skill_runtime_args(final_skill_context_tokens=37),
     )
-    async for _ in gen:
-        pass
+    collected = [completion async for completion in gen]
 
     persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
-    assert persisted["num_tokens_question"] == 43
+    assert persisted["num_tokens_question"] == 1020
+    assert persisted["num_tokens_answer"] == 60
+    assert persisted["context_prompt_tokens"] == 520
+    assert persisted["context_completion_tokens"] == 40
+    assert persisted["skill_context_tokens"] == 37
+
+    usage_event = next(
+        completion
+        for completion in collected
+        if completion.response_type == ResponseType.TOKEN_USAGE
+    )
+    assert usage_event.usage is not None
+    assert usage_event.usage.prompt_tokens == 1020
+    assert usage_event.usage.completion_tokens == 60
+    assert usage_event.usage.context_prompt_tokens == 520
+    assert usage_event.usage.context_completion_tokens == 40
+    assert usage_event.skill_context_tokens == 37
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("usage", "context_input_token_estimate"),
+    [
+        pytest.param(
+            TokenUsage(
+                prompt_tokens=1020,
+                completion_tokens=60,
+                context_prompt_tokens=520,
+                context_completion_tokens=40,
+            ),
+            999,
+            id="provider-final-request-usage-wins",
+        ),
+        pytest.param(
+            TokenUsage(
+                prompt_tokens=None,
+                completion_tokens=60,
+                context_prompt_tokens=None,
+                context_completion_tokens=None,
+            ),
+            520,
+            id="final-request-estimate-fallback",
+        ),
+    ],
+)
+async def test_non_streaming_handle_response_persists_context_without_changing_cost(
+    usage: TokenUsage,
+    context_input_token_estimate: int,
+):
+    response = SimpleNamespace(
+        completion=Completion(
+            text="ok",
+            context_input_token_estimate=context_input_token_estimate,
+        ),
+        total_token_count=1020,
+        usage=usage,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from eneo.assistants.assistant_service import AssistantService
+
+    with patch("eneo.assistants.assistant_service.count_tokens", return_value=40):
+        answer = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=False,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(final_skill_context_tokens=37),
+        )
+
+    assert answer == "ok"
+    persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
+    assert persisted["num_tokens_question"] == 1020
+    assert persisted["num_tokens_answer"] == 60
+    assert persisted["context_prompt_tokens"] == 520
+    assert persisted["context_completion_tokens"] == 40
+    assert persisted["skill_context_tokens"] == 37
 
 
 @pytest.mark.asyncio
@@ -702,6 +857,11 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
             response_type=ResponseType.TEXT,
             text="ok",
         )
+        yield Completion(
+            stop=True,
+            output_token_estimate=13,
+            context_output_token_estimate=11,
+        )
 
     response = SimpleNamespace(
         completion=fake_completion_stream(),
@@ -738,6 +898,8 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
     update_kwargs = session_service_mock.complete_question_with_answer.call_args.kwargs
     assert update_kwargs["answer"] == "ok"
     assert update_kwargs["reasoning"] == "let me think"
+    assert update_kwargs["num_tokens_answer"] == 13
+    assert update_kwargs["context_completion_tokens"] == 11
 
 
 @pytest.mark.asyncio

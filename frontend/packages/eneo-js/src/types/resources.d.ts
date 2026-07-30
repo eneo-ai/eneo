@@ -165,13 +165,7 @@ export type Conversation = components["schemas"]["SessionPublic"] & {
 };
 export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
 export type McpToolReference = components["schemas"]["McpToolReferencePublic"];
-// num_tokens_* are populated by the backend on every persisted message and
-// streamed live via the SSE token_usage event, but are not part of the generated
-// Message schema.
-export type ConversationMessage = components["schemas"]["Message"] & {
-  num_tokens_question?: number;
-  num_tokens_answer?: number;
-};
+export type ConversationMessage = components["schemas"]["Message"];
 export type ConversationTools = components["schemas"]["UseTools"];
 export type ChatTurnDiagnostics = components["schemas"]["ChatTurnDiagnostics"];
 export type PreflightResponse = components["schemas"]["PreflightResponse"];

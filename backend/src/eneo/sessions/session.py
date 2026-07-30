@@ -3,7 +3,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.files.file_models import FilePublic
@@ -179,9 +179,33 @@ class SSEToolApprovalTimeout(SSEBase):
 
 
 class TokenUsageEvent(BaseModel):
-    prompt_tokens: int
-    completion_tokens: int
-    turn_tokens: int
+    prompt_tokens: int = Field(
+        description=(
+            "Cumulative prompt tokens across every provider request in this "
+            "logical turn. Use context_prompt_tokens for context-window headroom."
+        )
+    )
+    completion_tokens: int = Field(
+        description=(
+            "Cumulative completion tokens across every provider response in this "
+            "logical turn. Use context_completion_tokens for context-window headroom."
+        )
+    )
+    turn_tokens: int = Field(
+        description="Cumulative prompt_tokens plus completion_tokens for this turn."
+    )
+    context_prompt_tokens: int = Field(
+        description="Prompt tokens for the final provider request only."
+    )
+    context_completion_tokens: int = Field(
+        description="Completion tokens for the final provider response only."
+    )
+    skill_context_tokens: int = Field(
+        description=(
+            "Model-aware Skill-owned subset of context_prompt_tokens. Already "
+            "included; do not add it to context usage again."
+        )
+    )
 
 
 class SSETokenUsage(SSEBase):

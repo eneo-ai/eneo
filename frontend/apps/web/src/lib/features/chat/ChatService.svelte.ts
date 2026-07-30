@@ -59,19 +59,22 @@ export class ChatService {
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
 
-  // Context-window usage for the most recent turn. Split into input vs output
-  // so the bar can show what was sent to the LLM (system + MCP + RAG + history
-  // + question, lumped together in the provider's prompt_tokens) separately
-  // from what the model returned. Updated live via SSE token_usage and seeded
-  // from the last persisted message on conversation load.
+  // Context-window usage for the final provider request in the most recent
+  // turn. Skill activation and tool rounds can issue additional requests; their
+  // cumulative usage belongs to cost reporting, not to this headroom snapshot.
   lockedInputTokens = $state<number>(0);
   lockedOutputTokens = $state<number>(0);
+  // Subset of lockedInputTokens owned by the Skill runtime. It is displayed as
+  // a breakdown only and must never be added to contextTokens again.
+  lockedSkillTokens = $state<number>(0);
 
   // Assistant baseline applies only before the first turn of a bare assistant
   // chat. Once a conversation exists, the provider's prompt_tokens for the last
   // turn already include prompt + persistent attachments.
   assistantPromptTokens = $state<number>(0);
   assistantAttachmentTokens = $state<number>(0);
+  // Subset of assistantPromptTokens for the initial assistant baseline.
+  assistantSkillTokens = $state<number>(0);
   assistantBaselineTokens = $derived(this.assistantPromptTokens + this.assistantAttachmentTokens);
   contextTokens = $derived(
     this.assistantBaselineTokens + this.lockedInputTokens + this.lockedOutputTokens
@@ -296,13 +299,15 @@ export class ChatService {
     // context fill — fixed when the user sends their next message and we
     // receive a fresh token_usage SSE event.
     const last = messages[messages.length - 1];
-    this.lockedInputTokens = last.num_tokens_question ?? 0;
-    this.lockedOutputTokens = last.num_tokens_answer ?? 0;
+    this.lockedInputTokens = last.context_prompt_tokens ?? last.num_tokens_question ?? 0;
+    this.lockedOutputTokens = last.context_completion_tokens ?? last.num_tokens_answer ?? 0;
+    this.lockedSkillTokens = last.skill_context_tokens ?? 0;
   }
 
   #resetLocked() {
     this.lockedInputTokens = 0;
     this.lockedOutputTokens = 0;
+    this.lockedSkillTokens = 0;
   }
 
   #clearPreflight(clearAssistantBaseline = true) {
@@ -314,6 +319,7 @@ export class ChatService {
     if (clearAssistantBaseline) {
       this.assistantPromptTokens = 0;
       this.assistantAttachmentTokens = 0;
+      this.assistantSkillTokens = 0;
     }
     this.pendingInputTokens = 0;
     this.pendingFileTokens = 0;
@@ -363,9 +369,11 @@ export class ChatService {
         if (this.#canRequestAssistantBaseline(partnerAtStart, conversationAtStart)) {
           this.assistantPromptTokens = res.prompt_tokens ?? 0;
           this.assistantAttachmentTokens = res.assistant_attachment_tokens ?? 0;
+          this.assistantSkillTokens = res.skill_context_tokens ?? 0;
         } else {
           this.assistantPromptTokens = 0;
           this.assistantAttachmentTokens = 0;
+          this.assistantSkillTokens = 0;
         }
         this.pendingModelName = res.model_name;
         this.pendingContextWindow = res.context_window;
@@ -374,6 +382,7 @@ export class ChatService {
         if (gen === this.#preflightGen) {
           this.assistantPromptTokens = 0;
           this.assistantAttachmentTokens = 0;
+          this.assistantSkillTokens = 0;
           this.pendingInputTokens = 0;
           this.pendingFileTokens = 0;
           this.pendingModelName = "";
@@ -677,25 +686,27 @@ export class ChatService {
               if (event.eneo_event_type === "generating_image") {
                 if (!ref) return;
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
-              } else if (event.eneo_event_type === "token_usage") {
+              } else if (event.eneo_event_type === "token_usage" && "usage" in event) {
                 // The backend routes token_usage events through the same SSE
                 // channel as eneo events. Reflect them on the live message
                 // so reload-from-history matches the in-memory state, then
                 // expose the running context fill for the UI bar.
-                const usage = (
-                  event as unknown as {
-                    usage?: { prompt_tokens: number; completion_tokens: number };
-                  }
-                ).usage;
-                if (!usage) return;
+                const usage = event.usage;
                 if (ref) {
                   ref.num_tokens_question = usage.prompt_tokens;
                   ref.num_tokens_answer = usage.completion_tokens;
+                  ref.context_prompt_tokens = usage.context_prompt_tokens ?? usage.prompt_tokens;
+                  ref.context_completion_tokens =
+                    usage.context_completion_tokens ?? usage.completion_tokens;
+                  ref.skill_context_tokens = usage.skill_context_tokens;
                 }
-                this.lockedInputTokens = usage.prompt_tokens;
-                this.lockedOutputTokens = usage.completion_tokens;
+                this.lockedInputTokens = usage.context_prompt_tokens ?? usage.prompt_tokens;
+                this.lockedOutputTokens =
+                  usage.context_completion_tokens ?? usage.completion_tokens;
+                this.lockedSkillTokens = usage.skill_context_tokens;
                 this.assistantPromptTokens = 0;
                 this.assistantAttachmentTokens = 0;
+                this.assistantSkillTokens = 0;
               }
             },
             onToolCall: (event) => {

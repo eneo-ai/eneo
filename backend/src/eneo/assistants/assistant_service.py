@@ -12,6 +12,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
     TokenUsage,
+    function_definition_to_tool,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.assistants.assistant import Assistant
@@ -185,6 +186,13 @@ logger = get_logger(__name__)
 class AssistantCompletionFileInputs:
     completion_message_files: list[File]
     completion_prompt_files: list[File]
+
+
+@dataclass(frozen=True)
+class AssistantPreflightBaseline:
+    prompt_tokens: int
+    skill_context_tokens: int
+    attachments: list[File]
 
 
 AT_TAG_PATTERN = r"<eneo-at-tag: @[^>]+>"
@@ -368,10 +376,15 @@ class AssistantService:
         assistant: Assistant,
         effective_config: "EffectiveConfig | None",
         space_is_personal: bool,
+        base_instructions_override: str | None = None,
     ) -> SkillTurnPlan:
-        base_instructions = self._governed_base_instructions(
-            assistant,
-            effective_config,
+        base_instructions = (
+            base_instructions_override
+            if base_instructions_override is not None
+            else self._governed_base_instructions(
+                assistant,
+                effective_config,
+            )
         )
         resolution = await self._resolve_assistant_skill_runtime(
             assistant=assistant,
@@ -1596,8 +1609,11 @@ class AssistantService:
         )
 
     async def get_preflight_baseline(
-        self, assistant_id: UUID
-    ) -> tuple[str, list[File]]:
+        self,
+        assistant_id: UUID,
+        *,
+        prompt_override: str | None = None,
+    ) -> AssistantPreflightBaseline:
         """The always-present cost of an assistant: its system prompt text and
         its persistent attachments, which ride along on every question.
 
@@ -1616,17 +1632,39 @@ class AssistantService:
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
+            base_instructions_override=prompt_override,
         )
         model = self._context_model(assistant, effective_config=effective_config)
-        prompt = skill_plan.composition.prompt
+        prompt_tokens = 0
+        skill_context_tokens = 0
         if model is not None:
-            prompt = skill_plan.to_activation_runtime(
+            runtime = skill_plan.to_activation_runtime(
                 selected_model_route=model.get_model_route(),
                 max_input_tokens=model.max_input_tokens,
                 supports_tool_calling=model.supports_tool_calling,
-            ).prompt
+            )
+            skill_context_tokens = runtime.snapshot().measurement.tokens
+            messages = (
+                [{"role": "system", "content": runtime.prompt}]
+                if runtime.prompt
+                else []
+            )
+            tools = (
+                [function_definition_to_tool(runtime.tool_definition)]
+                if runtime.tool_definition is not None
+                else []
+            )
+            prompt_tokens = measure_provider_input_tokens(
+                messages,
+                tools,
+                model.get_model_route(),
+            ).tokens
 
-        return prompt, assistant.attachments
+        return AssistantPreflightBaseline(
+            prompt_tokens=prompt_tokens,
+            skill_context_tokens=skill_context_tokens,
+            attachments=assistant.attachments,
+        )
 
     async def get_skill_configuration(
         self,
@@ -1880,6 +1918,9 @@ class AssistantService:
                 mcp_ref_seen: set[UUID] = set()
                 stream_usage: TokenUsage | None = None
                 stream_input_token_estimate: int | None = None
+                stream_context_input_token_estimate: int | None = None
+                stream_output_token_estimate: int | None = None
+                stream_context_output_token_estimate: int | None = None
                 completed = False
 
                 try:
@@ -1893,6 +1934,16 @@ class AssistantService:
                             stream_usage = chunk.usage
                         if chunk.input_token_estimate is not None:
                             stream_input_token_estimate = chunk.input_token_estimate
+                        if chunk.context_input_token_estimate is not None:
+                            stream_context_input_token_estimate = (
+                                chunk.context_input_token_estimate
+                            )
+                        if chunk.output_token_estimate is not None:
+                            stream_output_token_estimate = chunk.output_token_estimate
+                        if chunk.context_output_token_estimate is not None:
+                            stream_context_output_token_estimate = (
+                                chunk.context_output_token_estimate
+                            )
 
                         if chunk.response_type == ResponseType.TEXT:
                             response_string = f"{response_string}{chunk.text}"
@@ -2095,6 +2146,9 @@ class AssistantService:
                     if stream_usage and stream_usage.completion_tokens is not None:
                         num_tokens_answer = stream_usage.completion_tokens
                         output_source = "provider"
+                    elif stream_output_token_estimate is not None:
+                        num_tokens_answer = stream_output_token_estimate
+                        output_source = "litellm"
                     else:
                         assert completion_model is not None
                         num_tokens_answer = (
@@ -2102,6 +2156,25 @@ class AssistantService:
                             + reasoning_token_count
                         )
                         output_source = "litellm"
+
+                    assert completion_model is not None
+                    context_prompt_tokens = (
+                        stream_usage.context_prompt_tokens
+                        if stream_usage
+                        and stream_usage.context_prompt_tokens is not None
+                        else stream_context_input_token_estimate
+                        if stream_context_input_token_estimate is not None
+                        else num_tokens_question
+                    )
+                    context_completion_tokens = (
+                        stream_usage.context_completion_tokens
+                        if stream_usage
+                        and stream_usage.context_completion_tokens is not None
+                        else stream_context_output_token_estimate
+                        if stream_context_output_token_estimate is not None
+                        else count_tokens(response_string, completion_model.name)
+                        + reasoning_token_count
+                    )
 
                     logger.info(
                         f"[TokenUsage] assistant={assistant_id} streaming — "
@@ -2115,6 +2188,9 @@ class AssistantService:
                         answer=response_string,
                         num_tokens_question=num_tokens_question,
                         num_tokens_answer=num_tokens_answer,
+                        context_prompt_tokens=context_prompt_tokens,
+                        context_completion_tokens=context_completion_tokens,
+                        skill_context_tokens=skill_activation.skill_context_tokens,
                         completion_model=cast("AICompletionModel", completion_model),
                         info_blob_chunks=reference_chunks,
                         generated_files=generated_files,
@@ -2133,9 +2209,12 @@ class AssistantService:
                     yield Completion(
                         text="",
                         response_type=ResponseType.TOKEN_USAGE,
+                        skill_context_tokens=skill_activation.skill_context_tokens,
                         usage=TokenUsage(
                             prompt_tokens=num_tokens_question,
                             completion_tokens=num_tokens_answer,
+                            context_prompt_tokens=context_prompt_tokens,
+                            context_completion_tokens=context_completion_tokens,
                         ),
                     )
                 finally:
@@ -2228,6 +2307,15 @@ class AssistantService:
             if response.usage and response.usage.completion_tokens is not None:
                 num_tokens_answer = response.usage.completion_tokens
                 output_source = "provider"
+            elif (
+                output_token_estimate := getattr(
+                    response.completion,
+                    "output_token_estimate",
+                    None,
+                )
+            ) is not None:
+                num_tokens_answer = output_token_estimate
+                output_source = "litellm"
             else:
                 assert completion_model is not None
                 num_tokens_answer = (
@@ -2235,6 +2323,34 @@ class AssistantService:
                     + reasoning_token_count
                 )
                 output_source = "litellm"
+
+            assert completion_model is not None
+            context_input_token_estimate = getattr(
+                response.completion,
+                "context_input_token_estimate",
+                None,
+            )
+            context_output_token_estimate = getattr(
+                response.completion,
+                "context_output_token_estimate",
+                None,
+            )
+            context_prompt_tokens = (
+                response.usage.context_prompt_tokens
+                if response.usage and response.usage.context_prompt_tokens is not None
+                else context_input_token_estimate
+                if context_input_token_estimate is not None
+                else num_tokens_question
+            )
+            context_completion_tokens = (
+                response.usage.context_completion_tokens
+                if response.usage
+                and response.usage.context_completion_tokens is not None
+                else context_output_token_estimate
+                if context_output_token_estimate is not None
+                else count_tokens(final_answer, completion_model.name)
+                + reasoning_token_count
+            )
 
             logger.info(
                 f"[TokenUsage] assistant={assistant_id} non-streaming — "
@@ -2248,6 +2364,9 @@ class AssistantService:
                 answer=final_answer,
                 num_tokens_question=num_tokens_question,
                 num_tokens_answer=num_tokens_answer,
+                context_prompt_tokens=context_prompt_tokens,
+                context_completion_tokens=context_completion_tokens,
+                skill_context_tokens=skill_activation.skill_context_tokens,
                 generated_files=generated_files,
                 completion_model=cast("AICompletionModel", completion_model),
                 info_blob_chunks=reference_chunks,
