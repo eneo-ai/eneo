@@ -110,6 +110,10 @@ def test_tenant_in_db_validates_ai_builder_flow_settings():
             "ai_builder": {
                 "conversation_safety_buffer_tokens": 1500,
                 "minimum_conversation_budget_tokens": 6000,
+                "max_attachments": 37,
+                "max_message_chars": 12_000,
+                "max_template_inspection_uncompressed_bytes": 64 * 1024 * 1024,
+                "max_template_placeholders": 750,
             }
         },
         state=TenantState.ACTIVE,
@@ -118,6 +122,8 @@ def test_tenant_in_db_validates_ai_builder_flow_settings():
     assert (
         tenant.flow_settings["ai_builder"]["conversation_safety_buffer_tokens"] == 1500
     )
+    assert tenant.flow_settings["ai_builder"]["max_attachments"] == 37
+    assert tenant.flow_settings["ai_builder"]["max_template_placeholders"] == 750
 
 
 def test_tenant_in_db_rejects_invalid_ai_builder_flow_settings():

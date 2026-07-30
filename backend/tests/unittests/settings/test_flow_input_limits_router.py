@@ -246,7 +246,18 @@ async def test_get_ai_builder_budget_settings_delegates_to_service() -> None:
     service.get_ai_builder_budget_settings.return_value = AIBuilderBudgetSettingsPublic(
         conversation_safety_buffer_tokens=1500,
         minimum_conversation_budget_tokens=6000,
-        unknown_model_context_window_tokens=None,
+        max_attachments=37,
+        max_message_chars=12000,
+        max_template_inspection_uncompressed_bytes=67108864,
+        max_template_placeholders=750,
+        max_attachments_hard_limit=100,
+        max_message_chars_hard_limit=50000,
+        max_template_inspection_uncompressed_bytes_hard_limit=209715200,
+        max_template_placeholders_hard_limit=10000,
+        max_template_archive_entries_per_file_hard_limit=2048,
+        max_template_uncompressed_bytes_per_file_hard_limit=52428800,
+        max_planning_state_payload_bytes_hard_limit=131072,
+        budget_token_hard_limit=10000000,
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -268,7 +279,18 @@ async def test_patch_ai_builder_budget_settings_delegates_to_service() -> None:
         AIBuilderBudgetSettingsPublic(
             conversation_safety_buffer_tokens=1800,
             minimum_conversation_budget_tokens=5000,
-            unknown_model_context_window_tokens=256000,
+            max_attachments=42,
+            max_message_chars=15000,
+            max_template_inspection_uncompressed_bytes=67108864,
+            max_template_placeholders=800,
+            max_attachments_hard_limit=100,
+            max_message_chars_hard_limit=50000,
+            max_template_inspection_uncompressed_bytes_hard_limit=209715200,
+            max_template_placeholders_hard_limit=10000,
+            max_template_archive_entries_per_file_hard_limit=2048,
+            max_template_uncompressed_bytes_per_file_hard_limit=52428800,
+            max_planning_state_payload_bytes_hard_limit=131072,
+            budget_token_hard_limit=10000000,
         )
     )
     container.settings_service.return_value = service
@@ -278,13 +300,12 @@ async def test_patch_ai_builder_budget_settings_delegates_to_service() -> None:
 
     payload = AIBuilderBudgetSettingsUpdate(
         conversation_safety_buffer_tokens=1800,
-        unknown_model_context_window_tokens=256000,
     )
     response = await update_ai_builder_budget_settings(
         payload=payload, container=container
     )
 
-    assert response.unknown_model_context_window_tokens == 256000
+    assert response.conversation_safety_buffer_tokens == 1800
     service.update_ai_builder_budget_settings.assert_awaited_once_with(payload)
 
 

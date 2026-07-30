@@ -8,8 +8,13 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.flow_ai_builder_budget_settings import (
+    AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS,
+    AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+    AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+    AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
     extract_ai_builder_budget_settings,
     parse_ai_builder_budget_token,
+    parse_ai_builder_operating_limit,
 )
 from eneo.main.config import get_settings
 
@@ -18,7 +23,12 @@ from eneo.main.config import get_settings
 class AIBuilderBudgetPolicy:
     conversation_safety_buffer_tokens: int
     minimum_conversation_budget_tokens: int
-    unknown_model_context_window_tokens: int | None = None
+    max_attachments: int = AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT
+    max_message_chars: int = AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT
+    max_template_inspection_uncompressed_bytes: int = (
+        AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
+    )
+    max_template_placeholders: int = AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS
 
 
 def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
@@ -30,7 +40,12 @@ def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
         minimum_conversation_budget_tokens=int(
             source.ai_builder_minimum_conversation_budget_tokens
         ),
-        unknown_model_context_window_tokens=source.ai_builder_unknown_model_context_window_tokens,
+        max_attachments=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+        max_message_chars=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+        max_template_inspection_uncompressed_bytes=(
+            AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
+        ),
+        max_template_placeholders=AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS,
     )
 
 
@@ -76,18 +91,37 @@ def resolve_ai_builder_budget_policy(
         if parsed_minimum_budget is not None:
             minimum_budget = parsed_minimum_budget
 
-    unknown_context_window = resolved_defaults.unknown_model_context_window_tokens
-    if "unknown_model_context_window_tokens" in raw:
-        unknown_context_window = _parse_token_int(
-            raw["unknown_model_context_window_tokens"],
-            "unknown_model_context_window_tokens",
-            allow_none=True,
-        )
+    operating_limits = {
+        "max_attachments": resolved_defaults.max_attachments,
+        "max_message_chars": resolved_defaults.max_message_chars,
+        "max_template_inspection_uncompressed_bytes": (
+            resolved_defaults.max_template_inspection_uncompressed_bytes
+        ),
+        "max_template_placeholders": resolved_defaults.max_template_placeholders,
+    }
+    for field_name in operating_limits:
+        if field_name not in raw:
+            continue
+        try:
+            operating_limits[field_name] = parse_ai_builder_operating_limit(
+                raw[field_name],
+                field_name,
+            )
+        except ValueError as error:
+            raise AIBuilderBadRequestException(
+                str(error),
+                code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
+            ) from error
 
     return AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=safety_buffer,
         minimum_conversation_budget_tokens=minimum_budget,
-        unknown_model_context_window_tokens=unknown_context_window,
+        max_attachments=operating_limits["max_attachments"],
+        max_message_chars=operating_limits["max_message_chars"],
+        max_template_inspection_uncompressed_bytes=operating_limits[
+            "max_template_inspection_uncompressed_bytes"
+        ],
+        max_template_placeholders=operating_limits["max_template_placeholders"],
     )
 
 
@@ -96,7 +130,10 @@ def apply_ai_builder_budget_policy_patch(
     *,
     conversation_safety_buffer_tokens: int | None = None,
     minimum_conversation_budget_tokens: int | None = None,
-    unknown_model_context_window_tokens: int | None = None,
+    max_attachments: int | None = None,
+    max_message_chars: int | None = None,
+    max_template_inspection_uncompressed_bytes: int | None = None,
+    max_template_placeholders: int | None = None,
     remove_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     result = (
@@ -115,11 +152,20 @@ def apply_ai_builder_budget_policy_patch(
             minimum_conversation_budget_tokens,
             "minimum_conversation_budget_tokens",
         )
-    if unknown_model_context_window_tokens is not None:
-        next_settings["unknown_model_context_window_tokens"] = _parse_token_int(
-            unknown_model_context_window_tokens,
-            "unknown_model_context_window_tokens",
-        )
+    operating_updates = {
+        "max_attachments": max_attachments,
+        "max_message_chars": max_message_chars,
+        "max_template_inspection_uncompressed_bytes": (
+            max_template_inspection_uncompressed_bytes
+        ),
+        "max_template_placeholders": max_template_placeholders,
+    }
+    for field_name, value in operating_updates.items():
+        if value is not None:
+            next_settings[field_name] = parse_ai_builder_operating_limit(
+                value,
+                field_name,
+            )
 
     for key in remove_keys or ():
         next_settings.pop(key, None)

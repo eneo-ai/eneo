@@ -5,6 +5,13 @@
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { resolve } from "$app/paths";
+  import type {
+    AIBuilderBudgetSettingsUpdate,
+    FlowInputLimitsUpdate,
+    FlowMappedExecutionPolicyUpdate,
+    FlowRuntimePolicyUpdate
+  } from "@eneo/eneo-js";
+  import { saveFlowAdminSettings } from "./flowSettingsAdminSave";
 
   let { data } = $props();
   const eneo = getEneo();
@@ -17,6 +24,12 @@
   let maxStepTimeoutSeconds = $state("");
   let maxMappedProviderCalls = $state("");
   let maxMappedInputTokens = $state("");
+  let builderMaxAttachments = $state("");
+  let builderMaxMessageChars = $state("");
+  let builderMaxTemplateBytes = $state("");
+  let builderMaxTemplatePlaceholders = $state("");
+  let builderSafetyBufferTokens = $state("");
+  let builderMinimumConversationTokens = $state("");
   let isSaving = $state(false);
 
   let initialFileMaxSizeBytes = "";
@@ -27,6 +40,12 @@
   let initialMaxStepTimeoutSeconds = "";
   let initialMaxMappedProviderCalls = "";
   let initialMaxMappedInputTokens = "";
+  let initialBuilderMaxAttachments = "";
+  let initialBuilderMaxMessageChars = "";
+  let initialBuilderMaxTemplateBytes = "";
+  let initialBuilderMaxTemplatePlaceholders = "";
+  let initialBuilderSafetyBufferTokens = "";
+  let initialBuilderMinimumConversationTokens = "";
 
   $effect.pre(() => {
     const nextFileMaxSizeBytes = String(data.flowInputLimits.file_max_size_bytes ?? "");
@@ -49,6 +68,20 @@
     const nextMaxMappedInputTokens = String(
       data.mappedExecutionPolicy.max_estimated_input_tokens_per_mapped_step ?? ""
     );
+    const nextBuilderMaxAttachments = String(data.aiBuilderBudgetSettings.max_attachments);
+    const nextBuilderMaxMessageChars = String(data.aiBuilderBudgetSettings.max_message_chars);
+    const nextBuilderMaxTemplateBytes = String(
+      data.aiBuilderBudgetSettings.max_template_inspection_uncompressed_bytes
+    );
+    const nextBuilderMaxTemplatePlaceholders = String(
+      data.aiBuilderBudgetSettings.max_template_placeholders
+    );
+    const nextBuilderSafetyBufferTokens = String(
+      data.aiBuilderBudgetSettings.conversation_safety_buffer_tokens
+    );
+    const nextBuilderMinimumConversationTokens = String(
+      data.aiBuilderBudgetSettings.minimum_conversation_budget_tokens
+    );
 
     fileMaxSizeBytes = nextFileMaxSizeBytes;
     audioMaxSizeBytes = nextAudioMaxSizeBytes;
@@ -58,6 +91,12 @@
     maxStepTimeoutSeconds = nextMaxStepTimeoutSeconds;
     maxMappedProviderCalls = nextMaxMappedProviderCalls;
     maxMappedInputTokens = nextMaxMappedInputTokens;
+    builderMaxAttachments = nextBuilderMaxAttachments;
+    builderMaxMessageChars = nextBuilderMaxMessageChars;
+    builderMaxTemplateBytes = nextBuilderMaxTemplateBytes;
+    builderMaxTemplatePlaceholders = nextBuilderMaxTemplatePlaceholders;
+    builderSafetyBufferTokens = nextBuilderSafetyBufferTokens;
+    builderMinimumConversationTokens = nextBuilderMinimumConversationTokens;
 
     initialFileMaxSizeBytes = nextFileMaxSizeBytes;
     initialAudioMaxSizeBytes = nextAudioMaxSizeBytes;
@@ -67,6 +106,12 @@
     initialMaxStepTimeoutSeconds = nextMaxStepTimeoutSeconds;
     initialMaxMappedProviderCalls = nextMaxMappedProviderCalls;
     initialMaxMappedInputTokens = nextMaxMappedInputTokens;
+    initialBuilderMaxAttachments = nextBuilderMaxAttachments;
+    initialBuilderMaxMessageChars = nextBuilderMaxMessageChars;
+    initialBuilderMaxTemplateBytes = nextBuilderMaxTemplateBytes;
+    initialBuilderMaxTemplatePlaceholders = nextBuilderMaxTemplatePlaceholders;
+    initialBuilderSafetyBufferTokens = nextBuilderSafetyBufferTokens;
+    initialBuilderMinimumConversationTokens = nextBuilderMinimumConversationTokens;
   });
 
   function normalizeNumericInput(value: unknown): string {
@@ -135,9 +180,10 @@
   async function saveLimits() {
     isSaving = true;
     try {
-      const inputLimitsPatch: Record<string, number | null> = {};
-      const runtimePolicyPatch: Record<string, number | null> = {};
-      const mappedExecutionPatch: Record<string, number | null> = {};
+      const inputLimitsPatch: FlowInputLimitsUpdate = {};
+      const runtimePolicyPatch: FlowRuntimePolicyUpdate = {};
+      const mappedExecutionPatch: FlowMappedExecutionPolicyUpdate = {};
+      const builderSettingsPatch: AIBuilderBudgetSettingsUpdate = {};
 
       if (fileMaxSizeBytes !== initialFileMaxSizeBytes) {
         inputLimitsPatch.file_max_size_bytes = toPositiveIntegerOrNull(
@@ -187,25 +233,68 @@
           m.flow_mapped_execution_tokens_title()
         );
       }
-
+      if (builderMaxAttachments !== initialBuilderMaxAttachments) {
+        builderSettingsPatch.max_attachments = toPositiveInteger(
+          builderMaxAttachments,
+          m.ai_builder_limits_max_attachments_title()
+        );
+      }
+      if (builderMaxMessageChars !== initialBuilderMaxMessageChars) {
+        builderSettingsPatch.max_message_chars = toPositiveInteger(
+          builderMaxMessageChars,
+          m.ai_builder_limits_max_message_chars_title()
+        );
+      }
+      if (builderMaxTemplateBytes !== initialBuilderMaxTemplateBytes) {
+        builderSettingsPatch.max_template_inspection_uncompressed_bytes = toPositiveInteger(
+          builderMaxTemplateBytes,
+          m.ai_builder_limits_template_bytes_title()
+        );
+      }
+      if (builderMaxTemplatePlaceholders !== initialBuilderMaxTemplatePlaceholders) {
+        builderSettingsPatch.max_template_placeholders = toPositiveInteger(
+          builderMaxTemplatePlaceholders,
+          m.ai_builder_limits_template_placeholders_title()
+        );
+      }
+      if (builderSafetyBufferTokens !== initialBuilderSafetyBufferTokens) {
+        builderSettingsPatch.conversation_safety_buffer_tokens = toPositiveInteger(
+          builderSafetyBufferTokens,
+          m.ai_builder_limits_safety_buffer_title()
+        );
+      }
+      if (builderMinimumConversationTokens !== initialBuilderMinimumConversationTokens) {
+        builderSettingsPatch.minimum_conversation_budget_tokens = toPositiveInteger(
+          builderMinimumConversationTokens,
+          m.ai_builder_limits_conversation_budget_title()
+        );
+      }
       const shouldUpdateInputLimits = Object.keys(inputLimitsPatch).length > 0;
       const shouldUpdateRuntimePolicy = Object.keys(runtimePolicyPatch).length > 0;
       const shouldUpdateMappedExecution = Object.keys(mappedExecutionPatch).length > 0;
+      const shouldUpdateBuilderSettings = Object.keys(builderSettingsPatch).length > 0;
 
-      if (!shouldUpdateInputLimits && !shouldUpdateRuntimePolicy && !shouldUpdateMappedExecution) {
+      if (
+        !shouldUpdateInputLimits &&
+        !shouldUpdateRuntimePolicy &&
+        !shouldUpdateMappedExecution &&
+        !shouldUpdateBuilderSettings
+      ) {
         toast.success(m.saved_successfully());
         return;
       }
 
-      const [updatedInputLimits, updatedRuntimePolicy, updatedMappedExecution] = await Promise.all([
-        shouldUpdateInputLimits ? eneo.settings.updateFlowInputLimits(inputLimitsPatch) : null,
-        shouldUpdateRuntimePolicy
-          ? eneo.settings.updateFlowRuntimePolicy(runtimePolicyPatch)
-          : null,
-        shouldUpdateMappedExecution
-          ? eneo.settings.updateMappedExecutionPolicy(mappedExecutionPatch)
-          : null
-      ]);
+      const {
+        inputLimits: updatedInputLimits,
+        runtimePolicy: updatedRuntimePolicy,
+        mappedExecution: updatedMappedExecution,
+        builderBudget: updatedBuilderSettings
+      } = await saveFlowAdminSettings(eneo.settings, {
+        inputLimits: shouldUpdateInputLimits ? inputLimitsPatch : null,
+        runtimePolicy: shouldUpdateRuntimePolicy ? runtimePolicyPatch : null,
+        mappedExecution: shouldUpdateMappedExecution ? mappedExecutionPatch : null,
+        builderBudget: shouldUpdateBuilderSettings ? builderSettingsPatch : null
+      });
 
       if (updatedInputLimits) {
         fileMaxSizeBytes = String(updatedInputLimits.file_max_size_bytes);
@@ -231,6 +320,20 @@
           updatedMappedExecution.max_estimated_input_tokens_per_mapped_step ?? ""
         );
       }
+      if (updatedBuilderSettings) {
+        builderMaxAttachments = String(updatedBuilderSettings.max_attachments);
+        builderMaxMessageChars = String(updatedBuilderSettings.max_message_chars);
+        builderMaxTemplateBytes = String(
+          updatedBuilderSettings.max_template_inspection_uncompressed_bytes
+        );
+        builderMaxTemplatePlaceholders = String(updatedBuilderSettings.max_template_placeholders);
+        builderSafetyBufferTokens = String(
+          updatedBuilderSettings.conversation_safety_buffer_tokens
+        );
+        builderMinimumConversationTokens = String(
+          updatedBuilderSettings.minimum_conversation_budget_tokens
+        );
+      }
 
       initialFileMaxSizeBytes = fileMaxSizeBytes;
       initialAudioMaxSizeBytes = audioMaxSizeBytes;
@@ -240,6 +343,12 @@
       initialMaxStepTimeoutSeconds = maxStepTimeoutSeconds;
       initialMaxMappedProviderCalls = maxMappedProviderCalls;
       initialMaxMappedInputTokens = maxMappedInputTokens;
+      initialBuilderMaxAttachments = builderMaxAttachments;
+      initialBuilderMaxMessageChars = builderMaxMessageChars;
+      initialBuilderMaxTemplateBytes = builderMaxTemplateBytes;
+      initialBuilderMaxTemplatePlaceholders = builderMaxTemplatePlaceholders;
+      initialBuilderSafetyBufferTokens = builderSafetyBufferTokens;
+      initialBuilderMinimumConversationTokens = builderMinimumConversationTokens;
 
       toast.success(m.saved_successfully());
     } catch (error) {
@@ -324,7 +433,7 @@
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
               type="number"
               min="1"
-              placeholder={m.flow_input_limits_default_hint({ value: "10" })}
+              placeholder={m.flow_input_limits_deployment_default_hint()}
               bind:value={audioMaxFilesPerRun}
             />
           </div>
@@ -370,6 +479,133 @@
                 value: formatSeconds(data.flowRuntimePolicy.hard_ceiling_seconds)
               })}
             </p>
+          </div>
+        </Settings.Row>
+      </Settings.Group>
+
+      <Settings.Group title={m.ai_builder_limits_group()}>
+        <Settings.Row
+          title={m.ai_builder_limits_max_attachments_title()}
+          description={m.ai_builder_limits_max_attachments_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              max={data.aiBuilderBudgetSettings.max_attachments_hard_limit}
+              bind:value={builderMaxAttachments}
+            />
+            <p class="text-secondary text-xs">
+              {m.ai_builder_limits_ceiling_hint({
+                value: String(data.aiBuilderBudgetSettings.max_attachments_hard_limit)
+              })}
+            </p>
+          </div>
+        </Settings.Row>
+        <Settings.Row
+          title={m.ai_builder_limits_max_message_chars_title()}
+          description={m.ai_builder_limits_max_message_chars_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              max={data.aiBuilderBudgetSettings.max_message_chars_hard_limit}
+              bind:value={builderMaxMessageChars}
+            />
+            <p class="text-secondary text-xs">
+              {m.ai_builder_limits_ceiling_hint({
+                value: String(data.aiBuilderBudgetSettings.max_message_chars_hard_limit)
+              })}
+            </p>
+          </div>
+        </Settings.Row>
+        <Settings.Row
+          title={m.ai_builder_limits_template_bytes_title()}
+          description={m.ai_builder_limits_template_bytes_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              max={data.aiBuilderBudgetSettings
+                .max_template_inspection_uncompressed_bytes_hard_limit}
+              bind:value={builderMaxTemplateBytes}
+            />
+            <p class="text-secondary text-xs">
+              {m.ai_builder_limits_ceiling_hint({
+                value: formatBytes(
+                  data.aiBuilderBudgetSettings.max_template_inspection_uncompressed_bytes_hard_limit
+                )
+              })}
+            </p>
+            <p class="text-secondary text-xs">
+              {m.ai_builder_limits_template_file_ceiling_hint({
+                maxBytes: formatBytes(
+                  data.aiBuilderBudgetSettings.max_template_uncompressed_bytes_per_file_hard_limit
+                ),
+                maxEntries: String(
+                  data.aiBuilderBudgetSettings.max_template_archive_entries_per_file_hard_limit
+                )
+              })}
+            </p>
+          </div>
+        </Settings.Row>
+        <Settings.Row
+          title={m.ai_builder_limits_template_placeholders_title()}
+          description={m.ai_builder_limits_template_placeholders_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              max={data.aiBuilderBudgetSettings.max_template_placeholders_hard_limit}
+              bind:value={builderMaxTemplatePlaceholders}
+            />
+            <p class="text-secondary text-xs">
+              {m.ai_builder_limits_ceiling_hint({
+                value: String(data.aiBuilderBudgetSettings.max_template_placeholders_hard_limit)
+              })}
+            </p>
+            <p class="text-secondary text-xs">
+              {m.ai_builder_limits_planning_state_ceiling_hint({
+                value: formatBytes(
+                  data.aiBuilderBudgetSettings.max_planning_state_payload_bytes_hard_limit
+                )
+              })}
+            </p>
+          </div>
+        </Settings.Row>
+        <Settings.Row
+          title={m.ai_builder_limits_safety_buffer_title()}
+          description={m.ai_builder_limits_safety_buffer_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              max={data.aiBuilderBudgetSettings.budget_token_hard_limit}
+              bind:value={builderSafetyBufferTokens}
+            />
+          </div>
+        </Settings.Row>
+        <Settings.Row
+          title={m.ai_builder_limits_conversation_budget_title()}
+          description={m.ai_builder_limits_conversation_budget_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              max={data.aiBuilderBudgetSettings.budget_token_hard_limit}
+              bind:value={builderMinimumConversationTokens}
+            />
           </div>
         </Settings.Row>
       </Settings.Group>

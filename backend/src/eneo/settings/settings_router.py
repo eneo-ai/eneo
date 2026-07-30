@@ -742,8 +742,11 @@ async def preview_flow_classification_retention_policy(
 @settings_admin_router.get(
     "/ai-builder-budget",
     response_model=AIBuilderBudgetSettingsPublic,
-    summary="Get AI Builder budget settings",
-    description="Return token budget settings used by the Flow AI Builder planner.",
+    summary="Get AI Builder resource budget settings",
+    description=(
+        "Return effective prompt reserves, message and attachment limits, "
+        "template-inspection limits, and their fixed system ceilings."
+    ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
 async def get_ai_builder_budget_settings(
@@ -757,12 +760,15 @@ async def get_ai_builder_budget_settings(
 @settings_admin_router.patch(
     "/ai-builder-budget",
     response_model=AIBuilderBudgetSettingsPublic,
-    summary="Update AI Builder budget settings",
-    description="Update token budget settings used by the Flow AI Builder planner.",
+    summary="Update AI Builder resource budget settings",
+    description=(
+        "Update tenant-owned prompt reserves, message and attachment limits, "
+        "and template-inspection limits."
+    ),
     responses={
         400: _flow_settings_invalid_payload_response(
-            "Invalid AI Builder budget settings payload.",
-            "At least one AI Builder budget field must be provided.",
+            "Invalid AI Builder settings payload.",
+            "At least one AI Builder setting must be provided.",
         ),
         403: _flow_settings_admin_forbidden_response(),
     },

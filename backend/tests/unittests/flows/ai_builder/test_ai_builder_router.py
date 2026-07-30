@@ -34,6 +34,9 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     SessionModelsResponse,
     SessionPlansResponse,
 )
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContextPolicy,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
@@ -354,6 +357,7 @@ def _make_container(
             max_input_tokens=4096,
             max_output_tokens=2048,
             budget_policy=SimpleNamespace(),
+            attachment_context_policy=AIBuilderAttachmentContextPolicy(),
             mapped_execution_policy=None,
         ),
         completion_model_route=ResolvedCompletionModelRoute(
@@ -1837,6 +1841,7 @@ class TestSendMessageEndpoint:
                 max_input_tokens=4096,
                 max_output_tokens=2048,
                 budget_policy=SimpleNamespace(),
+                attachment_context_policy=AIBuilderAttachmentContextPolicy(),
                 mapped_execution_policy=None,
             ),
             completion_model_route=ResolvedCompletionModelRoute(
@@ -1899,6 +1904,7 @@ class TestSendMessageEndpoint:
                 max_input_tokens=4096,
                 max_output_tokens=4096,
                 budget_policy=SimpleNamespace(),
+                attachment_context_policy=AIBuilderAttachmentContextPolicy(),
                 mapped_execution_policy=None,
             ),
             completion_model_route=ResolvedCompletionModelRoute(

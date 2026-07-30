@@ -9,7 +9,13 @@ import { m } from "$lib/paraglide/messages";
 // the real layout provides; stub the minimum it touches.
 vi.mock("$lib/core/AppContext", () => ({
   getAppContext: () => ({
-    limits: { attachments: { formats: [] } }
+    limits: {
+      attachments: {
+        formats: [],
+        ai_builder_max_count: 37,
+        ai_builder_max_message_chars: 5000
+      }
+    }
   })
 }));
 vi.mock("$lib/core/Eneo", () => ({
@@ -418,7 +424,7 @@ describe("FlowAIBuilder plan-review left pane", () => {
     );
   });
 
-  it("counts down from 3 500 characters and blocks sending over 4 000", async () => {
+  it("uses the backend message limit instead of a local refinement limit", async () => {
     render(FlowAIBuilderHarness, { transport: planSessionHarness() });
 
     await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
@@ -426,18 +432,35 @@ describe("FlowAIBuilder plan-review left pane", () => {
       name: m.ai_builder_refine_label()
     }) as HTMLTextAreaElement;
 
-    await fireEvent.input(textbox, { target: { value: "a".repeat(3600) } });
-    expect(screen.getByText(/3\s*600\s*\/\s*4\s*000/)).toBeTruthy();
+    await fireEvent.input(textbox, { target: { value: "a".repeat(4001) } });
+    expect(screen.getByText(/4\s*001\s*\/\s*5\s*000/)).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: m.ai_builder_send() }) as HTMLButtonElement).disabled
     ).toBe(false);
 
-    await fireEvent.input(textbox, { target: { value: "a".repeat(4001) } });
+    await fireEvent.input(textbox, { target: { value: "a".repeat(5001) } });
     expect(textbox.getAttribute("aria-invalid")).toBe("true");
     expect(screen.getByText(m.ai_builder_refine_over_limit_tip())).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: m.ai_builder_send() }) as HTMLButtonElement).disabled
     ).toBe(true);
+  });
+
+  it("counts message length as Unicode code points like the backend", async () => {
+    render(FlowAIBuilderHarness, { transport: planSessionHarness() });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const textbox = screen.getByRole("textbox", {
+      name: m.ai_builder_refine_label()
+    }) as HTMLTextAreaElement;
+
+    await fireEvent.input(textbox, { target: { value: "😀".repeat(5000) } });
+    expect(
+      (screen.getByRole("button", { name: m.ai_builder_send() }) as HTMLButtonElement).disabled
+    ).toBe(false);
+
+    await fireEvent.input(textbox, { target: { value: "😀".repeat(5001) } });
+    expect(textbox.getAttribute("aria-invalid")).toBe("true");
   });
 
   it("persists the composer draft per session and restores it on remount", async () => {

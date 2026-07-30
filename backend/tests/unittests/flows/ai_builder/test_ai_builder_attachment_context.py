@@ -11,10 +11,12 @@ from docx import Document
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     _FILE_ROLE_PRIORITY,
+    AIBuilderAttachmentContext,
     AIBuilderAttachmentContextPolicy,
     apply_attachment_structural_evidence_to_planning_state,
     attachment_file_roles,
     build_ai_builder_attachment_context,
+    build_ai_builder_attachment_context_for_model,
     render_ai_builder_attachment_evidence,
     render_ai_builder_evidence_value,
 )
@@ -73,21 +75,27 @@ def _docx_bytes(text: str) -> bytes:
     return payload.getvalue()
 
 
-def test_build_ai_builder_attachment_context_truncates_per_file_and_total_budget() -> (
-    None
-):
+def _build_with_text_budget(
+    files: list[File], max_text_chars: int
+) -> AIBuilderAttachmentContext | None:
+    full_context = build_ai_builder_attachment_context(files)
+    assert full_context is not None
+    assert full_context.context is not None
+    framing_chars = len(full_context.context) - full_context.total_chars
+    return build_ai_builder_attachment_context(
+        files,
+        fits_context=lambda context: context is None
+        or len(context) <= framing_chars + max_text_chars,
+    )
+
+
+def test_build_ai_builder_attachment_context_fits_text_fairly() -> None:
     files = [
         _make_file(name="one.txt", text="A" * 120),
         _make_file(name="two.txt", text="B" * 120),
     ]
 
-    result = build_ai_builder_attachment_context(
-        files,
-        policy=AIBuilderAttachmentContextPolicy(
-            max_chars_per_file=40,
-            max_total_chars=70,
-        ),
-    )
+    result = _build_with_text_budget(files, 70)
 
     assert result is not None
     assert "one.txt" in result.context
@@ -95,6 +103,42 @@ def test_build_ai_builder_attachment_context_truncates_per_file_and_total_budget
     assert len(result.included_file_ids) == 2
     assert result.truncated is True
     assert result.total_chars <= 70
+
+
+def test_attachment_text_admission_scales_with_selected_model_context() -> None:
+    files = [
+        _make_file(name="one.txt", text="first evidence " * 2_000),
+        _make_file(name="two.txt", text="second evidence " * 2_000),
+    ]
+    policy = AIBuilderAttachmentContextPolicy()
+
+    small = build_ai_builder_attachment_context_for_model(
+        files,
+        policy=policy,
+        model_name="gpt-4o-mini",
+        max_input_tokens=2_000,
+        max_output_tokens=500,
+        safety_buffer_tokens=250,
+        minimum_conversation_tokens=500,
+    )
+    large = build_ai_builder_attachment_context_for_model(
+        files,
+        policy=policy,
+        model_name="gpt-4o-mini",
+        max_input_tokens=8_000,
+        max_output_tokens=500,
+        safety_buffer_tokens=250,
+        minimum_conversation_tokens=500,
+    )
+
+    assert small is not None
+    assert large is not None
+    assert small.truncated is True
+    assert large.total_chars > small.total_chars
+    assert (
+        abs(len(large.evidence[0].excerpt or "") - len(large.evidence[1].excerpt or ""))
+        <= 1
+    )
 
 
 def test_file_role_priority_covers_all_declared_file_roles() -> None:
@@ -140,10 +184,7 @@ def test_file_role_state_preserves_readability_and_exact_coverage() -> None:
     unreadable = _make_file(name="unreadable.bin", text=None)
     result = build_ai_builder_attachment_context(
         [readable, unreadable],
-        policy=AIBuilderAttachmentContextPolicy(
-            max_discovery_excerpt_chars=0,
-            max_discovery_excerpt_chars_total=0,
-        ),
+        fits_context=lambda context: context is None,
     )
     assert result is not None
     state = PlanningState.empty()
@@ -336,7 +377,7 @@ def test_long_template_placeholders_keep_complete_distinct_identity() -> None:
     assert all(first not in line and second not in line for line in role_evidence_lines)
 
 
-def test_invalid_docx_text_can_signal_role_but_not_an_approved_contract() -> None:
+def test_invalid_docx_is_rejected_instead_of_becoming_silent_partial_evidence() -> None:
     file = _make_file(
         name="invalid-template.docx",
         text="Fyll i {{ case_id }}.",
@@ -347,36 +388,105 @@ def test_invalid_docx_text_can_signal_role_but_not_an_approved_contract() -> Non
         file_type=FileType.DOCUMENT,
     )
 
-    result = build_ai_builder_attachment_context([file])
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        build_ai_builder_attachment_context([file])
+
+    assert exc_info.value.code is AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE
+    assert exc_info.value.context == {
+        "reason": "flow_template_invalid_archive",
+        "file_id": str(file.id),
+    }
+
+
+def test_template_inspection_accepts_many_small_docx_files_within_resource_budgets() -> (
+    None
+):
+    files = [
+        _make_file(
+            name=f"template-{index}.docx",
+            text=f"{{{{ field_{index} }}}}",
+            blob=_docx_bytes(f"{{{{ field_{index} }}}}"),
+            file_type=FileType.DOCUMENT,
+        )
+        for index in range(21)
+    ]
+
+    result = build_ai_builder_attachment_context(files)
 
     assert result is not None
-    assert result.evidence[0].inferred_role == "template"
-    assert result.evidence[0].template_placeholders is None
-    assert attachment_file_roles(result)[0].template_placeholders is None
-    assert result.output_schema_evidence is None
+    assert len(result.evidence) == 21
+    assert all(item.template_placeholders for item in result.evidence)
+
+
+def test_template_inspection_preserves_long_placeholder_identity() -> None:
+    placeholder = f"field_{'x' * 300}"
+    result = build_ai_builder_attachment_context(
+        [
+            _make_file(
+                name="long-placeholder.docx",
+                text=f"{{{{ {placeholder} }}}}",
+                blob=_docx_bytes(f"{{{{ {placeholder} }}}}"),
+                file_type=FileType.DOCUMENT,
+            )
+        ]
+    )
+
+    assert result is not None
+    assert result.evidence[0].template_placeholders == (placeholder,)
+
+
+def test_template_placeholder_budget_counts_unique_identities_across_session() -> None:
+    files = [
+        _make_file(
+            name=f"template-{index}.docx",
+            text="{{ shared_field }}",
+            blob=_docx_bytes("{{ shared_field }}"),
+            file_type=FileType.DOCUMENT,
+        )
+        for index in range(2)
+    ]
+
+    result = build_ai_builder_attachment_context(
+        files,
+        policy=AIBuilderAttachmentContextPolicy(max_template_placeholders=1),
+    )
+
+    assert result is not None
+    assert [item.template_placeholders for item in result.evidence] == [
+        ("shared_field",),
+        ("shared_field",),
+    ]
+
+
+def test_template_evidence_must_fit_exact_persisted_state_boundary() -> None:
+    placeholder = f"field_{'x' * 130_000}"
+    template_text = (
+        " ".join(f"{{{{ small_{index} }}}}" for index in range(8))
+        + f" {{{{ {placeholder} }}}}"
+    )
+    file = _make_file(
+        name="oversized-evidence.docx",
+        text=template_text,
+        blob=_docx_bytes(template_text),
+        file_type=FileType.DOCUMENT,
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        build_ai_builder_attachment_context([file])
+
+    assert exc_info.value.code is AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE
+    assert exc_info.value.context is not None
+    assert exc_info.value.context["reason"] == "planning_state_bytes"
+    actual_value = exc_info.value.context["actual_value"]
+    max_value = exc_info.value.context["max_value"]
+    assert isinstance(actual_value, int)
+    assert isinstance(max_value, int)
+    assert actual_value > max_value
 
 
 @pytest.mark.parametrize(
     ("policy", "files", "reason"),
     [
-        (
-            AIBuilderAttachmentContextPolicy(max_template_docx_files=1),
-            [
-                _make_file(
-                    name="first.docx",
-                    text="{{ first }}",
-                    blob=_docx_bytes("{{ first }}"),
-                    file_type=FileType.DOCUMENT,
-                ),
-                _make_file(
-                    name="second.docx",
-                    text="{{ second }}",
-                    blob=_docx_bytes("{{ second }}"),
-                    file_type=FileType.DOCUMENT,
-                ),
-            ],
-            "docx_count",
-        ),
         (
             AIBuilderAttachmentContextPolicy(max_template_uncompressed_bytes=1),
             [
@@ -401,18 +511,6 @@ def test_invalid_docx_text_can_signal_role_but_not_an_approved_contract() -> Non
             ],
             "placeholder_count",
         ),
-        (
-            AIBuilderAttachmentContextPolicy(max_template_placeholder_chars=4),
-            [
-                _make_file(
-                    name="template.docx",
-                    text="{{ longer_name }}",
-                    blob=_docx_bytes("{{ longer_name }}"),
-                    file_type=FileType.DOCUMENT,
-                )
-            ],
-            "placeholder_length",
-        ),
     ],
 )
 def test_template_inspection_budget_refuses_excess_before_planning(
@@ -424,7 +522,13 @@ def test_template_inspection_budget_refuses_excess_before_planning(
         build_ai_builder_attachment_context(files, policy=policy)
 
     assert exc_info.value.code is AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE
-    assert exc_info.value.context == {"reason": reason}
+    assert exc_info.value.context is not None
+    assert exc_info.value.context["reason"] == reason
+    actual_value = exc_info.value.context["actual_value"]
+    max_value = exc_info.value.context["max_value"]
+    assert isinstance(actual_value, int)
+    assert isinstance(max_value, int)
+    assert actual_value > max_value
 
 
 def test_non_template_transcription_does_not_become_placeholder_schema() -> None:
@@ -770,6 +874,7 @@ def test_build_ai_builder_attachment_context_surfaces_unreadable_files_for_disco
             _make_file(
                 name="beslutsmall.docx",
                 text=None,
+                blob=_docx_bytes("No extracted text"),
                 mimetype=(
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 ),
@@ -792,13 +897,7 @@ def test_discovery_excerpts_cover_every_file_fairly() -> None:
         for index, character in enumerate(("A", "B", "C"), start=1)
     ]
 
-    result = build_ai_builder_attachment_context(
-        files,
-        policy=AIBuilderAttachmentContextPolicy(
-            max_discovery_excerpt_chars=100,
-            max_discovery_excerpt_chars_total=30,
-        ),
-    )
+    result = _build_with_text_budget(files, 30)
 
     assert result is not None
     assert {item.file_id for item in result.evidence} == {file.id for file in files}
@@ -810,13 +909,7 @@ def test_discovery_excerpts_redistribute_unused_short_file_capacity() -> None:
     short_file = _make_file(name="short.txt", text="S")
     long_file = _make_file(name="long.txt", text="L" * 100)
 
-    result = build_ai_builder_attachment_context(
-        [short_file, long_file],
-        policy=AIBuilderAttachmentContextPolicy(
-            max_discovery_excerpt_chars=100,
-            max_discovery_excerpt_chars_total=30,
-        ),
-    )
+    result = _build_with_text_budget([short_file, long_file], 30)
 
     assert result is not None
     excerpts_by_id = {item.file_id: item.excerpt or "" for item in result.evidence}
@@ -831,35 +924,23 @@ def test_discovery_excerpts_mark_exactly_consumed_capacity_fully_seen() -> None:
         _make_file(name="long.txt", text="L" * 20),
     ]
 
-    result = build_ai_builder_attachment_context(
-        files,
-        policy=AIBuilderAttachmentContextPolicy(
-            max_discovery_excerpt_chars=20,
-            max_discovery_excerpt_chars_total=30,
-        ),
-    )
+    result = _build_with_text_budget(files, 30)
 
     assert result is not None
     assert sum(len(item.excerpt or "") for item in result.evidence) == 30
     assert {item.coverage for item in result.evidence} == {"fully_seen"}
 
 
-def test_discovery_excerpts_respect_per_file_limits_with_total_room_remaining() -> None:
+def test_discovery_excerpts_do_not_impose_an_independent_per_file_cap() -> None:
     files = [
         _make_file(name="first.txt", text="A" * 100),
         _make_file(name="second.txt", text="B" * 100),
     ]
 
-    result = build_ai_builder_attachment_context(
-        files,
-        policy=AIBuilderAttachmentContextPolicy(
-            max_discovery_excerpt_chars=20,
-            max_discovery_excerpt_chars_total=100,
-        ),
-    )
+    result = _build_with_text_budget(files, 100)
 
     assert result is not None
-    assert [len(item.excerpt or "") for item in result.evidence] == [20, 20]
+    assert [len(item.excerpt or "") for item in result.evidence] == [50, 50]
     assert {item.coverage for item in result.evidence} == {"excerpt_truncated"}
 
 
@@ -874,7 +955,7 @@ def test_large_file_inventory_keeps_the_last_stable_id_beyond_legacy_prefix_budg
         for index in range(30)
     ]
 
-    result = build_ai_builder_attachment_context(files)
+    result = _build_with_text_budget(files, 3_000)
 
     assert result is not None
     stable_evidence = sorted(result.evidence, key=lambda item: str(item.file_id))
@@ -895,13 +976,8 @@ def test_discovery_file_inventory_is_permutation_stable() -> None:
         _make_file(name=f"{index}.txt", text=character * 100)
         for index, character in enumerate(("A", "B", "C"), start=1)
     ]
-    policy = AIBuilderAttachmentContextPolicy(
-        max_discovery_excerpt_chars=100,
-        max_discovery_excerpt_chars_total=31,
-    )
-
-    forward = build_ai_builder_attachment_context(files, policy=policy)
-    reverse = build_ai_builder_attachment_context(list(reversed(files)), policy=policy)
+    forward = _build_with_text_budget(files, 31)
+    reverse = _build_with_text_budget(list(reversed(files)), 31)
 
     assert forward is not None
     assert reverse is not None
@@ -916,10 +992,7 @@ def test_zero_excerpt_budget_keeps_inventory_and_marks_context_truncated() -> No
 
     result = build_ai_builder_attachment_context(
         [file],
-        policy=AIBuilderAttachmentContextPolicy(
-            max_discovery_excerpt_chars=100,
-            max_discovery_excerpt_chars_total=0,
-        ),
+        fits_context=lambda context: context is None,
     )
 
     assert result is not None

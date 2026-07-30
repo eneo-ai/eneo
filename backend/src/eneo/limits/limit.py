@@ -14,6 +14,8 @@ class InfoBlobLimits(BaseModel):
 
 class AttachmentLimits(BaseModel):
     formats: list[FormatLimit]
+    ai_builder_max_count: int
+    ai_builder_max_message_chars: int
 
 
 class Limits(BaseModel):

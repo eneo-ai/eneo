@@ -62,6 +62,7 @@ export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type Settings = components["schemas"]["SettingsPublic"];
 export type FlowInputLimits = components["schemas"]["FlowInputLimitsPublic"];
+export type FlowInputLimitsUpdate = components["schemas"]["FlowInputLimitsUpdate"];
 export type FlowRuntimePolicy = components["schemas"]["FlowRuntimePolicyPublic"];
 export type FlowRuntimePolicyUpdate = components["schemas"]["FlowRuntimePolicyUpdate"];
 export type FlowMappedExecutionPolicy = components["schemas"]["FlowMappedExecutionPolicyPublic"];
@@ -102,6 +103,7 @@ export type FlowDocumentRenderLimits = {
   max_object_fields: number;
 };
 export type AIBuilderBudgetSettings = components["schemas"]["AIBuilderBudgetSettingsPublic"];
+export type AIBuilderBudgetSettingsUpdate = components["schemas"]["AIBuilderBudgetSettingsUpdate"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];

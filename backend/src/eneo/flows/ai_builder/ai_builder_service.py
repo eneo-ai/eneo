@@ -20,8 +20,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     SessionListItemResponse,
 )
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
-    AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
-    AI_BUILDER_MAX_ATTACHMENTS,
+    AIBuilderAttachmentContextPolicy,
     readable_attachment_text,
 )
 from eneo.flows.ai_builder.ai_builder_context import (
@@ -368,26 +367,48 @@ class AIBuilderService:
         space: "Space",
         model_id: UUID | None,
         tenant_flow_settings: dict[str, Any] | None,
+        message: str | None = None,
         message_file_ids: list[UUID] | None = None,
     ) -> PreparedMessageContext:
         """Pre-fetch planner, provider, and flow-edit context before SSE streaming."""
+        planner_context = build_planner_context(
+            space,
+            model_id=model_id,
+            tenant_flow_settings=tenant_flow_settings,
+        )
+        if (
+            message is not None
+            and len(message) > planner_context.budget_policy.max_message_chars
+        ):
+            raise AIBuilderBadRequestException(
+                "AI Builder messages support at most "
+                f"{planner_context.budget_policy.max_message_chars} characters. "
+                "Shorten the message or ask an administrator to review the Builder limit.",
+                code=AIBuilderErrorCode.BAD_REQUEST,
+                context={
+                    "actual_chars": len(message),
+                    "max_chars": planner_context.budget_policy.max_message_chars,
+                },
+            )
         session_file_ids = await self.repo.list_session_file_ids(
             session_id=session.id,
             tenant_id=self.user.tenant_id,
         )
         merged_file_ids = set(session_file_ids)
         merged_file_ids.update(message_file_ids or ())
-        if len(merged_file_ids) > AI_BUILDER_MAX_ATTACHMENTS:
+        if len(merged_file_ids) > planner_context.budget_policy.max_attachments:
             raise AIBuilderBadRequestException(
-                AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
+                "AI Builder sessions support at most "
+                f"{planner_context.budget_policy.max_attachments} attachments. "
+                "Detach an existing attachment or ask an administrator to review "
+                "the Builder limit.",
                 code=AIBuilderErrorCode.BAD_REQUEST,
+                context={
+                    "actual_attachments": len(merged_file_ids),
+                    "max_attachments": planner_context.budget_policy.max_attachments,
+                },
             )
 
-        planner_context = build_planner_context(
-            space,
-            model_id=model_id,
-            tenant_flow_settings=tenant_flow_settings,
-        )
         route = await self.completion_service.resolve_model_route(
             planner_context.model,
         )
@@ -471,6 +492,7 @@ class AIBuilderService:
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
+        attachment_context_policy: AIBuilderAttachmentContextPolicy | None = None,
         mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
         turn_preflight: SessionTurnPreflight | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
@@ -504,6 +526,7 @@ class AIBuilderService:
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
             budget_policy=budget_policy,
+            attachment_context_policy=attachment_context_policy,
             mapped_execution_policy=mapped_execution_policy,
             turn_preflight=turn_preflight,
         ):

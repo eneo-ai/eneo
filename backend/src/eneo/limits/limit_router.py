@@ -14,9 +14,9 @@ with_user_container = get_container(with_user=True)
 @router.get(
     "/",
     response_model=Limits,
-    description="Get the configured size and count limits for uploads and crawls.",
+    description="Get configured upload and AI Builder input limits.",
     responses=responses.get_responses([]),
 )
-def get_limits(container: Annotated[Container, Depends(with_user_container)]):
+async def get_limits(container: Annotated[Container, Depends(with_user_container)]):
     service = container.limit_service()
-    return service.get_limits()
+    return await service.get_limits()

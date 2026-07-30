@@ -296,6 +296,17 @@ Important builder rules:
   the user can reject them.
 - Attachments are first-class evidence through typed file role and output schema
   evidence. Avoid semantic filename or phrase-list heuristics.
+- Builder attachment text is admitted against the selected model's context
+  window after reserving output, safety, and active-conversation tokens. The
+  remaining capacity is shared fairly across readable files; there are no
+  independent per-file text or DOCX-count quotas.
+- The effective session-attachment, message-length, DOCX-inspection, and
+  placeholder-inspection limits come from the existing Flow settings owner.
+  Authenticated clients read the same effective attachment and message limits
+  through `/limits`; tenant admins see both the effective values and the fixed
+  platform safety ceilings. DOCX validation also has disclosed per-file archive
+  entry and uncompressed-size ceilings. Invalid or oversized templates fail
+  before model work instead of becoming partial evidence.
 - Treat MIME type, shape, and literal placeholders as structural facts. Semantic
   file roles and intent require quoted, confidence-bearing evidence.
 - Route attachments through existing evidence, asset, and runtime-input owners;
@@ -324,6 +335,8 @@ of adding a parallel path.
 | Review checkpoints | run review checkpoint API and runtime services |
 | Builder planning state | `PlanningState` |
 | Builder turn decision | `ai_builder_turn_controller` plus action policy |
+| Builder operating limits and prompt reserves | `flow_ai_builder_budget_settings` plus `ai_builder_settings` |
+| Builder attachment inspection and model-aware admission | `ai_builder_attachment_context` |
 | Builder create compilation | `ai_builder_create_compiler` and `ai_builder_assembly` |
 | Flow package layout rules | [package-layout.md](./package-layout.md) |
 

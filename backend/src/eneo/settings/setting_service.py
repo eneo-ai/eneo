@@ -15,10 +15,16 @@ from eneo.data_retention.infrastructure.data_retention_service import (
     FlowRetentionOrganizationProposal,
     FlowRetentionValuePatch,
 )
+from eneo.files.docx_template_validation import (
+    MAX_TEMPLATE_ARCHIVE_ENTRIES,
+    MAX_TEMPLATE_UNCOMPRESSED_BYTES,
+)
 from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
     apply_ai_builder_budget_policy_patch,
     resolve_ai_builder_budget_policy,
 )
+from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTES
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     apply_flow_mapped_execution_policy_patch,
@@ -27,6 +33,13 @@ from eneo.flows.domain.mapped_execution_policy import (
 from eneo.flows.domain.rag_evidence_policy import (
     apply_flow_rag_evidence_policy_patch,
     resolve_flow_rag_evidence_policy,
+)
+from eneo.flows.flow_ai_builder_budget_settings import (
+    AI_BUILDER_BUDGET_MAX_TOKENS,
+    AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+    AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+    AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
+    AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
 )
 from eneo.flows.flow_document_limits import (
     apply_flow_document_render_limits_patch,
@@ -524,15 +537,41 @@ class SettingService:
 
     @validate_permissions(Permission.ADMIN)
     async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic:
-        tenant = await self._get_tenant_for_flow_settings()
-        policy = resolve_ai_builder_budget_policy(
-            getattr(tenant, "flow_settings", None)
-        )
+        policy = await self.get_ai_builder_budget_policy()
         return AIBuilderBudgetSettingsPublic(
             conversation_safety_buffer_tokens=policy.conversation_safety_buffer_tokens,
             minimum_conversation_budget_tokens=policy.minimum_conversation_budget_tokens,
-            unknown_model_context_window_tokens=policy.unknown_model_context_window_tokens,
+            max_attachments=policy.max_attachments,
+            max_message_chars=policy.max_message_chars,
+            max_template_inspection_uncompressed_bytes=(
+                policy.max_template_inspection_uncompressed_bytes
+            ),
+            max_template_placeholders=policy.max_template_placeholders,
+            max_attachments_hard_limit=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+            max_message_chars_hard_limit=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+            max_template_inspection_uncompressed_bytes_hard_limit=(
+                AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
+            ),
+            max_template_placeholders_hard_limit=(
+                AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT
+            ),
+            max_template_archive_entries_per_file_hard_limit=(
+                MAX_TEMPLATE_ARCHIVE_ENTRIES
+            ),
+            max_template_uncompressed_bytes_per_file_hard_limit=(
+                MAX_TEMPLATE_UNCOMPRESSED_BYTES
+            ),
+            max_planning_state_payload_bytes_hard_limit=(
+                PLANNING_STATE_PAYLOAD_CAP_BYTES
+            ),
+            budget_token_hard_limit=AI_BUILDER_BUDGET_MAX_TOKENS,
         )
+
+    async def get_ai_builder_budget_policy(self) -> AIBuilderBudgetPolicy:
+        """Resolve effective Builder settings for authenticated tenant services."""
+
+        tenant = await self._get_tenant_for_flow_settings()
+        return resolve_ai_builder_budget_policy(getattr(tenant, "flow_settings", None))
 
     @validate_permissions(Permission.ADMIN)
     async def update_ai_builder_budget_settings(
@@ -542,8 +581,9 @@ class SettingService:
         patch = payload.model_dump(exclude_unset=True)
         if not patch:
             raise BadRequestException(
-                "At least one AI Builder budget field must be provided."
+                "At least one AI Builder setting must be provided."
             )
+        previous = await self.get_ai_builder_budget_settings()
         tenant = await self._get_tenant_for_flow_settings()
         next_flow_settings = apply_ai_builder_budget_policy_patch(
             cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
@@ -551,16 +591,26 @@ class SettingService:
             remove_keys={key for key, value in patch.items() if value is None},
         )
         await self._persist_flow_settings(next_flow_settings)
+        updated = await self.get_ai_builder_budget_settings()
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             actor_id=self.user.id,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
-            description="Updated AI Builder budget settings",
-            metadata={"setting": "ai_builder_budget_settings", "changes": patch},
+            description="Updated AI Builder settings",
+            metadata={
+                "setting": "ai_builder_budget_settings",
+                "changes": {
+                    key: {
+                        "old": getattr(previous, key),
+                        "new": getattr(updated, key),
+                    }
+                    for key in patch
+                },
+            },
         )
-        return await self.get_ai_builder_budget_settings()
+        return updated
 
     @validate_permissions(Permission.ADMIN)
     async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic:

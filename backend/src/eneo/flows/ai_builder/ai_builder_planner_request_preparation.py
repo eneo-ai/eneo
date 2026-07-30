@@ -9,7 +9,9 @@ from uuid import UUID
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
-    build_ai_builder_attachment_context,
+    AIBuilderAttachmentContextPolicy,
+    build_ai_builder_attachment_context_for_model,
+    fit_ai_builder_attachment_context,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
@@ -81,6 +83,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     BuilderTurnDecision,
     GenerateProposal,
@@ -94,15 +97,14 @@ from eneo.flows.ai_builder.planning_state_builder import (
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.main.logging import get_logger
-from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 from eneo.observability.failure_events import stable_hash
-from eneo.tokens.token_utils import count_message_tokens
+from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         ResolvedCompletionModelRoute,
     )
-    from eneo.flows.domain.flow import Flow
+    from eneo.flows.domain.flow import Flow, FlowStep
 
 logger = get_logger(__name__)
 
@@ -139,6 +141,7 @@ class PlannerRequestPreparationInput:
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
+    attachment_context_policy: AIBuilderAttachmentContextPolicy
     mapped_execution_policy: FlowMappedExecutionPolicy
     base_planning_state_version: int
     tenant_id: UUID
@@ -179,7 +182,7 @@ class ServerOutputPrepared(_PreparedBase):
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
     resource_catalog: AIBuilderResourceCatalog
-    attachment_context: str | None
+    attachment_context: AIBuilderAttachmentContext | None
     flow_context: str | None
 
 
@@ -210,7 +213,17 @@ async def prepare_planner_request(
     attachment_context_result = (
         request.prepared_attachment_context
         if request.output_schema_gate_checked
-        else build_ai_builder_attachment_context(request.attachment_files)
+        else build_ai_builder_attachment_context_for_model(
+            request.attachment_files,
+            policy=request.attachment_context_policy,
+            model_name=request.completion_model_route.litellm_model,
+            max_input_tokens=request.max_input_tokens,
+            max_output_tokens=request.max_output_tokens,
+            safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
+            minimum_conversation_tokens=(
+                request.budget_policy.minimum_conversation_budget_tokens
+            ),
+        )
     )
     if not request.output_schema_gate_checked:
         validate_preprovider_output_schema_gate(
@@ -282,11 +295,7 @@ async def prepare_planner_request(
             server_decision=turn_control.decision,
             planning_state=rebuilt_planning_state,
             resource_catalog=resource_catalog,
-            attachment_context=(
-                attachment_context_result.context
-                if attachment_context_result is not None
-                else None
-            ),
+            attachment_context=attachment_context_result,
             flow_context=flow_context,
         )
 
@@ -297,14 +306,11 @@ async def prepare_planner_request(
         slot_classification_metadata=discovery_runtime.slot_classification_metadata,
         conversation=request.conversation,
         planning_state=rebuilt_planning_state,
-        attachment_context=(
-            attachment_context_result.context
-            if attachment_context_result is not None
-            else None
-        ),
+        attachment_context=attachment_context_result,
         flow_context=flow_context,
         is_edit_mode=request.flow is not None,
         resource_catalog=resource_catalog,
+        current_steps=None if request.flow is None else list(request.flow.steps),
         plan_edit_context=request.plan_edit_context,
         prior_plan_for_revision=request.prior_plan_for_revision,
         litellm_model=request.completion_model_route.litellm_model,
@@ -323,10 +329,11 @@ def build_proposal_prepared(
     slot_classification_metadata: SlotClassificationMetadata | None,
     conversation: list[ConversationMessage],
     planning_state: PlanningState,
-    attachment_context: str | None,
+    attachment_context: AIBuilderAttachmentContext | None,
     flow_context: str | None,
     is_edit_mode: bool,
     resource_catalog: AIBuilderResourceCatalog,
+    current_steps: list["FlowStep"] | None,
     plan_edit_context: AIBuilderPlanEditContext | None,
     prior_plan_for_revision: BuilderPlan | None,
     litellm_model: str,
@@ -356,18 +363,39 @@ def build_proposal_prepared(
             else ()
         ),
     )
-    proposal_system_prompt = build_plan_proposal_system_prompt(
-        planning_state=planning_state,
-        confirmed_requirements=confirmed_requirements,
+    plan_revision_context = build_plan_revision_prompt_block(
+        context=plan_edit_context,
+        prior_plan=prior_plan_for_revision,
+    )
+
+    def build_proposal_prompt(attachment_text: str | None) -> str:
+        return build_plan_proposal_system_prompt(
+            planning_state=planning_state,
+            confirmed_requirements=confirmed_requirements,
+            attachment_context=attachment_text,
+            flow_context=flow_context,
+            is_edit_mode=is_edit_mode,
+            resource_catalog=resource_catalog,
+            requested_output_sections=requested_output_sections,
+            plan_revision_context=plan_revision_context,
+        )
+
+    fitted_attachment_context = _fit_proposal_attachment_context(
         attachment_context=attachment_context,
-        flow_context=flow_context,
-        is_edit_mode=is_edit_mode,
+        build_proposal_prompt=build_proposal_prompt,
+        current_steps=current_steps,
         resource_catalog=resource_catalog,
-        requested_output_sections=requested_output_sections,
-        plan_revision_context=build_plan_revision_prompt_block(
-            context=plan_edit_context,
-            prior_plan=prior_plan_for_revision,
-        ),
+        litellm_model=litellm_model,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        budget_policy=budget_policy,
+    )
+    proposal_system_prompt = build_proposal_prompt(
+        (
+            fitted_attachment_context.context
+            if fitted_attachment_context is not None
+            else None
+        )
     )
     prepared_prompt = _prepare_prompt_messages(
         conversation=conversation,
@@ -382,7 +410,11 @@ def build_proposal_prepared(
         "AI Builder plan proposal prompt metrics",
         extra={
             "system_prompt_chars": prepared_prompt.system_prompt_chars,
-            "attachment_context_chars": len(attachment_context or ""),
+            "attachment_context_chars": len(
+                fitted_attachment_context.context or ""
+                if fitted_attachment_context is not None
+                else ""
+            ),
             "conversation_budget_tokens": prepared_prompt.conversation_budget_tokens,
             "conversation_message_count": len(conversation),
             "trimmed_message_count": prepared_prompt.trimmed_message_count,
@@ -407,6 +439,49 @@ def build_proposal_prepared(
             output_reserve_tokens=max_output_tokens,
             safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
         ),
+    )
+
+
+def _fit_proposal_attachment_context(
+    *,
+    attachment_context: AIBuilderAttachmentContext | None,
+    build_proposal_prompt: Callable[[str | None], str],
+    current_steps: list["FlowStep"] | None,
+    resource_catalog: AIBuilderResourceCatalog,
+    litellm_model: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    budget_policy: AIBuilderBudgetPolicy,
+) -> AIBuilderAttachmentContext | None:
+    if attachment_context is None:
+        return None
+
+    proposal_tool = build_propose_flow_tool_schema(
+        current_steps=current_steps,
+        resource_catalog=resource_catalog,
+    )
+    system_prompt_token_limit = max(
+        0,
+        max_input_tokens
+        - max_output_tokens
+        - budget_policy.conversation_safety_buffer_tokens
+        - budget_policy.minimum_conversation_budget_tokens
+        - count_tool_tokens([proposal_tool], litellm_model),
+    )
+
+    def fits_context(context: str | None) -> bool:
+        prompt = build_proposal_prompt(context)
+        return (
+            count_message_tokens(
+                [{"role": "system", "content": prompt}],
+                litellm_model,
+            )
+            <= system_prompt_token_limit
+        )
+
+    return fit_ai_builder_attachment_context(
+        attachment_context,
+        fits_context=fits_context,
     )
 
 
@@ -532,15 +607,10 @@ def _prepare_prompt_messages(
         litellm_model,
     )
     conversation_budget = compute_conversation_token_budget(
-        litellm_model=litellm_model,
         model_max_input_tokens=max_input_tokens,
         system_prompt_tokens=prompt_tokens,
         max_output_tokens=max_output_tokens,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
-        minimum_budget_tokens=budget_policy.minimum_conversation_budget_tokens,
-        unknown_model_context_window_tokens=(
-            budget_policy.unknown_model_context_window_tokens
-        ),
     )
     raw_messages = [
         conversation_message_to_llm_message(message) for message in conversation
@@ -574,31 +644,18 @@ def _prepare_prompt_messages(
 
 def compute_conversation_token_budget(
     *,
-    litellm_model: str | None,
-    model_max_input_tokens: int | None,
+    model_max_input_tokens: int,
     system_prompt_tokens: int,
     max_output_tokens: int,
     safety_buffer_tokens: int,
-    minimum_budget_tokens: int,
-    unknown_model_context_window_tokens: int | None = None,
 ) -> int:
-    defaults = None
-    if litellm_model:
-        bare_name = litellm_model.split("/", 1)[-1] if "/" in litellm_model else None
-        defaults = lookup_model_defaults(litellm_model, bare_name)
-
-    context_window = (
-        (defaults.max_input_tokens if defaults else None)
-        or model_max_input_tokens
-        or unknown_model_context_window_tokens
-    )
-    if context_window is None:
-        raise ValueError("Planner model has no known context window.")
-
     budget = (
-        context_window - system_prompt_tokens - max_output_tokens - safety_buffer_tokens
+        model_max_input_tokens
+        - system_prompt_tokens
+        - max_output_tokens
+        - safety_buffer_tokens
     )
-    return max(budget, minimum_budget_tokens)
+    return max(budget, 0)
 
 
 def trim_conversation_for_context(

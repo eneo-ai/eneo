@@ -49,6 +49,8 @@ type AttachmentManagerParams = {
     rules?: AttachmentRules | Readable<AttachmentRules>;
     /** Callback to run once a file has been uploaded to eneo */
     onFileUploaded?: (file: UploadedFile) => void;
+    /** Attachments already owned by the surrounding session or draft. */
+    existingAttachmentCount?: () => number;
     /** When true, upload/validation errors are exposed via the `uploadError`
      * store for the consumer to render inline (e.g. next to the chat input)
      * instead of being shown as a toast. */
@@ -67,6 +69,7 @@ export { initAttachmentManager, getAttachmentManager };
 function createAttachmentManager(data: AttachmentManagerParams) {
   const { eneo } = data;
   const inlineErrors = data.options?.inlineErrors ?? false;
+  const existingAttachmentCount = data.options?.existingAttachmentCount ?? (() => 0);
   const attachmentRules = (() => {
     const rules = data.options?.rules ?? {};
     if (
@@ -215,7 +218,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
     for (const file of files) {
       const $attachments = get(attachments);
 
-      if (selectedRules.maxTotalCount && $attachments.length >= selectedRules.maxTotalCount) {
+      if (
+        selectedRules.maxTotalCount &&
+        existingAttachmentCount() + $attachments.length >= selectedRules.maxTotalCount
+      ) {
         errors.push({
           kind: "max_total_count",
           message: m.attachment_error_max_count({ count: selectedRules.maxTotalCount })

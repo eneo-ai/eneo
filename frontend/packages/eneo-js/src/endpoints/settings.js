@@ -105,7 +105,7 @@ export function initSettings(client) {
 
     /**
      * Update flow input limit settings for the current tenant.
-     * @param {Partial<import('../types/resources').FlowInputLimits>} patch
+     * @param {import('../types/resources').FlowInputLimitsUpdate} patch
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowInputLimits>}
      */
@@ -357,7 +357,7 @@ export function initSettings(client) {
 
     /**
      * Update AI Builder budget settings for the current tenant.
-     * @param {Partial<import('../types/resources').AIBuilderBudgetSettings>} patch
+     * @param {import('../types/resources').AIBuilderBudgetSettingsUpdate} patch
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').AIBuilderBudgetSettings>}
      */

@@ -9,7 +9,8 @@ from pydantic import ValidationError
 
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
-    build_ai_builder_attachment_context,
+    AIBuilderAttachmentContextPolicy,
+    build_ai_builder_attachment_context_for_model,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
@@ -300,6 +301,7 @@ class AIBuilderPlanner:
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
+        attachment_context_policy: AIBuilderAttachmentContextPolicy | None = None,
         mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
         turn_preflight: SessionTurnPreflight | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
@@ -322,15 +324,20 @@ class AIBuilderPlanner:
 
         if budget_policy is None:
             budget_policy = resolve_ai_builder_budget_policy(None)
+        if attachment_context_policy is None:
+            attachment_context_policy = AIBuilderAttachmentContextPolicy(
+                max_template_uncompressed_bytes=(
+                    budget_policy.max_template_inspection_uncompressed_bytes
+                ),
+                max_template_placeholders=budget_policy.max_template_placeholders,
+            )
         if mapped_execution_policy is None:
             mapped_execution_policy = resolve_flow_mapped_execution_policy(None)
         litellm_model = completion_model_route.litellm_model
         bare_name = litellm_model.split("/", 1)[-1] if "/" in litellm_model else None
         defaults = lookup_model_defaults(litellm_model, bare_name)
         if max_input_tokens is None:
-            max_input_tokens = (
-                defaults.max_input_tokens if defaults else None
-            ) or budget_policy.unknown_model_context_window_tokens
+            max_input_tokens = defaults.max_input_tokens if defaults else None
         if max_output_tokens is None:
             max_output_tokens = defaults.max_output_tokens if defaults else None
         if max_input_tokens is None or max_output_tokens is None:
@@ -440,8 +447,16 @@ class AIBuilderPlanner:
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
             )
-            prepared_attachment_context = build_ai_builder_attachment_context(
-                attachment_files or []
+            prepared_attachment_context = build_ai_builder_attachment_context_for_model(
+                attachment_files or [],
+                policy=attachment_context_policy,
+                model_name=litellm_model,
+                max_input_tokens=max_input_tokens,
+                max_output_tokens=max_output_tokens,
+                safety_buffer_tokens=(budget_policy.conversation_safety_buffer_tokens),
+                minimum_conversation_tokens=(
+                    budget_policy.minimum_conversation_budget_tokens
+                ),
             )
             schema_conflict_pending = validate_preprovider_output_schema_gate(
                 conversation=conversation,
@@ -502,6 +517,7 @@ class AIBuilderPlanner:
                         max_input_tokens=max_input_tokens,
                         max_output_tokens=max_output_tokens,
                         budget_policy=budget_policy,
+                        attachment_context_policy=attachment_context_policy,
                         mapped_execution_policy=mapped_execution_policy,
                         plan_edit_context=plan_edit_context,
                         prior_plan_for_revision=prior_plan_for_revision,
@@ -626,6 +642,7 @@ class AIBuilderPlanner:
                             flow_context=planner_turn_request.flow_context,
                             is_edit_mode=flow is not None,
                             resource_catalog=planner_turn_request.resource_catalog,
+                            current_steps=(None if flow is None else list(flow.steps)),
                             plan_edit_context=plan_edit_context,
                             prior_plan_for_revision=prior_plan_for_revision,
                             litellm_model=litellm_model,

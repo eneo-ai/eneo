@@ -13,8 +13,8 @@ from eneo.files.text import (
 from eneo.main.exceptions import BadRequestException, FileNotSupportedException
 
 _DOCX_MACRO_SUFFIXES = (".docm", ".dotm")
-_MAX_TEMPLATE_ARCHIVE_ENTRIES = 2048
-_MAX_TEMPLATE_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+MAX_TEMPLATE_ARCHIVE_ENTRIES = 2048
+MAX_TEMPLATE_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,13 +51,13 @@ def _validate_docx_archive_metadata(
     archive: zipfile.ZipFile,
 ) -> DocxTemplateArchiveMetrics:
     infos = archive.infolist()
-    if len(infos) > _MAX_TEMPLATE_ARCHIVE_ENTRIES:
+    if len(infos) > MAX_TEMPLATE_ARCHIVE_ENTRIES:
         raise BadRequestException(
             "The uploaded DOCX archive contains too many entries.",
             code="flow_template_too_large",
         )
     total_uncompressed = sum(info.file_size for info in infos)
-    if total_uncompressed > _MAX_TEMPLATE_UNCOMPRESSED_BYTES:
+    if total_uncompressed > MAX_TEMPLATE_UNCOMPRESSED_BYTES:
         raise BadRequestException(
             "The uploaded DOCX archive is too large when unpacked.",
             code="flow_template_too_large",

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, field
-from typing import Literal, cast
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field, replace
+from typing import Literal, NoReturn, cast
 from uuid import UUID
 
 from eneo.files.docx_template_validation import docx_template_archive_metrics
@@ -30,30 +30,34 @@ from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     OutputSchemaEvidence,
     PlanningState,
+    PlanningStatePayloadTooLargeError,
     ResolvedSlot,
     SignalConfidence,
+    enforce_planning_state_payload_cap,
+)
+from eneo.flows.flow_ai_builder_budget_settings import (
+    AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS,
+    AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+    AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
 )
 from eneo.flows.runtime.docx_template_runtime import (
     docx_template_placeholder_names,
 )
 from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.json_types import JsonObject
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, FileNotSupportedException
+from eneo.tokens.token_utils import count_message_tokens
 
 
 @dataclass(frozen=True, slots=True)
 class AIBuilderAttachmentContextPolicy:
-    max_chars_per_file: int = 4000
-    max_total_chars: int = 12000
-    max_discovery_excerpt_chars: int = 800
-    max_discovery_excerpt_chars_total: int = 4000
-    max_template_docx_files: int = 20
-    max_template_uncompressed_bytes: int = 200 * 1024 * 1024
-    max_template_placeholders: int = 1000
-    max_template_placeholder_chars: int = 256
+    max_template_uncompressed_bytes: int = (
+        AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
+    )
+    max_template_placeholders: int = AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS
 
 
-AI_BUILDER_MAX_ATTACHMENTS = 100
+AI_BUILDER_MAX_ATTACHMENTS = AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT
 AI_BUILDER_RENDERED_EVIDENCE_MAX_CHARS = 80
 AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE = (
     f"AI Builder sessions support at most {AI_BUILDER_MAX_ATTACHMENTS} attachments. "
@@ -80,6 +84,10 @@ class AIBuilderAttachmentEvidence:
 AttachmentOutputSchemaDisposition = Literal["none", "single", "ambiguous"]
 
 
+def _empty_readable_text_by_file() -> Mapping[UUID, str]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class AIBuilderAttachmentOutputSchemaDiscovery:
     candidates: tuple[AIBuilderAttachmentOutputSchemaCandidate, ...]
@@ -104,6 +112,11 @@ class AIBuilderAttachmentContext:
     output_schema_evidence: OutputSchemaEvidence | None = None
     output_schema_discovery: AIBuilderAttachmentOutputSchemaDiscovery = field(
         default_factory=lambda: AIBuilderAttachmentOutputSchemaDiscovery(candidates=())
+    )
+    readable_text_by_file: Mapping[UUID, str] = field(
+        default_factory=_empty_readable_text_by_file,
+        repr=False,
+        compare=False,
     )
 
 
@@ -305,15 +318,22 @@ def _template_placeholder_output_schema_evidence(
         return None
     total_count = len(all_placeholders)
     truncated = total_count > len(selected)
-    return build_output_schema_evidence(
-        json_schema=_template_placeholder_schema(tuple(selected)),
-        source="template_placeholders",
-        source_file_ids=tuple(sorted(set(source_file_ids), key=str)),
-        confidence="medium" if truncated else "high",
-        evidence=(*source_markers, *placeholder_markers),
-        total_count=total_count,
-        truncated=truncated,
-    )
+    try:
+        return build_output_schema_evidence(
+            json_schema=_template_placeholder_schema(tuple(selected)),
+            source="template_placeholders",
+            source_file_ids=tuple(sorted(set(source_file_ids), key=str)),
+            confidence="medium" if truncated else "high",
+            evidence=(*source_markers, *placeholder_markers),
+            total_count=total_count,
+            truncated=truncated,
+        )
+    except OutputSchemaLimitExceeded as error:
+        _template_inspection_limit_exceeded(
+            "placeholder_schema_bytes",
+            max_value=error.max_value,
+            actual_value=error.actual_value,
+        )
 
 
 def _template_placeholder_schema(placeholders: tuple[str, ...]) -> JsonObject:
@@ -359,72 +379,6 @@ def _apply_structural_template_docx_mode(
         evidence=evidence[:3],
         confidence="high",
     )
-
-
-def _bounded_text(value: str, max_chars: int) -> tuple[str, bool]:
-    if len(value) <= max_chars:
-        return value, False
-    return value[:max_chars], True
-
-
-def _fair_discovery_excerpts(
-    readable_text_by_file: Mapping[UUID, str | None],
-    *,
-    policy: AIBuilderAttachmentContextPolicy,
-) -> dict[UUID, tuple[str | None, AttachmentCoverage]]:
-    readable_files = sorted(
-        (
-            (file_id, text)
-            for file_id, text in readable_text_by_file.items()
-            if text is not None
-        ),
-        key=lambda item: str(item[0]),
-    )
-    excerpt_by_file: dict[UUID, tuple[str | None, AttachmentCoverage]] = {
-        file_id: (None, "inventory_only") for file_id in readable_text_by_file
-    }
-    if not readable_files:
-        return excerpt_by_file
-
-    per_file_limit = max(0, policy.max_discovery_excerpt_chars)
-    capacities = {
-        file_id: min(len(text), per_file_limit) for file_id, text in readable_files
-    }
-    allocations = {file_id: 0 for file_id, _ in readable_files}
-    remaining = min(
-        max(0, policy.max_discovery_excerpt_chars_total),
-        sum(capacities.values()),
-    )
-
-    while remaining > 0:
-        active_file_ids = [
-            file_id
-            for file_id, _ in readable_files
-            if allocations[file_id] < capacities[file_id]
-        ]
-        if not active_file_ids:
-            break
-        fair_share = max(1, remaining // len(active_file_ids))
-        for file_id in active_file_ids:
-            allocation = min(
-                fair_share,
-                capacities[file_id] - allocations[file_id],
-                remaining,
-            )
-            allocations[file_id] += allocation
-            remaining -= allocation
-            if remaining == 0:
-                break
-
-    for file_id, text in readable_files:
-        allocation = allocations[file_id]
-        if allocation <= 0:
-            continue
-        excerpt_by_file[file_id] = (
-            text[:allocation],
-            "fully_seen" if allocation == len(text) else "excerpt_truncated",
-        )
-    return excerpt_by_file
 
 
 def _infer_file_role(
@@ -514,12 +468,12 @@ def build_ai_builder_attachment_context(
     files: list[File],
     *,
     policy: AIBuilderAttachmentContextPolicy | None = None,
+    fits_context: Callable[[str | None], bool] | None = None,
 ) -> AIBuilderAttachmentContext | None:
     if not files:
         return None
 
     resolved_policy = policy or AIBuilderAttachmentContextPolicy()
-    remaining = resolved_policy.max_total_chars
     readable_text_by_file = {file.id: readable_attachment_text(file) for file in files}
     template_placeholders_by_file = _inspect_template_placeholders(
         files,
@@ -534,21 +488,10 @@ def build_ai_builder_attachment_context(
         files,
         template_placeholders_by_file,
     )
-    discovery_excerpts = _fair_discovery_excerpts(
-        readable_text_by_file,
-        policy=resolved_policy,
-    )
-    parts: list[str] = []
     evidence: list[AIBuilderAttachmentEvidence] = []
-    included_file_ids: list[UUID] = []
-    total_chars = 0
-    truncated = False
 
     for file in files:
         text = readable_text_by_file[file.id]
-        excerpt, coverage = discovery_excerpts[file.id]
-        truncated = truncated or (text is not None and coverage != "fully_seen")
-
         role, role_confidence, role_evidence, candidate_roles = _infer_file_role(
             file,
             text,
@@ -560,8 +503,8 @@ def build_ai_builder_attachment_context(
             file_type=file.file_type,
             mimetype=file.mimetype,
             has_readable_text=text is not None,
-            excerpt=excerpt,
-            coverage=coverage,
+            excerpt=None,
+            coverage="inventory_only",
             inferred_role=role,
             role_confidence=role_confidence,
             role_evidence=role_evidence,
@@ -570,43 +513,201 @@ def build_ai_builder_attachment_context(
         )
         evidence.append(attachment_evidence)
 
-        if text is None or remaining <= 0:
-            continue
+    structural_context = AIBuilderAttachmentContext(
+        context=None,
+        evidence=tuple(evidence),
+        included_file_ids=[],
+        total_chars=0,
+        truncated=any(text is not None for text in readable_text_by_file.values()),
+        output_schema_evidence=output_schema_evidence,
+        output_schema_discovery=output_schema_discovery,
+        readable_text_by_file={
+            file_id: text
+            for file_id, text in readable_text_by_file.items()
+            if text is not None
+        },
+    )
+    _validate_attachment_planning_state_payload(structural_context)
+    return fit_ai_builder_attachment_context(
+        structural_context,
+        fits_context=fits_context or (lambda _: True),
+    )
 
-        text, file_truncated = _bounded_text(
-            text,
-            resolved_policy.max_chars_per_file,
+
+def build_ai_builder_attachment_context_for_model(
+    files: list[File],
+    *,
+    policy: AIBuilderAttachmentContextPolicy,
+    model_name: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    safety_buffer_tokens: int,
+    minimum_conversation_tokens: int,
+) -> AIBuilderAttachmentContext | None:
+    """Admit attachment text against the selected model's usable input budget."""
+
+    attachment_token_budget = max(
+        0,
+        max_input_tokens
+        - max_output_tokens
+        - safety_buffer_tokens
+        - minimum_conversation_tokens,
+    )
+
+    def fits_context(context: str | None) -> bool:
+        if context is None:
+            return True
+        return (
+            count_message_tokens(
+                [{"role": "system", "content": context}],
+                model_name,
+            )
+            <= attachment_token_budget
         )
-        truncated = truncated or file_truncated
-        filename_header = (
-            f"Filename: {render_ai_builder_evidence_value(file.name)}\n"
-            f"File role: {attachment_evidence.inferred_role} "
-            f"({attachment_evidence.role_confidence}, unconfirmed)\n"
+
+    return build_ai_builder_attachment_context(
+        files,
+        policy=policy,
+        fits_context=fits_context,
+    )
+
+
+def fit_ai_builder_attachment_context(
+    attachment_context: AIBuilderAttachmentContext,
+    *,
+    fits_context: Callable[[str | None], bool],
+) -> AIBuilderAttachmentContext:
+    """Fit readable attachment text fairly without inventing file or char quotas."""
+
+    readable_items = sorted(
+        (
+            (item.file_id, attachment_context.readable_text_by_file[item.file_id])
+            for item in attachment_context.evidence
+            if item.file_id in attachment_context.readable_text_by_file
+        ),
+        key=lambda item: str(item[0]),
+    )
+    if not readable_items:
+        if fits_context(attachment_context.context):
+            return attachment_context
+        return replace(
+            attachment_context,
+            context=None,
+            included_file_ids=[],
+            total_chars=0,
+            truncated=attachment_context.truncated
+            or attachment_context.context is not None,
         )
-        block_body = text[:remaining]
-        if len(text) > len(block_body):
-            truncated = True
-        block = f"{filename_header}{block_body}"
+    if not fits_context(None):
+        return _render_attachment_context_with_allocations(
+            attachment_context,
+            allocations={},
+        )
 
-        if not block_body:
+    total_available_chars = sum(len(text) for _, text in readable_items)
+    if total_available_chars == 0:
+        return _render_attachment_context_with_allocations(
+            attachment_context,
+            allocations={},
+        )
+
+    def render(char_budget: int) -> AIBuilderAttachmentContext:
+        bounded_budget = min(max(char_budget, 0), total_available_chars)
+        allocations = _fair_text_allocations(readable_items, bounded_budget)
+        return _render_attachment_context_with_allocations(
+            attachment_context,
+            allocations=allocations,
+        )
+
+    lower = 0
+    upper = 1
+    while upper < total_available_chars and fits_context(render(upper).context):
+        lower = upper
+        upper = min(total_available_chars, upper * 2)
+
+    if fits_context(render(upper).context):
+        return render(upper)
+
+    while lower + 1 < upper:
+        midpoint = (lower + upper) // 2
+        if fits_context(render(midpoint).context):
+            lower = midpoint
+        else:
+            upper = midpoint
+    return render(lower)
+
+
+def _fair_text_allocations(
+    readable_items: list[tuple[UUID, str]],
+    char_budget: int,
+) -> dict[UUID, int]:
+    allocations = {file_id: 0 for file_id, _ in readable_items}
+    remaining = min(char_budget, sum(len(text) for _, text in readable_items))
+    while remaining > 0:
+        active = [
+            (file_id, text)
+            for file_id, text in readable_items
+            if allocations[file_id] < len(text)
+        ]
+        if not active:
+            break
+        fair_share = max(1, remaining // len(active))
+        for file_id, text in active:
+            allocation = min(
+                fair_share,
+                len(text) - allocations[file_id],
+                remaining,
+            )
+            allocations[file_id] += allocation
+            remaining -= allocation
+            if remaining == 0:
+                break
+    return allocations
+
+
+def _render_attachment_context_with_allocations(
+    attachment_context: AIBuilderAttachmentContext,
+    *,
+    allocations: Mapping[UUID, int],
+) -> AIBuilderAttachmentContext:
+    parts: list[str] = []
+    evidence: list[AIBuilderAttachmentEvidence] = []
+    included_file_ids: list[UUID] = []
+    total_chars = 0
+    truncated = False
+
+    for item in attachment_context.evidence:
+        text = attachment_context.readable_text_by_file.get(item.file_id)
+        allocation = min(allocations.get(item.file_id, 0), len(text or ""))
+        excerpt = text[:allocation] if text is not None and allocation > 0 else None
+        coverage: AttachmentCoverage = (
+            "fully_seen"
+            if text is not None and allocation == len(text)
+            else "excerpt_truncated"
+            if allocation > 0
+            else "inventory_only"
+        )
+        evidence.append(replace(item, excerpt=excerpt, coverage=coverage))
+        if text is not None and allocation < len(text):
+            truncated = True
+        if excerpt is None:
             continue
+        parts.append(
+            f"Filename: {render_ai_builder_evidence_value(item.filename)}\n"
+            f"File role: {item.inferred_role} "
+            f"({item.role_confidence}, unconfirmed)\n"
+            f"{excerpt}"
+        )
+        included_file_ids.append(item.file_id)
+        total_chars += allocation
 
-        parts.append(block)
-        included_file_ids.append(file.id)
-        remaining -= len(block_body)
-        total_chars += len(block_body)
-        if remaining <= 0:
-            truncated = True
-
-    context = _render_reference_material(parts)
-    return AIBuilderAttachmentContext(
-        context=context,
+    return replace(
+        attachment_context,
+        context=_render_reference_material(parts),
         evidence=tuple(evidence),
         included_file_ids=included_file_ids,
         total_chars=total_chars,
         truncated=truncated,
-        output_schema_evidence=output_schema_evidence,
-        output_schema_discovery=output_schema_discovery,
     )
 
 
@@ -617,13 +718,44 @@ def _is_docx_attachment(file: File) -> bool:
     )
 
 
-def _template_inspection_limit_exceeded(reason: str) -> None:
+def _template_inspection_limit_exceeded(
+    reason: str,
+    *,
+    file_id: UUID | None = None,
+    max_value: int | None = None,
+    actual_value: int | None = None,
+) -> NoReturn:
+    context: dict[str, object] = {"reason": reason}
+    if file_id is not None:
+        context["file_id"] = str(file_id)
+    if max_value is not None:
+        context["max_value"] = max_value
+    if actual_value is not None:
+        context["actual_value"] = actual_value
     raise AIBuilderBadRequestException(
-        "AI Builder cannot safely inspect all attached DOCX files. "
-        "Detach unnecessary templates or simplify their placeholders and try again.",
+        "AI Builder cannot safely inspect or retain all attached evidence. "
+        "Detach unnecessary files or simplify their template structure and try again.",
         code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE,
-        context={"reason": reason},
+        context=context,
     )
+
+
+def _validate_attachment_planning_state_payload(
+    attachment_context: AIBuilderAttachmentContext,
+) -> None:
+    state = PlanningState.empty()
+    state.file_roles = attachment_file_roles(attachment_context)
+    apply_attachment_structural_evidence_to_planning_state(state, attachment_context)
+    try:
+        enforce_planning_state_payload_cap(
+            cast(JsonObject, state.model_dump(mode="json"))
+        )
+    except PlanningStatePayloadTooLargeError as error:
+        _template_inspection_limit_exceeded(
+            "planning_state_bytes",
+            max_value=error.cap_bytes,
+            actual_value=error.byte_size,
+        )
 
 
 def _inspect_template_placeholders(
@@ -632,42 +764,46 @@ def _inspect_template_placeholders(
     policy: AIBuilderAttachmentContextPolicy,
 ) -> dict[UUID, tuple[str, ...] | None]:
     placeholders_by_file: dict[UUID, tuple[str, ...] | None] = {}
-    docx_count = 0
     total_uncompressed_bytes = 0
-    total_placeholders = 0
+    unique_placeholders: set[str] = set()
 
     for file in sorted(files, key=lambda item: str(item.id)):
         placeholders_by_file[file.id] = None
         if not _is_docx_attachment(file) or file.blob is None:
             continue
 
-        docx_count += 1
-        if docx_count > policy.max_template_docx_files:
-            _template_inspection_limit_exceeded("docx_count")
-
         try:
             metrics = docx_template_archive_metrics(file.blob, filename=file.name)
-        except BadRequestException:
-            continue
+        except (BadRequestException, FileNotSupportedException) as error:
+            _template_inspection_limit_exceeded(
+                error.code or "invalid_docx",
+                file_id=file.id,
+            )
         total_uncompressed_bytes += metrics.uncompressed_bytes
         if total_uncompressed_bytes > policy.max_template_uncompressed_bytes:
-            _template_inspection_limit_exceeded("uncompressed_bytes")
+            _template_inspection_limit_exceeded(
+                "uncompressed_bytes",
+                max_value=policy.max_template_uncompressed_bytes,
+                actual_value=total_uncompressed_bytes,
+            )
 
         try:
             placeholders = docx_template_placeholder_names(
                 file.blob,
                 filename=file.name,
             )
-        except BadRequestException:
-            continue
-        if any(
-            len(placeholder) > policy.max_template_placeholder_chars
-            for placeholder in placeholders
-        ):
-            _template_inspection_limit_exceeded("placeholder_length")
-        total_placeholders += len(placeholders)
-        if total_placeholders > policy.max_template_placeholders:
-            _template_inspection_limit_exceeded("placeholder_count")
+        except (BadRequestException, FileNotSupportedException) as error:
+            _template_inspection_limit_exceeded(
+                error.code or "invalid_docx",
+                file_id=file.id,
+            )
+        unique_placeholders.update(placeholders)
+        if len(unique_placeholders) > policy.max_template_placeholders:
+            _template_inspection_limit_exceeded(
+                "placeholder_count",
+                max_value=policy.max_template_placeholders,
+                actual_value=len(unique_placeholders),
+            )
         placeholders_by_file[file.id] = placeholders
 
     return placeholders_by_file

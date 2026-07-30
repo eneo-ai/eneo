@@ -1147,8 +1147,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get AI Builder budget settings
-     * @description Return token budget settings used by the Flow AI Builder planner.
+     * Get AI Builder resource budget settings
+     * @description Return effective prompt reserves, message and attachment limits, template-inspection limits, and their fixed system ceilings.
      */
     get: operations["get_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_get"];
     put?: never;
@@ -1157,8 +1157,8 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Update AI Builder budget settings
-     * @description Update token budget settings used by the Flow AI Builder planner.
+     * Update AI Builder resource budget settings
+     * @description Update tenant-owned prompt reserves, message and attachment limits, and template-inspection limits.
      */
     patch: operations["update_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_patch"];
     trace?: never;
@@ -5368,7 +5368,7 @@ export interface paths {
     };
     /**
      * Get Limits
-     * @description Get the configured size and count limits for uploads and crawls.
+     * @description Get configured upload and AI Builder input limits.
      */
     get: operations["get_limits_api_v1_limits__get"];
     put?: never;
@@ -8757,8 +8757,30 @@ export interface components {
       conversation_safety_buffer_tokens: number;
       /** Minimum Conversation Budget Tokens */
       minimum_conversation_budget_tokens: number;
-      /** Unknown Model Context Window Tokens */
-      unknown_model_context_window_tokens?: number | null;
+      /** Max Attachments */
+      max_attachments: number;
+      /** Max Message Chars */
+      max_message_chars: number;
+      /** Max Template Inspection Uncompressed Bytes */
+      max_template_inspection_uncompressed_bytes: number;
+      /** Max Template Placeholders */
+      max_template_placeholders: number;
+      /** Max Attachments Hard Limit */
+      max_attachments_hard_limit: number;
+      /** Max Message Chars Hard Limit */
+      max_message_chars_hard_limit: number;
+      /** Max Template Inspection Uncompressed Bytes Hard Limit */
+      max_template_inspection_uncompressed_bytes_hard_limit: number;
+      /** Max Template Placeholders Hard Limit */
+      max_template_placeholders_hard_limit: number;
+      /** Max Template Archive Entries Per File Hard Limit */
+      max_template_archive_entries_per_file_hard_limit: number;
+      /** Max Template Uncompressed Bytes Per File Hard Limit */
+      max_template_uncompressed_bytes_per_file_hard_limit: number;
+      /** Max Planning State Payload Bytes Hard Limit */
+      max_planning_state_payload_bytes_hard_limit: number;
+      /** Budget Token Hard Limit */
+      budget_token_hard_limit: number;
     };
     /** AIBuilderBudgetSettingsUpdate */
     AIBuilderBudgetSettingsUpdate: {
@@ -8766,8 +8788,14 @@ export interface components {
       conversation_safety_buffer_tokens?: number | null;
       /** Minimum Conversation Budget Tokens */
       minimum_conversation_budget_tokens?: number | null;
-      /** Unknown Model Context Window Tokens */
-      unknown_model_context_window_tokens?: number | null;
+      /** Max Attachments */
+      max_attachments?: number | null;
+      /** Max Message Chars */
+      max_message_chars?: number | null;
+      /** Max Template Inspection Uncompressed Bytes */
+      max_template_inspection_uncompressed_bytes?: number | null;
+      /** Max Template Placeholders */
+      max_template_placeholders?: number | null;
     };
     /** AIBuilderConversationMessage */
     AIBuilderConversationMessage: {
@@ -10910,6 +10938,10 @@ export interface components {
     AttachmentLimits: {
       /** Formats */
       formats: components["schemas"]["FormatLimit"][];
+      /** Ai Builder Max Count */
+      ai_builder_max_count: number;
+      /** Ai Builder Max Message Chars */
+      ai_builder_max_message_chars: number;
     };
     /**
      * AuditConfigResponse
@@ -33978,7 +34010,7 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderBudgetSettingsPublic"];
         };
       };
-      /** @description Invalid AI Builder budget settings payload. */
+      /** @description Invalid AI Builder settings payload. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -33986,7 +34018,7 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "At least one AI Builder budget field must be provided.",
+           *       "message": "At least one AI Builder setting must be provided.",
            *       "eneo_error_code": 9007,
            *       "code": "flow_settings_invalid_payload"
            *     }

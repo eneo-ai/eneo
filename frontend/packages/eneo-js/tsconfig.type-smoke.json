@@ -12,6 +12,7 @@
   "include": [
     "index.d.ts",
     "src/endpoints/flows.js",
+    "src/endpoints/settings.js",
     "src/types/flow-client.types.ts",
     "src/types/flow-resource-aliases.types.ts"
   ],

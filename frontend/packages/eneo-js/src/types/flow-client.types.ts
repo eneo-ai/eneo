@@ -1,4 +1,5 @@
 import { createEneo } from "@eneo/eneo-js";
+import type { AIBuilderBudgetSettingsUpdate } from "./resources";
 import type { operations } from "./schema";
 
 type Assert<T extends true> = T;
@@ -45,4 +46,7 @@ type _GetFlowRunContractReturn = Assert<
 >;
 type _CreateFlowRunReturn = Assert<
   Equal<Awaited<ReturnType<typeof flows.runs.create>>, CreateFlowRunResponse>
+>;
+type _AIBuilderUpdateExcludesResponseOnlyHardLimits = Assert<
+  Equal<Extract<keyof AIBuilderBudgetSettingsUpdate, `${string}hard_limit`>, never>
 >;

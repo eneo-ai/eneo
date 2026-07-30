@@ -24,6 +24,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
+    AIBuilderAttachmentContextPolicy,
     AIBuilderAttachmentOutputSchemaDiscovery,
     build_ai_builder_attachment_context,
 )
@@ -41,6 +42,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    AIBuilderKnownProviderRejectionException,
     build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
@@ -68,12 +70,14 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     PlannerRequestPreparationInput,
     ProposalPrepared,
     ServerOutputPrepared,
+    build_proposal_prepared,
     prepare_planner_request,
     validate_preprovider_output_schema_gate,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalMessageGroup,
+    flatten_proposal_message_groups,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
@@ -103,6 +107,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     AskOutputSchemaConflict,
@@ -136,6 +141,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.main.exceptions import BadRequestException
+from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
 
 
 def _route(
@@ -335,8 +341,8 @@ async def _prepare_planner_request_for_test(
             or AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
+            attachment_context_policy=AIBuilderAttachmentContextPolicy(),
             base_planning_state_version=base_planning_state_version,
             tenant_id=planner.user.tenant_id,
             plan_edit_context=cast(Any, plan_edit_context),
@@ -428,7 +434,6 @@ def _budget_policy() -> AIBuilderBudgetPolicy:
     return AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=128,
         minimum_conversation_budget_tokens=256,
-        unknown_model_context_window_tokens=8192,
     )
 
 
@@ -924,7 +929,6 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
             base_planning_state_version=4,
         )
@@ -1059,7 +1063,7 @@ async def test_prepare_planner_request_reuses_checked_empty_attachment_context(
     )
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_ai_builder_attachment_context",
+        "build_ai_builder_attachment_context_for_model",
         rebuild_context,
     )
 
@@ -1120,7 +1124,8 @@ async def test_send_message_checks_attachment_conflict_before_metadata_provider_
         AsyncMock(return_value=(None, None)),
     )
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_planner.build_ai_builder_attachment_context",
+        "eneo.flows.ai_builder.ai_builder_planner."
+        "build_ai_builder_attachment_context_for_model",
         build_context,
     )
     monkeypatch.setattr(
@@ -1147,7 +1152,15 @@ async def test_send_message_checks_attachment_conflict_before_metadata_provider_
     with pytest.raises(RuntimeError, match="request captured"):
         await anext(stream)
 
-    build_context.assert_called_once_with(attachments)
+    build_context.assert_called_once_with(
+        attachments,
+        policy=AIBuilderAttachmentContextPolicy(),
+        model_name="openai/gpt-5.4",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        safety_buffer_tokens=128,
+        minimum_conversation_tokens=256,
+    )
     resolve_metadata.assert_not_awaited()
     assert captured_request is not None
     assert captured_request.prepared_attachment_context is prepared_context
@@ -1305,7 +1318,6 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
             base_planning_state_version=4,
         )
@@ -1377,7 +1389,6 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
             base_planning_state_version=4,
         )
@@ -1434,7 +1445,8 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
             return_value=requirements_state,
         ),
         patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
+            "build_ai_builder_attachment_context_for_model",
             return_value=attachment_context,
         ) as build_attachment_context,
         patch(
@@ -1461,7 +1473,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
             base_planning_state_version=4,
         )
@@ -1521,7 +1532,8 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             return_value=requirements,
         ),
         patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
+            "build_ai_builder_attachment_context_for_model",
             return_value=AIBuilderAttachmentContext(
                 context="attachment context",
                 evidence=(),
@@ -1561,7 +1573,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
             base_planning_state_version=0,
         )
@@ -1646,7 +1657,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
             base_planning_state_version=4,
         )
@@ -1654,6 +1664,102 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     assert isinstance(prepared, ProposalPrepared)
     assert prepared.llm_messages[0]["role"] == "system"
     assert "Call exactly one `propose_flow` tool" in prepared.llm_messages[0]["content"]
+
+
+def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> None:
+    model_name = "gpt-4o-mini"
+    current_turn = ConversationMessage(
+        role="user",
+        content="Build the confirmed reporting flow from my attached source.",
+    )
+    history = ConversationMessage(role="user", content="old context " * 5_000)
+    attachment_text = "ATTACHMENT-EVIDENCE " * 5_000
+    attachment_context = build_ai_builder_attachment_context(
+        [_make_file(attachment_text)]
+    )
+    assert attachment_context is not None
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None,
+        available_kbs=None,
+    )
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=64,
+        minimum_conversation_budget_tokens=128,
+    )
+    common = {
+        "requirements_state": RequirementsState(),
+        "ui_language": "en",
+        "slot_classification_metadata": None,
+        "planning_state": PlanningState.empty(),
+        "flow_context": None,
+        "is_edit_mode": False,
+        "resource_catalog": catalog,
+        "current_steps": None,
+        "plan_edit_context": None,
+        "prior_plan_for_revision": None,
+        "litellm_model": model_name,
+        "max_output_tokens": 256,
+        "budget_policy": policy,
+        "attachment_file_count": 1,
+    }
+    baseline = build_proposal_prepared(
+        **common,
+        conversation=[current_turn],
+        attachment_context=None,
+        max_input_tokens=100_000,
+        current_turn_start=0,
+    )
+    tool_schema = build_propose_flow_tool_schema(
+        current_steps=None,
+        resource_catalog=catalog,
+    )
+    irreducible_request_tokens = (
+        count_message_tokens(baseline.llm_messages, model_name)
+        + count_tool_tokens([tool_schema], model_name)
+        + 256
+        + policy.conversation_safety_buffer_tokens
+    )
+    tight_context_window = irreducible_request_tokens + 300
+
+    prepared = build_proposal_prepared(
+        **common,
+        conversation=[history, current_turn],
+        attachment_context=attachment_context,
+        max_input_tokens=tight_context_window,
+        current_turn_start=1,
+    )
+
+    assert prepared.request_budget is not None
+    fitted_groups = prepared.request_budget.fit(
+        message_groups=prepared.message_groups,
+        tool_schemas=[tool_schema],
+        model_name=model_name,
+    )
+    fitted_messages = flatten_proposal_message_groups(fitted_groups)
+    final_request_tokens = (
+        count_message_tokens(fitted_messages, model_name)
+        + count_tool_tokens([tool_schema], model_name)
+        + prepared.request_budget.output_reserve_tokens
+        + prepared.request_budget.safety_buffer_tokens
+    )
+    assert final_request_tokens <= tight_context_window
+    assert current_turn.content in [message["content"] for message in fitted_messages]
+    system_content = fitted_messages[0]["content"]
+    assert isinstance(system_content, str)
+    assert attachment_text not in system_content
+    assert "ATTACHMENT-EVIDENCE" in system_content
+
+    assert baseline.request_budget is not None
+    impossible_budget = replace(
+        baseline.request_budget,
+        context_window_tokens=irreducible_request_tokens - 1,
+    )
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        impossible_budget.fit(
+            message_groups=baseline.message_groups,
+            tool_schemas=[tool_schema],
+            model_name=model_name,
+        )
 
 
 @pytest.mark.asyncio
@@ -1691,7 +1797,6 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
             base_planning_state_version=0,
             allow_discovery_semantic_adjudication=False,
@@ -1770,7 +1875,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
             base_planning_state_version=0,
         )
@@ -1812,7 +1916,6 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
         ):
             pass
@@ -2421,7 +2524,6 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
         )
     ]
@@ -2634,7 +2736,6 @@ async def test_send_message_rejects_closed_session_before_claiming_lock() -> Non
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
             ),
         ):
             pass

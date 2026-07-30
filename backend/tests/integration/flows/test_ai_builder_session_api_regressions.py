@@ -4693,7 +4693,6 @@ async def test_send_message_status_jump_under_lock_uses_lease(
                 budget_policy=AIBuilderBudgetPolicy(
                     conversation_safety_buffer_tokens=128,
                     minimum_conversation_budget_tokens=256,
-                    unknown_model_context_window_tokens=8192,
                 ),
             ):
                 pass

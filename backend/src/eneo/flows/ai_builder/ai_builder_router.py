@@ -837,6 +837,7 @@ async def send_message(
                             tenant_flow_settings=(
                                 tenant.flow_settings if tenant else None
                             ),
+                            message=body.message,
                             message_file_ids=body.file_ids,
                         )
                     )
@@ -901,6 +902,9 @@ async def send_message(
                         prepared_context.planner_context.max_output_tokens
                     ),
                     budget_policy=prepared_context.planner_context.budget_policy,
+                    attachment_context_policy=(
+                        prepared_context.planner_context.attachment_context_policy
+                    ),
                     mapped_execution_policy=(
                         prepared_context.planner_context.mapped_execution_policy
                     ),

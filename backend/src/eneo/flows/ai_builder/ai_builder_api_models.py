@@ -37,6 +37,9 @@ from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.flow_ai_builder_budget_settings import (
+    AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+)
 
 AI_BUILDER_SESSION_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "session_id": "00000000-0000-0000-0000-000000000701",
@@ -315,7 +318,7 @@ class SendMessageRequest(BaseModel):
             "only when retrying the same request payload."
         )
     )
-    message: str = Field(max_length=50_000)
+    message: str = Field(max_length=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT)
     model_id: UUID | None = None
     file_ids: list[UUID] | None = Field(
         default=None,

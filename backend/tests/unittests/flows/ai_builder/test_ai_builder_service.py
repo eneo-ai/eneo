@@ -1287,6 +1287,69 @@ class TestPlannerContextPreparation:
         completion_service.resolve_model_route.assert_not_awaited()
 
     @pytest.mark.anyio
+    async def test_prepare_message_context_enforces_resolved_builder_operating_limits(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        repo.list_session_file_ids.return_value = [uuid4()]
+        file_service = AsyncMock()
+        model = _make_model()
+        model.max_input_tokens = 4096
+        model.max_output_tokens = 2048
+        model.provider_type = "openai"
+        space = MagicMock()
+        space.completion_models = [model]
+        space.collections = []
+        space.get_default_completion_model.return_value = model
+        service = AIBuilderService(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            completion_service=AsyncMock(),
+            space_service=AsyncMock(),
+            template_asset_service=AsyncMock(),
+            file_service=file_service,
+        )
+
+        with pytest.raises(
+            AIBuilderBadRequestException,
+            match="at most 2 attachments",
+        ):
+            await service.prepare_message_context(
+                session=_make_session(tenant_id=user.tenant_id),
+                space=space,
+                model_id=None,
+                tenant_flow_settings={
+                    "ai_builder": {
+                        "max_attachments": 2,
+                        "max_message_chars": 5,
+                    }
+                },
+                message="valid",
+                message_file_ids=[uuid4(), uuid4()],
+            )
+
+        with pytest.raises(
+            AIBuilderBadRequestException,
+            match="at most 5 characters",
+        ):
+            await service.prepare_message_context(
+                session=_make_session(tenant_id=user.tenant_id),
+                space=space,
+                model_id=None,
+                tenant_flow_settings={
+                    "ai_builder": {
+                        "max_attachments": 2,
+                        "max_message_chars": 5,
+                    }
+                },
+                message="too long",
+            )
+
+        file_service.get_files_by_ids.assert_not_awaited()
+
+    @pytest.mark.anyio
     async def test_prepare_message_context_rejects_flow_space_mismatch(self):
         user = _make_user()
         repo = AsyncMock()

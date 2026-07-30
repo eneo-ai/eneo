@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContextPolicy,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -35,6 +38,7 @@ class AIBuilderPlannerContext:
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
+    attachment_context_policy: AIBuilderAttachmentContextPolicy
     mapped_execution_policy: FlowMappedExecutionPolicy
 
 
@@ -114,15 +118,19 @@ def build_planner_context(
         getattr(model, "name", None),
     )
     budget_policy = resolve_ai_builder_budget_policy(tenant_flow_settings)
+    attachment_context_policy = AIBuilderAttachmentContextPolicy(
+        max_template_uncompressed_bytes=(
+            budget_policy.max_template_inspection_uncompressed_bytes
+        ),
+        max_template_placeholders=budget_policy.max_template_placeholders,
+    )
     mapped_execution_policy = resolve_flow_mapped_execution_policy(tenant_flow_settings)
-    max_input_tokens = (
-        getattr(model, "max_input_tokens", None)
-        or (defaults.max_input_tokens if defaults else None)
-        or budget_policy.unknown_model_context_window_tokens
+    max_input_tokens = getattr(model, "max_input_tokens", None) or (
+        defaults.max_input_tokens if defaults else None
     )
     if max_input_tokens is None:
         raise AIBuilderBadRequestException(
-            "Planner model is missing a usable context window. Configure max_input_tokens for the model or set an AI Builder fallback in flow settings.",
+            "Planner model is missing a usable context window. Configure max_input_tokens for the model.",
             code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW,
         )
 
@@ -144,5 +152,6 @@ def build_planner_context(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         budget_policy=budget_policy,
+        attachment_context_policy=attachment_context_policy,
         mapped_execution_policy=mapped_execution_policy,
     )

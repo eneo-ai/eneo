@@ -20,7 +20,7 @@ export function getAIBuilderAttachmentRules(limits: Limits): AttachmentRules {
   );
 
   return {
-    maxTotalCount: Infinity,
+    maxTotalCount: limits.attachments.ai_builder_max_count,
     acceptedFormats: formats.map(({ mimetype, size }) => ({
       mimetype,
       maxSize: size

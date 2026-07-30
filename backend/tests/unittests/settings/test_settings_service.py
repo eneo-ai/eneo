@@ -211,6 +211,7 @@ def test_flow_settings_update_models_reject_unknown_fields() -> None:
         (FlowDocumentRenderLimitsUpdate, {"max_source_chars": 500_000}),
         (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": 900}),
         (FlowEvidencePolicyUpdate, {"allow_sensitive_flow_exports": True}),
+        (AIBuilderBudgetSettingsUpdate, {"max_attachments": 50}),
         (
             FlowClassificationRetentionPolicyUpdate,
             {
@@ -872,6 +873,10 @@ async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch)
                 "ai_builder": {
                     "conversation_safety_buffer_tokens": 1234,
                     "minimum_conversation_budget_tokens": 5678,
+                    "max_attachments": 37,
+                    "max_message_chars": 12000,
+                    "max_template_inspection_uncompressed_bytes": 67108864,
+                    "max_template_placeholders": 750,
                 }
             }
         }
@@ -882,7 +887,6 @@ async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch)
         lambda: SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2000,
             ai_builder_minimum_conversation_budget_tokens=4000,
-            ai_builder_unknown_model_context_window_tokens=None,
         ),
     )
 
@@ -900,7 +904,15 @@ async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch)
 
     assert settings.conversation_safety_buffer_tokens == 1234
     assert settings.minimum_conversation_budget_tokens == 5678
-    assert settings.unknown_model_context_window_tokens is None
+    assert settings.max_attachments == 37
+    assert settings.max_message_chars == 12000
+    assert settings.max_template_inspection_uncompressed_bytes == 67108864
+    assert settings.max_template_placeholders == 750
+    assert settings.max_template_archive_entries_per_file_hard_limit == 2048
+    assert (
+        settings.max_template_uncompressed_bytes_per_file_hard_limit == 50 * 1024 * 1024
+    )
+    assert settings.max_planning_state_payload_bytes_hard_limit == 128 * 1024
 
 
 async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch):
@@ -919,7 +931,6 @@ async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch
         lambda: SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2000,
             ai_builder_minimum_conversation_budget_tokens=4000,
-            ai_builder_unknown_model_context_window_tokens=128000,
         ),
     )
 
@@ -936,23 +947,25 @@ async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch
     updated = await service.update_ai_builder_budget_settings(
         AIBuilderBudgetSettingsUpdate(
             conversation_safety_buffer_tokens=1500,
-            unknown_model_context_window_tokens=None,
+            max_attachments=42,
         )
     )
 
     assert updated.conversation_safety_buffer_tokens == 1500
     assert updated.minimum_conversation_budget_tokens == 4000
-    assert updated.unknown_model_context_window_tokens == 128000
+    assert updated.max_attachments == 42
 
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
     assert (
         tenant.flow_settings["ai_builder"]["conversation_safety_buffer_tokens"] == 1500
     )
-    assert (
-        "unknown_model_context_window_tokens" not in tenant.flow_settings["ai_builder"]
-    )
+    assert tenant.flow_settings["ai_builder"]["max_attachments"] == 42
     assert len(calls) == 1
     assert calls[0]["metadata"]["setting"] == "ai_builder_budget_settings"
+    assert calls[0]["metadata"]["changes"]["max_attachments"] == {
+        "old": 100,
+        "new": 42,
+    }
 
 
 async def test_update_ai_builder_budget_settings_rejects_empty_patch():
@@ -969,9 +982,7 @@ async def test_update_ai_builder_budget_settings_rejects_empty_patch():
         data_retention_service=MockDataRetentionService(),
     )
 
-    with pytest.raises(
-        BadRequestException, match="At least one AI Builder budget field"
-    ):
+    with pytest.raises(BadRequestException, match="At least one AI Builder setting"):
         await service.update_ai_builder_budget_settings(AIBuilderBudgetSettingsUpdate())
 
 

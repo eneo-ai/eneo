@@ -1598,7 +1598,10 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
     )
-    limit_service = providers.Factory(LimitService)
+    limit_service = providers.Factory(
+        LimitService,
+        settings_service=settings_service,
+    )
 
     integration_service = providers.Factory(
         IntegrationService,

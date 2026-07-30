@@ -60,7 +60,11 @@
     clearUploads
   } = initAttachmentManager({
     eneo,
-    options: { rules: attachmentRules }
+    options: {
+      rules: attachmentRules,
+      existingAttachmentCount: () =>
+        (service.session?.attachments?.length ?? 0) + restoredFiles.length
+    }
   });
 
   let inputValue = $state("");
@@ -78,14 +82,12 @@
           : m.ai_builder_input_placeholder())
   );
 
-  // Character budget (handoff §5): counter fades in near the limit, over the
-  // limit the composer reports an error and refuses to send.
-  const MESSAGE_CHAR_LIMIT = 4000;
-  const COUNTER_THRESHOLD = 3500;
+  const messageCharLimit = limits.attachments.ai_builder_max_message_chars;
   const numberFormatter = new Intl.NumberFormat(getLocale());
-  const charCount = $derived(inputValue.length);
-  const overLimit = $derived(refinement && charCount > MESSAGE_CHAR_LIMIT);
-  const showCounter = $derived(refinement && charCount >= COUNTER_THRESHOLD && !overLimit);
+  // Match Python/Pydantic string length: count Unicode code points rather than
+  // JavaScript UTF-16 code units, so emoji do not consume two different limits.
+  const charCount = $derived(Array.from(inputValue).length);
+  const overLimit = $derived(charCount > messageCharLimit);
 
   // --- Draft lifecycle (handoff §2) ------------------------------------------
   // Explicit keyed state machine:
@@ -715,13 +717,13 @@
     </div>
   {/if}
 
-  {#if refinement}
+  {#if refinement || overLimit}
     <div class="composer-meta">
       {#if overLimit}
         <p id="ai-builder-composer-limit" class="composer-error" role="status">
           {m.ai_builder_refine_over_limit({
             count: numberFormatter.format(charCount),
-            limit: numberFormatter.format(MESSAGE_CHAR_LIMIT)
+            limit: numberFormatter.format(messageCharLimit)
           })}
           <span class="composer-tip">{m.ai_builder_refine_over_limit_tip()}</span>
         </p>
@@ -729,11 +731,9 @@
         <p class="composer-hint">
           {draftRestored ? m.ai_builder_draft_persistence_note() : m.ai_builder_refine_hint()}
         </p>
-        {#if showCounter}
-          <span class="composer-counter">
-            {numberFormatter.format(charCount)} / {numberFormatter.format(MESSAGE_CHAR_LIMIT)}
-          </span>
-        {/if}
+        <span class="composer-counter">
+          {numberFormatter.format(charCount)} / {numberFormatter.format(messageCharLimit)}
+        </span>
       {/if}
     </div>
   {/if}
