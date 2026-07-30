@@ -76,16 +76,11 @@ from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
-    FlowAttemptProvenance,
     FlowResolvedInputEdge,
     FlowResolvedInputEdgeGrouping,
     FlowResolvedInputEdges,
-    LlmProvenance,
     ModelParameterSnapshot,
-    RagProvenance,
     group_resolved_input_edges,
-    normalize_json_preview,
-    normalize_text_preview,
     parse_attempt_provenance,
 )
 from eneo.flows.flow_run_step_result_file import build_step_result_file_references
@@ -186,7 +181,9 @@ from eneo.flows.runtime.step_input_resolution import (
     resolve_step_input as resolve_step_input_runtime,
 )
 from eneo.flows.runtime.step_result_builder import (
+    build_attempt_provenance,
     build_default_failed_input_payload,
+    build_incomplete_attempt_provenance,
 )
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
@@ -419,95 +416,6 @@ def _pre_attempt_start_model_from_state_cache(
         _requested_model_from_assistant(assistant),
         _provider_from_assistant(assistant),
     )
-
-
-def _build_incomplete_attempt_provenance(
-    *,
-    state: RunExecutionState | None,
-    step: RuntimeStep,
-    rag_metadata: object = None,
-) -> dict[str, Any] | None:
-    """Provenance for an attempt that failed before producing a step output.
-
-    Retrieval evidence captured before the failure is recorded here, because
-    attempt provenance is the only owner of verbatim passages: dropping it would
-    make a failed attempt look like a step that retrieved nothing.
-    """
-    attempt_start = _attempt_start_for_step(state=state, step=step)
-    rag = (
-        RagProvenance.model_validate(rag_metadata)
-        if isinstance(rag_metadata, dict)
-        else None
-    )
-    if attempt_start is None and rag is None:
-        return None
-    return FlowAttemptProvenance(attempt_start=attempt_start, rag=rag).to_payload()
-
-
-def _build_attempt_provenance(
-    *,
-    step: RuntimeStep,
-    output: StepExecutionOutput,
-    step_result: FlowStepResult,
-    attempt_start: AttemptStartProvenance | None = None,
-) -> dict[str, Any]:
-    provenance_payload: dict[str, Any] = {
-        "llm": LlmProvenance(
-            effective_prompt=normalize_text_preview(output.effective_prompt),
-            model_parameters=output.model_parameters_json,
-            tool_calls=normalize_json_preview(output.tool_calls_metadata)
-            if output.tool_calls_metadata is not None
-            else None,
-            raw_completion_text=normalize_text_preview(output.raw_completion_text)
-            if isinstance(output.raw_completion_text, str)
-            and output.raw_completion_text
-            else None,
-        )
-    }
-    if attempt_start is not None:
-        provenance_payload["attempt_start"] = attempt_start
-    if output.rag_metadata is not None:
-        provenance_payload["rag"] = output.rag_metadata
-    if output.runtime_input_metadata is not None:
-        provenance_payload["runtime_input"] = output.runtime_input_metadata
-    if output.transcription_metadata is not None:
-        provenance_payload["transcription"] = output.transcription_metadata
-    if output.contract_validation is not None or output.diagnostics:
-        provenance_payload["guards"] = {
-            "contract_validation": output.contract_validation,
-            "diagnostics": [
-                {
-                    "code": diagnostic.code,
-                    "message": diagnostic.message,
-                    "severity": diagnostic.severity,
-                }
-                for diagnostic in output.diagnostics
-            ],
-        }
-    output_payload = step_result.output_payload_json or {}
-    template_provenance = output_payload.get("template_provenance")
-    if isinstance(template_provenance, dict):
-        provenance_payload["template"] = template_provenance
-    if output.artifacts or output.generated_file_ids:
-        provenance_payload["artifacts"] = {
-            "items": output.artifacts or [],
-            "generated_file_ids": [
-                str(file_id) for file_id in output.generated_file_ids
-            ],
-        }
-    if step.input_source == "http_get":
-        provenance_payload["http"] = {
-            "input_source": step.input_source,
-            "structured_input_present": output.source_text != "",
-        }
-    if step.output_mode == "http_post":
-        provenance_payload["http"] = {
-            **cast(dict[str, Any], provenance_payload.get("http", {})),
-            "output_mode": step.output_mode,
-        }
-    if output.citation_sidecar is not None:
-        provenance_payload["citations"] = output.citation_sidecar
-    return FlowAttemptProvenance.model_validate(provenance_payload).to_payload()
 
 
 class FlowRunExecutor:
@@ -1808,9 +1716,8 @@ class FlowRunExecutor:
             error_message="Run was cancelled during step execution.",
             requested_model=requested_model,
             provider=provider,
-            provenance_json=_build_incomplete_attempt_provenance(
-                state=state,
-                step=step,
+            provenance_json=build_incomplete_attempt_provenance(
+                attempt_start=attempt_start,
             ),
         )
         await self._commit()
@@ -1849,10 +1756,10 @@ class FlowRunExecutor:
             run_error_message=run_error_message,
         )
         await self._rollback()
+        attempt_start = _attempt_start_for_step(state=state, step=step)
         requested_model = getattr(typed_exc, "requested_model", None)
         provider = getattr(typed_exc, "provider", None)
         if requested_model is None or provider is None:
-            attempt_start = _attempt_start_for_step(state=state, step=step)
             state_model, state_provider = (
                 (
                     attempt_start.requested_model,
@@ -1877,9 +1784,8 @@ class FlowRunExecutor:
             if isinstance(requested_model, str)
             else None,
             provider=provider if isinstance(provider, str) else None,
-            provenance_json=_build_incomplete_attempt_provenance(
-                state=state,
-                step=step,
+            provenance_json=build_incomplete_attempt_provenance(
+                attempt_start=attempt_start,
                 rag_metadata=getattr(typed_exc, "rag_metadata", None),
             ),
             input_payload_json=failure_plan.failed_result.input_payload_json,
@@ -1984,9 +1890,8 @@ class FlowRunExecutor:
             error_message=failure_plan.error_message,
             requested_model=requested_model,
             provider=provider,
-            provenance_json=_build_incomplete_attempt_provenance(
-                state=state,
-                step=step,
+            provenance_json=build_incomplete_attempt_provenance(
+                attempt_start=attempt_start,
                 rag_metadata=getattr(exc, "rag_metadata", None),
             ),
             input_payload_json=failure_plan.failed_result.input_payload_json,
@@ -2063,10 +1968,8 @@ class FlowRunExecutor:
             provider_response_id=output.provider_response_id,
             num_tokens_input=output.num_tokens_input,
             num_tokens_output=output.num_tokens_output,
-            provenance_json=_build_attempt_provenance(
-                step=step,
+            provenance_json=build_attempt_provenance(
                 output=output,
-                step_result=step_result,
                 attempt_start=attempt_start,
             ),
             input_payload_json=saved_result.input_payload_json,

@@ -2542,7 +2542,7 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
         )
         if unavailable_status == "corrupt":
             persisted_provenance = {
-                "schema_version": "flow-attempt-provenance.v1",
+                "schema_version": "flow-attempt-provenance.v2",
                 "unexpected": {},
             }
         else:
@@ -2589,8 +2589,8 @@ async def test_attempt_provenance_writers_preserve_unavailable_evidence(
             tenant_id=context.tenant_id,
             status=FlowStepAttemptStatus.FAILED,
             provenance_json={
-                "schema_version": "flow-attempt-provenance.v1",
-                "artifacts": {"generated_count": 1},
+                "schema_version": "flow-attempt-provenance.v2",
+                "citations": {"citation_observed": True},
             },
             input_payload_json={"secret": "runtime-input"},
             output_payload_json={"secret": "runtime-output"},
@@ -2628,8 +2628,8 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
             .where(FlowStepAttempts.id == attempt.id)
             .values(
                 provenance_json={
-                    "schema_version": "flow-attempt-provenance.v1",
-                    "artifacts": {"generated_count": 1},
+                    "schema_version": "flow-attempt-provenance.v2",
+                    "citations": {"citation_observed": True},
                 }
             )
         )
@@ -2650,8 +2650,8 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
         assert persisted is not None
         parsed = parse_attempt_provenance(persisted.provenance_json)
         assert parsed.provenance is not None
-        assert parsed.provenance.artifacts is not None
-        assert parsed.provenance.artifacts.model_dump() == {"generated_count": 1}
+        assert parsed.provenance.citations is not None
+        assert parsed.provenance.citations.model_dump() == {"citation_observed": True}
         assert parsed.provenance.attempt_start == context.attempt_start
         resolved_input = await run_repo.get_resolved_input_edges(
             attempt_id=attempt.id,
@@ -4024,7 +4024,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
                 .where(FlowStepAttempts.attempt_no == attempt_no)
                 .values(
                     provenance_json={
-                        "schema_version": "flow-attempt-provenance.v1",
+                        "schema_version": "flow-attempt-provenance.v2",
                         "rag": {
                             "status": "success",
                             "recorded_passage_bytes": passage_bytes,
@@ -4126,7 +4126,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             .where(FlowStepAttempts.attempt_no == 1)
             .values(
                 provenance_json={
-                    "schema_version": "flow-attempt-provenance.v1",
+                    "schema_version": "flow-attempt-provenance.v2",
                     "rag": {"status": "success", "recorded_passage_bytes": "12abc"},
                 }
             )
@@ -4138,7 +4138,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             .where(FlowStepAttempts.attempt_no == 2)
             .values(
                 provenance_json={
-                    "schema_version": "flow-attempt-provenance.v1",
+                    "schema_version": "flow-attempt-provenance.v2",
                     "rag": {"status": "success", "recorded_passage_bytes": -500},
                 }
             )

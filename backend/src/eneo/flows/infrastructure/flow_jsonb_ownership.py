@@ -489,8 +489,12 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
         corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
         rationale=(
-            "Attempt provenance records provider, retrieval, and evidence context "
-            "whose shape is useful as one diagnostic document."
+            "Attempt provenance v2 excludes facts reconstructed from immutable attempt "
+            "payloads, relational result files, provider-call rows, or the published "
+            "definition. Its remaining LLM and attempt-start context is diagnostic "
+            "until those scalars converge on a typed immutable attempt owner; exact "
+            "retrieval evidence and bounded completion, tool-call, admission, and "
+            "citation observations have no other reconstruction path."
         ),
     ),
     _owner(

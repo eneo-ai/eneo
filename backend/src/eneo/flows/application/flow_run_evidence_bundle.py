@@ -559,11 +559,6 @@ def _dump_attempt_record(
         parse_result.provenance,
         item,
     )
-    if export_provenance is not None and export_provenance.token_usage is not None:
-        # Historical provider-call receipts remain in JSONB only as migration and
-        # rollback material. The relational provider_calls projection is the sole
-        # public lifecycle authority after the cutover.
-        export_provenance = export_provenance.model_copy(update={"token_usage": None})
     dumped["provenance_json"] = (
         export_provenance.to_payload()
         if export_provenance is not None

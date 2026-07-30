@@ -292,7 +292,7 @@ async def test_list_provider_calls_authorizes_run_and_forwards_page_cursor(user)
 
 
 @pytest.mark.asyncio
-async def test_export_v13_hash_covers_all_provider_call_events(user):
+async def test_export_v14_hash_covers_all_provider_call_events(user):
     user = _trace_user(user)
     provider_call_repo = _provider_call_repo()
     event = _provider_call_evidence()
@@ -326,7 +326,7 @@ async def test_export_v13_hash_covers_all_provider_call_events(user):
     )
     export_without_event = await service.export_evidence_json(run_id=run.id)
 
-    assert export_with_event["schema_version"] == "flow-evidence-export.v13"
+    assert export_with_event["schema_version"] == "flow-evidence-export.v14"
     assert export_with_event["bundle"]["provider_calls"]["items"][0]["event_id"] == str(
         event.event_id
     )

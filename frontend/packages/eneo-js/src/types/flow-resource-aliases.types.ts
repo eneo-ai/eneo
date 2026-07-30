@@ -713,14 +713,14 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 const validUntypedFlowEvidence: FlowRunEvidence = validFlowEvidence;
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v13",
+  schema_version: "flow-evidence-export.v14",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v13",
+    schema_version: "flow-evidence-export.v14",
     app_version: "DEV",
-    provenance_schema_version_min: "flow-attempt-provenance.v1",
-    provenance_schema_version_current: "flow-attempt-provenance.v1",
+    provenance_schema_version_min: "flow-attempt-provenance.v2",
+    provenance_schema_version_current: "flow-attempt-provenance.v2",
     provenance_persisted_version_status: "not_tracked",
     content_hash: "sha256:evidence",
     content_hash_input: "redacted",

@@ -205,14 +205,14 @@ def _evidence_export_payload(
         mode="json"
     )
     return {
-        "schema_version": "flow-evidence-export.v13",
+        "schema_version": "flow-evidence-export.v14",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
-            "schema_version": "flow-evidence-export.v13",
+            "schema_version": "flow-evidence-export.v14",
             "app_version": "DEV",
-            "provenance_schema_version_min": "flow-attempt-provenance.v1",
-            "provenance_schema_version_current": "flow-attempt-provenance.v1",
+            "provenance_schema_version_min": "flow-attempt-provenance.v2",
+            "provenance_schema_version_current": "flow-attempt-provenance.v2",
             "provenance_persisted_version_status": "not_tracked",
             "run_id": str(run.id),
             "tenant_id": str(run.tenant_id),

@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from typing import get_type_hints
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
+
 from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepAttemptStatus,
@@ -18,7 +21,6 @@ from eneo.flows.flow_run_provenance import (
     parse_attempt_provenance,
 )
 from eneo.flows.runtime.claim_resolution import StepClaimResolution
-from eneo.flows.runtime.executor import _build_attempt_provenance
 from eneo.flows.runtime.step_attempt_runtime import (
     StepFailurePlan,
     build_generic_failure_plan,
@@ -32,7 +34,10 @@ from eneo.flows.runtime.step_execution_result import (
     WebhookDeliveryIntent,
     WebhookPayloadRef,
 )
-from eneo.flows.runtime.step_result_builder import build_completed_step_result
+from eneo.flows.runtime.step_result_builder import (
+    build_attempt_provenance,
+    build_completed_step_result,
+)
 
 
 def _claimed_result(*, step_order: int = 1) -> FlowStepResult:
@@ -352,10 +357,8 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
     assert plan.delivery_intents == (intent,)
 
 
-def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
-    claimed = _claimed_result()
+def test_build_attempt_provenance_omits_retired_runtime_projections() -> None:
     generated_file_id = uuid4()
-    step = _runtime_step(input_source="http_get", output_mode="http_post")
     output = _step_output()
     output.generated_file_ids = [generated_file_id]
     output.artifacts = [
@@ -378,18 +381,8 @@ def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
         )
     ]
     output.citation_sidecar = {"tracking_mode": "passive_inline_scan"}
-    step_result = claimed.model_copy(
-        update={
-            "output_payload_json": {
-                "template_provenance": {"template_id": "template-1"},
-            }
-        }
-    )
-
-    provenance_payload = _build_attempt_provenance(
-        step=step,
+    provenance_payload = build_attempt_provenance(
         output=output,
-        step_result=step_result,
     )
 
     validated = FlowAttemptProvenance.model_validate(provenance_payload)
@@ -402,18 +395,7 @@ def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
         "schema_version",
         "llm",
         "rag",
-        "runtime_input",
-        "transcription",
-        "guards",
-        "template",
-        "artifacts",
-        "http",
         "citations",
-    }
-    assert provenance_payload["http"] == {
-        "input_source": "http_get",
-        "structured_input_present": True,
-        "output_mode": "http_post",
     }
     assert set(provenance_payload["llm"]) <= {
         "effective_prompt",
@@ -421,9 +403,26 @@ def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
         "tool_calls",
         "raw_completion_text",
     }
-    assert provenance_payload["artifacts"]["generated_file_ids"] == [
-        str(generated_file_id)
-    ]
+
+
+@pytest.mark.parametrize(
+    "retired_key",
+    [
+        "artifacts",
+        "template",
+        "runtime_input",
+        "transcription",
+        "guards",
+        "http",
+        "token_usage",
+        "agentic",
+    ],
+)
+def test_attempt_provenance_rejects_retired_parallel_owners(
+    retired_key: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowAttemptProvenance.model_validate({retired_key: {}})
 
 
 def test_runtime_tool_calls_land_in_attempt_provenance_not_step_result() -> None:
@@ -442,16 +441,16 @@ def test_runtime_tool_calls_land_in_attempt_provenance_not_step_result() -> None
         output_payload_json={"text": "done"},
         execution_hash="exec-hash",
     )
-    provenance_payload = _build_attempt_provenance(
-        step=step,
+    provenance_payload = build_attempt_provenance(
         output=output,
-        step_result=step_result,
     )
 
     parse_result = parse_attempt_provenance(provenance_payload)
     assert parse_result.provenance is not None
     assert parse_result.provenance.llm is not None
     assert parse_result.provenance.llm.tool_calls is not None
+    assert "tool_calls" not in (step_result.input_payload_json or {})
+    assert "tool_calls" not in (step_result.output_payload_json or {})
     assert provenance_payload["llm"]["tool_calls"]["preview"] == [
         {"name": "lookup", "arguments": {"q": "case"}}
     ]

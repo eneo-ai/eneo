@@ -122,12 +122,6 @@ ALLOWED_OUTPUT_MODE_BRANCHES = frozenset(
         _OutputAxisBranch(
             axis="output_mode",
             relative_path="executor.py",
-            function="_build_attempt_provenance",
-            expression="step.output_mode == 'http_post'",
-        ),
-        _OutputAxisBranch(
-            axis="output_mode",
-            relative_path="executor.py",
             function="_build_step_handler",
             expression="match mode using FlowOutputMode",
         ),

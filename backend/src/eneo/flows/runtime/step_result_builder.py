@@ -9,6 +9,67 @@ from eneo.flows.domain.rag_evidence import (
     build_step_result_citation_state,
 )
 from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
+from eneo.flows.flow_run_provenance import (
+    AttemptStartProvenance,
+    CitationsProvenance,
+    FlowAttemptProvenance,
+    LlmProvenance,
+    RagProvenance,
+    normalize_json_preview,
+    normalize_text_preview,
+)
+
+
+def build_incomplete_attempt_provenance(
+    *,
+    attempt_start: AttemptStartProvenance | None,
+    rag_metadata: object = None,
+) -> dict[str, Any] | None:
+    """Build evidence captured before an attempt produced a complete output."""
+    rag = (
+        RagProvenance.model_validate(rag_metadata)
+        if isinstance(rag_metadata, dict)
+        else None
+    )
+    if attempt_start is None and rag is None:
+        return None
+    return FlowAttemptProvenance(attempt_start=attempt_start, rag=rag).to_payload()
+
+
+def build_attempt_provenance(
+    *,
+    output: StepExecutionOutput,
+    attempt_start: AttemptStartProvenance | None = None,
+) -> dict[str, Any]:
+    """Build the v2 attempt-evidence projection from completed runtime output."""
+    return FlowAttemptProvenance(
+        llm=LlmProvenance(
+            effective_prompt=normalize_text_preview(output.effective_prompt),
+            model_parameters=output.model_parameters_json,
+            tool_calls=(
+                normalize_json_preview(output.tool_calls_metadata)
+                if output.tool_calls_metadata is not None
+                else None
+            ),
+            raw_completion_text=(
+                normalize_text_preview(output.raw_completion_text)
+                if isinstance(output.raw_completion_text, str)
+                and output.raw_completion_text
+                else None
+            ),
+        ),
+        attempt_start=attempt_start,
+        rag=(
+            RagProvenance.model_validate(output.rag_metadata)
+            if output.rag_metadata is not None
+            else None
+        ),
+        citations=(
+            CitationsProvenance.model_validate(output.citation_sidecar)
+            if output.citation_sidecar is not None
+            else None
+        ),
+    ).to_payload()
 
 
 def build_default_failed_input_payload(*, input_source: str) -> dict[str, Any]:

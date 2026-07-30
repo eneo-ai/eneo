@@ -513,9 +513,6 @@ async def _seed_flow_run_contract_data(
                         }
                     ],
                 },
-                "http": {
-                    "request_preview": {"authorization": "Bearer super-secret"},
-                },
             },
             started_at=started_at,
             finished_at=finished_at,
@@ -942,7 +939,7 @@ async def test_flow_run_evidence_endpoint_requires_trace_permission(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_run_evidence_hides_legacy_provider_call_jsonb_after_cutover(
+async def test_flow_run_evidence_marks_retired_provider_call_jsonb_corrupt(
     client,
     db_container,
     patch_auth_service_jwt,
@@ -985,7 +982,12 @@ async def test_flow_run_evidence_hides_legacy_provider_call_jsonb_after_cutover(
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert "token_usage" not in payload["step_attempts"][0]["provenance_json"]
+    provenance = payload["step_attempts"][0]["provenance_json"]
+    assert provenance["status"] == "corrupt"
+    assert provenance["error_code"] == (
+        "flow_attempt_provenance_unknown_top_level_keys"
+    )
+    assert provenance["unknown_keys"] == ["token_usage"]
     assert payload["provider_calls"] == {
         "items": [],
         "count": 0,
@@ -1162,7 +1164,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     )
     assert export_response.status_code == 200, export_response.text
     evidence_export = export_response.json()
-    assert evidence_export["schema_version"] == "flow-evidence-export.v13"
+    assert evidence_export["schema_version"] == "flow-evidence-export.v14"
     assert (
         evidence_export["manifest"]["schema_version"]
         == evidence_export["schema_version"]

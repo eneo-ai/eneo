@@ -339,10 +339,37 @@ per-item execution, earlier calls may already have completed. The failed step
 result and attempt input payload retain the bounded RAG metadata and diagnostics
 before the run is terminalized;
 completed best-effort steps retain the same fields and the attempt provenance
-guard projection. Debug and evidence normalization preserve additive RAG fields.
+retains the exact retrieved passages. Guard diagnostics stay in the immutable
+attempt input and current step-result projection instead of being copied into
+provenance. Debug and evidence normalization preserve additive RAG fields.
 This reuses the published step `output_config`, step-result/attempt persistence,
 and evidence owners; it adds no setting, query, lock, migration, or background
 process.
+
+### Attempt evidence ownership
+
+`step_result_builder.py` constructs terminal attempt evidence and the mutable
+step-result projection. The executor supplies runtime facts and orchestrates
+persistence. Attempt-start evidence is still constructed during activation in
+the executor and merged by the repository. The v2 projection is therefore the
+deletion boundary, not the final ownership boundary: prompt, model-parameter,
+and attempt-start scalars must converge on a typed immutable attempt input.
+
+| Fact | Canonical owner | Other retained projection | Explicitly not retained in attempt provenance |
+| --- | --- | --- | --- |
+| Exact execution input and original output | Immutable `flow_step_attempts.input_payload_json` and `output_payload_json` | The current step result keeps only the runtime value used by downstream execution and review. Its output may legitimately differ after a human edit. | Runtime input, transcription, validation guards, diagnostics, and template output metadata are reconstructed from the attempt payloads. |
+| LLM request and attempt-start context | Requested model and provider are attempt columns; effective prompt and model parameters remain on the current step result until the immutable attempt input is typed. | Attempt provenance temporarily retains a bounded diagnostic copy. It is not a compatibility or fallback authority. | This split ownership is explicit technical debt, not a second canonical source. |
+| Generated and declared artifacts | `flow_run_step_result_files`, joined to `files` | The current result may contain file-backed output metadata needed to interpret its text. | Artifact identity, checksum, size, source, and availability are never copied into provenance. |
+| Provider-call lifecycle and token usage | Relational `flow_provider_calls` | Attempt and current-result scalars remain transitional runtime summaries until the typed-owner convergence removes them. | The retired JSONB token-receipt document is rejected as corrupt instead of becoming a fallback authority. |
+| Retrieved knowledge | `RetrievedKnowledgeEvidence` inside attempt provenance | The current result carries citation source identity without passages so later steps can inherit source context. | Verbatim passages have no second copy. |
+| Raw completion, tool calls, and citation observations | Attempt provenance | None. These facts cannot be reconstructed from the sanitized output. | None. |
+| Published HTTP behavior | Immutable published definition plus attempt input/output | None. | HTTP mode and presence flags are derived rather than persisted again. |
+
+The current attempt-provenance schema is `flow-attempt-provenance.v2`. Because
+Flows are not deployed, the retired v1 keys have no compatibility reader: an old
+or malformed document is exported with an explicit corruption marker. Retention
+purge markers remain a separate typed state and must never be reported as
+`not_tracked` or `corrupt`.
 
 ## Step Behavior And Output Format
 

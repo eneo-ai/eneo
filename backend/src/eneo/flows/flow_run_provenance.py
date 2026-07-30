@@ -36,8 +36,8 @@ TEXT_PREVIEW_MAX_BYTES = 16 * 1024
 JSON_PREVIEW_MAX_BYTES = 16 * 1024
 ModelT = TypeVar("ModelT", bound=BaseModel)
 DEFAULT_RAG_SELECTION_BASIS = "semantic_search_ranked_chunks_grouped_by_source"
-FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION: Literal["flow-attempt-provenance.v1"] = (
-    "flow-attempt-provenance.v1"
+FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION: Literal["flow-attempt-provenance.v2"] = (
+    "flow-attempt-provenance.v2"
 )
 FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION: Literal[
     "flow-attempt-provenance-marker.v1"
@@ -500,84 +500,6 @@ TokenCountSource = Literal[
 ]
 
 
-class ProviderCallTokenReceiptProvenance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    call_index: int
-    num_tokens_input: int | None = Field(default=None, ge=0)
-    num_tokens_output: int | None = Field(default=None, ge=0)
-    input_source: TokenCountSource
-    output_source: TokenCountSource
-    requested_model: str | None = None
-    response_model: str | None = None
-    provider: str | None = None
-    provider_response_id: str | None = None
-    mapped_call: MappedProviderCallProvenance | None = None
-
-    @model_validator(mode="after")
-    def _usage_source_matches_count(self) -> "ProviderCallTokenReceiptProvenance":
-        _validate_provider_call_count_source(
-            count=self.num_tokens_input,
-            source=self.input_source,
-            dimension="input",
-        )
-        _validate_provider_call_count_source(
-            count=self.num_tokens_output,
-            source=self.output_source,
-            dimension="output",
-        )
-        return self
-
-
-class TokenUsageProvenance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    num_tokens_input: int | None = Field(default=None, ge=0)
-    num_tokens_output: int | None = Field(default=None, ge=0)
-    input_source: TokenCountSource
-    output_source: TokenCountSource
-    completed_provider_calls: tuple[ProviderCallTokenReceiptProvenance, ...] = ()
-
-    @model_validator(mode="after")
-    def _aggregate_source_matches_count(self) -> "TokenUsageProvenance":
-        _validate_aggregate_count_source(
-            count=self.num_tokens_input,
-            source=self.input_source,
-            dimension="input",
-        )
-        _validate_aggregate_count_source(
-            count=self.num_tokens_output,
-            source=self.output_source,
-            dimension="output",
-        )
-        return self
-
-
-def _validate_provider_call_count_source(
-    *, count: int | None, source: TokenCountSource, dimension: str
-) -> None:
-    if (count is None) != (source == "not_reported"):
-        raise ValueError(
-            f"Provider call {dimension} count must be absent exactly when its "
-            "source is not_reported."
-        )
-
-
-def _validate_aggregate_count_source(
-    *, count: int | None, source: TokenCountSource, dimension: str
-) -> None:
-    if count is None and source not in ("mixed", "not_reported"):
-        raise ValueError(
-            f"Aggregate {dimension} count can be absent only for mixed or "
-            "not_reported usage."
-        )
-    if count is not None and source == "not_reported":
-        raise ValueError(
-            f"Aggregate {dimension} count cannot be measured when its source is "
-            "not_reported."
-        )
-
-
 def sum_complete_token_counts(counts: Iterable[int | None]) -> int | None:
     total = 0
     observed = False
@@ -593,34 +515,6 @@ class RagProvenance(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class HttpProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
-class GuardsProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
-class RuntimeInputProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
-class TranscriptionProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
-class TemplateProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
-class ArtifactProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
-class AgenticProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
 class CitationsProvenance(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -628,21 +522,13 @@ class CitationsProvenance(BaseModel):
 class FlowAttemptProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["flow-attempt-provenance.v1"] = (
+    schema_version: Literal["flow-attempt-provenance.v2"] = (
         FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
     )
     llm: LlmProvenance | None = None
     attempt_start: AttemptStartProvenance | None = None
     rag: RagProvenance | None = None
-    http: HttpProvenance | None = None
-    template: TemplateProvenance | None = None
-    runtime_input: RuntimeInputProvenance | None = None
-    transcription: TranscriptionProvenance | None = None
-    artifacts: ArtifactProvenance | None = None
-    agentic: AgenticProvenance | None = None
-    guards: GuardsProvenance | None = None
     citations: CitationsProvenance | None = None
-    token_usage: TokenUsageProvenance | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -847,7 +733,7 @@ def resolve_attempt_terminalization_evidence(
     existing: dict[str, Any] | None,
     incoming: dict[str, Any] | None,
 ) -> FlowAttemptTerminalizationEvidence:
-    """Preserve unavailable evidence and committed receipts during terminalization."""
+    """Preserve unavailable evidence during attempt terminalization."""
     existing_result = parse_attempt_provenance(existing)
     if existing_result.status in ("corrupt", "retention_purged"):
         return FlowAttemptTerminalizationEvidence(
@@ -859,25 +745,8 @@ def resolve_attempt_terminalization_evidence(
             provenance_json=existing,
             write_runtime_payloads=True,
         )
-    incoming_result = parse_attempt_provenance(incoming)
-    if incoming_result.status != "tracked" or incoming_result.provenance is None:
-        return FlowAttemptTerminalizationEvidence(
-            provenance_json=incoming,
-            write_runtime_payloads=True,
-        )
-    if (
-        incoming_result.provenance.token_usage is not None
-        or existing_result.status != "tracked"
-        or existing_result.provenance is None
-        or existing_result.provenance.token_usage is None
-    ):
-        provenance_json = incoming
-    else:
-        provenance_json = incoming_result.provenance.model_copy(
-            update={"token_usage": existing_result.provenance.token_usage}
-        ).to_payload()
     return FlowAttemptTerminalizationEvidence(
-        provenance_json=provenance_json,
+        provenance_json=incoming,
         write_runtime_payloads=True,
     )
 
@@ -964,7 +833,7 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
 
     try:
         return FlowAttemptProvenanceParseResult.tracked(
-            _normalize_attempt_provenance_v1(raw_payload)
+            _normalize_attempt_provenance_v2(raw_payload)
         )
     except (TypeError, ValueError, ValidationError):
         return FlowAttemptProvenanceParseResult.corrupt(
@@ -977,7 +846,7 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
         )
 
 
-def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenance:
+def _normalize_attempt_provenance_v2(raw: dict[str, Any]) -> FlowAttemptProvenance:
     llm_raw = raw.get("llm")
     llm: LlmProvenance | None = None
     if isinstance(llm_raw, dict):
@@ -1009,19 +878,7 @@ def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenan
             AttemptStartProvenance, raw.get("attempt_start")
         ),
         rag=_normalize_rag_provenance(raw.get("rag")),
-        http=_validate_extra_model(HttpProvenance, raw.get("http")),
-        template=_validate_extra_model(TemplateProvenance, raw.get("template")),
-        runtime_input=_validate_extra_model(
-            RuntimeInputProvenance, raw.get("runtime_input")
-        ),
-        transcription=_validate_extra_model(
-            TranscriptionProvenance, raw.get("transcription")
-        ),
-        artifacts=_validate_extra_model(ArtifactProvenance, raw.get("artifacts")),
-        agentic=_validate_extra_model(AgenticProvenance, raw.get("agentic")),
-        guards=_validate_extra_model(GuardsProvenance, raw.get("guards")),
         citations=_validate_extra_model(CitationsProvenance, raw.get("citations")),
-        token_usage=_validate_extra_model(TokenUsageProvenance, raw.get("token_usage")),
     )
 
 
