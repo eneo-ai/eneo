@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-30 | **Bounded Builder persistence and replayable terminal failures**: locally detected oversized planning state now commits one typed terminal outcome that preserves the last valid state and replays without another provider call, while genuine unknown provider outcomes remain untouched; immutable proposal snapshots have one current-only top-level schema version, a 1 MiB serialized bound, and canonical fail-closed hydration that rejects unknown or normalized persisted values without weakening provider-input normalization; the established draft-title path remains intact (`c606411f7..48e9be497`, gate green 8/10 after two passes, no findings) |
 | 2026-07-29 | **Bounded interactive attempt evidence**: current and recent attempt candidates stop at 500 rows plus one truncation sentinel before ranking, aggregation, and payload hydration; every attempt-derived count is explicitly exact or a lower bound through the API and Swedish/English UI; unlimited exports remain complete; narrow PostgreSQL indexes are resumable and reject wrong, mixed-direction, or widened definitions (`acf340e9a..f82a2419a`, gate green 8/10 after three total passes, no findings) |
 | 2026-07-29 | **Canonical completion-model capability**: every Flow output mode now has one typed completion-backed classification shared by runtime disclosure, retrieval validation, the capability manifest, authoring, and materialization; deterministic template-fill steps shed unused completion-model bindings, and new output modes must be explicitly classified (`4b0796152`, gate green 9/10, no findings) |
 | 2026-07-29 | **Honest run token totals**: provider-call lifecycle rows now own live usage; retained attempts preserve typed totals and per-dimension completeness in identity-validated tombstones; superseded/rerun spend survives retention; invalid retained evidence makes recoverable totals explicitly incomplete; live and retained reads stream and fold with bounded application memory; the UI distinguishes zero, incomplete, and unrecorded usage in Swedish and English (`9f7d70165`, gate green 8/10, no findings) |
@@ -53,9 +54,9 @@ plan against current source, not carried over blind).
 
 From the retired program's OPEN-WORK ledger: **A is done** (`9f7d70165`:
 provider-call-owned totals, typed completeness, retention-safe summaries).
-**B remains open** (the planning-state payload cap raises a
-plain exception that the send lease converts into false
-`PROVIDER_OUTCOME_UNKNOWN` — item 4). **C is obsolete** under the no-compat
+**B is done** (`c606411f7..48e9be497`: oversized planning state is a typed,
+replayable terminal outcome, and versioned proposal snapshots are bounded and
+canonical on hydration). **C is obsolete** under the no-compat
 pre-release policy (no data preflight, no tolerant reader). **D is done**
 (typed discriminated rerun-revision contract + repository reads + multi-rerun
 DB proof). Vocabulary neutrality is NOT fully landed: `case_documents`,
@@ -84,15 +85,11 @@ external release gate (item 10); BM0.2 is external (item 10).
 2b. ~~Fix the three verified production defects~~ — **LANDED** `69f242cdd`.
 3. ~~Honest run token totals, retention included~~ — **LANDED**
    `9f7d70165`.
-4. **Bounded Builder persistence and terminal behavior** *(large, two
-   reviewable commits)* — (a) a locally detected oversized planning state
-   becomes a typed, replayable terminal outcome preserving the last valid
-   state; the handler catches ONLY `PlanningStatePayloadTooLargeError` and
-   never rewrites an existing `PROVIDER_OUTCOME_UNKNOWN` (no combined
-   ambiguity/oversize state); (b) bound builder proposal JSON with a
-   top-level current-only schema version — do not wrap `content`, and do
-   not break the draft-title JSON path (BM4.10). Max+1
-   repository-level test proves retry replays without another provider call.
+4. ~~Bounded Builder persistence and terminal behavior~~ — **LANDED**
+   `c606411f7..48e9be497`. Oversized planning state commits a typed replayable
+   terminal outcome without rewriting genuine unknown provider outcomes;
+   current-only proposal snapshots are versioned, bounded, and canonical on
+   hydration while preserving the draft-title JSON path.
 4b. **Honest static execution shape** *(medium, after item 4)* — add critic
    invariants for hard structural waste and one factual proposal projection:
    model-backed versus deterministic steps, mapped upper bound, and
@@ -195,7 +192,8 @@ Hard ordering constraints: the B5a prerequisite for item 2c is complete
 B4 runs understanding/confirmation → compile/apply. The ranked plan above
 controls all other ordering.
 
-- **B1** (= item 4): terminal replayable Builder persistence. *(L)*
+- **B1** (= item 4): **LANDED** `c606411f7..48e9be497`. Terminal replayable
+  Builder persistence and bounded canonical proposal snapshots. *(L)*
 - **B2** (= item 5 deepened, three ordered owner slices): (a) preserve the
   attachment owner's actual evidence contract —
   `fully_seen/excerpt_truncated/inventory_only` plus readability — through
