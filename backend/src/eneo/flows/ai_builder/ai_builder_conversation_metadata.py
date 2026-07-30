@@ -62,7 +62,11 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
-from eneo.flows.ai_builder.planning_state import AttachmentCoverage, FileRole
+from eneo.flows.ai_builder.planning_state import (
+    AttachmentCoverage,
+    ExampleOutputConstraintEvidence,
+    FileRole,
+)
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.main.logging import get_logger
@@ -98,11 +102,18 @@ ClassifierRetentionClass: TypeAlias = Literal[
     "slot",
     "file_role",
     "form_intake",
+    "example_output_constraint",
     "secondary_obligation",
 ]
 ClassifierRetentionIdentity: TypeAlias = tuple[ClassifierRetentionClass, str]
 CLASSIFIER_RETENTION_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
-    {"slot", "file_role", "form_intake", "secondary_obligation"}
+    {
+        "slot",
+        "file_role",
+        "form_intake",
+        "example_output_constraint",
+        "secondary_obligation",
+    }
 )
 
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
@@ -307,6 +318,7 @@ class SlotClassificationMetadata(BaseModel):
         max_length=_MAX_RESULT_OBLIGATIONS,
     )
     form_intake: SlotClassificationFormIntakeMetadata | None = None
+    example_output_constraints: ExampleOutputConstraintEvidence | None = None
     assumptions: list[SlotClassificationNote] = Field(
         default_factory=_empty_slot_classification_notes,
         max_length=CLASSIFICATION_NOTES_MAX_ITEMS,
@@ -360,7 +372,8 @@ class SlotClassificationMetadata(BaseModel):
 
     @model_validator(mode="after")
     def validate_evidence_sources(self) -> "SlotClassificationMetadata":
-        source_ids = {source.source_id for source in self.source_inventory}
+        sources_by_id = {source.source_id: source for source in self.source_inventory}
+        source_ids = set(sources_by_id)
         evidence_items = [evidence for slot in self.slots for evidence in slot.evidence]
         evidence_items.extend(
             evidence for file_role in self.file_roles for evidence in file_role.evidence
@@ -376,6 +389,48 @@ class SlotClassificationMetadata(BaseModel):
         }
         if any(file_role.file_id not in file_ids for file_role in self.file_roles):
             raise ValueError("classified file roles must cite inventoried files")
+        constraints = self.example_output_constraints
+        if constraints is None:
+            return self
+        if any(
+            citation.source_id not in source_ids for citation in constraints.citations
+        ):
+            raise ValueError("example output constraints must cite inventoried sources")
+        for citation in constraints.citations:
+            source = sources_by_id[citation.source_id]
+            expected_file_id = (
+                source.file_id if source.kind == "uploaded_file" else None
+            )
+            if citation.file_id != expected_file_id:
+                raise ValueError(
+                    "example output citation file_id must match its source"
+                )
+        uploaded_sources_by_file_id = {
+            source.file_id: source
+            for source in self.source_inventory
+            if source.kind == "uploaded_file" and source.file_id is not None
+        }
+        coverage_by_file_id = {
+            item.file_id: item.coverage for item in constraints.source_coverage
+        }
+        if any(
+            uploaded_sources_by_file_id.get(file_id) is None
+            for file_id in constraints.source_file_ids
+        ):
+            raise ValueError("example output constraints must cite inventoried files")
+        if any(
+            uploaded_sources_by_file_id[file_id].coverage
+            != coverage_by_file_id[file_id]
+            for file_id in constraints.source_file_ids
+        ):
+            raise ValueError("example output coverage must match inventoried sources")
+        cited_file_ids = {
+            citation.file_id
+            for citation in constraints.citations
+            if citation.file_id is not None
+        }
+        if cited_file_ids != set(constraints.source_file_ids):
+            raise ValueError("example output constraints must cite every selected file")
         return self
 
     def to_result(self) -> SlotClassificationResult:
@@ -387,6 +442,7 @@ class SlotClassificationMetadata(BaseModel):
             form_intake=self.form_intake.to_classified_form_intake()
             if self.form_intake is not None
             else None,
+            example_output_constraints=self.example_output_constraints,
             secondary_obligations=tuple(self.secondary_obligations),
             assumptions=tuple(self.assumptions),
             contradictions=tuple(self.contradictions),
@@ -411,6 +467,12 @@ class SlotClassificationMetadata(BaseModel):
             and self.form_intake.evidence
         ):
             identities.add(("form_intake", "form_intake"))
+        if (
+            self.example_output_constraints is not None
+            and self.example_output_constraints.confidence != "low"
+            and self.example_output_constraints.citations
+        ):
+            identities.add(("example_output_constraint", "current"))
         identities.update(
             ("secondary_obligation", obligation)
             for obligation in self.secondary_obligations
@@ -433,6 +495,11 @@ class SlotClassificationMetadata(BaseModel):
         form_intake = (
             self.form_intake if ("form_intake", "form_intake") in identities else None
         )
+        example_output_constraints = (
+            self.example_output_constraints
+            if ("example_output_constraint", "current") in identities
+            else None
+        )
         secondary_obligations = [
             obligation
             for obligation in self.secondary_obligations
@@ -448,9 +515,21 @@ class SlotClassificationMetadata(BaseModel):
                     for evidence in file_role.evidence
                 ],
                 *([] if form_intake is None else form_intake.evidence),
+                *(
+                    []
+                    if example_output_constraints is None
+                    else example_output_constraints.citations
+                ),
             )
         }
-        retained_file_ids = {file_role.file_id for file_role in file_roles}
+        retained_file_ids = {
+            *[file_role.file_id for file_role in file_roles],
+            *(
+                []
+                if example_output_constraints is None
+                else example_output_constraints.source_file_ids
+            ),
+        }
         source_inventory = [
             source
             for source in self.source_inventory
@@ -474,6 +553,7 @@ class SlotClassificationMetadata(BaseModel):
                 "file_roles": file_roles,
                 "secondary_obligations": secondary_obligations,
                 "form_intake": form_intake,
+                "example_output_constraints": example_output_constraints,
                 # Free-form model notes are diagnostics, not rebuild facts. Compaction
                 # keeps only its typed, consumer-visible degradation marker here.
                 "assumptions": [],
@@ -856,6 +936,11 @@ def slot_classification_metadata_from_result(
                 "file_roles": file_role_payloads,
                 "secondary_obligations": secondary_obligations,
                 "form_intake": form_intake_payload,
+                "example_output_constraints": (
+                    result.example_output_constraints.model_dump(mode="python")
+                    if result.example_output_constraints is not None
+                    else None
+                ),
                 "assumptions": [
                     _bounded_metadata_text(value, fallback="assumption")
                     for value in result.assumptions

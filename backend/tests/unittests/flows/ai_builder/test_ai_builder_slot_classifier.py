@@ -692,6 +692,249 @@ def test_parse_slot_classification_response_filters_file_roles() -> None:
     assert result.file_roles[0].evidence_level == "explicit"
 
 
+def test_example_output_constraints_keep_typed_citations_and_downgrade_attachment_only_high_confidence() -> (
+    None
+):
+    file_id = uuid4()
+    file_source_id = f"uploaded_file:{file_id}"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "example_output",
+                        "confidence": "medium",
+                        "reason": "the attachment demonstrates the desired result",
+                        "evidence": [
+                            _evidence("# Executive summary", source_id=file_source_id)
+                        ],
+                        "evidence_level": "inferred",
+                    }
+                ],
+                "example_output_constraints": {
+                    "source_file_ids": [str(file_id)],
+                    "headings": ["Executive summary", "Decision", "Next steps"],
+                    "style_constraints": [
+                        {
+                            "category": "tone",
+                            "description": "Formal and concise",
+                        },
+                        {
+                            "category": "organization",
+                            "description": "Lead with the decision",
+                        },
+                    ],
+                    "confidence": "high",
+                    "evidence": [
+                        _evidence("# Executive summary", source_id=file_source_id),
+                        _evidence("Decision comes first.", source_id=file_source_id),
+                    ],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=file_source_id,
+                    kind="uploaded_file",
+                    text="# Executive summary\nDecision comes first.",
+                    file_id=file_id,
+                    coverage="fully_seen",
+                ),
+            )
+        ),
+    )
+
+    assert result is not None
+    constraints = result.example_output_constraints
+    assert constraints is not None
+    assert constraints.source_file_ids == [file_id]
+    assert [(item.file_id, item.coverage) for item in constraints.source_coverage] == [
+        (file_id, "fully_seen")
+    ]
+    assert constraints.headings == [
+        "Executive summary",
+        "Decision",
+        "Next steps",
+    ]
+    assert [
+        (item.category, item.description) for item in constraints.style_constraints
+    ] == [
+        ("tone", "Formal and concise"),
+        ("organization", "Lead with the decision"),
+    ]
+    assert constraints.confidence == "medium"
+    assert [
+        (item.source_id, item.file_id, item.quote) for item in constraints.citations
+    ] == [
+        (file_source_id, file_id, "# Executive summary"),
+        (file_source_id, file_id, "Decision comes first."),
+    ]
+
+
+def test_example_output_constraints_keep_high_confidence_with_independent_user_evidence() -> (
+    None
+):
+    file_id = uuid4()
+    file_source_id = f"uploaded_file:{file_id}"
+    user_source_id = "user_message:user-1"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "example_output",
+                        "confidence": "high",
+                        "reason": "the user confirms the attachment role",
+                        "evidence": [
+                            _evidence(
+                                "Use the attached report as the output example.",
+                                source_id=user_source_id,
+                            )
+                        ],
+                        "evidence_level": "explicit",
+                    }
+                ],
+                "example_output_constraints": {
+                    "source_file_ids": [str(file_id)],
+                    "headings": ["Summary", "Recommendation"],
+                    "style_constraints": [
+                        {
+                            "category": "audience",
+                            "description": "Municipal decision-makers",
+                        }
+                    ],
+                    "confidence": "high",
+                    "evidence": [
+                        _evidence("# Summary", source_id=file_source_id),
+                        _evidence(
+                            "Use the attached report as the output example.",
+                            source_id=user_source_id,
+                        ),
+                    ],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=user_source_id,
+                    kind="user_message",
+                    text="Use the attached report as the output example.",
+                    message_id="user-1",
+                ),
+                SlotClassificationSource(
+                    source_id=file_source_id,
+                    kind="uploaded_file",
+                    text="# Summary\n# Recommendation",
+                    file_id=file_id,
+                    coverage="fully_seen",
+                ),
+            )
+        ),
+    )
+
+    assert result is not None
+    assert result.example_output_constraints is not None
+    assert result.example_output_constraints.confidence == "high"
+
+
+def test_example_output_constraints_reject_inventory_only_content_claims() -> None:
+    file_id = uuid4()
+    file_source_id = f"uploaded_file:{file_id}"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "example_output",
+                        "confidence": "medium",
+                        "reason": "possible example",
+                        "evidence": [_evidence("# Summary", source_id=file_source_id)],
+                        "evidence_level": "inferred",
+                    }
+                ],
+                "example_output_constraints": {
+                    "source_file_ids": [str(file_id)],
+                    "headings": ["Summary"],
+                    "style_constraints": [],
+                    "confidence": "medium",
+                    "evidence": [_evidence("# Summary", source_id=file_source_id)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=file_source_id,
+                    kind="uploaded_file",
+                    text="# Summary",
+                    file_id=file_id,
+                    coverage="inventory_only",
+                ),
+            )
+        ),
+    )
+
+    assert result is not None
+    assert result.example_output_constraints is None
+
+
+def test_example_output_constraints_reject_fabricated_citations() -> None:
+    file_id = uuid4()
+    file_source_id = f"uploaded_file:{file_id}"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [
+                    {
+                        "file_id": str(file_id),
+                        "role": "example_output",
+                        "confidence": "medium",
+                        "reason": "possible example",
+                        "evidence": [_evidence("# Summary", source_id=file_source_id)],
+                        "evidence_level": "inferred",
+                    }
+                ],
+                "example_output_constraints": {
+                    "source_file_ids": [str(file_id)],
+                    "headings": ["Summary"],
+                    "style_constraints": [],
+                    "confidence": "medium",
+                    "evidence": [
+                        _evidence("Fabricated heading", source_id=file_source_id)
+                    ],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=file_source_id,
+                    kind="uploaded_file",
+                    text="# Summary",
+                    file_id=file_id,
+                    coverage="fully_seen",
+                ),
+            )
+        ),
+    )
+
+    assert result is not None
+    assert result.example_output_constraints is None
+
+
 def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> None:
     result = parse_slot_classification_response(
         json.dumps(
@@ -1328,7 +1571,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     response_format = litellm_client.acompletion.await_args.kwargs["response_format"]
     assert response_format["type"] == "json_schema"
     json_schema = response_format["json_schema"]
-    assert json_schema["name"] == "ai_builder_slot_classification_v13"
+    assert json_schema["name"] == "ai_builder_slot_classification_v14"
     assert json_schema["strict"] is False
 
     schema = json_schema["schema"]
@@ -1336,6 +1579,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "slots",
         "file_roles",
         "form_intake",
+        "example_output_constraints",
         "secondary_obligations",
         "assumptions",
         "contradictions",
@@ -1379,6 +1623,26 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert (
         schema["properties"]["assumptions"]["items"]["maxLength"]
         == classifier.CLASSIFICATION_NOTE_MAX_LENGTH
+    )
+    example_schema = schema["properties"]["example_output_constraints"]["anyOf"][0]
+    assert example_schema["required"] == [
+        "source_file_ids",
+        "headings",
+        "style_constraints",
+        "confidence",
+        "evidence",
+    ]
+    assert example_schema["properties"]["source_file_ids"]["maxItems"] == 100
+    assert (
+        example_schema["properties"]["headings"]["maxItems"]
+        == classifier.EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS
+    )
+    assert example_schema["properties"]["style_constraints"]["items"]["properties"][
+        "category"
+    ]["enum"] == ["tone", "detail_level", "organization", "formatting", "audience"]
+    assert (
+        example_schema["properties"]["evidence"]["maxItems"]
+        == classifier.EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS
     )
 
 
@@ -1570,6 +1834,9 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
     assert '"evidence": [{"source_id": str, "quote": exact_quote_str}]' in prompt
     assert "attachment-only conclusions as medium confidence" in prompt
     assert '"file_roles": [{"file_id": str, "role": str' in prompt
+    assert '"example_output_constraints": {' in prompt
+    assert "tone, detail_level, organization, formatting, or audience" in prompt
+    assert "does not promise exact visual layout" in prompt
     assert "Use the conversation and file evidence together" in prompt
     assert "Do not wait for deterministic inferred_role example_output" in prompt
     assert "report_disposition, terminal_output" in prompt

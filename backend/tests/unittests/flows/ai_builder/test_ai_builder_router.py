@@ -87,6 +87,9 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreflight,
     SessionTurnPreparationBaseline,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    SLOT_CLASSIFICATION_SCHEMA_VERSION,
+)
 from eneo.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.main.exceptions import (
@@ -579,7 +582,7 @@ def test_classifier_diagnostic_projection_exposes_compaction_degradation() -> No
                 role="assistant",
                 metadata={
                     "slot_classification": {
-                        "schema_version": 13,
+                        "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
                         "prompt_hash": "a" * 64,
                         "model": "openai/gpt-test",
                         "provider": "openai",
@@ -956,7 +959,7 @@ class TestGetSessionEndpoint:
                 content="Jag förstår att flödet bara ska transkribera.",
                 metadata={
                     "slot_classification": {
-                        "schema_version": 13,
+                        "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
                         "prompt_hash": "a" * 64,
                         "model": "openai/gpt-test",
                         "provider": "openai",
@@ -1001,7 +1004,7 @@ class TestGetSessionEndpoint:
             "classifier_runs": [
                 {
                     "message_id": "assistant-1",
-                    "schema_version": 13,
+                    "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
                     "prompt_hash": "a" * 64,
                     "model": "openai/gpt-test",
                     "provider": "openai",
@@ -1036,6 +1039,7 @@ class TestGetSessionEndpoint:
                     "file_roles": [],
                     "secondary_obligations": [],
                     "form_intake": None,
+                    "example_output_constraints": None,
                     "assumptions": [],
                     "contradictions": [],
                 }

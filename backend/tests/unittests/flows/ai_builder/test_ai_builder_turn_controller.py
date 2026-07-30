@@ -4,17 +4,43 @@ from datetime import datetime, timezone
 from typing import get_args
 from uuid import UUID
 
+import pytest
+
+from eneo.files.file_models import FileType
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
+    AIBuilderAttachmentEvidence,
+    AIBuilderAttachmentOutputSchemaDiscovery,
+)
+from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
+    MAX_SESSION_MESSAGE_BYTES,
+    compact_ai_builder_conversation,
+    conversation_serialized_size_bytes,
+)
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    make_persisted_assistant_tool_call,
+    metadata_for_assistant_question,
+)
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_attachment_schema_candidate,
+    build_output_schema_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
+    AskOutputSchemaConflict,
     CommitArchitecture,
     ConfirmRequirements,
     ReviseArchitecture,
@@ -22,8 +48,12 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSchemaInferenceOutcome,
+    ExampleOutputSourceCoverage,
+    ExampleOutputStyleConstraint,
     FileRoleEvidence,
-    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -103,6 +133,90 @@ def test_server_builds_ask_question_for_allowed_target() -> None:
     assert "uploaded source material" in decision.prompt
 
 
+@pytest.mark.parametrize("ui_language", ["en", "sv"])
+@pytest.mark.parametrize("field_fill", ["\0", '"', "\\", "😀"])
+def test_schema_conflict_maximum_question_fits_persisted_message_limit(
+    ui_language: str,
+    field_fill: str,
+) -> None:
+    candidates = tuple(
+        build_attachment_schema_candidate(
+            {
+                "type": "object",
+                "properties": {
+                    f"{candidate_index}-{field_index}-{field_fill * 76}": {
+                        "type": "string"
+                    }
+                    for field_index in range(8)
+                },
+            },
+            source_file_ids=(UUID(int=candidate_index + 1),),
+        )
+        for candidate_index in range(100)
+    )
+    attachment_context = AIBuilderAttachmentContext(
+        context=None,
+        evidence=tuple(
+            AIBuilderAttachmentEvidence(
+                file_id=UUID(int=index + 1),
+                filename="😀" * 80,
+                file_type=FileType.TEXT,
+                mimetype="application/json",
+                has_readable_text=True,
+                excerpt=None,
+                coverage="fully_seen",
+            )
+            for index in range(100)
+        ),
+        included_file_ids=[],
+        total_chars=0,
+        truncated=False,
+        output_schema_discovery=AIBuilderAttachmentOutputSchemaDiscovery(
+            candidates=candidates
+        ),
+    )
+
+    decision = resolve_turn_control(
+        session_state=PlanningState.empty(),
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language=ui_language,
+        attachment_context=attachment_context,
+        output_schema_conflict_pending=True,
+    ).decision
+
+    assert isinstance(decision, AskOutputSchemaConflict)
+    question = decision.question
+    tool_call = make_persisted_assistant_tool_call(
+        tool_call_id="schema_conflict",
+        tool_name=ASK_STRUCTURED_QUESTION_TOOL_NAME,
+        arguments=question.question_data.model_dump(
+            mode="json",
+            exclude_none=False,
+            exclude_unset=True,
+        ),
+    )
+    assistant_message = ConversationMessage(
+        role="assistant",
+        content=question.assistant_text,
+        metadata=metadata_for_assistant_question(question.question_data),
+        tool_calls=[tool_call.model_dump(mode="json")],
+    )
+
+    assert {option.id for option in question.question_data.options} == {
+        candidate.fingerprint for candidate in candidates
+    }
+    assert all(
+        option.description is not None and "…" in option.description
+        for option in question.question_data.options
+    )
+    assert (
+        conversation_serialized_size_bytes([assistant_message])
+        < MAX_SESSION_MESSAGE_BYTES
+    )
+    assert compact_ai_builder_conversation([assistant_message]) == [assistant_message]
+
+
 def test_server_builds_commit_when_no_questions_remain() -> None:
     state = _state(
         primary_runtime_input="documents",
@@ -167,13 +281,15 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_swedis
     None
 ):
     state = _state(primary_runtime_input="text", terminal_output="docx_document")
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {f"field_{index}": {"type": "string"} for index in range(8)},
         },
         source="template_placeholders",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="medium",
+        evidence=("file:00000000-0000-0000-0000-000000000001:placeholder",),
         total_count=12,
         truncated=True,
     )
@@ -192,13 +308,15 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_englis
     None
 ):
     state = _state(primary_runtime_input="text", terminal_output="docx_document")
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {f"field_{index}": {"type": "string"} for index in range(8)},
         },
         source="template_placeholders",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="medium",
+        evidence=("file:00000000-0000-0000-0000-000000000001:placeholder",),
         total_count=12,
         truncated=True,
     )
@@ -210,6 +328,192 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_englis
     assert (
         "The template contains 12 unique placeholders; 8 are shown in the planning evidence."
         in decision.payload.summary
+    )
+
+
+@pytest.mark.parametrize(
+    ("ui_language", "summary_fragment", "layout_fragment"),
+    [
+        (
+            "en",
+            "A conservative output shape was inferred from the selected example",
+            "does not promise exact visual layout",
+        ),
+        (
+            "sv",
+            "En försiktig utdatastruktur har härletts från valt exempelresultat",
+            "lovar inte exakt visuell layout",
+        ),
+    ],
+)
+def test_server_confirmation_discloses_inferred_example_structure_and_style(
+    ui_language: str,
+    summary_fragment: str,
+    layout_fragment: str,
+) -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000711")
+    state = _state(primary_runtime_input="text", terminal_output="structured_json")
+    state.architecture_commit = _finalized_commit_for_state(state)
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename="expected.json",
+            file_type="text",
+            mimetype="application/json",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="example_output",
+            source="model",
+            confidence="medium",
+        )
+    ]
+    constraints = ExampleOutputConstraintEvidence(
+        source_file_ids=[file_id],
+        source_coverage=[
+            ExampleOutputSourceCoverage(
+                file_id=file_id,
+                coverage="fully_seen",
+            )
+        ],
+        headings=["Summary", "Decision", "Next steps"],
+        style_constraints=[
+            ExampleOutputStyleConstraint(
+                category="tone",
+                description="Formal and concise",
+            )
+        ],
+        confidence="medium",
+        citations=[
+            ExampleOutputCitation(
+                source_id=f"uploaded_file:{file_id}",
+                file_id=file_id,
+                quote='"decision": "approved"',
+            )
+        ],
+    )
+    schema_evidence = build_output_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {
+                "decision": {"type": "string"},
+                "count": {"type": "integer"},
+            },
+        },
+        source="inferred_example",
+        source_file_ids=(file_id,),
+        confidence="medium",
+        evidence=(f"file:{file_id}:inferred_example_shape",),
+    )
+    state = PlanningState.model_validate(
+        {
+            **dict(state),
+            "example_output_constraints": constraints,
+            "output_schema_evidence": schema_evidence,
+            "example_output_schema_inference": ExampleOutputSchemaInferenceOutcome(
+                status="inferred",
+                source_file_ids=[file_id],
+            ),
+        }
+    )
+
+    decision = _decision(state=state, ui_language=ui_language)
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert summary_fragment in decision.payload.summary
+    assumptions = "\n".join(decision.payload.assumptions)
+    assert "Summary" in assumptions
+    assert "Formal and concise" in assumptions
+    assert layout_fragment in assumptions
+
+
+def test_confirmation_fingerprint_covers_nonvisible_example_evidence() -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000712")
+    state = _state(primary_runtime_input="text", terminal_output="structured_text")
+    state.architecture_commit = _finalized_commit_for_state(state)
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename="expected.txt",
+            file_type="text",
+            mimetype="text/plain",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="example_output",
+            source="model",
+            confidence="medium",
+        )
+    ]
+    constraints = ExampleOutputConstraintEvidence(
+        source_file_ids=[file_id],
+        source_coverage=[
+            ExampleOutputSourceCoverage(
+                file_id=file_id,
+                coverage="fully_seen",
+            )
+        ],
+        headings=["Summary"],
+        style_constraints=[
+            ExampleOutputStyleConstraint(
+                category="tone",
+                description="Original hidden detail",
+            )
+        ],
+        confidence="medium",
+        citations=[
+            ExampleOutputCitation(
+                source_id=f"uploaded_file:{file_id}",
+                file_id=file_id,
+                quote="Summary",
+            )
+        ],
+    )
+    state = PlanningState.model_validate(
+        {
+            **dict(state),
+            "example_output_constraints": constraints,
+            "example_output_schema_inference": ExampleOutputSchemaInferenceOutcome(
+                status="not_inferred",
+                reason="no_json_object",
+                source_file_ids=[file_id],
+            ),
+        }
+    )
+    first = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(first, ConfirmRequirements)
+
+    changed_constraints = constraints.model_copy(
+        update={
+            "style_constraints": [
+                ExampleOutputStyleConstraint(
+                    category="tone",
+                    description="Changed hidden detail",
+                )
+            ]
+        }
+    )
+    changed = PlanningState.model_validate(
+        {
+            **dict(state),
+            "example_output_constraints": changed_constraints,
+        }
+    )
+    second = resolve_turn_control(
+        session_state=changed,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=(
+            first.attachment_evidence_fingerprint
+        ),
+        ui_language="en",
+    ).decision
+
+    assert isinstance(second, ConfirmRequirements)
+    assert (
+        second.attachment_evidence_fingerprint != first.attachment_evidence_fingerprint
     )
 
 

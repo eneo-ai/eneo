@@ -13,8 +13,8 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
-    top_level_schema_property_names,
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    project_output_schema_fields,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -112,6 +112,9 @@ def build_plan_proposal_system_prompt(
     output_schema_block = _output_schema_evidence_block(planning_state)
     if output_schema_block is not None:
         lines.extend(["", "Output schema evidence:", output_schema_block])
+    example_style_block = _example_output_style_evidence_block(planning_state)
+    if example_style_block is not None:
+        lines.extend(["", "Example-output style evidence:", example_style_block])
     if result_contract_block is not None:
         lines.extend(["", "Result contract:", result_contract_block])
     section_block = _requested_output_sections_block(requested_output_sections)
@@ -135,6 +138,7 @@ def _requested_output_sections_design_rule(
     if (
         requested_output_sections is None
         or not requested_output_sections.high_confidence
+        or len(requested_output_sections.sections) < 2
     ):
         return None
     return (
@@ -248,12 +252,18 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
     evidence = planning_state.output_schema_evidence
     if evidence is None:
         return None
-    fields = top_level_schema_property_names(evidence.json_schema)
+    projection = project_output_schema_fields(evidence.json_schema)
+    fields = projection.fields
     field_text = (
         ", ".join(render_ai_builder_evidence_value(field) for field in fields)
         if fields
         else "top-level object"
     )
+    if projection.truncated:
+        field_text = (
+            f"{field_text} "
+            f"(showing {len(projection.fields)} of {projection.total_count})"
+        )
     if evidence.source == "template_placeholders":
         coverage_line = (
             f"- placeholder coverage: {len(fields)} of {evidence.total_count} unique "
@@ -271,6 +281,16 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 "the user must provide at runtime.",
             ]
         )
+    if evidence.source == "inferred_example":
+        return "\n".join(
+            [
+                f"- source: {evidence.source}, {evidence.confidence} confidence",
+                f"- inferred top-level fields: {field_text}",
+                "- Treat this as an open structural hint from a selected example, "
+                "not as an explicit or closed contract. Do not invent required "
+                "fields or validation constraints.",
+            ]
+        )
     return "\n".join(
         [
             f"- source: {evidence.source}, {evidence.confidence} confidence",
@@ -278,6 +298,27 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
             "- Use output_fields consistent with these user-declared fields.",
         ]
     )
+
+
+def _example_output_style_evidence_block(
+    planning_state: PlanningState,
+) -> str | None:
+    constraints = planning_state.example_output_constraints
+    if constraints is None or not constraints.style_constraints:
+        return None
+    visible = constraints.style_constraints[:8]
+    lines = [
+        f"- {item.category}: {render_ai_builder_evidence_value(item.description)}"
+        for item in visible
+    ]
+    omitted = len(constraints.style_constraints) - len(visible)
+    if omitted:
+        lines.append(f"- {omitted} additional style constraints omitted")
+    lines.append(
+        "- Use this evidence to guide structure and style; do not promise exact "
+        "visual layout or copy accidental example content."
+    )
+    return "\n".join(lines)
 
 
 def _resource_context_block(

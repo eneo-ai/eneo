@@ -37,6 +37,12 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
+from eneo.flows.ai_builder.planning_state import (
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSourceCoverage,
+    ExampleOutputStyleConstraint,
+)
 from eneo.flows.ai_builder.planning_state_builder import (
     CLASSIFIER_REBUILD_INPUT_CLASSES,
 )
@@ -67,7 +73,7 @@ def _classification_input(*quotes: str) -> SlotClassificationInput:
 
 def _persisted_classification_header() -> dict[str, object]:
     return {
-        "schema_version": 13,
+        "schema_version": 14,
         "prompt_hash": "a" * 64,
         "model": "openai/gpt-test",
         "provider": "openai",
@@ -432,6 +438,111 @@ def test_classifier_retention_identities_follow_replay_confidence_rules() -> Non
     assert classification.effective_retention_identities() == frozenset(
         {("slot", "primary_runtime_input")}
     )
+
+
+def test_example_output_constraints_round_trip_with_replay_sources() -> None:
+    file_id = uuid4()
+    file_source_id = f"uploaded_file:{file_id}"
+    constraints = ExampleOutputConstraintEvidence(
+        source_file_ids=[file_id],
+        source_coverage=[
+            ExampleOutputSourceCoverage(file_id=file_id, coverage="fully_seen")
+        ],
+        headings=["Summary", "Decision"],
+        style_constraints=[
+            ExampleOutputStyleConstraint(
+                category="tone",
+                description="Formal and concise",
+            )
+        ],
+        confidence="high",
+        citations=[
+            ExampleOutputCitation(
+                source_id=file_source_id,
+                file_id=file_id,
+                quote="# Summary",
+            ),
+            ExampleOutputCitation(
+                source_id=_CLASSIFICATION_SOURCE_ID,
+                quote="Use this as the output example.",
+            ),
+        ],
+    )
+    classification = slot_classification_metadata_from_result(
+        SlotClassificationResult(example_output_constraints=constraints),
+        prompt_hash="a" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=_CLASSIFICATION_SOURCE_ID,
+                    kind="user_message",
+                    text="Use this as the output example.",
+                    message_id="user-1",
+                ),
+                SlotClassificationSource(
+                    source_id=file_source_id,
+                    kind="uploaded_file",
+                    text="# Summary",
+                    file_id=file_id,
+                    coverage="fully_seen",
+                ),
+            )
+        ),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+
+    assert classification is not None
+    metadata = metadata_with_slot_classification(None, classification)
+    parsed = slot_classification_from_metadata(metadata)
+    assert parsed is not None
+    assert parsed.to_result().example_output_constraints == constraints
+    assert parsed.effective_retention_identities() == frozenset(
+        {("example_output_constraint", "current")}
+    )
+    retained = parsed.retain_effective_semantics(
+        frozenset({("example_output_constraint", "current")})
+    )
+    assert retained.example_output_constraints == constraints
+    assert {source.source_id for source in retained.source_inventory} == {
+        _CLASSIFICATION_SOURCE_ID,
+        file_source_id,
+    }
+
+
+def test_example_output_constraint_metadata_rejects_citation_file_mismatch() -> None:
+    file_id = uuid4()
+    different_file_id = uuid4()
+    file_source_id = f"uploaded_file:{file_id}"
+    payload = {
+        **_persisted_classification_header(),
+        "source_inventory": [
+            {
+                "source_id": file_source_id,
+                "kind": "uploaded_file",
+                "source_sha256": "b" * 64,
+                "file_id": str(file_id),
+                "coverage": "fully_seen",
+            }
+        ],
+        "slots": [],
+        "example_output_constraints": {
+            "source_file_ids": [str(file_id)],
+            "source_coverage": [{"file_id": str(file_id), "coverage": "fully_seen"}],
+            "headings": ["Summary"],
+            "style_constraints": [],
+            "confidence": "medium",
+            "citations": [
+                {
+                    "source_id": file_source_id,
+                    "file_id": str(different_file_id),
+                    "quote": "# Summary",
+                }
+            ],
+        },
+    }
+
+    assert slot_classification_from_metadata({"slot_classification": payload}) is None
 
 
 def test_slot_classification_metadata_rejects_extra_nested_fields() -> None:

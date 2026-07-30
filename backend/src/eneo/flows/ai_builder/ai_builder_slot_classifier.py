@@ -8,6 +8,8 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
@@ -23,7 +25,12 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     completion_token_usage_from_response,
 )
-from eneo.flows.ai_builder.planning_state import AttachmentCoverage, FileRole
+from eneo.flows.ai_builder.planning_state import (
+    AttachmentCoverage,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputStyleCategory,
+    FileRole,
+)
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -48,7 +55,7 @@ SlotClassificationSourceKind = Literal[
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 13
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 14
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
@@ -63,6 +70,9 @@ _PROVIDER_EXECUTION_IDENTITY_FIELDS = (
     "deployment_name",
 )
 _PROVIDER_IDENTITY_LABEL_MAX_LENGTH = 63
+EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS = 20
+EXAMPLE_OUTPUT_STYLE_CONSTRAINTS_MAX_ITEMS = 20
+EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +137,7 @@ class SlotClassificationResult:
     slots: tuple[ClassifiedSlot, ...] = ()
     file_roles: tuple[ClassifiedFileRole, ...] = ()
     form_intake: ClassifiedFormIntake | None = None
+    example_output_constraints: ExampleOutputConstraintEvidence | None = None
     secondary_obligations: tuple[ResultObligation, ...] = ()
     assumptions: tuple[str, ...] = ()
     contradictions: tuple[str, ...] = ()
@@ -386,9 +397,6 @@ def parse_slot_classification_response(
         for item in cast(list[object], raw_dict.get("contradictions", []))
         if isinstance(item, str) and item.strip()
     )
-    secondary_obligations = _parse_secondary_obligations(
-        raw_dict.get("secondary_obligations", [])
-    )
     file_roles = _parse_file_roles(
         raw_dict.get("file_roles", []),
         classification_input=classification_input,
@@ -397,10 +405,19 @@ def parse_slot_classification_response(
         raw_dict.get("form_intake"),
         classification_input=classification_input,
     )
+    example_output_constraints = _parse_example_output_constraints(
+        raw_dict.get("example_output_constraints"),
+        classification_input=classification_input,
+        file_roles=file_roles,
+    )
+    secondary_obligations = _parse_secondary_obligations(
+        raw_dict.get("secondary_obligations", [])
+    )
     return SlotClassificationResult(
         slots=tuple(slots),
         file_roles=file_roles,
         form_intake=form_intake,
+        example_output_constraints=example_output_constraints,
         secondary_obligations=secondary_obligations,
         assumptions=assumptions,
         contradictions=contradictions,
@@ -546,6 +563,7 @@ def _parse_classification_evidence(
     raw_value: object,
     *,
     classification_input: SlotClassificationInput,
+    max_items: int = CLASSIFICATION_EVIDENCE_MAX_ITEMS,
 ) -> tuple[ClassifiedEvidence, ...]:
     if not isinstance(raw_value, list):
         return ()
@@ -576,9 +594,113 @@ def _parse_classification_evidence(
             continue
         evidence.append(ClassifiedEvidence(source_id=source_id, quote=quote))
         seen.add((source_id, quote))
-        if len(evidence) >= CLASSIFICATION_EVIDENCE_MAX_ITEMS:
+        if len(evidence) >= max_items:
             break
     return tuple(evidence)
+
+
+def _parse_example_output_constraints(
+    raw_value: object,
+    *,
+    classification_input: SlotClassificationInput,
+    file_roles: tuple[ClassifiedFileRole, ...],
+) -> ExampleOutputConstraintEvidence | None:
+    if not isinstance(raw_value, dict):
+        return None
+    raw = cast(dict[str, object], raw_value)
+    source_file_ids = _parse_example_output_source_file_ids(raw.get("source_file_ids"))
+    if source_file_ids is None:
+        return None
+    roles_by_file_id = {item.file_id: item for item in file_roles}
+    if any(
+        (role := roles_by_file_id.get(file_id)) is None
+        or role.role != "example_output"
+        or role.confidence == "low"
+        for file_id in source_file_ids
+    ):
+        return None
+
+    evidence = _parse_classification_evidence(
+        raw.get("evidence", []),
+        classification_input=classification_input,
+        max_items=EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS,
+    )
+    sources_by_id = {
+        source.source_id: source for source in classification_input.sources
+    }
+    uploaded_sources_by_file_id = {
+        source.file_id: source
+        for source in classification_input.sources
+        if source.kind == "uploaded_file" and source.file_id is not None
+    }
+    if any(
+        (source := uploaded_sources_by_file_id.get(file_id)) is None
+        or source.coverage == "inventory_only"
+        or not any(item.source_id == source.source_id for item in evidence)
+        for file_id in source_file_ids
+    ):
+        return None
+    if any(
+        (source := sources_by_id[item.source_id]).kind == "uploaded_file"
+        and source.file_id not in source_file_ids
+        for item in evidence
+    ):
+        return None
+
+    confidence = raw.get("confidence")
+    if confidence not in {"high", "medium", "low"}:
+        return None
+    if confidence == "high" and not any(
+        sources_by_id[item.source_id].kind != "uploaded_file" for item in evidence
+    ):
+        confidence = "medium"
+    try:
+        return ExampleOutputConstraintEvidence.model_validate(
+            {
+                "source_file_ids": sorted(source_file_ids, key=str),
+                "source_coverage": [
+                    {
+                        "file_id": str(file_id),
+                        "coverage": uploaded_sources_by_file_id[file_id].coverage,
+                    }
+                    for file_id in sorted(source_file_ids, key=str)
+                ],
+                "headings": raw.get("headings", []),
+                "style_constraints": raw.get("style_constraints", []),
+                "confidence": confidence,
+                "citations": [
+                    {
+                        "source_id": item.source_id,
+                        "file_id": sources_by_id[item.source_id].file_id,
+                        "quote": item.quote,
+                    }
+                    for item in evidence
+                ],
+            }
+        )
+    except ValidationError:
+        return None
+
+
+def _parse_example_output_source_file_ids(
+    raw_value: object,
+) -> tuple[UUID, ...] | None:
+    if not isinstance(raw_value, list) or not raw_value:
+        return None
+    parsed: list[UUID] = []
+    for raw_file_id in cast(list[object], raw_value):
+        if not isinstance(raw_file_id, str):
+            return None
+        try:
+            file_id = UUID(raw_file_id)
+        except ValueError:
+            return None
+        if file_id in parsed:
+            return None
+        parsed.append(file_id)
+        if len(parsed) > 100:
+            return None
+    return tuple(parsed)
 
 
 def _validated_evidence_level(
@@ -645,6 +767,7 @@ def _slot_classification_json_schema(
             "slots",
             "file_roles",
             "form_intake",
+            "example_output_constraints",
             "secondary_obligations",
             "assumptions",
             "contradictions",
@@ -662,6 +785,12 @@ def _slot_classification_json_schema(
             "form_intake": {
                 "anyOf": [
                     _classified_form_intake_schema(),
+                    {"type": "null"},
+                ],
+            },
+            "example_output_constraints": {
+                "anyOf": [
+                    _classified_example_output_constraints_schema(),
                     {"type": "null"},
                 ],
             },
@@ -756,6 +885,60 @@ def _classified_form_intake_schema() -> dict[str, object]:
     }
 
 
+def _classified_example_output_constraints_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "source_file_ids",
+            "headings",
+            "style_constraints",
+            "confidence",
+            "evidence",
+        ],
+        "properties": {
+            "source_file_ids": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {"type": "string"},
+            },
+            "headings": {
+                "type": "array",
+                "maxItems": EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS,
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160,
+                },
+            },
+            "style_constraints": {
+                "type": "array",
+                "maxItems": EXAMPLE_OUTPUT_STYLE_CONSTRAINTS_MAX_ITEMS,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["category", "description"],
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": list(get_args(ExampleOutputStyleCategory)),
+                        },
+                        "description": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240,
+                        },
+                    },
+                },
+            },
+            "confidence": _classification_confidence_schema(),
+            "evidence": _classification_evidence_array_schema(
+                max_items=EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS
+            ),
+        },
+    }
+
+
 def _classification_confidence_schema() -> dict[str, object]:
     return {"type": "string", "enum": ["high", "medium", "low"]}
 
@@ -784,10 +967,13 @@ def _classification_note_array_schema() -> dict[str, object]:
     }
 
 
-def _classification_evidence_array_schema() -> dict[str, object]:
+def _classification_evidence_array_schema(
+    *,
+    max_items: int = CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+) -> dict[str, object]:
     return {
         "type": "array",
-        "maxItems": CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+        "maxItems": max_items,
         "items": {
             "type": "object",
             "additionalProperties": False,
@@ -965,6 +1151,15 @@ def _build_slot_classification_prompt(
         "template means the file is a structure to fill. Emit file_roles only for "
         "listed uploads. Attachment-only semantic conclusions should be medium "
         "confidence unless the conversation independently confirms the role. "
+        "When one or more files are classified as example_output, emit one "
+        "example_output_constraints object only for those file ids. Capture bounded "
+        "ordered headings and evidenced style constraints categorized as tone, "
+        "detail_level, organization, formatting, or audience. Cite exact source "
+        "quotes for every content claim. Inventory-only sources cannot support "
+        "headings or style. Attachment-only constraint evidence cannot be high "
+        "confidence without independent user-message or structured-answer evidence. "
+        "An example guides structure and style but does not promise exact visual "
+        "layout. Return null when no supported example constraint exists. "
         "A requested final document is terminal_output, not primary input. "
         "If the final deliverable is a DOCX, Word, PDF, or document artifact, choose "
         "that artifact as terminal_output even when the document contains a readable "
@@ -1040,6 +1235,7 @@ def _build_slot_classification_prompt(
         '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
+        '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"secondary_obligations": [str], '
         '"assumptions": [str], '
         '"contradictions": [str]'

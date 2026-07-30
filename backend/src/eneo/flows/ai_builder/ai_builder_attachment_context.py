@@ -7,6 +7,15 @@ from typing import Literal, cast
 from uuid import UUID
 
 from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    OUTPUT_SCHEMA_MAX_JSON_BYTES,
+    AIBuilderAttachmentOutputSchemaCandidate,
+    OutputSchemaCandidateRefusal,
+    OutputSchemaLimitExceeded,
+    build_attachment_schema_candidate,
+    build_output_schema_evidence,
+    parse_output_schema_candidate,
+)
 from eneo.flows.ai_builder.planning_state import (
     ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
@@ -19,7 +28,6 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
     SignalConfidence,
 )
-from eneo.flows.ai_builder.planning_state_builder import parse_output_schema_candidate
 from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.json_types import JsonObject
 
@@ -59,14 +67,9 @@ AttachmentOutputSchemaDisposition = Literal["none", "single", "ambiguous"]
 
 
 @dataclass(frozen=True, slots=True)
-class AIBuilderAttachmentOutputSchemaCandidate:
-    file_id: UUID
-    json_schema: JsonObject
-
-
-@dataclass(frozen=True, slots=True)
 class AIBuilderAttachmentOutputSchemaDiscovery:
     candidates: tuple[AIBuilderAttachmentOutputSchemaCandidate, ...]
+    refusals: tuple[OutputSchemaCandidateRefusal, ...] = ()
 
     @property
     def disposition(self) -> AttachmentOutputSchemaDisposition:
@@ -150,20 +153,65 @@ def _attachment_output_schema_discovery(
     files: list[File],
     readable_text_by_file: Mapping[UUID, str | None],
 ) -> AIBuilderAttachmentOutputSchemaDiscovery:
-    candidates: list[AIBuilderAttachmentOutputSchemaCandidate] = []
+    candidates_by_fingerprint: dict[str, AIBuilderAttachmentOutputSchemaCandidate] = {}
+    refusals: list[OutputSchemaCandidateRefusal] = []
     for attachment in sorted(files, key=lambda item: str(item.id)):
         text = readable_text_by_file[attachment.id]
-        if text is None or not _is_json_attachment(attachment):
+        if text is None:
             continue
-        schema = parse_output_schema_candidate(text)
-        if schema is not None:
-            candidates.append(
-                AIBuilderAttachmentOutputSchemaCandidate(
+        if (
+            not _is_json_attachment(attachment)
+            and len(text.encode("utf-8")) > OUTPUT_SCHEMA_MAX_JSON_BYTES
+        ):
+            if text.lstrip().startswith("{"):
+                refusals.append(
+                    OutputSchemaCandidateRefusal(
+                        file_id=attachment.id,
+                        reason="raw_bytes",
+                        max_value=OUTPUT_SCHEMA_MAX_JSON_BYTES,
+                        actual_value=len(text.encode("utf-8")),
+                        blocks_provider_work=False,
+                    )
+                )
+            continue
+        try:
+            schema = parse_output_schema_candidate(text)
+        except OutputSchemaLimitExceeded as error:
+            refusals.append(
+                OutputSchemaCandidateRefusal(
                     file_id=attachment.id,
-                    json_schema=schema,
+                    reason=error.reason,
+                    max_value=error.max_value,
+                    actual_value=error.actual_value,
+                    blocks_provider_work=(
+                        _is_declared_schema_attachment(attachment)
+                        or error.schema_shaped
+                    ),
                 )
             )
-    return AIBuilderAttachmentOutputSchemaDiscovery(candidates=tuple(candidates))
+            continue
+        if schema is not None:
+            candidate = build_attachment_schema_candidate(
+                schema,
+                source_file_ids=(attachment.id,),
+            )
+            existing = candidates_by_fingerprint.get(candidate.fingerprint)
+            if existing is not None:
+                candidate = build_attachment_schema_candidate(
+                    existing.json_schema,
+                    source_file_ids=(
+                        *existing.source_file_ids,
+                        *candidate.source_file_ids,
+                    ),
+                )
+            candidates_by_fingerprint[candidate.fingerprint] = candidate
+    return AIBuilderAttachmentOutputSchemaDiscovery(
+        candidates=tuple(
+            candidates_by_fingerprint[fingerprint]
+            for fingerprint in sorted(candidates_by_fingerprint)
+        ),
+        refusals=tuple(refusals),
+    )
 
 
 def _selected_output_schema_evidence(
@@ -175,13 +223,15 @@ def _selected_output_schema_evidence(
         return None
     if discovery.disposition == "single":
         candidate = discovery.candidates[0]
-        return OutputSchemaEvidence(
+        return build_output_schema_evidence(
             json_schema=candidate.json_schema,
             source="attachment_json_schema",
+            source_file_ids=candidate.source_file_ids,
             confidence="high",
-            evidence=[
-                f"file:{candidate.file_id}{ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX}"
-            ],
+            evidence=tuple(
+                f"file:{file_id}{ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX}"
+                for file_id in candidate.source_file_ids
+            ),
         )
     return _template_placeholder_output_schema_evidence(files, readable_text_by_file)
 
@@ -193,6 +243,13 @@ def _is_json_attachment(file: File) -> bool:
     )
 
 
+def _is_declared_schema_attachment(file: File) -> bool:
+    mimetype = (file.mimetype or "").casefold().split(";", 1)[0].strip()
+    return mimetype == "application/schema+json" or file.name.casefold().endswith(
+        ".schema.json"
+    )
+
+
 def _template_placeholder_output_schema_evidence(
     files: list[File],
     readable_text_by_file: Mapping[UUID, str | None],
@@ -200,6 +257,7 @@ def _template_placeholder_output_schema_evidence(
     selected: list[str] = []
     all_placeholders: set[str] = set()
     source_markers: list[str] = []
+    source_file_ids: list[UUID] = []
     placeholder_markers: list[str] = []
 
     for file in sorted(files, key=lambda item: str(item.id)):
@@ -220,6 +278,7 @@ def _template_placeholder_output_schema_evidence(
                 )
                 file_placeholders.add(placeholder)
         if has_placeholder:
+            source_file_ids.append(file.id)
             source_markers.append(
                 f"file:{file.id}{TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX}"
             )
@@ -228,11 +287,12 @@ def _template_placeholder_output_schema_evidence(
         return None
     total_count = len(all_placeholders)
     truncated = total_count > len(selected)
-    return OutputSchemaEvidence(
+    return build_output_schema_evidence(
         json_schema=_template_placeholder_schema(tuple(selected)),
         source="template_placeholders",
+        source_file_ids=tuple(sorted(set(source_file_ids), key=str)),
         confidence="medium" if truncated else "high",
-        evidence=[*source_markers, *placeholder_markers],
+        evidence=(*source_markers, *placeholder_markers),
         total_count=total_count,
         truncated=truncated,
     )

@@ -41,6 +41,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_output_schema_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
@@ -54,8 +57,10 @@ from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSourceCoverage,
     FileRoleEvidence,
-    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
 )
@@ -653,12 +658,13 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
                 included_file_ids=[],
                 total_chars=0,
                 truncated=False,
-                output_schema_evidence=OutputSchemaEvidence(
+                output_schema_evidence=build_output_schema_evidence(
                     json_schema={
                         "type": "object",
                         "properties": {"kundnamn": {"type": "string"}},
                     },
                     source="template_placeholders",
+                    source_file_ids=(file_id,),
                     confidence="high",
                     evidence=[
                         f"file:{file_id}:template_placeholder_source",
@@ -697,12 +703,13 @@ async def test_runtime_applies_attachment_json_schema_evidence_without_model_cal
     None
 ):
     file_id = uuid4()
-    attachment_evidence = OutputSchemaEvidence(
+    attachment_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"decision": {"type": "string"}},
         },
         source="attachment_json_schema",
+        source_file_ids=(file_id,),
         confidence="high",
         evidence=[f"file:{file_id}:json_schema_attachment"],
     )
@@ -732,12 +739,13 @@ async def test_runtime_applies_attachment_json_schema_evidence_without_model_cal
 @pytest.mark.asyncio
 async def test_runtime_does_not_treat_template_placeholders_as_json_terminal() -> None:
     file_id = uuid4()
-    template_evidence = OutputSchemaEvidence(
+    template_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"kundnamn": {"type": "string"}},
         },
         source="template_placeholders",
+        source_file_ids=(file_id,),
         confidence="high",
         evidence=[
             f"file:{file_id}:template_placeholder_source",
@@ -769,6 +777,172 @@ async def test_runtime_does_not_treat_template_placeholders_as_json_terminal() -
 
     assert state.output_schema_evidence is template_evidence
     assert "terminal_output" not in state.resolved_slots
+
+
+@pytest.mark.asyncio
+async def test_runtime_infers_schema_only_after_example_output_classification() -> None:
+    file_id = uuid4()
+    source_id = f"uploaded_file:{file_id}"
+    exact_json = '{"decision":"approved","count":2}'
+    evidence = (
+        ClassifiedEvidence(
+            source_id=source_id,
+            quote=exact_json,
+        ),
+    )
+    classification_result = SlotClassificationResult(
+        file_roles=(
+            ClassifiedFileRole(
+                file_id=file_id,
+                role="example_output",
+                confidence="medium",
+                reason="The user identifies this upload as the expected result.",
+                evidence=evidence,
+            ),
+        ),
+        example_output_constraints=ExampleOutputConstraintEvidence(
+            source_file_ids=[file_id],
+            source_coverage=[
+                ExampleOutputSourceCoverage(
+                    file_id=file_id,
+                    coverage="fully_seen",
+                )
+            ],
+            headings=["Decision"],
+            confidence="medium",
+            citations=[
+                ExampleOutputCitation(
+                    source_id=source_id,
+                    file_id=file_id,
+                    quote=exact_json,
+                )
+            ],
+        ),
+    )
+    attachment_context = AIBuilderAttachmentContext(
+        context=exact_json,
+        evidence=(
+            AIBuilderAttachmentEvidence(
+                file_id=file_id,
+                filename="expected.json",
+                file_type=FileType.TEXT,
+                mimetype="application/json",
+                has_readable_text=True,
+                excerpt=exact_json,
+                coverage="fully_seen",
+            ),
+        ),
+        included_file_ids=[file_id],
+        total_chars=len(exact_json),
+        truncated=False,
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        classify = AsyncMock(return_value=classification_result)
+        monkeypatch.setattr(runtime, "classify_slots", classify)
+        state = (
+            await build_runtime_discovery_context(
+                [ConversationMessage(role="user", content="Use the attached example.")],
+                litellm_client=AsyncMock(),
+                completion_model_route=_route(),
+                tenant_id=uuid4(),
+                attachment_context=attachment_context,
+            )
+        ).planning_state
+
+    assert state.example_output_constraints is not None
+    assert state.example_output_schema_inference is not None
+    assert state.example_output_schema_inference.status == "inferred"
+    assert state.output_schema_evidence is not None
+    assert state.output_schema_evidence.source == "inferred_example"
+    assert state.output_schema_evidence.json_schema == {
+        "type": "object",
+        "properties": {
+            "decision": {"type": "string"},
+            "count": {"type": "integer"},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_records_incomplete_example_json_without_guessing_schema() -> (
+    None
+):
+    file_id = uuid4()
+    source_id = f"uploaded_file:{file_id}"
+    excerpt = '{"decision":"approved"'
+    classification_result = SlotClassificationResult(
+        file_roles=(
+            ClassifiedFileRole(
+                file_id=file_id,
+                role="example_output",
+                confidence="medium",
+                reason="The user identifies this upload as the expected result.",
+                evidence=(
+                    ClassifiedEvidence(
+                        source_id=source_id,
+                        quote=excerpt,
+                    ),
+                ),
+            ),
+        ),
+        example_output_constraints=ExampleOutputConstraintEvidence(
+            source_file_ids=[file_id],
+            source_coverage=[
+                ExampleOutputSourceCoverage(
+                    file_id=file_id,
+                    coverage="excerpt_truncated",
+                )
+            ],
+            headings=["Decision"],
+            confidence="medium",
+            citations=[
+                ExampleOutputCitation(
+                    source_id=source_id,
+                    file_id=file_id,
+                    quote=excerpt,
+                )
+            ],
+        ),
+    )
+    attachment_context = AIBuilderAttachmentContext(
+        context=excerpt,
+        evidence=(
+            AIBuilderAttachmentEvidence(
+                file_id=file_id,
+                filename="expected.json",
+                file_type=FileType.TEXT,
+                mimetype="application/json",
+                has_readable_text=True,
+                excerpt=excerpt,
+                coverage="excerpt_truncated",
+            ),
+        ),
+        included_file_ids=[file_id],
+        total_chars=len(excerpt),
+        truncated=True,
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            runtime,
+            "classify_slots",
+            AsyncMock(return_value=classification_result),
+        )
+        state = (
+            await build_runtime_discovery_context(
+                [ConversationMessage(role="user", content="Use the attached example.")],
+                litellm_client=AsyncMock(),
+                completion_model_route=_route(),
+                tenant_id=uuid4(),
+                attachment_context=attachment_context,
+            )
+        ).planning_state
+
+    assert state.output_schema_evidence is None
+    assert state.example_output_schema_inference is not None
+    assert state.example_output_schema_inference.status == "not_inferred"
+    assert state.example_output_schema_inference.reason == "incomplete_content"
 
 
 @pytest.mark.asyncio

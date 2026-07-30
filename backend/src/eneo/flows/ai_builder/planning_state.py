@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Literal, assert_never
+from typing import Annotated, Literal, assert_never
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -52,7 +52,7 @@ from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 7
+BUILDER_SCHEMA_VERSION: int = 8
 PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
 ARCHITECTURE_HASH_HEX_LENGTH: int = 64
 
@@ -106,6 +106,27 @@ OutputSchemaEvidenceSource = Literal[
     "freeform_text",
     "template_placeholders",
     "attachment_json_schema",
+    "inferred_example",
+]
+OutputSchemaEvidenceStrength = Literal["explicit", "inferred"]
+ExampleOutputStyleCategory = Literal[
+    "tone",
+    "detail_level",
+    "organization",
+    "formatting",
+    "audience",
+]
+ExampleOutputSchemaInferenceStatus = Literal["inferred", "not_inferred"]
+ExampleOutputSchemaInferenceReason = Literal[
+    "higher_priority_schema",
+    "no_json_object",
+    "incomplete_content",
+    "invalid_json",
+    "top_level_not_object",
+    "raw_bytes",
+    "field_count",
+    "depth",
+    "conflicting_shapes",
 ]
 
 ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX = ":json_schema_attachment"
@@ -289,14 +310,37 @@ class FileRoleEvidence(_PlanningModel):
 
 class OutputSchemaEvidence(_PlanningModel):
     json_schema: JsonObject
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     source: OutputSchemaEvidenceSource
+    strength: OutputSchemaEvidenceStrength
+    source_file_ids: list[UUID] = Field(max_length=100)
     confidence: SignalConfidence
-    evidence: list[str] = Field(default_factory=list[str])
+    evidence: list[str] = Field(default_factory=list[str], max_length=200)
     total_count: int | None = Field(default=None, ge=0)
     truncated: bool = False
 
     @model_validator(mode="after")
     def _validate_truncation_metadata(self) -> OutputSchemaEvidence:
+        from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+
+        expected_fingerprint = canonical_json_hash(self.json_schema)
+        if self.fingerprint != expected_fingerprint:
+            raise ValueError("output schema fingerprint must match json_schema")
+        expected_strength: OutputSchemaEvidenceStrength = (
+            "explicit"
+            if self.source in {"freeform_text", "attachment_json_schema"}
+            else "inferred"
+        )
+        if self.strength != expected_strength:
+            raise ValueError("output schema strength must match its source")
+        if self.source_file_ids != sorted(set(self.source_file_ids), key=str):
+            raise ValueError("output schema source_file_ids must be unique and sorted")
+        if self.source != "freeform_text" and not self.source_file_ids:
+            raise ValueError(
+                "attachment-derived output schema requires source_file_ids"
+            )
+        if self.source == "freeform_text" and self.source_file_ids:
+            raise ValueError("freeform output schema cannot cite attachment files")
         if self.source != "template_placeholders":
             if self.total_count is not None or self.truncated:
                 raise ValueError(
@@ -314,6 +358,97 @@ class OutputSchemaEvidence(_PlanningModel):
         if self.truncated and self.confidence == "high":
             raise ValueError(
                 "truncated placeholder evidence cannot have high confidence"
+            )
+        return self
+
+
+ExampleOutputHeading = Annotated[str, Field(min_length=1, max_length=160)]
+
+
+class ExampleOutputSourceCoverage(_PlanningModel):
+    file_id: UUID
+    coverage: AttachmentCoverage
+
+
+class ExampleOutputCitation(_PlanningModel):
+    source_id: str = Field(min_length=1, max_length=256)
+    file_id: UUID | None = None
+    quote: str = Field(min_length=1, max_length=240)
+
+
+class ExampleOutputStyleConstraint(_PlanningModel):
+    category: ExampleOutputStyleCategory
+    description: str = Field(min_length=1, max_length=240)
+
+
+class ExampleOutputConstraintEvidence(_PlanningModel):
+    source_file_ids: list[UUID] = Field(min_length=1, max_length=100)
+    source_coverage: list[ExampleOutputSourceCoverage] = Field(
+        min_length=1,
+        max_length=100,
+    )
+    headings: list[ExampleOutputHeading] = Field(
+        default_factory=list[ExampleOutputHeading],
+        max_length=20,
+    )
+    style_constraints: list[ExampleOutputStyleConstraint] = Field(
+        default_factory=list[ExampleOutputStyleConstraint],
+        max_length=20,
+    )
+    confidence: SignalConfidence
+    citations: list[ExampleOutputCitation] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def _validate_example_output_evidence(self) -> ExampleOutputConstraintEvidence:
+        if self.source_file_ids != sorted(set(self.source_file_ids), key=str):
+            raise ValueError("example output source_file_ids must be unique and sorted")
+        coverage_ids = [item.file_id for item in self.source_coverage]
+        if coverage_ids != sorted(set(coverage_ids), key=str):
+            raise ValueError("example output coverage must be unique and sorted")
+        if coverage_ids != self.source_file_ids:
+            raise ValueError("example output coverage must describe every source file")
+        if not self.headings and not self.style_constraints:
+            raise ValueError("example output evidence requires structure or style")
+        if len({heading.casefold() for heading in self.headings}) != len(self.headings):
+            raise ValueError("example output headings must be unique")
+        style_keys = [
+            (item.category, item.description.casefold())
+            for item in self.style_constraints
+        ]
+        if len(style_keys) != len(set(style_keys)):
+            raise ValueError("example output style constraints must be unique")
+        cited_file_ids = {
+            citation.file_id
+            for citation in self.citations
+            if citation.file_id is not None
+        }
+        if not cited_file_ids <= set(self.source_file_ids):
+            raise ValueError("example output citations must cite selected source files")
+        if self.confidence == "high" and all(
+            citation.file_id is not None for citation in self.citations
+        ):
+            raise ValueError(
+                "attachment-only example output evidence cannot have high confidence"
+            )
+        return self
+
+
+class ExampleOutputSchemaInferenceOutcome(_PlanningModel):
+    status: ExampleOutputSchemaInferenceStatus
+    reason: ExampleOutputSchemaInferenceReason | None = None
+    source_file_ids: list[UUID] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def _validate_inference_outcome(self) -> ExampleOutputSchemaInferenceOutcome:
+        if self.source_file_ids != sorted(set(self.source_file_ids), key=str):
+            raise ValueError(
+                "example output schema inference source_file_ids must be unique "
+                "and sorted"
+            )
+        if (self.status == "inferred") != (self.reason is None):
+            raise ValueError(
+                "inferred example output schema requires no refusal reason; "
+                "not_inferred requires one"
             )
         return self
 
@@ -349,6 +484,8 @@ class PlanningState(_PlanningModel):
     )
     file_roles: list[FileRoleEvidence] = Field(default_factory=list[FileRoleEvidence])
     output_schema_evidence: OutputSchemaEvidence | None = None
+    example_output_constraints: ExampleOutputConstraintEvidence | None = None
+    example_output_schema_inference: ExampleOutputSchemaInferenceOutcome | None = None
     input_fields: list[FlowInputFieldIntent] = Field(
         default_factory=list[FlowInputFieldIntent]
     )
@@ -362,10 +499,122 @@ class PlanningState(_PlanningModel):
             if item.file_id in seen:
                 raise ValueError("file_roles must contain unique file_id values")
             seen.add(item.file_id)
+        if self.example_output_constraints is not None:
+            source_ids = set(self.example_output_constraints.source_file_ids)
+            if not source_ids <= seen:
+                raise ValueError(
+                    "example output constraints must cite current file role evidence"
+                )
+            roles_by_file_id = {item.file_id: item.role for item in self.file_roles}
+            if any(
+                roles_by_file_id[file_id] != "example_output" for file_id in source_ids
+            ):
+                raise ValueError(
+                    "example output constraints require example_output file roles"
+                )
+            coverage_by_file_id = {
+                item.file_id: item.coverage for item in self.file_roles
+            }
+            if any(
+                coverage.coverage != coverage_by_file_id[coverage.file_id]
+                for coverage in self.example_output_constraints.source_coverage
+            ):
+                raise ValueError(
+                    "example output constraint coverage must match file role evidence"
+                )
+        inference = self.example_output_schema_inference
+        if inference is not None:
+            constraints = self.example_output_constraints
+            if constraints is None:
+                raise ValueError(
+                    "example output schema inference requires example output "
+                    "constraints"
+                )
+            if not set(inference.source_file_ids) <= set(constraints.source_file_ids):
+                raise ValueError(
+                    "example output schema inference must cite selected example "
+                    "output files"
+                )
+        inferred_schema = (
+            self.output_schema_evidence
+            if self.output_schema_evidence is not None
+            and self.output_schema_evidence.source == "inferred_example"
+            else None
+        )
+        if inferred_schema is not None:
+            if inference is None or inference.status != "inferred":
+                raise ValueError(
+                    "inferred output schema evidence requires an inferred outcome"
+                )
+            if inferred_schema.source_file_ids != inference.source_file_ids:
+                raise ValueError(
+                    "inferred output schema evidence and outcome must cite the "
+                    "same files"
+                )
+        elif inference is not None and inference.status == "inferred":
+            raise ValueError(
+                "inferred example output outcome requires output schema evidence"
+            )
         return self
 
     def has_template_file_role(self) -> bool:
         return any(item.role == "template" for item in self.file_roles)
+
+    def replace_output_schema_resolution(
+        self,
+        *,
+        evidence: OutputSchemaEvidence | None,
+        example_inference: ExampleOutputSchemaInferenceOutcome | None,
+    ) -> None:
+        """Atomically replace the two fields that form one schema resolution."""
+
+        self.replace_attachment_interpretation(
+            file_roles=self.file_roles,
+            example_constraints=self.example_output_constraints,
+            evidence=evidence,
+            example_inference=example_inference,
+        )
+
+    def replace_attachment_interpretation(
+        self,
+        *,
+        file_roles: list[FileRoleEvidence],
+        example_constraints: ExampleOutputConstraintEvidence | None,
+        evidence: OutputSchemaEvidence | None,
+        example_inference: ExampleOutputSchemaInferenceOutcome | None,
+    ) -> None:
+        """Replace the coupled attachment interpretation as one valid snapshot.
+
+        Assignment validation cannot safely observe these fields one at a time.
+        Validate the complete candidate first, then copy only validated values onto
+        this mutable full-snapshot model.
+        """
+
+        candidate = type(self).model_validate(
+            {
+                **dict(self),
+                "file_roles": file_roles,
+                "example_output_constraints": example_constraints,
+                "output_schema_evidence": evidence,
+                "example_output_schema_inference": example_inference,
+            }
+        )
+        object.__setattr__(self, "file_roles", candidate.file_roles)
+        object.__setattr__(
+            self,
+            "example_output_constraints",
+            candidate.example_output_constraints,
+        )
+        object.__setattr__(
+            self,
+            "output_schema_evidence",
+            candidate.output_schema_evidence,
+        )
+        object.__setattr__(
+            self,
+            "example_output_schema_inference",
+            candidate.example_output_schema_inference,
+        )
 
     @classmethod
     def empty(cls) -> PlanningState:

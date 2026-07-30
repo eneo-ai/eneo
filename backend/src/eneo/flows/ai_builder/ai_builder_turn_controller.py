@@ -21,14 +21,18 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
     render_ai_builder_evidence_value,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
+    StructuredQuestionOptionPayload,
+    StructuredQuestionPayload,
 )
-from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
-    top_level_schema_property_names,
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    project_output_schema_fields,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_EN,
@@ -45,6 +49,7 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     AttachmentCoverage,
+    ExampleOutputSchemaInferenceReason,
     FileRole,
     FileRoleEvidence,
     PlanningState,
@@ -53,6 +58,8 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.question_catalog import Locale, render_question
 
 _MAX_CONFIRMATION_ATTACHMENT_DETAILS = 10
+_MAX_CONFIRMATION_EXAMPLE_HEADINGS = 8
+_MAX_CONFIRMATION_STYLE_CONSTRAINTS = 6
 _ATTACHMENT_ASSUMPTION_PREFIX_EN = "Attachment evidence — "
 _ATTACHMENT_ASSUMPTION_PREFIX_SV = "Bilageunderlag – "
 
@@ -61,6 +68,11 @@ _ATTACHMENT_ASSUMPTION_PREFIX_SV = "Bilageunderlag – "
 class AskCanonicalQuestion:
     slot_name: str
     prompt: str
+
+
+@dataclass(frozen=True, slots=True)
+class AskOutputSchemaConflict:
+    question: BackendQuestion
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +98,7 @@ class GenerateProposal:
 
 BuilderTurnDecision: TypeAlias = (
     AskCanonicalQuestion
+    | AskOutputSchemaConflict
     | CommitArchitecture
     | ReviseArchitecture
     | ConfirmRequirements
@@ -105,15 +118,26 @@ def resolve_turn_control(
     confirmed_attachment_evidence_fingerprint: str | None,
     ui_language: str | None,
     discovery_assumptions: tuple[str, ...] = (),
+    attachment_context: AIBuilderAttachmentContext | None = None,
+    output_schema_conflict_pending: bool = False,
 ) -> BuilderTurnControl:
+    if output_schema_conflict_pending:
+        if attachment_context is None:
+            raise ValueError("output schema conflict requires attachment context")
+        return BuilderTurnControl(
+            decision=AskOutputSchemaConflict(
+                question=_output_schema_conflict_question(
+                    attachment_context,
+                    _locale(ui_language),
+                )
+            )
+        )
     requirements_payload = _confirm_requirements_payload(
         session_state,
         _locale(ui_language),
         discovery_assumptions,
     )
-    attachment_evidence_fingerprint = _attachment_evidence_fingerprint(
-        session_state.file_roles
-    )
+    attachment_evidence_fingerprint = _attachment_evidence_fingerprint(session_state)
     action_policy = build_planner_action_policy(
         session_state=session_state,
         selected_discovery_question_ids=selected_discovery_question_ids,
@@ -133,13 +157,41 @@ def resolve_turn_control(
 
 
 def _attachment_evidence_fingerprint(
-    file_roles: list[FileRoleEvidence],
+    session_state: PlanningState,
 ) -> str:
+    output_schema = session_state.output_schema_evidence
     serialized = json.dumps(
-        [
-            item.model_dump(mode="json")
-            for item in sorted(file_roles, key=lambda item: str(item.file_id))
-        ],
+        {
+            "file_roles": [
+                item.model_dump(mode="json")
+                for item in sorted(
+                    session_state.file_roles,
+                    key=lambda item: str(item.file_id),
+                )
+            ],
+            "output_schema": (
+                {
+                    "fingerprint": output_schema.fingerprint,
+                    "source": output_schema.source,
+                    "strength": output_schema.strength,
+                    "source_file_ids": [
+                        str(file_id) for file_id in output_schema.source_file_ids
+                    ],
+                }
+                if output_schema is not None
+                else None
+            ),
+            "example_output_constraints": (
+                session_state.example_output_constraints.model_dump(mode="json")
+                if session_state.example_output_constraints is not None
+                else None
+            ),
+            "example_output_schema_inference": (
+                session_state.example_output_schema_inference.model_dump(mode="json")
+                if session_state.example_output_schema_inference is not None
+                else None
+            ),
+        },
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -201,6 +253,77 @@ def _question_prompt(target: str, ui_language: str | None) -> str:
     return f"{rendered.question}\n\n{option_lines}"
 
 
+def _output_schema_conflict_question(
+    attachment_context: AIBuilderAttachmentContext,
+    locale: Locale,
+) -> BackendQuestion:
+    filenames_by_id = {
+        item.file_id: render_ai_builder_evidence_value(item.filename)
+        for item in attachment_context.evidence
+    }
+    options: list[StructuredQuestionOptionPayload] = []
+    for index, candidate in enumerate(
+        attachment_context.output_schema_discovery.candidates,
+        start=1,
+    ):
+        filenames = [
+            filenames_by_id[file_id]
+            for file_id in candidate.source_file_ids
+            if file_id in filenames_by_id
+        ]
+        visible_filenames = ", ".join(filenames[:2])
+        if len(filenames) > 2:
+            visible_filenames = f"{visible_filenames} (+{len(filenames) - 2})"
+        projection = project_output_schema_fields(candidate.json_schema)
+        visible_fields = ", ".join(projection.fields)
+        if projection.truncated:
+            visible_fields = (
+                f"{visible_fields} (+{projection.total_count - len(projection.fields)})"
+            )
+        if locale == "sv":
+            label = (
+                f"Schema {index}: {visible_filenames or 'namnlös JSON-fil'} "
+                f"({candidate.fingerprint[:8]})"
+            )
+            description = f"Fält: {visible_fields or 'inga namngivna toppnivåfält'}."
+        else:
+            label = (
+                f"Schema {index}: {visible_filenames or 'unnamed JSON file'} "
+                f"({candidate.fingerprint[:8]})"
+            )
+            description = f"Fields: {visible_fields or 'no named top-level fields'}."
+        options.append(
+            StructuredQuestionOptionPayload(
+                id=candidate.fingerprint,
+                label=label,
+                value=candidate.fingerprint,
+                description=description,
+            )
+        )
+    if locale == "sv":
+        question_text = "Vilket av de bifogade JSON-schemana ska styra utdatan?"
+        assistant_text = (
+            "Jag hittade flera olika uttryckliga JSON-scheman. Välj vilket som "
+            "ska styra flödets utdata."
+        )
+    else:
+        question_text = "Which attached JSON schema should control the output?"
+        assistant_text = (
+            "I found several distinct explicit JSON schemas. Choose which one "
+            "should control the flow output."
+        )
+    return BackendQuestion(
+        question_data=StructuredQuestionPayload(
+            question_id="output_schema_conflict",
+            question=question_text,
+            options=options,
+            selection_mode="single",
+            allow_custom=False,
+        ),
+        assistant_text=assistant_text,
+    )
+
+
 def _locale(ui_language: str | None) -> Locale:
     return "sv" if ui_language == "sv" else "en"
 
@@ -245,6 +368,7 @@ def _confirm_requirements_payload(
             ],
             *discovery_assumptions,
             *_attachment_assumptions(session_state, locale),
+            *_example_output_assumptions(session_state, locale),
             *_assumptions(locale),
         ],
         manual_setup_notes=[],
@@ -359,22 +483,153 @@ def _output_schema_summary_line(
     locale: Locale,
 ) -> str | None:
     evidence = session_state.output_schema_evidence
-    if (
-        evidence is None
-        or evidence.source != "template_placeholders"
-        or not evidence.truncated
-        or evidence.total_count is None
-    ):
+    if evidence is None:
         return None
-    visible_count = len(top_level_schema_property_names(evidence.json_schema))
+    projection = project_output_schema_fields(evidence.json_schema)
+    field_text = _bounded_projection_text(projection.fields, locale=locale)
+    if evidence.source == "template_placeholders":
+        if not evidence.truncated or evidence.total_count is None:
+            return None
+        visible_count = len(projection.fields)
+        if locale == "sv":
+            return (
+                f"Mallen innehåller {evidence.total_count} unika platshållare; "
+                f"{visible_count} visas i planeringsunderlaget."
+            )
+        return (
+            f"The template contains {evidence.total_count} unique placeholders; "
+            f"{visible_count} are shown in the planning evidence."
+        )
+    if evidence.strength == "explicit":
+        if locale == "sv":
+            return (
+                "Ett uttryckligt utdataschema styr JSON-resultatet. "
+                f"Valda fält: {field_text}."
+            )
+        return (
+            "An explicit output schema controls the JSON result. "
+            f"Selected fields: {field_text}."
+        )
     if locale == "sv":
         return (
-            f"Mallen innehåller {evidence.total_count} unika platshållare; "
-            f"{visible_count} visas i planeringsunderlaget."
+            "En försiktig utdatastruktur har härletts från valt exempelresultat; "
+            "den är vägledning och inte ett uttryckligt slutet kontrakt. "
+            f"Härledda fält: {field_text}."
         )
     return (
-        f"The template contains {evidence.total_count} unique placeholders; "
-        f"{visible_count} are shown in the planning evidence."
+        "A conservative output shape was inferred from the selected example; "
+        "it is guidance, not an explicit closed contract. "
+        f"Inferred fields: {field_text}."
+    )
+
+
+def _bounded_projection_text(
+    fields: tuple[str, ...],
+    *,
+    locale: Locale,
+) -> str:
+    if fields:
+        return ", ".join(render_ai_builder_evidence_value(field) for field in fields)
+    return (
+        "inga namngivna toppnivåfält" if locale == "sv" else "no named top-level fields"
+    )
+
+
+def _example_output_assumptions(
+    session_state: PlanningState,
+    locale: Locale,
+) -> list[str]:
+    constraints = session_state.example_output_constraints
+    if constraints is None:
+        return []
+    headings = constraints.headings[:_MAX_CONFIRMATION_EXAMPLE_HEADINGS]
+    styles = constraints.style_constraints[:_MAX_CONFIRMATION_STYLE_CONSTRAINTS]
+    assumptions: list[str] = []
+    if headings:
+        rendered = ", ".join(
+            render_ai_builder_evidence_value(heading) for heading in headings
+        )
+        omitted = len(constraints.headings) - len(headings)
+        if omitted:
+            rendered = f"{rendered} (+{omitted})"
+        assumptions.append(
+            f"Exempelresultatets valda rubriker: {rendered}."
+            if locale == "sv"
+            else f"Selected example-output headings: {rendered}."
+        )
+    if styles:
+        rendered = "; ".join(
+            f"{item.category}: {render_ai_builder_evidence_value(item.description)}"
+            for item in styles
+        )
+        omitted = len(constraints.style_constraints) - len(styles)
+        if omitted:
+            rendered = f"{rendered}; +{omitted}"
+        assumptions.append(
+            f"Exempelresultatets stilunderlag: {rendered}."
+            if locale == "sv"
+            else f"Example-output style evidence: {rendered}."
+        )
+    assumptions.append(
+        (
+            "Det valda exemplet vägleder struktur och stil men lovar inte exakt "
+            "visuell layout."
+        )
+        if locale == "sv"
+        else (
+            "The selected example guides structure and style but does not promise "
+            "exact visual layout."
+        )
+    )
+    inference = session_state.example_output_schema_inference
+    if inference is not None and inference.status == "not_inferred":
+        assumptions.append(_no_inference_assumption(inference.reason, locale))
+    return assumptions
+
+
+def _no_inference_assumption(
+    reason: ExampleOutputSchemaInferenceReason | None,
+    locale: Locale,
+) -> str:
+    reasons_sv: dict[ExampleOutputSchemaInferenceReason, str] = {
+        "higher_priority_schema": "ett schema med högre prioritet redan styr utdatan",
+        "no_json_object": "inget valt exempel var ett JSON-objekt",
+        "incomplete_content": "hela JSON-objektet inte var tillgängligt",
+        "invalid_json": "JSON-innehållet inte var giltigt",
+        "top_level_not_object": "JSON-innehållet inte var ett objekt på toppnivå",
+        "raw_bytes": "JSON-exemplet överskred säkerhetsgränsen för storlek",
+        "field_count": "JSON-exemplet överskred säkerhetsgränsen för antal fält",
+        "depth": "JSON-exemplet överskred säkerhetsgränsen för nästling",
+        "conflicting_shapes": "de valda JSON-exemplen hade olika strukturer",
+    }
+    reasons_en: dict[ExampleOutputSchemaInferenceReason, str] = {
+        "higher_priority_schema": "a higher-priority schema already controls the output",
+        "no_json_object": "no selected example was a JSON object",
+        "incomplete_content": "the complete JSON object was not available",
+        "invalid_json": "the JSON content was invalid",
+        "top_level_not_object": "the JSON content was not a top-level object",
+        "raw_bytes": "the JSON example exceeded the byte safety limit",
+        "field_count": "the JSON example exceeded the field-count safety limit",
+        "depth": "the JSON example exceeded the nesting safety limit",
+        "conflicting_shapes": "the selected JSON examples had different shapes",
+    }
+    if locale == "sv":
+        rendered_reason = (
+            reasons_sv[reason]
+            if reason is not None
+            else "underlaget inte var säkert att tolka"
+        )
+        return (
+            "Ingen JSON-struktur härleddes från exempelresultatet eftersom "
+            f"{rendered_reason}."
+        )
+    rendered_reason = (
+        reasons_en[reason]
+        if reason is not None
+        else "the evidence was not safe to interpret"
+    )
+    return (
+        f"No JSON shape was inferred from the example output because {rendered_reason}."
     )
 
 

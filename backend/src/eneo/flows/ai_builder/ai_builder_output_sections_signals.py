@@ -79,26 +79,39 @@ def extract_requested_output_sections(
     text: str,
     *,
     model_form_intake_signals: Collection[str] = (),
+    confirmed_headings: Collection[str] = (),
 ) -> RequestedOutputSections:
     normalized = text.casefold()
     if (
-        not normalized
-        or SECTIONED_FORM_INTAKE_SIGNAL in model_form_intake_signals
+        SECTIONED_FORM_INTAKE_SIGNAL in model_form_intake_signals
         or mentions_sectioned_form_intake(text)
     ):
         return RequestedOutputSections.empty()
 
-    explicit_titles = _explicit_heading_titles(text)
-    candidates = (
+    explicit_titles = _explicit_heading_titles(text) if normalized else ()
+    conversation_candidates = (
         list(explicit_titles)
         if explicit_titles
-        else [
-            *_cue_scoped_list_titles(text, normalized),
-            *_inline_heading_titles(text, normalized),
-            *_markdown_heading_titles(text, normalized),
-        ]
+        else (
+            [
+                *_cue_scoped_list_titles(text, normalized),
+                *_inline_heading_titles(text, normalized),
+                *_markdown_heading_titles(text, normalized),
+            ]
+            if normalized
+            else []
+        )
     )
+    confirmed_candidates = [
+        heading for raw in confirmed_headings if (heading := _clean_title(raw))
+    ]
+    candidates = [*conversation_candidates, *confirmed_candidates]
     sections = _dedupe_titles(candidates)
+    if confirmed_candidates and sections:
+        return RequestedOutputSections(
+            sections=sections[:_MAX_HIGH_CONFIDENCE_SECTIONS],
+            confidence="high",
+        )
     if (
         len(sections) < _MIN_HIGH_CONFIDENCE_SECTIONS
         or len(sections) > _MAX_HIGH_CONFIDENCE_SECTIONS

@@ -25,6 +25,7 @@ from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentOutputSchemaDiscovery,
+    build_ai_builder_attachment_context,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
@@ -53,6 +54,9 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_text_event,
     encode_ai_builder_stream_event,
 )
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    OUTPUT_SCHEMA_MAX_JSON_BYTES,
+)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -65,6 +69,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ProposalPrepared,
     ServerOutputPrepared,
     prepare_planner_request,
+    validate_preprovider_output_schema_gate,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -100,12 +105,14 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
+    AskOutputSchemaConflict,
     CommitArchitecture,
     ConfirmRequirements,
     ReviseArchitecture,
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
+    prepare_user_question_metadata,
     resolve_user_question_metadata,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -307,6 +314,8 @@ async def _prepare_planner_request_for_test(
     allow_discovery_semantic_adjudication: bool = True,
     persisted_planning_state: PlanningState | None = None,
     before_provider_call: AsyncMock | None = None,
+    prepared_attachment_context: AIBuilderAttachmentContext | None = None,
+    output_schema_gate_checked: bool = False,
 ):
     return await prepare_planner_request(
         PlannerRequestPreparationInput(
@@ -341,6 +350,8 @@ async def _prepare_planner_request_for_test(
                 target_kind=TargetKind.CREATE,
             ),
             before_provider_call=before_provider_call,
+            prepared_attachment_context=prepared_attachment_context,
+            output_schema_gate_checked=output_schema_gate_checked,
         )
     )
 
@@ -718,6 +729,28 @@ async def test_resolve_user_question_metadata_keeps_supported_non_slot_questions
     }
 
 
+def test_prepare_user_question_metadata_accepts_output_schema_conflict_answer() -> None:
+    fingerprint = "a" * 64
+
+    prepared = prepare_user_question_metadata(
+        conversation=[],
+        message="Use the first schema",
+        question_answer={
+            "kind": "structured_question_answer",
+            "question_id": "output_schema_conflict",
+            "selected_values": [fingerprint],
+        },
+    )
+
+    assert prepared.metadata == {
+        "question_answer": {
+            "question_id": "output_schema_conflict",
+            "selected_values": [fingerprint],
+        }
+    }
+    assert prepared.needs_auxiliary_llm is False
+
+
 @pytest.mark.asyncio
 async def test_resolve_user_question_metadata_does_not_adjudicate_without_pending_question() -> (
     None
@@ -903,43 +936,223 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
 
 
 @pytest.mark.asyncio
-async def test_prepare_planner_request_refuses_ambiguous_attachment_schemas_before_discovery() -> (
+async def test_prepare_planner_request_asks_about_distinct_attachment_schemas_before_provider() -> (
     None
 ):
     planner = _make_planner()
-    schema = '{"type":"object","properties":{"decision":{"type":"string"}}}'
     provider_callback = AsyncMock()
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(_discovery_analysis(), PlanningState.empty()),
-    ) as build_discovery_runtime_result:
-        with pytest.raises(AIBuilderBadRequestException) as exc_info:
-            await _prepare_planner_request_for_test(
-                planner,
-                conversation=[ConversationMessage(role="user", content="Build a flow")],
-                message="Build a flow",
-                completion_model_route=_route(),
-                attachment_files=[
-                    _make_file(
-                        schema,
-                        name="first.schema.json",
-                        mimetype="application/json",
-                    ),
-                    _make_file(
-                        schema,
-                        name="second.schema.json",
-                        mimetype="application/json",
-                    ),
-                ],
-                before_provider_call=provider_callback,
-            )
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=[ConversationMessage(role="user", content="Build a flow")],
+        message="Build a flow",
+        completion_model_route=_route(),
+        attachment_files=[
+            _make_file(
+                '{"type":"object","properties":{"decision":{"type":"string"}}}',
+                name="first.schema.json",
+                mimetype="application/json",
+            ),
+            _make_file(
+                '{"type":"object","properties":{"count":{"type":"integer"}}}',
+                name="second.schema.json",
+                mimetype="application/json",
+            ),
+        ],
+        before_provider_call=provider_callback,
+    )
 
-    assert exc_info.value.code is AIBuilderErrorCode.AMBIGUOUS_ATTACHMENT_OUTPUT_SCHEMAS
-    assert "Keep one schema attached and retry." in str(exc_info.value)
-    build_discovery_runtime_result.assert_not_awaited()
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, AskOutputSchemaConflict)
+    assert prepared.server_decision.question.question_data.question_id == (
+        "output_schema_conflict"
+    )
+    assert len(prepared.server_decision.question.question_data.options) == 2
     provider_callback.assert_not_awaited()
+
+
+def test_preprovider_gate_promotes_user_declared_schema_refusal() -> None:
+    attachment = _make_file(
+        name="expected-output.txt",
+        text='{"description":"' + ("x" * OUTPUT_SCHEMA_MAX_JSON_BYTES) + '"}',
+        mimetype="text/plain",
+    )
+    attachment_context = build_ai_builder_attachment_context([attachment])
+    assert attachment_context is not None
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        validate_preprovider_output_schema_gate(
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Use expected-output.txt as the output schema.",
+                )
+            ],
+            attachment_context=attachment_context,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED
+    assert exc_info.value.context["file_id"] == str(attachment.id)
+
+
+@pytest.mark.asyncio
+async def test_prepare_planner_request_rejects_canonical_schema_expansion_before_provider() -> (
+    None
+):
+    raw_json = (
+        '{"type":"object","allOf":['
+        + ",".join('{"default":1e9}' for _ in range(5_500))
+        + "]}"
+    )
+    attachment = _make_file(
+        name="expanded.schema.json",
+        text=raw_json,
+        mimetype="application/schema+json",
+    )
+    provider_callback = AsyncMock()
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await _prepare_planner_request_for_test(
+            _make_planner(),
+            conversation=[ConversationMessage(role="user", content="Build a flow")],
+            message="Build a flow",
+            completion_model_route=_route(),
+            attachment_files=[attachment],
+            before_provider_call=provider_callback,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED
+    assert exc_info.value.context["reason"] == "canonical_bytes"
+    assert exc_info.value.context["file_id"] == str(attachment.id)
+    provider_callback.assert_not_awaited()
+
+
+def test_preprovider_gate_keeps_unclassified_large_json_text_nonblocking() -> None:
+    attachment = _make_file(
+        name="large-example.txt",
+        text='{"records":"' + ("x" * OUTPUT_SCHEMA_MAX_JSON_BYTES) + '"}',
+        mimetype="text/plain",
+    )
+    attachment_context = build_ai_builder_attachment_context([attachment])
+    assert attachment_context is not None
+
+    conflict_pending = validate_preprovider_output_schema_gate(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Use the attachment as general reference material.",
+            )
+        ],
+        attachment_context=attachment_context,
+    )
+
+    assert conflict_pending is False
+
+
+@pytest.mark.asyncio
+async def test_prepare_planner_request_reuses_checked_empty_attachment_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    rebuild_context = MagicMock(
+        side_effect=AssertionError("checked attachment context must not be rebuilt")
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
+        "build_ai_builder_attachment_context",
+        rebuild_context,
+    )
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=[ConversationMessage(role="user", content="Build a flow")],
+        message="Build a flow",
+        completion_model_route=_route(),
+        attachment_files=[],
+        allow_discovery_semantic_adjudication=False,
+        prepared_attachment_context=None,
+        output_schema_gate_checked=True,
+    )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    rebuild_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_message_checks_attachment_conflict_before_metadata_provider_and_builds_context_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+    )
+    planner.repo.load_planning_state.return_value = None
+    attachments = [
+        _make_file(
+            '{"type":"object","properties":{"decision":{"type":"string"}}}',
+            name="first.schema.json",
+            mimetype="application/json",
+        ),
+        _make_file(
+            '{"type":"object","properties":{"count":{"type":"integer"}}}',
+            name="second.schema.json",
+            mimetype="application/json",
+        ),
+    ]
+    prepared_context = build_ai_builder_attachment_context(attachments)
+    build_context = MagicMock(return_value=prepared_context)
+    resolve_metadata = AsyncMock(
+        side_effect=AssertionError("metadata provider must not run before conflict")
+    )
+    captured_request: PlannerRequestPreparationInput | None = None
+
+    async def stop_after_request(
+        request: PlannerRequestPreparationInput,
+    ) -> ServerOutputPrepared:
+        nonlocal captured_request
+        captured_request = request
+        raise RuntimeError("request captured")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(None, None)),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.build_ai_builder_attachment_context",
+        build_context,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_user_question_metadata",
+        resolve_metadata,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        stop_after_request,
+    )
+    stream = planner.send_message(
+        session_id=uuid4(),
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot("Build a flow"),
+        message="Build a flow",
+        completion_model_route=_route(),
+        attachment_files=attachments,
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+    )
+
+    with pytest.raises(RuntimeError, match="request captured"):
+        await anext(stream)
+
+    build_context.assert_called_once_with(attachments)
+    resolve_metadata.assert_not_awaited()
+    assert captured_request is not None
+    assert captured_request.prepared_attachment_context is prepared_context
+    assert captured_request.output_schema_gate_checked is True
+    planner.repo.mark_session_turn_processing.assert_not_awaited()
 
 
 @pytest.mark.asyncio

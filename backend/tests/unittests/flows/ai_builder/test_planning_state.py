@@ -16,6 +16,9 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_output_schema_evidence,
+)
 from eneo.flows.ai_builder.planning_state import (
     ARCHITECTURE_HASH_HEX_LENGTH,
     BUILDER_SCHEMA_VERSION,
@@ -24,8 +27,10 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
     AttachmentCoverage,
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSourceCoverage,
     FileRoleEvidence,
-    OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -37,8 +42,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_seven(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 7
+    def test_builder_schema_version_is_eight(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 8
 
     def test_payload_cap_is_128_kilobytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 128 * 1024
@@ -73,41 +78,84 @@ class TestEmptyConstruction:
 
 class TestOutputSchemaEvidence:
     def test_accepts_template_placeholder_source(self) -> None:
-        evidence = OutputSchemaEvidence(
+        evidence = build_output_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {"kundnamn": {"type": "string"}},
             },
             source="template_placeholders",
+            source_file_ids=("00000000-0000-0000-0000-000000000001",),
             confidence="high",
             evidence=["file:file_id:content:template_placeholder:kundnamn"],
         )
 
         assert evidence.source == "template_placeholders"
 
-    def test_old_payload_defaults_truncation_metadata(self) -> None:
-        state = PlanningState.model_validate(
-            {
-                "fcm_version": FCM_VERSION,
-                "planner_contract_version": PLANNER_CONTRACT_VERSION,
-                "builder_schema_version": 5,
-                "output_schema_evidence": {
-                    "json_schema": {
-                        "type": "object",
-                        "properties": {"kundnamn": {"type": "string"}},
+    def test_incomplete_schema_evidence_payload_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            PlanningState.model_validate(
+                {
+                    "fcm_version": FCM_VERSION,
+                    "planner_contract_version": PLANNER_CONTRACT_VERSION,
+                    "builder_schema_version": BUILDER_SCHEMA_VERSION,
+                    "output_schema_evidence": {
+                        "json_schema": {
+                            "type": "object",
+                            "properties": {"kundnamn": {"type": "string"}},
+                        },
+                        "source": "template_placeholders",
+                        "confidence": "high",
+                        "evidence": [
+                            "file:file_id:content:template_placeholder:kundnamn"
+                        ],
                     },
-                    "source": "template_placeholders",
-                    "confidence": "high",
-                    "evidence": ["file:file_id:content:template_placeholder:kundnamn"],
-                },
-            }
-        )
+                }
+            )
 
-        evidence = state.output_schema_evidence
-        assert evidence is not None
-        assert evidence.total_count is None
-        assert evidence.truncated is False
-        assert state.builder_schema_version == 5
+
+class TestExampleOutputConstraints:
+    def test_coverage_must_match_current_file_role_evidence(self) -> None:
+        file_id = "00000000-0000-0000-0000-000000000709"
+        with pytest.raises(
+            ValidationError,
+            match="coverage must match file role evidence",
+        ):
+            PlanningState(
+                fcm_version=FCM_VERSION,
+                planner_contract_version=PLANNER_CONTRACT_VERSION,
+                builder_schema_version=BUILDER_SCHEMA_VERSION,
+                file_roles=[
+                    FileRoleEvidence(
+                        file_id=file_id,
+                        filename="example.pdf",
+                        file_type="document",
+                        mimetype="application/pdf",
+                        has_readable_text=True,
+                        coverage="excerpt_truncated",
+                        role="example_output",
+                        source="model",
+                        confidence="medium",
+                    )
+                ],
+                example_output_constraints=ExampleOutputConstraintEvidence(
+                    source_file_ids=[file_id],
+                    source_coverage=[
+                        ExampleOutputSourceCoverage(
+                            file_id=file_id,
+                            coverage="fully_seen",
+                        )
+                    ],
+                    headings=["Summary"],
+                    confidence="medium",
+                    citations=[
+                        ExampleOutputCitation(
+                            source_id=f"uploaded_file:{file_id}",
+                            file_id=file_id,
+                            quote="# Summary",
+                        )
+                    ],
+                ),
+            )
 
 
 class TestRoundTrip:
@@ -160,7 +208,7 @@ class TestRoundTrip:
                     candidate_roles=["template"],
                 )
             ],
-            output_schema_evidence=OutputSchemaEvidence(
+            output_schema_evidence=build_output_schema_evidence(
                 json_schema={
                     "type": "object",
                     "properties": {"decision": {"type": "string"}},

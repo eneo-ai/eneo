@@ -8,12 +8,14 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_output_schema_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.planning_state import (
-    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
 )
@@ -1590,7 +1592,7 @@ def _terminal_schema_planning_state() -> PlanningState:
         primary_runtime_input="documents",
         terminal_output="structured_json",
     )
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"source_case_id": {"type": "string"}},

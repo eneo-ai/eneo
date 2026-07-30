@@ -263,3 +263,9 @@ def test_canonical_json_bytes_preserve_hash_serialization_contract() -> None:
 
     assert serialized == b'{"a":[1,true,null],"z":"r\xc3\xa4ksm\xc3\xb6rg\xc3\xa5s"}'
     assert canonical_json_hash(payload) == hashlib.sha256(serialized).hexdigest()
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_canonical_json_bytes_reject_non_finite_numbers(value: float) -> None:
+    with pytest.raises(ValueError, match="Out of range float values"):
+        canonical_json_bytes({"value": value})

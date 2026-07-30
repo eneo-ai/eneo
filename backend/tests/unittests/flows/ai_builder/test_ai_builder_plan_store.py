@@ -28,6 +28,9 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_output_schema_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_plan_store import (
     _persist_active_send_plan_proposal,
     append_plan_messages,
@@ -50,7 +53,6 @@ from eneo.flows.ai_builder.ai_builder_validation_common import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     FileRoleEvidence,
-    OutputSchemaEvidence,
     PlanningState,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
@@ -643,12 +645,13 @@ async def test_store_plan_drops_prior_file_evidence_when_file_is_detached() -> N
             confidence="high",
         )
     ]
-    prior_state.output_schema_evidence = OutputSchemaEvidence(
+    prior_state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"kundnamn": {"type": "string"}},
         },
         source="template_placeholders",
+        source_file_ids=(file_id,),
         confidence="high",
         evidence=[f"file:{file_id}:content:template_placeholder:kundnamn"],
     )

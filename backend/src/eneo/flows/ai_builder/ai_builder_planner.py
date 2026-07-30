@@ -8,6 +8,9 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from eneo.files.file_models import File
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    build_ai_builder_attachment_context,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
     metadata_for_user_message,
@@ -47,6 +50,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ServerOutputPrepared,
     build_proposal_prepared,
     prepare_planner_request,
+    validate_preprovider_output_schema_gate,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
@@ -436,26 +440,40 @@ class AIBuilderPlanner:
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
             )
-            try:
-                metadata_resolution = await resolve_user_question_metadata(
-                    litellm_client=self.litellm_client,
-                    conversation=conversation,
-                    message=message,
-                    question_answer=question_answer,
-                    ui_language=ui_language,
-                    completion_model_route=completion_model_route,
-                    prepared=prepared_metadata,
-                    usage_tracker=usage_tracker,
-                    before_provider_call=mark_provider_work_started,
+            prepared_attachment_context = build_ai_builder_attachment_context(
+                attachment_files or []
+            )
+            schema_conflict_pending = validate_preprovider_output_schema_gate(
+                conversation=conversation,
+                attachment_context=prepared_attachment_context,
+            )
+            if schema_conflict_pending:
+                metadata = prepared_metadata.metadata
+                metadata_resolution_used_auxiliary_llm = False
+            else:
+                try:
+                    metadata_resolution = await resolve_user_question_metadata(
+                        litellm_client=self.litellm_client,
+                        conversation=conversation,
+                        message=message,
+                        question_answer=question_answer,
+                        ui_language=ui_language,
+                        completion_model_route=completion_model_route,
+                        prepared=prepared_metadata,
+                        usage_tracker=usage_tracker,
+                        before_provider_call=mark_provider_work_started,
+                    )
+                except AIBuilderKnownProviderRejectionException as error:
+                    yield await self._complete_known_provider_rejection(
+                        turn=turn,
+                        error=error,
+                    )
+                    yield build_done_event()
+                    return
+                metadata = metadata_resolution.metadata
+                metadata_resolution_used_auxiliary_llm = (
+                    metadata_resolution.used_auxiliary_llm
                 )
-            except AIBuilderKnownProviderRejectionException as error:
-                yield await self._complete_known_provider_rejection(
-                    turn=turn,
-                    error=error,
-                )
-                yield build_done_event()
-                return
-            metadata = metadata_resolution.metadata
             if plan_edit_context is not None:
                 metadata = {
                     **(metadata or {}),
@@ -488,7 +506,7 @@ class AIBuilderPlanner:
                         plan_edit_context=plan_edit_context,
                         prior_plan_for_revision=prior_plan_for_revision,
                         allow_discovery_semantic_adjudication=(
-                            not metadata_resolution.used_auxiliary_llm
+                            not metadata_resolution_used_auxiliary_llm
                         ),
                         persisted_planning_state=persisted_planning_state,
                         base_planning_state_version=turn.base_planning_state_version,
@@ -496,6 +514,8 @@ class AIBuilderPlanner:
                         current_turn_start=new_messages_start,
                         usage_tracker=usage_tracker,
                         before_provider_call=mark_provider_work_started,
+                        prepared_attachment_context=prepared_attachment_context,
+                        output_schema_gate_checked=True,
                     )
                 )
             except AIBuilderKnownProviderRejectionException as error:

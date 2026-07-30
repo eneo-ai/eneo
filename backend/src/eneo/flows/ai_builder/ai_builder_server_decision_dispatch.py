@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
+    AskOutputSchemaConflict,
     BuilderTurnDecision,
     CommitArchitecture,
     ConfirmRequirements,
@@ -112,6 +113,8 @@ async def dispatch_server_decision(
     match decision:
         case AskCanonicalQuestion():
             return await _dispatch_question(request, decision)
+        case AskOutputSchemaConflict():
+            return await _dispatch_output_schema_conflict(request, decision)
         case CommitArchitecture():
             return await _dispatch_architecture_commit(
                 request,
@@ -195,6 +198,37 @@ async def _dispatch_question(
             ),
         ),
         new_planning_state_version=request.turn.base_planning_state_version,
+    )
+
+
+async def _dispatch_output_schema_conflict(
+    request: ServerDecisionDispatchRequest,
+    decision: AskOutputSchemaConflict,
+) -> ServerDecisionDispatchResult:
+    telemetry = _server_turn_telemetry(
+        request,
+        action_kind="ask_question",
+        architecture_commit_populated=False,
+        tool_call_count=1,
+    )
+    persisted = await persist_backend_question(
+        repo=request.repo,
+        turn=request.turn,
+        conversation=request.conversation,
+        new_messages_start=request.new_messages_start,
+        question=decision.question,
+        flow=request.flow,
+        assistant_metadata=build_assistant_message_metadata(
+            request.conversation,
+            planner_telemetry=telemetry,
+            tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+        ),
+        planning_state_overlay=request.planning_state,
+    )
+    return ServerDecisionDispatchResult(
+        action_kind="ask_question",
+        events=persisted.events,
+        new_planning_state_version=persisted.new_planning_state_version,
     )
 
 

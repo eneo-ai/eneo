@@ -8,6 +8,7 @@ from uuid import UUID
 
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
     build_ai_builder_attachment_context,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -37,6 +38,11 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
+)
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    OutputSchemaCandidateRefusal,
+    OutputSchemaLimitExceeded,
+    resolve_attachment_output_schema,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -83,6 +89,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
+    derive_freeform_output_schema_evidence,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
@@ -98,6 +105,24 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
+
+_OUTPUT_SCHEMA_DECLARATION_MARKERS = (
+    "output schema",
+    "output-schema",
+    "json schema",
+    "json-schema",
+    "utdataschema",
+    "utdata-schema",
+)
+_ATTACHMENT_DECLARATION_MARKERS = (
+    "attached",
+    "attachment",
+    "uploaded",
+    "upload",
+    "bifogad",
+    "bilaga",
+    "filen",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +149,8 @@ class PlannerRequestPreparationInput:
     current_turn_start: int
     usage_tracker: ProposalTurnTelemetry
     before_provider_call: Callable[[], Awaitable[None]] | None = None
+    prepared_attachment_context: AIBuilderAttachmentContext | None = None
+    output_schema_gate_checked: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,17 +207,15 @@ async def prepare_planner_request(
 ) -> PreparedTurnOutcome:
     requirements_state = resolve_requirements_state(request.conversation)
     ui_language = _resolve_ui_language(request.conversation)
-    attachment_context_result = build_ai_builder_attachment_context(
-        request.attachment_files
+    attachment_context_result = (
+        request.prepared_attachment_context
+        if request.output_schema_gate_checked
+        else build_ai_builder_attachment_context(request.attachment_files)
     )
-    if (
-        attachment_context_result is not None
-        and attachment_context_result.output_schema_discovery.disposition == "ambiguous"
-    ):
-        raise AIBuilderBadRequestException(
-            "Multiple valid JSON schemas are attached. "
-            "Keep one schema attached and retry.",
-            code=AIBuilderErrorCode.AMBIGUOUS_ATTACHMENT_OUTPUT_SCHEMAS,
+    if not request.output_schema_gate_checked:
+        validate_preprovider_output_schema_gate(
+            conversation=request.conversation,
+            attachment_context=attachment_context_result,
         )
     discovery_runtime = await build_discovery_runtime_result(
         request.conversation,
@@ -228,6 +253,11 @@ async def prepare_planner_request(
         request.persisted_planning_state,
         attached_file_ids={file.id for file in request.attachment_files},
     )
+    if discovery_runtime.output_schema_conflict_pending:
+        rebuilt_planning_state.replace_output_schema_resolution(
+            evidence=None,
+            example_inference=None,
+        )
     turn_control = resolve_turn_control(
         session_state=rebuilt_planning_state,
         selected_discovery_question_ids=discovery_analysis.selected_question_ids,
@@ -236,6 +266,10 @@ async def prepare_planner_request(
         ),
         ui_language=ui_language,
         discovery_assumptions=discovery_analysis.assumptions,
+        attachment_context=attachment_context_result,
+        output_schema_conflict_pending=(
+            discovery_runtime.output_schema_conflict_pending
+        ),
     )
     if not isinstance(turn_control.decision, GenerateProposal):
         return ServerOutputPrepared(
@@ -316,6 +350,11 @@ def build_proposal_prepared(
         model_form_intake_signals=form_intake_signal_values_from_planning_state(
             planning_state
         ),
+        confirmed_headings=(
+            planning_state.example_output_constraints.headings
+            if planning_state.example_output_constraints is not None
+            else ()
+        ),
     )
     proposal_system_prompt = build_plan_proposal_system_prompt(
         planning_state=planning_state,
@@ -368,6 +407,95 @@ def build_proposal_prepared(
             output_reserve_tokens=max_output_tokens,
             safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
         ),
+    )
+
+
+def validate_preprovider_output_schema_gate(
+    *,
+    conversation: list[ConversationMessage],
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> bool:
+    """Validate deterministic schema blockers before any provider work."""
+
+    if attachment_context is not None:
+        user_declared_schema_file_ids = _user_declared_schema_file_ids(
+            conversation,
+            attachment_context,
+        )
+        blocking_refusal = next(
+            (
+                refusal
+                for refusal in attachment_context.output_schema_discovery.refusals
+                if refusal.blocks_provider_work
+                or refusal.file_id in user_declared_schema_file_ids
+            ),
+            None,
+        )
+        if blocking_refusal is not None:
+            _raise_output_schema_limit(blocking_refusal)
+    try:
+        authoritative_evidence = derive_freeform_output_schema_evidence(conversation)
+    except OutputSchemaLimitExceeded as error:
+        raise AIBuilderBadRequestException(
+            "The supplied output schema exceeds the Builder safety limit.",
+            code=AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED,
+            context={
+                "reason": error.reason,
+                "max_value": error.max_value,
+                **(
+                    {"actual_value": error.actual_value}
+                    if error.actual_value is not None
+                    else {}
+                ),
+            },
+        ) from error
+    resolution = resolve_attachment_output_schema(
+        conversation=conversation,
+        candidates=(
+            attachment_context.output_schema_discovery.candidates
+            if attachment_context is not None
+            else ()
+        ),
+        authoritative_evidence=authoritative_evidence,
+    )
+    return resolution.conflict_pending
+
+
+def _user_declared_schema_file_ids(
+    conversation: list[ConversationMessage],
+    attachment_context: AIBuilderAttachmentContext,
+) -> frozenset[UUID]:
+    text = aggregate_freeform_user_text(conversation).casefold()
+    if not any(marker in text for marker in _OUTPUT_SCHEMA_DECLARATION_MARKERS):
+        return frozenset()
+    declared = {
+        item.file_id
+        for item in attachment_context.evidence
+        if item.filename.casefold() in text
+    }
+    if declared:
+        return frozenset(declared)
+    if len(attachment_context.evidence) == 1 and any(
+        marker in text for marker in _ATTACHMENT_DECLARATION_MARKERS
+    ):
+        return frozenset({attachment_context.evidence[0].file_id})
+    return frozenset()
+
+
+def _raise_output_schema_limit(refusal: OutputSchemaCandidateRefusal) -> None:
+    raise AIBuilderBadRequestException(
+        "An attached output schema exceeds the Builder safety limit.",
+        code=AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED,
+        context={
+            "reason": refusal.reason,
+            "max_value": refusal.max_value,
+            **(
+                {"actual_value": refusal.actual_value}
+                if refusal.actual_value is not None
+                else {}
+            ),
+            "file_id": str(refusal.file_id),
+        },
     )
 
 

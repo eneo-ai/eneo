@@ -30,6 +30,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     question_is_already_resolved,
 )
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_output_schema_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
@@ -45,6 +48,13 @@ from eneo.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
+    AttachmentCoverage,
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSchemaInferenceOutcome,
+    ExampleOutputSourceCoverage,
+    ExampleOutputStyleConstraint,
+    FileRole,
     FileRoleEvidence,
     MappedFileLimit,
     OutputSchemaEvidence,
@@ -77,7 +87,7 @@ def _state(
 
 
 def _output_schema_evidence() -> OutputSchemaEvidence:
-    return OutputSchemaEvidence(
+    return build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"decision": {"type": "string"}},
@@ -87,6 +97,70 @@ def _output_schema_evidence() -> OutputSchemaEvidence:
         source="freeform_text",
         confidence="high",
         evidence=["message:msg_schema", "fenced_json_schema"],
+    )
+
+
+def _example_output_constraints(
+    file_id: UUID,
+    *,
+    heading: str,
+) -> ExampleOutputConstraintEvidence:
+    return ExampleOutputConstraintEvidence(
+        source_file_ids=[file_id],
+        source_coverage=[
+            ExampleOutputSourceCoverage(
+                file_id=file_id,
+                coverage="fully_seen",
+            )
+        ],
+        headings=[heading],
+        confidence="medium",
+        citations=[
+            ExampleOutputCitation(
+                source_id=f"uploaded_file:{file_id}",
+                file_id=file_id,
+                quote=heading,
+            )
+        ],
+    )
+
+
+def _example_output_file_role(file_id: UUID) -> FileRoleEvidence:
+    return FileRoleEvidence(
+        file_id=file_id,
+        filename=f"{file_id}.json",
+        file_type="text",
+        mimetype="application/json",
+        has_readable_text=True,
+        coverage="fully_seen",
+        role="example_output",
+        source="model",
+        confidence="medium",
+        evidence=["model:file_role"],
+        candidate_roles=["example_output"],
+    )
+
+
+def _apply_inferred_example_schema(
+    state: PlanningState,
+    *,
+    file_id: UUID,
+) -> None:
+    state.replace_output_schema_resolution(
+        evidence=build_output_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"decision": {"type": "string"}},
+            },
+            source="inferred_example",
+            source_file_ids=(file_id,),
+            confidence="medium",
+            evidence=(f"file:{file_id}:inferred_example_shape",),
+        ),
+        example_inference=ExampleOutputSchemaInferenceOutcome(
+            status="inferred",
+            source_file_ids=[file_id],
+        ),
     )
 
 
@@ -455,7 +529,7 @@ class TestOutputSchemaEvidencePreservation:
 
     def test_current_turn_output_schema_evidence_wins(self) -> None:
         current = _output_schema_evidence()
-        stale = OutputSchemaEvidence(
+        stale = build_output_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {"old": {"type": "string"}},
@@ -481,7 +555,7 @@ class TestOutputSchemaEvidencePreservation:
         active_file_id = UUID("00000000-0000-0000-0000-000000000701")
         detached_file_id = UUID("00000000-0000-0000-0000-000000000702")
         persisted = _state()
-        persisted.output_schema_evidence = OutputSchemaEvidence(
+        persisted.output_schema_evidence = build_output_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {
@@ -492,6 +566,7 @@ class TestOutputSchemaEvidencePreservation:
                 "additionalProperties": False,
             },
             source="template_placeholders",
+            source_file_ids=(active_file_id, detached_file_id),
             confidence="high",
             evidence=[
                 f"file:{active_file_id}:content:template_placeholder:kundnamn",
@@ -524,12 +599,13 @@ class TestOutputSchemaEvidencePreservation:
         active_file_id = UUID("00000000-0000-0000-0000-000000000701")
         detached_file_id = UUID("00000000-0000-0000-0000-000000000702")
         persisted = _state()
-        persisted.output_schema_evidence = OutputSchemaEvidence(
+        persisted.output_schema_evidence = build_output_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {"shared": {"type": "string"}},
             },
             source="template_placeholders",
+            source_file_ids=(active_file_id, detached_file_id),
             confidence="high",
             evidence=[
                 f"file:{detached_file_id}:content:template_placeholder:shared",
@@ -555,7 +631,7 @@ class TestOutputSchemaEvidencePreservation:
         active_file_id = UUID("00000000-0000-0000-0000-000000000701")
         detached_file_id = UUID("00000000-0000-0000-0000-000000000702")
         persisted = _state()
-        persisted.output_schema_evidence = OutputSchemaEvidence(
+        persisted.output_schema_evidence = build_output_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {
@@ -564,6 +640,7 @@ class TestOutputSchemaEvidencePreservation:
                 },
             },
             source="template_placeholders",
+            source_file_ids=(active_file_id, detached_file_id),
             confidence="high",
             evidence=[
                 f"file:{active_file_id}:content:template_placeholder:kept",
@@ -591,7 +668,7 @@ class TestOutputSchemaEvidencePreservation:
         active_file_id = UUID("00000000-0000-0000-0000-000000000701")
         detached_file_id = UUID("00000000-0000-0000-0000-000000000702")
         persisted = _state()
-        persisted.output_schema_evidence = OutputSchemaEvidence(
+        persisted.output_schema_evidence = build_output_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {
@@ -599,6 +676,7 @@ class TestOutputSchemaEvidencePreservation:
                 },
             },
             source="template_placeholders",
+            source_file_ids=(active_file_id, detached_file_id),
             confidence="medium",
             evidence=[
                 f"file:{active_file_id}:template_placeholder_source",
@@ -624,12 +702,13 @@ class TestOutputSchemaEvidencePreservation:
     def test_drops_attached_json_schema_evidence_after_detach(self) -> None:
         file_id = UUID("00000000-0000-0000-0000-000000000701")
         persisted = _state()
-        persisted.output_schema_evidence = OutputSchemaEvidence(
+        persisted.output_schema_evidence = build_output_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {"decision": {"type": "string"}},
             },
             source="attachment_json_schema",
+            source_file_ids=(file_id,),
             confidence="high",
             evidence=[f"file:{file_id}:json_schema_attachment"],
         )
@@ -646,12 +725,13 @@ class TestOutputSchemaEvidencePreservation:
     def test_drops_template_output_schema_evidence_for_detached_file(self) -> None:
         file_id = UUID("00000000-0000-0000-0000-000000000701")
         persisted = _state()
-        persisted.output_schema_evidence = OutputSchemaEvidence(
+        persisted.output_schema_evidence = build_output_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {"kundnamn": {"type": "string"}},
             },
             source="template_placeholders",
+            source_file_ids=(file_id,),
             confidence="high",
             evidence=[f"file:{file_id}:content:template_placeholder:kundnamn"],
         )
@@ -678,6 +758,141 @@ class TestOutputSchemaEvidencePreservation:
         )
 
         assert rebuilt.output_schema_evidence is persisted_evidence
+
+    def test_carries_inferred_example_schema_and_outcome_as_one_resolution(
+        self,
+    ) -> None:
+        file_id = UUID("00000000-0000-0000-0000-000000000715")
+        file_role = FileRoleEvidence(
+            file_id=file_id,
+            filename="expected.json",
+            file_type="text",
+            mimetype="application/json",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="example_output",
+            source="model",
+            confidence="medium",
+        )
+        constraints = ExampleOutputConstraintEvidence(
+            source_file_ids=[file_id],
+            source_coverage=[
+                ExampleOutputSourceCoverage(
+                    file_id=file_id,
+                    coverage="fully_seen",
+                )
+            ],
+            headings=["Decision"],
+            confidence="medium",
+            citations=[
+                ExampleOutputCitation(
+                    source_id=f"uploaded_file:{file_id}",
+                    file_id=file_id,
+                    quote='"decision": "approved"',
+                )
+            ],
+        )
+        evidence = build_output_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"decision": {"type": "string"}},
+            },
+            source="inferred_example",
+            source_file_ids=(file_id,),
+            confidence="medium",
+            evidence=(f"file:{file_id}:inferred_example_shape",),
+        )
+        outcome = ExampleOutputSchemaInferenceOutcome(
+            status="inferred",
+            source_file_ids=[file_id],
+        )
+        persisted = PlanningState.model_validate(
+            {
+                **dict(_state()),
+                "file_roles": [file_role],
+                "example_output_constraints": constraints,
+                "output_schema_evidence": evidence,
+                "example_output_schema_inference": outcome,
+            }
+        )
+        rebuilt = _state()
+        rebuilt.file_roles = [file_role]
+        rebuilt.example_output_constraints = constraints
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids={file_id},
+        )
+
+        assert rebuilt.output_schema_evidence == evidence
+        assert rebuilt.example_output_schema_inference == outcome
+        rebuilt.validated_snapshot()
+
+    def test_detach_drops_inferred_example_schema_and_outcome(self) -> None:
+        file_id = UUID("00000000-0000-0000-0000-000000000716")
+        file_role = FileRoleEvidence(
+            file_id=file_id,
+            filename="expected.json",
+            file_type="text",
+            mimetype="application/json",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="example_output",
+            source="model",
+            confidence="medium",
+        )
+        constraints = ExampleOutputConstraintEvidence(
+            source_file_ids=[file_id],
+            source_coverage=[
+                ExampleOutputSourceCoverage(
+                    file_id=file_id,
+                    coverage="fully_seen",
+                )
+            ],
+            headings=["Decision"],
+            confidence="medium",
+            citations=[
+                ExampleOutputCitation(
+                    source_id=f"uploaded_file:{file_id}",
+                    file_id=file_id,
+                    quote='"decision": "approved"',
+                )
+            ],
+        )
+        persisted = PlanningState.model_validate(
+            {
+                **dict(_state()),
+                "file_roles": [file_role],
+                "example_output_constraints": constraints,
+                "output_schema_evidence": build_output_schema_evidence(
+                    json_schema={
+                        "type": "object",
+                        "properties": {"decision": {"type": "string"}},
+                    },
+                    source="inferred_example",
+                    source_file_ids=(file_id,),
+                    confidence="medium",
+                    evidence=(f"file:{file_id}:inferred_example_shape",),
+                ),
+                "example_output_schema_inference": (
+                    ExampleOutputSchemaInferenceOutcome(
+                        status="inferred",
+                        source_file_ids=[file_id],
+                    )
+                ),
+            }
+        )
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.output_schema_evidence is None
+        assert rebuilt.example_output_schema_inference is None
 
 
 class TestOutputSchemaEvidenceDerivation:
@@ -2649,6 +2864,186 @@ class TestModelSlotMerge:
             "quote:user_message:test-source:så här ska rapporten se ut",
         ]
         assert role.candidate_roles == ["context_only", "example_output"]
+
+    def test_model_example_output_constraints_follow_current_file_evidence(
+        self,
+    ) -> None:
+        file_id = UUID("00000000-0000-0000-0000-000000000705")
+        state = _state()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="exempel.pdf",
+                file_type="document",
+                mimetype="application/pdf",
+                has_readable_text=True,
+                coverage="fully_seen",
+                role="example_output",
+                source="model",
+                confidence="medium",
+                evidence=["model:file_role"],
+            )
+        ]
+        constraints = ExampleOutputConstraintEvidence(
+            source_file_ids=[file_id],
+            source_coverage=[
+                ExampleOutputSourceCoverage(
+                    file_id=file_id,
+                    coverage="fully_seen",
+                )
+            ],
+            headings=["Summary"],
+            style_constraints=[
+                ExampleOutputStyleConstraint(
+                    category="tone",
+                    description="Formal",
+                )
+            ],
+            confidence="medium",
+            citations=[
+                ExampleOutputCitation(
+                    source_id=f"uploaded_file:{file_id}",
+                    file_id=file_id,
+                    quote="# Summary",
+                )
+            ],
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                example_output_constraints=constraints,
+            ),
+            prompt_hash="x" * 64,
+            freeform_text="",
+        )
+
+        assert state.example_output_constraints == constraints
+
+    def test_model_reclassification_atomically_clears_inferred_example_state(
+        self,
+    ) -> None:
+        file_id = UUID("00000000-0000-0000-0000-000000000707")
+        state = _state()
+        state.file_roles = [_example_output_file_role(file_id)]
+        state.example_output_constraints = _example_output_constraints(
+            file_id,
+            heading="Previous",
+        )
+        _apply_inferred_example_schema(state, file_id=file_id)
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=file_id,
+                        role="context_only",
+                        confidence="medium",
+                        reason="The attachment is background material.",
+                        evidence=_model_evidence("background material"),
+                    ),
+                )
+            ),
+            prompt_hash="r" * 64,
+            freeform_text="",
+        )
+
+        assert state.file_roles[0].role == "context_only"
+        assert state.example_output_constraints is None
+        assert state.output_schema_evidence is None
+        assert state.example_output_schema_inference is None
+        assert state.validated_snapshot() == state
+
+    def test_model_constraint_replacement_atomically_drops_stale_inference(
+        self,
+    ) -> None:
+        first_file_id = UUID("00000000-0000-0000-0000-000000000708")
+        second_file_id = UUID("00000000-0000-0000-0000-000000000709")
+        state = _state()
+        state.file_roles = [
+            _example_output_file_role(first_file_id),
+            _example_output_file_role(second_file_id),
+        ]
+        state.example_output_constraints = _example_output_constraints(
+            first_file_id,
+            heading="Previous",
+        )
+        _apply_inferred_example_schema(state, file_id=first_file_id)
+        replacement = _example_output_constraints(
+            second_file_id,
+            heading="Current",
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(example_output_constraints=replacement),
+            prompt_hash="s" * 64,
+            freeform_text="",
+        )
+
+        assert state.example_output_constraints == replacement
+        assert state.output_schema_evidence is None
+        assert state.example_output_schema_inference is None
+        assert state.validated_snapshot() == state
+
+    @pytest.mark.parametrize(
+        ("role", "coverage"),
+        [
+            ("context_only", "fully_seen"),
+            ("example_output", "excerpt_truncated"),
+        ],
+    )
+    def test_model_example_output_constraints_reject_stale_file_evidence(
+        self,
+        role: FileRole,
+        coverage: AttachmentCoverage,
+    ) -> None:
+        file_id = UUID("00000000-0000-0000-0000-000000000706")
+        state = _state()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=file_id,
+                filename="exempel.pdf",
+                file_type="document",
+                mimetype="application/pdf",
+                has_readable_text=True,
+                coverage=coverage,
+                role=role,
+                source="model",
+                confidence="medium",
+                evidence=["model:file_role"],
+            )
+        ]
+        constraints = ExampleOutputConstraintEvidence(
+            source_file_ids=[file_id],
+            source_coverage=[
+                ExampleOutputSourceCoverage(
+                    file_id=file_id,
+                    coverage="fully_seen",
+                )
+            ],
+            headings=["Summary"],
+            confidence="medium",
+            citations=[
+                ExampleOutputCitation(
+                    source_id=f"uploaded_file:{file_id}",
+                    file_id=file_id,
+                    quote="# Summary",
+                )
+            ],
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                example_output_constraints=constraints,
+            ),
+            prompt_hash="y" * 64,
+            freeform_text="",
+        )
+
+        assert state.example_output_constraints is None
 
     def test_model_file_role_without_quoted_evidence_is_ignored(self) -> None:
         file_id = "00000000-0000-0000-0000-000000000703"

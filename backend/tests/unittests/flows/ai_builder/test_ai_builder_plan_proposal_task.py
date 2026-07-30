@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
+)
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_output_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -17,8 +21,12 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSchemaInferenceOutcome,
+    ExampleOutputSourceCoverage,
+    ExampleOutputStyleConstraint,
     FileRoleEvidence,
-    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -269,7 +277,7 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
 
 def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None:
     state = PlanningState.empty()
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {
@@ -300,9 +308,92 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
     assert "additionalProperties" not in prompt
 
 
+def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000713")
+    state = PlanningState.model_validate(
+        {
+            **dict(PlanningState.empty()),
+            "file_roles": [
+                FileRoleEvidence(
+                    file_id=file_id,
+                    filename="expected.json",
+                    file_type="text",
+                    mimetype="application/json",
+                    has_readable_text=True,
+                    coverage="fully_seen",
+                    role="example_output",
+                    source="model",
+                    confidence="medium",
+                )
+            ],
+            "example_output_constraints": ExampleOutputConstraintEvidence(
+                source_file_ids=[file_id],
+                source_coverage=[
+                    ExampleOutputSourceCoverage(
+                        file_id=file_id,
+                        coverage="fully_seen",
+                    )
+                ],
+                headings=["Summary", "Decision"],
+                style_constraints=[
+                    ExampleOutputStyleConstraint(
+                        category="tone",
+                        description="Formal and concise",
+                    )
+                ],
+                confidence="medium",
+                citations=[
+                    ExampleOutputCitation(
+                        source_id=f"uploaded_file:{file_id}",
+                        file_id=file_id,
+                        quote='"decision": "approved"',
+                    )
+                ],
+            ),
+            "output_schema_evidence": build_output_schema_evidence(
+                json_schema={
+                    "type": "object",
+                    "properties": {
+                        f"field_{index}": {"type": "string"} for index in range(12)
+                    },
+                },
+                source="inferred_example",
+                source_file_ids=(file_id,),
+                confidence="medium",
+                evidence=(f"file:{file_id}:inferred_example_shape",),
+            ),
+            "example_output_schema_inference": ExampleOutputSchemaInferenceOutcome(
+                status="inferred",
+                source_file_ids=[file_id],
+            ),
+        }
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(summary="Follow the selected example."),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        requested_output_sections=RequestedOutputSections(
+            sections=("Summary", "Decision"),
+            confidence="high",
+        ),
+    )
+
+    assert "inferred top-level fields:" in prompt
+    assert "showing 8 of 12" in prompt
+    assert "not as an explicit or closed contract" in prompt
+    assert "Example-output style evidence:" in prompt
+    assert "- tone: Formal and concise" in prompt
+    assert "do not promise exact visual layout" in prompt
+    assert "Requested output sections:" in prompt
+
+
 def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
     state = PlanningState.empty()
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {
@@ -311,6 +402,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
             },
         },
         source="template_placeholders",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=["file:file_id:content:template_placeholder:kundnamn"],
     )
@@ -352,12 +444,13 @@ def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> N
             candidate_roles=["template"],
         )
     ]
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {long_placeholder: {"type": "string"}},
         },
         source="template_placeholders",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=[f"file:file_id:content:template_placeholder:{long_placeholder}"],
     )

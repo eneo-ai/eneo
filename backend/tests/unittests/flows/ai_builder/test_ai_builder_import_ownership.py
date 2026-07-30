@@ -296,6 +296,7 @@ PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES = frozenset(
         "conversation_message_to_llm_message",
         "prepare_planner_request",
         "trim_conversation_for_context",
+        "validate_preprovider_output_schema_gate",
     }
 )
 PLANNER_FAILURE_EVENTS_PUBLIC_NAMES = frozenset(

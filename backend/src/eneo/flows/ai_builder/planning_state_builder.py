@@ -8,11 +8,10 @@ and committed architecture state.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal
 from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
@@ -53,6 +52,10 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_output_schema_evidence,
+    parse_output_schema_candidate,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
@@ -78,12 +81,13 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
 from eneo.flows.ai_builder.planning_state import (
-    ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX,
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSchemaInferenceOutcome,
     FileRole,
     FileRoleEvidence,
     MappedFileLimit,
@@ -97,12 +101,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import Flow
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
-from eneo.flows.output_processing import (
-    schema_yields_top_level_object,
-    validate_schema_syntax,
-)
 from eneo.json_types import JsonObject
-from eneo.main.exceptions import TypedIOValidationException
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,18 +133,6 @@ _FENCED_JSON_BLOCK_RE = re.compile(
     r"```(?:json|jsonschema|schema)?\s*(.*?)```",
     re.IGNORECASE | re.DOTALL,
 )
-_JSON_SCHEMA_SHAPE_KEYS = frozenset(
-    {
-        "$schema",
-        "type",
-        "properties",
-        "required",
-        "additionalProperties",
-        "allOf",
-        "anyOf",
-        "oneOf",
-    }
-)
 _OUTPUT_SCHEMA_LABELS = (
     "output schema",
     "output json schema",
@@ -170,7 +157,13 @@ _OUTPUT_SCHEMA_PROMOTABLE_TERMINAL_OUTPUT_SOURCES: frozenset[SlotSource] = froze
     }
 )
 CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
-    {"slot", "file_role", "form_intake", "secondary_obligation"}
+    {
+        "slot",
+        "file_role",
+        "form_intake",
+        "example_output_constraint",
+        "secondary_obligation",
+    }
 )
 
 
@@ -195,7 +188,8 @@ def build_planning_state_from_conversation(
         else None
     )
     output_schema_evidence = (
-        _derive_output_schema_evidence(conversation) or attachment_json_schema_evidence
+        derive_freeform_output_schema_evidence(conversation)
+        or attachment_json_schema_evidence
     )
     resolved_slots = _resolve_slots(
         conversation,
@@ -400,14 +394,6 @@ def carry_forward_persisted_planner_state(
         and persisted.architecture_commit is not None
     ):
         rebuilt.architecture_commit = persisted.architecture_commit
-    if (
-        rebuilt.output_schema_evidence is None
-        and persisted.output_schema_evidence is not None
-    ):
-        rebuilt.output_schema_evidence = _carryable_output_schema_evidence(
-            persisted.output_schema_evidence,
-            attached_file_ids=attached_file_ids,
-        )
     current_file_ids = {item.file_id for item in rebuilt.file_roles}
     for file_role in persisted.file_roles:
         if file_role.file_id not in attached_file_ids:
@@ -415,6 +401,31 @@ def carry_forward_persisted_planner_state(
         if file_role.file_id not in current_file_ids:
             rebuilt.file_roles.append(file_role)
             current_file_ids.add(file_role.file_id)
+    carried_evidence = rebuilt.output_schema_evidence
+    if carried_evidence is None and persisted.output_schema_evidence is not None:
+        carried_evidence = _carryable_output_schema_evidence(
+            persisted.output_schema_evidence,
+            attached_file_ids=attached_file_ids,
+        )
+    carried_inference = rebuilt.example_output_schema_inference
+    if carried_inference is None:
+        carried_inference = _carryable_example_output_schema_inference(
+            persisted.example_output_schema_inference,
+            constraints=rebuilt.example_output_constraints,
+            output_schema_evidence=carried_evidence,
+            attached_file_ids=attached_file_ids,
+        )
+    if (
+        carried_evidence is not None
+        and carried_evidence.source == "inferred_example"
+        and carried_inference is None
+    ):
+        carried_evidence = None
+    if carried_evidence is not None or carried_inference is not None:
+        rebuilt.replace_output_schema_resolution(
+            evidence=carried_evidence,
+            example_inference=carried_inference,
+        )
 
 
 def _carryable_output_schema_evidence(
@@ -426,29 +437,10 @@ def _carryable_output_schema_evidence(
         return evidence
 
     attached = set(attached_file_ids)
-    if evidence.source == "attachment_json_schema":
-        source_file_ids = {
-            file_id
-            for marker in evidence.evidence
-            if (
-                file_id := _attachment_evidence_file_id(
-                    marker, ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX
-                )
-            )
-            is not None
-        }
+    source_file_ids = set(evidence.source_file_ids)
+    if evidence.source in {"attachment_json_schema", "inferred_example"}:
         return evidence if source_file_ids and source_file_ids <= attached else None
 
-    source_file_ids = {
-        file_id
-        for marker in evidence.evidence
-        if (
-            file_id := _attachment_evidence_file_id(
-                marker, TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX
-            )
-        )
-        is not None
-    }
     if evidence.truncated and source_file_ids and not source_file_ids <= attached:
         return None
     retained = [
@@ -464,21 +456,22 @@ def _carryable_output_schema_evidence(
     retained_source_markers = [
         marker
         for marker in evidence.evidence
-        if (
-            file_id := _attachment_evidence_file_id(
-                marker, TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX
-            )
+        if _attachment_evidence_file_id(
+            marker,
+            TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
         )
         in attached
     ]
-    return OutputSchemaEvidence(
+    retained_source_file_ids = tuple(sorted(source_file_ids & attached, key=str))
+    return build_output_schema_evidence(
         json_schema=_filter_template_placeholder_schema(
             evidence.json_schema,
             retained_placeholders=retained_placeholders,
         ),
         source=evidence.source,
+        source_file_ids=retained_source_file_ids,
         confidence=evidence.confidence,
-        evidence=[*retained_source_markers, *[marker for marker, _ in retained]],
+        evidence=(*retained_source_markers, *[marker for marker, _ in retained]),
         total_count=(
             evidence.total_count
             if evidence.truncated
@@ -488,6 +481,38 @@ def _carryable_output_schema_evidence(
         ),
         truncated=evidence.truncated,
     )
+
+
+def _carryable_example_output_schema_inference(
+    inference: ExampleOutputSchemaInferenceOutcome | None,
+    *,
+    constraints: ExampleOutputConstraintEvidence | None,
+    output_schema_evidence: OutputSchemaEvidence | None,
+    attached_file_ids: Collection[UUID],
+) -> ExampleOutputSchemaInferenceOutcome | None:
+    if inference is None or constraints is None:
+        return None
+    source_file_ids = set(inference.source_file_ids)
+    if not source_file_ids <= set(attached_file_ids):
+        return None
+    if not source_file_ids <= set(constraints.source_file_ids):
+        return None
+    if inference.status == "inferred":
+        if (
+            output_schema_evidence is None
+            or output_schema_evidence.source != "inferred_example"
+            or output_schema_evidence.source_file_ids != inference.source_file_ids
+        ):
+            return None
+        return inference
+    if inference.reason == "higher_priority_schema":
+        return (
+            inference
+            if output_schema_evidence is not None
+            and output_schema_evidence.source != "inferred_example"
+            else None
+        )
+    return inference if output_schema_evidence is None else None
 
 
 def _attachment_evidence_file_id(marker: str, suffix: str) -> UUID | None:
@@ -543,7 +568,7 @@ def _filter_template_placeholder_schema(
     return filtered
 
 
-def _derive_output_schema_evidence(
+def derive_freeform_output_schema_evidence(
     conversation: list[ConversationMessage],
 ) -> OutputSchemaEvidence | None:
     evidence: OutputSchemaEvidence | None = None
@@ -556,11 +581,14 @@ def _derive_output_schema_evidence(
             schema = parse_output_schema_candidate(match.group(1))
             if schema is None:
                 continue
-            evidence = OutputSchemaEvidence(
+            evidence = build_output_schema_evidence(
                 json_schema=schema,
                 source="freeform_text",
                 confidence="high",
-                evidence=[f"message:{message.message_id}", "fenced_json_schema"],
+                evidence=(
+                    f"message:{message.message_id}",
+                    "fenced_json_schema",
+                ),
             )
     return evidence
 
@@ -674,30 +702,6 @@ def _mentions_output_schema_near_fence(
     return any(label in window for label in _OUTPUT_SCHEMA_LABELS)
 
 
-def parse_output_schema_candidate(raw_json: str) -> JsonObject | None:
-    try:
-        parsed: object = json.loads(raw_json)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    # `json.loads` object keys are strings; the cast preserves the shared JSON alias.
-    candidate = cast(JsonObject, parsed)
-    if not _looks_like_json_schema(candidate):
-        return None
-    try:
-        validate_schema_syntax(candidate, label="output_schema_evidence")
-    except TypedIOValidationException:
-        return None
-    if not schema_yields_top_level_object(candidate):
-        return None
-    return candidate
-
-
-def _looks_like_json_schema(candidate: JsonObject) -> bool:
-    return any(key in candidate for key in _JSON_SCHEMA_SHAPE_KEYS)
-
-
 def merge_llm_resolved_slots(
     state: PlanningState,
     classification_result: SlotClassificationResult,
@@ -721,11 +725,35 @@ def merge_llm_resolved_slots(
         classification_result=classification_result,
         prompt_hash=prompt_hash,
     )
-    _merge_model_file_roles(
-        state,
+    file_roles = _merged_model_file_roles(
+        state.file_roles,
         classification_result=classification_result,
         prompt_hash=prompt_hash,
     )
+    example_constraints = _merged_model_example_output_constraints(
+        current=state.example_output_constraints,
+        file_roles=file_roles,
+        classification_result=classification_result,
+    )
+    if (
+        file_roles != state.file_roles
+        or example_constraints != state.example_output_constraints
+    ):
+        example_inference = state.example_output_schema_inference
+        evidence = state.output_schema_evidence
+        if not _example_output_inference_matches_constraints(
+            example_inference,
+            example_constraints,
+        ):
+            example_inference = None
+            if evidence is not None and evidence.source == "inferred_example":
+                evidence = None
+        state.replace_attachment_interpretation(
+            file_roles=file_roles,
+            example_constraints=example_constraints,
+            evidence=evidence,
+            example_inference=example_inference,
+        )
 
     for classified_slot in classification_result.slots:
         if not _model_slot_is_persistable(classified_slot.slot_name):
@@ -821,15 +849,15 @@ def _form_intake_signal_values(
     return tuple(values)
 
 
-def _merge_model_file_roles(
-    state: PlanningState,
+def _merged_model_file_roles(
+    current: list[FileRoleEvidence],
     *,
     classification_result: SlotClassificationResult,
     prompt_hash: str,
-) -> None:
-    if not classification_result.file_roles or not state.file_roles:
-        return
-    roles_by_id = {item.file_id: item for item in state.file_roles}
+) -> list[FileRoleEvidence]:
+    if not classification_result.file_roles or not current:
+        return current
+    roles_by_id = {item.file_id: item for item in current}
     changed = False
     for classified_role in classification_result.file_roles:
         existing_role = roles_by_id.get(classified_role.file_id)
@@ -859,8 +887,62 @@ def _merge_model_file_roles(
             }
         )
         changed = True
-    if changed:
-        state.file_roles = [roles_by_id[item.file_id] for item in state.file_roles]
+    if not changed:
+        return current
+    return [roles_by_id[item.file_id] for item in current]
+
+
+def _merged_model_example_output_constraints(
+    *,
+    current: ExampleOutputConstraintEvidence | None,
+    file_roles: list[FileRoleEvidence],
+    classification_result: SlotClassificationResult,
+) -> ExampleOutputConstraintEvidence | None:
+    constraints = classification_result.example_output_constraints
+    if constraints is None:
+        return (
+            current
+            if _example_output_constraints_match_file_roles(current, file_roles)
+            else None
+        )
+    if (
+        constraints.confidence == "low"
+        or not _example_output_constraints_match_file_roles(
+            constraints,
+            file_roles,
+        )
+    ):
+        return None
+    return constraints
+
+
+def _example_output_inference_matches_constraints(
+    inference: ExampleOutputSchemaInferenceOutcome | None,
+    constraints: ExampleOutputConstraintEvidence | None,
+) -> bool:
+    if inference is None:
+        return True
+    return constraints is not None and set(inference.source_file_ids) <= set(
+        constraints.source_file_ids
+    )
+
+
+def _example_output_constraints_match_file_roles(
+    constraints: ExampleOutputConstraintEvidence | None,
+    file_roles: list[FileRoleEvidence],
+) -> bool:
+    if constraints is None:
+        return True
+    roles_by_file_id = {item.file_id: item for item in file_roles}
+    coverage_by_file_id = {
+        item.file_id: item.coverage for item in constraints.source_coverage
+    }
+    return all(
+        (role := roles_by_file_id.get(file_id)) is not None
+        and role.role == "example_output"
+        and role.coverage == coverage_by_file_id[file_id]
+        for file_id in constraints.source_file_ids
+    )
 
 
 def _model_file_role_can_replace(

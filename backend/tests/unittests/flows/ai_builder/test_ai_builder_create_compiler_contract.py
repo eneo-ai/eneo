@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import cast
+from uuid import UUID
 
 import pytest
 
@@ -19,6 +20,9 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_output_schema_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
@@ -36,8 +40,12 @@ from eneo.flows.ai_builder.pattern_registry import (
 )
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSchemaInferenceOutcome,
+    ExampleOutputSourceCoverage,
+    FileRoleEvidence,
     MappedFileLimit,
-    OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -88,12 +96,13 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
         "terminal_output",
         "docx_document",
     )
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"kundnamn": {"type": "string"}},
         },
         source="template_placeholders",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=["file:file_id:content:template_placeholder:kundnamn"],
     )
@@ -117,7 +126,7 @@ def test_compile_context_keeps_distinct_long_template_placeholder_names() -> Non
         "terminal_output",
         "docx_document",
     )
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {
@@ -126,6 +135,7 @@ def test_compile_context_keeps_distinct_long_template_placeholder_names() -> Non
             },
         },
         source="template_placeholders",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=[
             f"file:file_id:content:template_placeholder:{first}",
@@ -152,9 +162,10 @@ def test_compile_context_binds_attachment_json_schema_to_json_terminal() -> None
         "properties": {"decision": {"type": "string"}},
         "required": ["decision"],
     }
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema=schema,
         source="attachment_json_schema",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=["file:00000000-0000-0000-0000-000000000701:json_schema_attachment"],
     )
@@ -166,18 +177,87 @@ def test_compile_context_binds_attachment_json_schema_to_json_terminal() -> None
     assert context.terminal_output_schema == schema
 
 
+def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000714")
+    schema: JsonObject = {
+        "type": "object",
+        "properties": {"decision": {"type": "string"}},
+    }
+    state = PlanningState.model_validate(
+        {
+            **dict(PlanningState.empty()),
+            "resolved_slots": {
+                "terminal_output": _slot(
+                    "terminal_output",
+                    "structured_json",
+                )
+            },
+            "file_roles": [
+                FileRoleEvidence(
+                    file_id=file_id,
+                    filename="expected.json",
+                    file_type="text",
+                    mimetype="application/json",
+                    has_readable_text=True,
+                    coverage="fully_seen",
+                    role="example_output",
+                    source="model",
+                    confidence="medium",
+                )
+            ],
+            "example_output_constraints": ExampleOutputConstraintEvidence(
+                source_file_ids=[file_id],
+                source_coverage=[
+                    ExampleOutputSourceCoverage(
+                        file_id=file_id,
+                        coverage="fully_seen",
+                    )
+                ],
+                headings=["Decision"],
+                confidence="medium",
+                citations=[
+                    ExampleOutputCitation(
+                        source_id=f"uploaded_file:{file_id}",
+                        file_id=file_id,
+                        quote='"decision": "approved"',
+                    )
+                ],
+            ),
+            "output_schema_evidence": build_output_schema_evidence(
+                json_schema=schema,
+                source="inferred_example",
+                source_file_ids=(file_id,),
+                confidence="medium",
+                evidence=(f"file:{file_id}:inferred_example_shape",),
+            ),
+            "example_output_schema_inference": ExampleOutputSchemaInferenceOutcome(
+                status="inferred",
+                source_file_ids=[file_id],
+            ),
+        }
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.terminal_output_schema == schema
+    assert "required" not in context.terminal_output_schema
+    assert "additionalProperties" not in context.terminal_output_schema
+
+
 def test_compile_context_rejects_attachment_json_schema_for_docx_terminal() -> None:
     state = PlanningState.empty()
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
         "docx_document",
     )
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"decision": {"type": "string"}},
         },
         source="attachment_json_schema",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=["file:00000000-0000-0000-0000-000000000701:json_schema_attachment"],
     )
@@ -2095,7 +2175,7 @@ def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
         "terminal_output",
         "docx_document",
     )
-    state.output_schema_evidence = OutputSchemaEvidence(
+    state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {
@@ -2107,6 +2187,7 @@ def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
             },
         },
         source="template_placeholders",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=[
             "file:file_id:content:template_placeholder:kundnamn",

@@ -23,6 +23,9 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     extract_freeform_user_messages,
 )
+from eneo.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
 
 # Versioned persistence limits for the BuilderSessions JSON aggregate. These are
 # deliberately independent of model context windows: provider request assembly
@@ -224,6 +227,7 @@ def _required_message_indices(
         if confirmation_index is not None:
             required_indices.add(confirmation_index)
     required_indices.update(_latest_structured_answer_indices(conversation))
+    required_indices.update(_latest_output_schema_conflict_trace_indices(conversation))
     required_indices.update(_latest_tool_trace_indices(conversation))
     required_indices.update(_classifier_semantic_indices(conversation))
     return required_indices
@@ -361,4 +365,28 @@ def _latest_tool_trace_indices(
                 indices.append(cursor)
                 cursor += 1
             return indices
+    return []
+
+
+def _latest_output_schema_conflict_trace_indices(
+    conversation: list[ConversationMessage],
+) -> Iterable[int]:
+    for index in range(len(conversation) - 1, -1, -1):
+        for tool_call in tool_calls_from_message(conversation[index]):
+            if tool_call.name != ASK_STRUCTURED_QUESTION_TOOL_NAME:
+                continue
+            if tool_call.arguments.get("question_id") == "output_schema_conflict":
+                indices = [index]
+                call_ids = tool_call_ids(tool_calls_from_message(conversation[index]))
+                cursor = index + 1
+                while cursor < len(conversation):
+                    candidate = conversation[cursor]
+                    if (
+                        candidate.role != "tool"
+                        or candidate.tool_call_id not in call_ids
+                    ):
+                        break
+                    indices.append(cursor)
+                    cursor += 1
+                return indices
     return []

@@ -36,6 +36,11 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     slot_names_blocked_by_explicit_uncertainty,
 )
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    ExampleOutputJsonSource,
+    resolve_attachment_output_schema,
+    resolve_example_output_schema_inference,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_question_state import (
     assistant_question_id,
@@ -76,6 +81,7 @@ class RuntimeDiscoveryContext:
     planning_state: PlanningState
     slot_classification_result: SlotClassificationResult | None = None
     slot_classification_metadata: SlotClassificationMetadata | None = None
+    output_schema_conflict_pending: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +89,68 @@ class DiscoveryRuntimeResult:
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
     slot_classification_metadata: SlotClassificationMetadata | None = None
+    output_schema_conflict_pending: bool = False
+
+
+def _apply_example_output_schema_inference(
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> PlanningState:
+    constraints = state.example_output_constraints
+    if constraints is None:
+        if state.example_output_schema_inference is None and (
+            state.output_schema_evidence is None
+            or state.output_schema_evidence.source != "inferred_example"
+        ):
+            return state
+        state.replace_output_schema_resolution(
+            evidence=(
+                None
+                if state.output_schema_evidence is not None
+                and state.output_schema_evidence.source == "inferred_example"
+                else state.output_schema_evidence
+            ),
+            example_inference=None,
+        )
+        return state
+
+    evidence_by_file_id = (
+        {item.file_id: item for item in attachment_context.evidence}
+        if attachment_context is not None
+        else {}
+    )
+    sources: list[ExampleOutputJsonSource] = []
+    for file_id in constraints.source_file_ids:
+        attachment = evidence_by_file_id.get(file_id)
+        if attachment is None:
+            continue
+        normalized_mimetype = (
+            (attachment.mimetype or "").casefold().split(";", 1)[0].strip()
+        )
+        sources.append(
+            ExampleOutputJsonSource(
+                file_id=file_id,
+                is_json=(
+                    normalized_mimetype
+                    in {"application/json", "application/schema+json"}
+                    or attachment.filename.casefold().endswith(".json")
+                ),
+                content=attachment.excerpt,
+                content_complete=(
+                    attachment.coverage == "fully_seen"
+                    and attachment.excerpt is not None
+                ),
+            )
+        )
+    resolution = resolve_example_output_schema_inference(
+        sources=tuple(sources),
+        authoritative_evidence=state.output_schema_evidence,
+    )
+    state.replace_output_schema_resolution(
+        evidence=resolution.evidence,
+        example_inference=resolution.outcome,
+    )
+    return state
 
 
 def _targeted_classification_bias(
@@ -318,6 +386,30 @@ async def build_runtime_discovery_context(
         mapped_execution_policy=mapped_execution_policy,
     )
     apply_attachment_structural_evidence_to_planning_state(state, attachment_context)
+    schema_resolution = resolve_attachment_output_schema(
+        conversation=conversation,
+        candidates=(
+            attachment_context.output_schema_discovery.candidates
+            if attachment_context is not None
+            else ()
+        ),
+        authoritative_evidence=state.output_schema_evidence,
+    )
+    state.replace_output_schema_resolution(
+        evidence=schema_resolution.evidence,
+        example_inference=(
+            state.example_output_schema_inference
+            if schema_resolution.evidence is not None
+            and schema_resolution.evidence.source == "inferred_example"
+            else None
+        ),
+    )
+    if schema_resolution.conflict_pending:
+        return RuntimeDiscoveryContext(
+            planning_state=state,
+            output_schema_conflict_pending=True,
+        )
+    state = _apply_example_output_schema_inference(state, attachment_context)
     if (
         not allow_classification
         or litellm_client is None
@@ -386,6 +478,7 @@ async def build_runtime_discovery_context(
         freeform_text=text,
         model_blocked_slots=model_blocked_slots,
     )
+    state = _apply_example_output_schema_inference(state, attachment_context)
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
     return RuntimeDiscoveryContext(
         planning_state=state,
@@ -437,4 +530,5 @@ async def build_discovery_runtime_result(
         discovery_analysis=analysis,
         planning_state=context.planning_state,
         slot_classification_metadata=context.slot_classification_metadata,
+        output_schema_conflict_pending=context.output_schema_conflict_pending,
     )

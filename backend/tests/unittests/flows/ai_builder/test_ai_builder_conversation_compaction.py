@@ -23,6 +23,10 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     extract_freeform_user_messages,
 )
 from eneo.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
+from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
+    build_attachment_schema_candidate,
+    resolve_attachment_output_schema,
+)
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
@@ -34,6 +38,13 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
+)
+from eneo.flows.ai_builder.planning_state import (
+    ExampleOutputCitation,
+    ExampleOutputConstraintEvidence,
+    ExampleOutputSourceCoverage,
+    ExampleOutputStyleConstraint,
+    FileRoleEvidence,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -103,6 +114,11 @@ def _classifier_result_msg(
                 for evidence in file_role.evidence
             ],
             *([] if result.form_intake is None else result.form_intake.evidence),
+            *(
+                []
+                if result.example_output_constraints is None
+                else result.example_output_constraints.citations
+            ),
         )
     ]
     source_text = "\n".join(evidence_quotes) or "classifier source"
@@ -309,6 +325,104 @@ def test_count_compaction_retains_complete_classifier_semantic_family() -> None:
     assert not any(item.assumptions for item in classifications)
 
 
+def test_count_and_byte_compaction_retain_example_output_constraints_for_rebuild() -> (
+    None
+):
+    file_id = UUID("00000000-0000-0000-0000-000000000708")
+    file_source_id = f"uploaded_file:{file_id}"
+    constraints = ExampleOutputConstraintEvidence(
+        source_file_ids=[file_id],
+        source_coverage=[
+            ExampleOutputSourceCoverage(file_id=file_id, coverage="fully_seen")
+        ],
+        headings=["Summary"],
+        style_constraints=[
+            ExampleOutputStyleConstraint(
+                category="tone",
+                description="Formal",
+            )
+        ],
+        confidence="medium",
+        citations=[
+            ExampleOutputCitation(
+                source_id=file_source_id,
+                file_id=file_id,
+                quote="# Summary",
+            )
+        ],
+    )
+    classifier_message = _classifier_result_msg(
+        "example-output",
+        SlotClassificationResult(
+            file_roles=(
+                ClassifiedFileRole(
+                    file_id=file_id,
+                    role="example_output",
+                    confidence="medium",
+                    reason="the upload is an example output",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id=file_source_id,
+                            quote="# Summary",
+                        ),
+                    ),
+                ),
+            ),
+            example_output_constraints=constraints,
+        ),
+        uploaded_file_id=file_id,
+    )
+    conversation = [
+        classifier_message,
+        *[_msg("assistant", content=f"filler {index}") for index in range(20)],
+        _msg("user", content="continue"),
+    ]
+    attachment_file_roles = [
+        FileRoleEvidence(
+            file_id=file_id,
+            filename="example.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="context_only",
+            source="heuristic",
+            confidence="low",
+            evidence=["fallback:unclassified_file"],
+        )
+    ]
+    expected = build_planning_state_from_conversation(
+        conversation,
+        attachment_file_roles=attachment_file_roles,
+    )
+    count_compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=5,
+        tail_messages=3,
+    )
+    required_messages = [classifier_message, conversation[-1]]
+    byte_cap = conversation_serialized_size_bytes(required_messages) + 100
+    byte_compacted = compact_ai_builder_conversation(
+        conversation,
+        max_conversation_bytes=byte_cap,
+    )
+
+    assert expected.example_output_constraints == constraints
+    for compacted in (count_compacted, byte_compacted):
+        rebuilt = build_planning_state_from_conversation(
+            compacted,
+            attachment_file_roles=attachment_file_roles,
+        )
+        assert rebuilt == expected
+        parsed = next(
+            classification
+            for message in compacted
+            if (classification := slot_classification_from_metadata(message.metadata))
+            is not None
+        )
+        assert parsed.example_output_constraints == constraints
+
+
 def test_byte_compaction_rebuild_matches_after_later_slot_correction() -> None:
     conversation = [
         _classifier_msg(
@@ -499,6 +613,113 @@ def test_compaction_keeps_latest_tool_trace_pair() -> None:
 
     assert any(msg.tool_calls for msg in compacted)
     assert any(msg.tool_call_id == "call-1" for msg in compacted)
+
+
+def test_count_and_byte_compaction_keep_schema_conflict_selection_replayable() -> None:
+    first = build_attachment_schema_candidate(
+        {"type": "object", "properties": {"decision": {"type": "string"}}},
+        source_file_ids=(UUID(int=801),),
+    )
+    second = build_attachment_schema_candidate(
+        {"type": "object", "properties": {"count": {"type": "integer"}}},
+        source_file_ids=(UUID(int=802),),
+    )
+    conflict_question = _msg(
+        "assistant",
+        content="Choose a schema.",
+        tool_calls=[
+            {
+                "id": "call-schema-conflict",
+                "name": "ask_structured_question",
+                "arguments": {
+                    "question_id": "output_schema_conflict",
+                    "question": "Which schema?",
+                    "options": [
+                        {
+                            "id": candidate.fingerprint,
+                            "label": f"Schema {index}",
+                            "value": candidate.fingerprint,
+                        }
+                        for index, candidate in enumerate((first, second), start=1)
+                    ],
+                    "selection_mode": "single",
+                    "allow_custom": False,
+                },
+            }
+        ],
+    )
+    conflict_tool = _msg(
+        "tool",
+        content="Question presented.",
+        tool_call_id="call-schema-conflict",
+    )
+    answer = _msg(
+        "user",
+        content="Use schema 2.",
+        metadata={
+            "question_answer": {
+                "question_id": "output_schema_conflict",
+                "selected_option_id": second.fingerprint,
+                "selected_value": second.fingerprint,
+            }
+        },
+    )
+    later_tool_call = _msg(
+        "assistant",
+        content="Later tool.",
+        tool_calls=[{"id": "call-later", "name": "later_tool", "arguments": {}}],
+    )
+    later_tool_result = _msg(
+        "tool",
+        content="Later result.",
+        tool_call_id="call-later",
+    )
+    final = _msg("user", content="continue")
+    conversation = [
+        *[_msg("assistant", content=f"old filler {index}") for index in range(20)],
+        conflict_question,
+        conflict_tool,
+        answer,
+        later_tool_call,
+        later_tool_result,
+        *[_msg("assistant", content="x" * 2_000) for _ in range(5)],
+        final,
+    ]
+    count_compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=8,
+        tail_messages=2,
+    )
+    required = [
+        conflict_question,
+        conflict_tool,
+        answer,
+        later_tool_call,
+        later_tool_result,
+        final,
+    ]
+    byte_compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=100,
+        max_conversation_bytes=conversation_serialized_size_bytes(required) + 100,
+    )
+
+    for compacted in (count_compacted, byte_compacted):
+        resolution = resolve_attachment_output_schema(
+            conversation=compacted,
+            candidates=(first, second),
+            authoritative_evidence=None,
+        )
+        assert resolution.conflict_pending is False
+        assert resolution.evidence is not None
+        assert resolution.evidence.fingerprint == second.fingerprint
+        assert any(
+            message.tool_call_id == "call-schema-conflict" for message in compacted
+        )
+        assert any(
+            message.role == "tool" and message.tool_call_id == "call-schema-conflict"
+            for message in compacted
+        )
 
 
 def test_compaction_preserves_tool_trace_atomically_after_final_slice() -> None:
