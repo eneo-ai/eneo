@@ -435,9 +435,8 @@ async def get_space_applications(
     service = container.space_service()
     assembler = container.space_assembler()
 
-    space = await service.get_space(id)
-
-    return assembler.from_space_to_model(space).applications
+    projection = await service.get_applications_projection(id)
+    return assembler.from_applications_projection(projection)
 
 
 @router.post(
@@ -547,7 +546,10 @@ async def create_group_chat(
 async def create_app(
     id: UUID,
     create_service_req: CreateSpaceAppRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, with_upload_admission=True)),
+    ],
     _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_service = container.space_service()

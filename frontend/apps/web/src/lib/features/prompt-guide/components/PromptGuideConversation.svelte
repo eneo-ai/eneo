@@ -21,7 +21,7 @@
 -->
 
 <script lang="ts">
-  import { LoaderCircle } from "lucide-svelte";
+  import LoaderCircle from "lucide-svelte/icons/loader-circle";
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { extractStructuredQuestion } from "../extractStructuredQuestion";

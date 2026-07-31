@@ -1,16 +1,14 @@
 import type { ApiKeyState, ApiKeyV2 } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
-import {
-  Building2,
-  MessageSquare,
-  AppWindow,
-  Eye,
-  Pencil,
-  Globe,
-  Lock,
-  ShieldCheck
-} from "lucide-svelte";
+import Building2 from "lucide-svelte/icons/building-2";
+import MessageSquare from "lucide-svelte/icons/message-square";
+import AppWindow from "lucide-svelte/icons/app-window";
+import Eye from "lucide-svelte/icons/eye";
+import Pencil from "lucide-svelte/icons/pencil";
+import Globe from "lucide-svelte/icons/globe";
+import Lock from "lucide-svelte/icons/lock";
+import ShieldCheck from "lucide-svelte/icons/shield-check";
 
 type LucideIcon = typeof Building2;
 

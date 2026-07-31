@@ -9,6 +9,7 @@ from typing import Optional, Protocol, Union
 from cryptography.fernet import Fernet, InvalidToken
 from typing_extensions import override
 
+from eneo.main.exceptions import EncryptionNotConfiguredException
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -22,6 +23,10 @@ class EncryptionService:
 
     VERSION_PREFIX = "enc:fernet:v1:"
     MAX_CREDENTIAL_LENGTH = 10240  # 10KB - reasonable limit for API keys
+    NOT_CONFIGURED_MESSAGE = (
+        "Credential encryption is not configured. Set ENCRYPTION_KEY and restart "
+        "the backend."
+    )
 
     class _HasEncryptionKey(Protocol):
         encryption_key: Optional[str]
@@ -60,8 +65,10 @@ class EncryptionService:
             self._fernet = Fernet(key_value.encode())
             logger.debug("Encryption service initialized")
         except Exception as e:
-            logger.error(f"Invalid encryption key: {e}")
-            raise ValueError(f"ENCRYPTION_KEY must be valid Fernet key: {e}")
+            raise EncryptionNotConfiguredException(
+                "Credential encryption is unavailable because ENCRYPTION_KEY is "
+                "invalid. Generate a valid Fernet key and restart the backend."
+            ) from e
 
     def is_active(self) -> bool:
         """Check if encryption is enabled."""
@@ -87,10 +94,11 @@ class EncryptionService:
             Versioned encrypted string: enc:fernet:v1:<ciphertext>
 
         Raises:
-            ValueError: If encryption not configured or plaintext too long
+            EncryptionNotConfiguredException: If encryption is not configured
+            ValueError: If plaintext is too long
         """
         if not self._fernet:
-            raise ValueError("Encryption not configured")
+            raise EncryptionNotConfiguredException(self.NOT_CONFIGURED_MESSAGE)
 
         if not plaintext:
             raise ValueError("Cannot encrypt empty string")
@@ -118,7 +126,10 @@ class EncryptionService:
             Decrypted plaintext API key
 
         Raises:
-            ValueError: If decryption fails, version unsupported, or plaintext when encryption is required
+            EncryptionNotConfiguredException: If encrypted data exists but
+                encryption is not configured
+            ValueError: If decryption fails, the version is unsupported, or
+                plaintext is provided when encryption is required
         """
         if not ciphertext:
             raise ValueError("Cannot decrypt empty string")
@@ -150,10 +161,7 @@ class EncryptionService:
             )
 
         if not self._fernet:
-            raise ValueError(
-                "Cannot decrypt: encryption key not configured. "
-                "Set ENCRYPTION_KEY environment variable."
-            )
+            raise EncryptionNotConfiguredException(self.NOT_CONFIGURED_MESSAGE)
 
         plaintext = self._authenticated_plaintext(token)
         if plaintext is None:

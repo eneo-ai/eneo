@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AlertTriangle } from "lucide-svelte";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";

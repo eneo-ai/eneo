@@ -13,7 +13,6 @@ from eneo.assistants.assistant_update import (
     AssistantUpdateCaller,
     AssistantUpdateCommand,
 )
-from eneo.files.file_repo import FileRepository
 from eneo.flows.application.flow_authoring_command import (
     AIBuilderFlowAuthoringOrigin,
     CreateFlowAuthoringCommand,
@@ -431,5 +430,4 @@ class _RealFlowServiceHarness:
             flow_repo=cast(FlowRepository, self.flow_repo),
             flow_version_repo=cast(FlowVersionRepository, unused),
             assistant_service=cast(AssistantService, self.assistant_service),
-            file_repo=cast(FileRepository, unused),
         )

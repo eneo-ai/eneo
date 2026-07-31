@@ -3,7 +3,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
-  import { Search } from "lucide-svelte";
+  import Search from "lucide-svelte/icons/search";
   import { m } from "$lib/paraglide/messages";
   import {
     getRecommendedTemplates,

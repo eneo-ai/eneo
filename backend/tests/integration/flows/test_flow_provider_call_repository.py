@@ -80,7 +80,7 @@ async def _activate_resolved_inputs(
         attempt_no=context.attempt_no,
         tenant_id=context.tenant_id,
         resolved_input_edges=aggregate,
-        attempt_start=None,
+        attempt_input=None,
     )
     assert activated is not None
 

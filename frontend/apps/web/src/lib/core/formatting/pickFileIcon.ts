@@ -1,4 +1,7 @@
-import { File as FileIcon, FileAudio, FileImage, FileText } from "lucide-svelte";
+import FileIcon from "lucide-svelte/icons/file";
+import FileAudio from "lucide-svelte/icons/file-audio";
+import FileImage from "lucide-svelte/icons/file-image";
+import FileText from "lucide-svelte/icons/file-text";
 
 /**
  * Maps a MIME type to a representative lucide-svelte file icon.

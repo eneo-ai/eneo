@@ -94,7 +94,7 @@
         {:else}
           <Input
             type="password"
-            placeholder="Token"
+            placeholder={m.http_auth_token_placeholder()}
             value={typeof auth.token === "string" ? auth.token : ""}
             disabled={isPublished}
             oninput={(e) => updateAuth({ token: e.currentTarget.value })}

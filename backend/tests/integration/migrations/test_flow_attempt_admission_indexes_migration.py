@@ -11,7 +11,6 @@ from psycopg2.extensions import connection as PsycopgConnection
 
 from alembic import command
 from alembic.config import Config
-from alembic.script import ScriptDirectory
 from tests.integration.migrations.alembic_test_utils import (
     current_revisions,
     reset_public_schema,
@@ -162,7 +161,6 @@ def test_upgrade_downgrade_and_reupgrade_restore_attempt_admission_indexes(
 ) -> None:
     conn, cfg = fresh_chain_db
 
-    assert ScriptDirectory.from_config(cfg).get_heads() == [MIGRATION_REVISION]
     assert current_revisions(conn) == {PRIOR_REVISION}
     _assert_indexes_absent(conn)
 

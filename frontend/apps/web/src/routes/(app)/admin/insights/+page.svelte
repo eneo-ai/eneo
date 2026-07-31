@@ -13,17 +13,15 @@
   import { CalendarDate } from "@internationalized/date";
   import { getEneo } from "$lib/core/Eneo";
   import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
-  import {
-    ArrowUp,
-    ArrowDown,
-    GitCompare,
-    RefreshCw,
-    Clock,
-    Cpu,
-    ExternalLink,
-    Users,
-    Activity
-  } from "lucide-svelte";
+  import ArrowUp from "lucide-svelte/icons/arrow-up";
+  import ArrowDown from "lucide-svelte/icons/arrow-down";
+  import GitCompare from "lucide-svelte/icons/git-compare";
+  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import Clock from "lucide-svelte/icons/clock";
+  import Cpu from "lucide-svelte/icons/cpu";
+  import ExternalLink from "lucide-svelte/icons/external-link";
+  import Users from "lucide-svelte/icons/users";
+  import Activity from "lucide-svelte/icons/activity";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
 
   import InteractiveGraph from "./InteractiveGraph.svelte";

@@ -11,7 +11,10 @@
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight, Check, X, Wrench } from "lucide-svelte";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import Check from "lucide-svelte/icons/check";
+  import X from "lucide-svelte/icons/x";
+  import Wrench from "lucide-svelte/icons/wrench";
   import { SvelteSet } from "svelte/reactivity";
 
   const chat = getChatService();

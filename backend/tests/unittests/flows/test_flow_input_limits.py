@@ -17,84 +17,75 @@ from eneo.main.exceptions import BadRequestException
 
 def _app_settings(upload: int, transcription: int) -> SimpleNamespace:
     return SimpleNamespace(
-        upload_max_file_size=upload,
-        transcription_max_file_size=transcription,
+        session_file_maximum_bytes=upload,
+        session_audio_maximum_bytes=transcription,
     )
 
 
-def test_resolve_defaults_when_tenant_settings_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "eneo.flows.flow_input_limits.get_settings",
-        lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
+def test_resolve_defaults_when_tenant_settings_missing() -> None:
+    limits = resolve_flow_input_limits(
+        None,
+        defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
     )
-
-    limits = resolve_flow_input_limits(None)
 
     assert limits.file_max_size_bytes == 10_000_000
     assert limits.audio_max_size_bytes == 25_000_000
 
 
-def test_resolve_uses_tenant_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "eneo.flows.flow_input_limits.get_settings",
-        lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
-    )
-
+def test_resolve_uses_tenant_overrides() -> None:
     limits = resolve_flow_input_limits(
         {
             "input_limits": {
                 "file_max_size_bytes": 12_000_000,
                 "audio_max_size_bytes": 32_000_000,
             }
-        }
+        },
+        defaults=_app_settings(upload=20_000_000, transcription=40_000_000),
     )
 
     assert limits.file_max_size_bytes == 12_000_000
     assert limits.audio_max_size_bytes == 32_000_000
 
 
-def test_resolve_falls_back_for_malformed_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "eneo.flows.flow_input_limits.get_settings",
-        lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
-    )
-
+def test_resolve_caps_tenant_overrides_at_upload_admission() -> None:
     limits = resolve_flow_input_limits(
         {
             "input_limits": {
-                "file_max_size_bytes": "oops",
-                "audio_max_size_bytes": -123,
+                "file_max_size_bytes": 30_000_000,
+                "audio_max_size_bytes": 40_000_000,
             }
-        }
+        },
+        defaults=_app_settings(upload=20_000_000, transcription=25_000_000),
     )
 
-    assert limits.file_max_size_bytes == 10_000_000
+    assert limits.file_max_size_bytes == 20_000_000
     assert limits.audio_max_size_bytes == 25_000_000
 
 
-def test_resolve_falls_back_for_boolean_limit_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "eneo.flows.flow_input_limits.get_settings",
-        lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
-    )
+def test_resolve_rejects_malformed_settings() -> None:
+    with pytest.raises(BadRequestException, match="file_max_size_bytes"):
+        resolve_flow_input_limits(
+            {
+                "input_limits": {
+                    "file_max_size_bytes": "oops",
+                    "audio_max_size_bytes": -123,
+                }
+            },
+            defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
+        )
 
-    limits = resolve_flow_input_limits(
-        {
-            "input_limits": {
-                "file_max_size_bytes": True,
-                "audio_max_size_bytes": False,
-            }
-        }
-    )
 
-    assert limits.file_max_size_bytes == 10_000_000
-    assert limits.audio_max_size_bytes == 25_000_000
+def test_resolve_rejects_boolean_limit_values() -> None:
+    with pytest.raises(BadRequestException, match="file_max_size_bytes"):
+        resolve_flow_input_limits(
+            {
+                "input_limits": {
+                    "file_max_size_bytes": True,
+                    "audio_max_size_bytes": False,
+                }
+            },
+            defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
+        )
 
 
 def test_apply_patch_updates_only_requested_fields() -> None:
@@ -171,60 +162,42 @@ def test_effective_limit_prefers_audio_for_audio_type() -> None:
 # --- File count fields ---
 
 
-def test_resolve_defaults_includes_file_count_fields(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "eneo.flows.flow_input_limits.get_settings",
-        lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
+def test_resolve_defaults_includes_file_count_fields() -> None:
+    limits = resolve_flow_input_limits(
+        None,
+        defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
     )
-
-    limits = resolve_flow_input_limits(None)
 
     assert limits.max_files_per_run is None
     assert limits.audio_max_files_per_run == DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 
-def test_resolve_uses_tenant_file_count_overrides(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "eneo.flows.flow_input_limits.get_settings",
-        lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
-    )
-
+def test_resolve_uses_tenant_file_count_overrides() -> None:
     limits = resolve_flow_input_limits(
         {
             "input_limits": {
                 "max_files_per_run": 50,
                 "audio_max_files_per_run": 20,
             }
-        }
+        },
+        defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
     assert limits.max_files_per_run == 50
     assert limits.audio_max_files_per_run == 20
 
 
-def test_resolve_falls_back_for_malformed_file_count(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "eneo.flows.flow_input_limits.get_settings",
-        lambda: _app_settings(upload=10_000_000, transcription=25_000_000),
-    )
-
-    limits = resolve_flow_input_limits(
-        {
-            "input_limits": {
-                "max_files_per_run": "not-a-number",
-                "audio_max_files_per_run": True,
-            }
-        }
-    )
-
-    assert limits.max_files_per_run is None
-    assert limits.audio_max_files_per_run == DEFAULT_MAX_AUDIO_FILES_PER_RUN
+def test_resolve_rejects_malformed_file_count() -> None:
+    with pytest.raises(BadRequestException, match="max_files_per_run"):
+        resolve_flow_input_limits(
+            {
+                "input_limits": {
+                    "max_files_per_run": "not-a-number",
+                    "audio_max_files_per_run": True,
+                }
+            },
+            defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
+        )
 
 
 def test_apply_patch_updates_file_count_fields() -> None:

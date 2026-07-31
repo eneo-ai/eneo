@@ -19,7 +19,7 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
-    from eneo.files.file_repo import FileRepository
+    from eneo.files.file_service import FileService
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
     from eneo.transcription_models.domain.transcription_model import (
@@ -32,14 +32,14 @@ logger = get_logger(__name__)
 class Transcriber:
     def __init__(
         self,
-        file_repo: "FileRepository",
+        file_service: "FileService",
         tenant: Optional["TenantInDB"] = None,
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
     ):
         super().__init__()
-        self.file_repo = file_repo
+        self.file_service = file_service
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
@@ -59,7 +59,7 @@ class Transcriber:
 
         file_cache_enabled = persist_cache_to_file and language is None
         # Cached transcription is only safe when language is auto-detected and
-        # the caller has chosen the shared Files.transcription cache owner.
+        # the caller has chosen the File's shared transcription reference.
         if file_cache_enabled and file.transcription:
             return file.transcription
 
@@ -76,10 +76,7 @@ class Transcriber:
             )
 
             if file_cache_enabled:
-                file.transcription = result
-
-            if file_cache_enabled and self.file_repo:
-                await self.file_repo.update(file)
+                result = await self.file_service.save_transcription(file.id, result)
         finally:
             if temp_file_path is not None:
                 with contextlib.suppress(FileNotFoundError):
@@ -164,7 +161,25 @@ class Transcriber:
         transcription_model: "TranscriptionModel",
         language: str | None = None,
     ):
-        adapter = await self._get_adapter(transcription_model)
+        adapter = await self.prepare_transcription(transcription_model)
+        return await self.transcribe_prepared_from_filepath(
+            filepath=filepath,
+            adapter=adapter,
+            language=language,
+        )
 
+    async def prepare_transcription(
+        self,
+        transcription_model: "TranscriptionModel",
+    ) -> LiteLLMTranscriptionAdapter:
+        return await self._get_adapter(transcription_model)
+
+    async def transcribe_prepared_from_filepath(
+        self,
+        *,
+        filepath: Path,
+        adapter: LiteLLMTranscriptionAdapter,
+        language: str | None = None,
+    ) -> str:
         async with audio.to_wav(str(filepath)) as wav_file:
             return await adapter.get_text_from_file(wav_file, language=language)

@@ -20,7 +20,12 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowVersions,
 )
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    ObjectContents,
+)
 from eneo.database.tables.tenant_table import Tenants
+from eneo.files.file_models import FileContentVariant, FileType
 from eneo.flows.enums import FlowRunRerunOperationStatus, FlowRunStatus
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
@@ -29,11 +34,15 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeResult,
 )
 from eneo.flows.principal import FlowPrincipal
+from eneo.object_content.content import ContentState
+
+_RUNTIME_UPLOAD_PAYLOAD = b"r" * 128
 
 
 @dataclass(frozen=True, slots=True)
 class _RuntimeUpload:
     file_id: UUID
+    content_id: UUID
     flow_id: UUID
     tenant_id: UUID
     owner_user_id: UUID
@@ -49,11 +58,13 @@ class _BoundRuntimeUpload:
 
 async def _create_runtime_upload(
     *,
+    db_container,
     completion_model_factory,
     space_factory,
     admin_user,
 ) -> _RuntimeUpload:
-    async with sessionmanager.session() as session, session.begin():
+    async with db_container(user=admin_user) as container:
+        session = container.session()
         model = await completion_model_factory(
             session,
             f"runtime-upload-lock-model-{uuid4()}",
@@ -74,22 +85,20 @@ async def _create_runtime_upload(
             metadata_json=None,
             data_retention_days=30,
         )
-        file = Files(
-            name=f"runtime-upload-lock-{uuid4()}.pdf",
-            text="runtime file",
-            blob=None,
-            checksum=f"runtime-upload-lock-{uuid4()}",
-            size=128,
-            mimetype="application/pdf",
-            file_type="document",
-            transcription=None,
-            owner_type="user",
-            owner_user_id=admin_user.id,
-            owner_service_id=None,
-            tenant_id=admin_user.tenant_id,
-        )
-        session.add_all([flow, file])
+        session.add(flow)
         await session.flush()
+        file = await container.file_service().save_generated_file(
+            payload=_RUNTIME_UPLOAD_PAYLOAD,
+            name=f"runtime-upload-lock-{uuid4()}.pdf",
+            mimetype="application/pdf",
+            file_type=FileType.DOCUMENT,
+        )
+        content_id = await session.scalar(
+            sa.select(FileContentReferences.content_id).where(
+                FileContentReferences.file_id == file.id
+            )
+        )
+        assert content_id is not None
 
         upload = FlowRuntimeUploadedFiles(
             file_id=file.id,
@@ -109,6 +118,7 @@ async def _create_runtime_upload(
         )
         return _RuntimeUpload(
             file_id=file.id,
+            content_id=content_id,
             flow_id=flow.id,
             tenant_id=admin_user.tenant_id,
             owner_user_id=admin_user.id,
@@ -118,11 +128,13 @@ async def _create_runtime_upload(
 
 async def _create_bound_runtime_upload(
     *,
+    db_container,
     completion_model_factory,
     space_factory,
     admin_user,
 ) -> _BoundRuntimeUpload:
     upload = await _create_runtime_upload(
+        db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         admin_user=admin_user,
@@ -204,13 +216,37 @@ async def _purge_run(run_id: UUID) -> FlowRunHistoryPurgeResult:
         return await FlowRunHistoryPurgeRepository(session).purge_run_history([run_id])
 
 
-async def _sweep_abandoned_runtime_uploads() -> FlowRunHistoryPurgeCounts:
+async def _sweep_abandoned_runtime_uploads(
+    *, lock_timeout: str | None = None
+) -> FlowRunHistoryPurgeCounts:
     async with sessionmanager.session() as session, session.begin():
+        if lock_timeout is not None:
+            if lock_timeout != "100ms":
+                raise ValueError("Unsupported test lock timeout.")
+            await session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
         return await FlowRunHistoryPurgeRepository(
             session
         ).purge_abandoned_runtime_uploads(
             now=datetime.now(timezone.utc),
             limit=10,
+        )
+
+
+async def _make_runtime_upload_abandoned(upload: _RuntimeUpload) -> None:
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(FlowRuntimeUploadedFiles)
+            .where(FlowRuntimeUploadedFiles.file_id == upload.file_id)
+            .values(created_at=datetime.now(timezone.utc) - timedelta(days=2))
+        )
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == upload.tenant_id)
+            .values(
+                flow_runtime_upload_abandonment_days=1,
+                flow_run_history_minimum_retention_days=None,
+                flow_run_history_no_purge=False,
+            )
         )
 
 
@@ -300,13 +336,14 @@ async def _runtime_source_rows_exist(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_runtime_upload_binding_lock_blocks_concurrent_delete(
-    setup_database,
+    db_container,
     completion_model_factory,
     space_factory,
     admin_user,
 ) -> None:
     """`FOR KEY SHARE` keeps a runtime upload from being deleted while a run binds it."""
     upload = await _create_runtime_upload(
+        db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         admin_user=admin_user,
@@ -345,12 +382,13 @@ async def test_runtime_upload_binding_lock_blocks_concurrent_delete(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_runtime_upload_bind_first_keeps_source_during_run_purge(
-    setup_database,
+    db_container,
     completion_model_factory,
     space_factory,
     admin_user,
 ) -> None:
     fixture = await _create_bound_runtime_upload(
+        db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         admin_user=admin_user,
@@ -400,12 +438,13 @@ async def test_runtime_upload_bind_first_keeps_source_during_run_purge(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_runtime_upload_purge_first_blocks_binding_then_removes_source(
-    setup_database,
+    db_container,
     completion_model_factory,
     space_factory,
     admin_user,
 ) -> None:
     fixture = await _create_bound_runtime_upload(
+        db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         admin_user=admin_user,
@@ -416,7 +455,13 @@ async def test_runtime_upload_purge_first_blocks_binding_then_removes_source(
             purge_result = await FlowRunHistoryPurgeRepository(
                 purge_session
             ).purge_run_history([fixture.run_id])
+            assert purge_result.counts.flow_runtime_source_candidate_bytes == len(
+                _RUNTIME_UPLOAD_PAYLOAD
+            )
             assert purge_result.counts.flow_runtime_source_files_deleted == 1
+            assert purge_result.counts.flow_runtime_source_bytes_deleted == len(
+                _RUNTIME_UPLOAD_PAYLOAD
+            )
 
             with pytest.raises(DBAPIError) as exc_info:
                 await _lock_runtime_upload_for_binding(
@@ -433,17 +478,24 @@ async def test_runtime_upload_purge_first_blocks_binding_then_removes_source(
         == set()
     )
     assert await _runtime_source_rows_exist(fixture=fixture) == (False, False)
+    async with sessionmanager.session() as session, session.begin():
+        content = await session.get(ObjectContents, fixture.upload.content_id)
+        assert content is not None
+        assert content.state == ContentState.DELETE_PENDING.value
+        assert content.reference_count == 0
+        assert content.delete_requested_at is not None
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_runtime_upload_bind_during_abandonment_sweep_survives(
-    setup_database,
+    db_container,
     completion_model_factory,
     space_factory,
     admin_user,
 ) -> None:
     fixture = await _create_bound_runtime_upload(
+        db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         admin_user=admin_user,
@@ -454,16 +506,7 @@ async def test_runtime_upload_bind_during_abandonment_sweep_survives(
                 FlowRunStepInputFiles.flow_run_id == fixture.run_id
             )
         )
-        await session.execute(
-            sa.update(FlowRuntimeUploadedFiles)
-            .where(FlowRuntimeUploadedFiles.file_id == fixture.upload.file_id)
-            .values(created_at=datetime.now(timezone.utc) - timedelta(days=2))
-        )
-        await session.execute(
-            sa.update(Tenants)
-            .where(Tenants.id == fixture.upload.tenant_id)
-            .values(flow_runtime_upload_abandonment_days=1)
-        )
+    await _make_runtime_upload_abandoned(fixture.upload)
 
     async with sessionmanager.session() as binding_session:
         async with binding_session.begin():
@@ -499,13 +542,115 @@ async def test_runtime_upload_bind_during_abandonment_sweep_survives(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_abandonment_sweep_skips_file_locked_for_deletion(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+) -> None:
+    upload = await _create_runtime_upload(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        admin_user=admin_user,
+    )
+    await _make_runtime_upload_abandoned(upload)
+
+    async with sessionmanager.session() as deletion_session:
+        async with deletion_session.begin():
+            locked_file_id = await deletion_session.scalar(
+                sa.select(Files.id)
+                .where(Files.id == upload.file_id)
+                .with_for_update(of=Files)
+            )
+            assert locked_file_id == upload.file_id
+
+            skipped_counts = await _sweep_abandoned_runtime_uploads(
+                lock_timeout="100ms"
+            )
+            assert skipped_counts.flow_runtime_source_candidates == 0
+            assert skipped_counts.flow_runtime_source_bindings_deleted == 0
+            assert skipped_counts.flow_runtime_source_files_deleted == 0
+
+            await deletion_session.execute(
+                sa.delete(Files).where(Files.id == upload.file_id)
+            )
+
+    async with sessionmanager.session() as session, session.begin():
+        assert await session.get(Files, upload.file_id) is None
+        assert await session.get(FlowRuntimeUploadedFiles, upload.file_id) is None
+        content = await session.get(ObjectContents, upload.content_id)
+        assert content is not None
+        assert content.state == ContentState.DELETE_PENDING.value
+        assert content.reference_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_abandonment_sweep_reports_file_bytes_while_shared_content_remains(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+) -> None:
+    upload = await _create_runtime_upload(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        admin_user=admin_user,
+    )
+    await _make_runtime_upload_abandoned(upload)
+    retained_file_id = uuid4()
+    async with sessionmanager.session() as session, session.begin():
+        session.add(
+            Files(
+                id=retained_file_id,
+                name="retained-shared-runtime-content.pdf",
+                mimetype="application/pdf",
+                file_type=FileType.DOCUMENT.value,
+                owner_type="user",
+                owner_user_id=upload.owner_user_id,
+                owner_service_id=None,
+                tenant_id=upload.tenant_id,
+                parent_file_id=None,
+            )
+        )
+        await session.flush()
+        session.add(
+            FileContentReferences(
+                file_id=retained_file_id,
+                content_id=upload.content_id,
+                variant=FileContentVariant.ORIGINAL.value,
+                ordinal=0,
+            )
+        )
+
+    counts = await _sweep_abandoned_runtime_uploads()
+
+    assert counts.flow_runtime_source_candidates == 1
+    assert counts.flow_runtime_source_candidate_bytes == len(_RUNTIME_UPLOAD_PAYLOAD)
+    assert counts.flow_runtime_source_bindings_deleted == 1
+    assert counts.flow_runtime_source_files_deleted == 1
+    assert counts.flow_runtime_source_bytes_deleted == len(_RUNTIME_UPLOAD_PAYLOAD)
+    async with sessionmanager.session() as session, session.begin():
+        assert await session.get(Files, upload.file_id) is None
+        assert await session.get(Files, retained_file_id) is not None
+        content = await session.get(ObjectContents, upload.content_id)
+        assert content is not None
+        assert content.state == ContentState.AVAILABLE.value
+        assert content.reference_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_run_purge_skips_rerun_that_wins_the_run_lock(
-    setup_database,
+    db_container,
     completion_model_factory,
     space_factory,
     admin_user,
 ) -> None:
     fixture = await _create_bound_runtime_upload(
+        db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         admin_user=admin_user,

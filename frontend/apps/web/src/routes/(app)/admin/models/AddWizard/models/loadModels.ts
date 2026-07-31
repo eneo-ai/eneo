@@ -11,6 +11,7 @@
  *   3. Some providers (Azure) cannot list models at all; we skip both.
  */
 import type { Eneo } from "@eneo/eneo-js";
+import { getErrorMessage } from "$lib/core/errors";
 import {
   NO_SUGGESTIONS_PROVIDERS,
   type ModelProviderCapabilities
@@ -66,8 +67,8 @@ export async function loadLiveModels(
     }));
 
     return { models, error: null };
-  } catch {
-    return { models: [], error: "Could not fetch models from provider" };
+  } catch (error: unknown) {
+    return { models: [], error: getErrorMessage(error) };
   }
 }
 

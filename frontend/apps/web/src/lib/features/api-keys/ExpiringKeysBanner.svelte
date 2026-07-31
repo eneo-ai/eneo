@@ -1,6 +1,10 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
-  import { Clock, AlertTriangle, X, BellOff, Bell } from "lucide-svelte";
+  import Clock from "lucide-svelte/icons/clock";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import X from "lucide-svelte/icons/x";
+  import BellOff from "lucide-svelte/icons/bell-off";
+  import Bell from "lucide-svelte/icons/bell";
   import { m } from "$lib/paraglide/messages";
   import type { ExpiringKeyDisplayItem, ExpiryLevel } from "./expirationUtils";
   import { isDismissed, dismiss, isMutedNonCritical, setMutedNonCritical } from "./expirationPrefs";

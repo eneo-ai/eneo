@@ -8,9 +8,12 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, ChevronRight, Info, Plug } from "lucide-svelte";
+  import AlertCircle from "lucide-svelte/icons/alert-circle";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import Info from "lucide-svelte/icons/info";
+  import Plug from "lucide-svelte/icons/plug";
   import { SvelteSet } from "svelte/reactivity";
-  import PolicySection from "./PolicySection.svelte";
+  import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type McpTool = { id: string; name: string; description?: string | null };
   type McpServer = {

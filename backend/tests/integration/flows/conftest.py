@@ -552,14 +552,6 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
             "FLOW_RUNTIME_STEP_TIMEOUT_HARD_CEILING_SECONDS": str(
                 settings.flow_runtime_step_timeout_hard_ceiling_seconds
             ),
-            "UPLOAD_FILE_TO_SESSION_MAX_SIZE": str(
-                settings.upload_file_to_session_max_size
-            ),
-            "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE": str(
-                settings.upload_image_to_session_max_size
-            ),
-            "UPLOAD_MAX_FILE_SIZE": str(settings.upload_max_file_size),
-            "TRANSCRIPTION_MAX_FILE_SIZE": str(settings.transcription_max_file_size),
             "API_PREFIX": settings.api_prefix,
             "API_KEY_LENGTH": str(settings.api_key_length),
             "API_KEY_HEADER_NAME": settings.api_key_header_name,

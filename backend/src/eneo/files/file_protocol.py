@@ -1,13 +1,16 @@
+import asyncio
 import contextlib
-import hashlib
 import os
+from collections.abc import AsyncGenerator, AsyncIterable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from fastapi import UploadFile
 
 from eneo.files.audio import AudioMimeTypes
-from eneo.files.file_models import FileBaseWithContent, FileType
+from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor, ImageMimeTypes
 from eneo.files.image_processing import (
@@ -18,16 +21,11 @@ from eneo.files.image_processing import (
 )
 from eneo.files.text import TextExtractor, TextMimeTypes
 from eneo.main.config import get_settings
-from eneo.main.exceptions import (
-    FileTooLargeException,
+from eneo.main.exceptions import FileTooLargeException
+from eneo.object_content.deployment_policy import (
+    UploadAdmissionSnapshot,
+    UploadLimitUseCase,
 )
-
-
-def bytes_extractor(
-    filepath: Path, _mimetype: str, _filename: str | None = None
-) -> bytes:
-    with open(filepath, "rb") as file:
-        return file.read()
 
 
 def sanitize_filename(filename: str | None) -> str:
@@ -41,11 +39,41 @@ def sanitize_filename(filename: str | None) -> str:
     return filename or "unnamed"
 
 
-def _is_docx_upload(upload_file: UploadFile) -> bool:
-    content_type = (upload_file.content_type or "").split(";", 1)[0].strip()
-    return content_type == TextMimeTypes.DOCX.value or sanitize_filename(
-        upload_file.filename
-    ).casefold().endswith(".docx")
+_FILE_STREAM_CHUNK_BYTES = 256 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class PendingFileContent:
+    variant: FileContentVariant
+    chunks: AsyncIterable[bytes]
+    declared_media_type: str
+    verified_media_type: str
+    ordinal: int = 0
+    page_number: int | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_ms: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedFileUpload:
+    name: str
+    file_type: FileType
+    display_media_type: str
+    contents: tuple[PendingFileContent, ...]
+    derivatives: tuple["PreparedFileUpload", ...] = ()
+
+
+async def _path_chunks(filepath: Path) -> AsyncGenerator[bytes]:
+    with filepath.open("rb") as source:
+        while chunk := await asyncio.to_thread(source.read, _FILE_STREAM_CHUNK_BYTES):
+            yield chunk
+
+
+async def _bytes_chunks(payload: bytes) -> AsyncGenerator[bytes]:
+    view = memoryview(payload)
+    for start in range(0, len(view), _FILE_STREAM_CHUNK_BYTES):
+        yield bytes(view[start : start + _FILE_STREAM_CHUNK_BYTES])
 
 
 class FileProtocol:
@@ -60,300 +88,222 @@ class FileProtocol:
         self.text_extractor = text_extractor
         self.image_extractor = image_extractor
 
-    async def _get_content(
-        self,
-        upload_file: UploadFile,
-        file_type: FileType,
-        max_size: int,
-        extractor: Callable[[Path, str, str | None], str | bytes],
-        limit_setting_name: str | None = None,
-        on_disk_hook: Callable[[Path], None] | None = None,
-        preserve_source_bytes: bool = False,
-    ) -> FileBaseWithContent:
-        self.validate_size(
-            upload_file,
-            max_size=max_size,
-            limit_setting_name=limit_setting_name,
-        )
-
-        # save_file_to_disk closes the upload stream — this temp file is the
-        # only window where the content is readable from disk.
-        filepath = await self.file_size_service.save_file_to_disk(upload_file.file)
-        filepath = Path(filepath)
-
-        try:
-            # content_type can be None for uploads without Content-Type header
-            content_type: str = upload_file.content_type or ""
-            content = extractor(filepath, content_type, upload_file.filename)
-            checksum = self.file_size_service.get_file_checksum(filepath)
-            source_blob = filepath.read_bytes() if preserve_source_bytes else None
-
-            if source_blob is not None:
-                size = len(source_blob)
-            elif isinstance(content, str):
-                size = len(content.encode("utf-8"))
-            else:
-                size = len(content)
-
-            if on_disk_hook is not None:
-                on_disk_hook(filepath)
-
-            return self._create_file_base(
-                upload_file,
-                file_type,
-                content,
-                checksum,
-                size,
-                source_blob=source_blob,
-            )
-        finally:
-            with contextlib.suppress(FileNotFoundError):
-                os.remove(filepath)
-
-    def validate_size(
+    @asynccontextmanager
+    async def prepare_document_upload(
         self,
         upload_file: UploadFile,
         *,
-        max_size: int,
-        limit_setting_name: str | None = None,
-    ) -> None:
+        upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
+        max_size: int | None = None,
+        limit_name: str | None = None,
+    ) -> AsyncGenerator[PreparedFileUpload]:
+        """Preserve an uploaded document exactly for domain-specific inspection."""
+
+        if max_size is None:
+            if upload_admission_snapshot is None:
+                raise RuntimeError("Upload admission snapshot is required")
+            max_size = upload_admission_snapshot.session_file_maximum_bytes
+            limit_name = limit_name or UploadLimitUseCase.SESSION_FILE.value
+
         file_size = self.file_size_service.get_file_size(upload_file.file)
         if file_size > max_size:
             raise FileTooLargeException(
                 file_size=file_size,
                 max_size=max_size,
-                setting_name=limit_setting_name,
+                limit_name=limit_name,
             )
 
-    def _create_file_base(
-        self,
-        upload_file: UploadFile,
-        file_type: FileType,
-        content: str | bytes,
-        checksum: str,
-        size: int,
-        source_blob: bytes | None = None,
-    ) -> FileBaseWithContent:
-        # Sanitize filename to prevent path traversal attacks
-        sanitized_filename = sanitize_filename(upload_file.filename)
-
-        if file_type == FileType.TEXT:
-            return FileBaseWithContent(
-                name=sanitized_filename,
-                checksum=checksum,
-                size=size,
-                file_type=file_type,
-                mimetype=upload_file.content_type,
-                text=content if isinstance(content, str) else None,
-                blob=source_blob,
-            )
-        else:
-            return FileBaseWithContent(
-                name=sanitized_filename,
-                checksum=checksum,
-                size=size,
-                file_type=file_type,
-                mimetype=upload_file.content_type,
-                blob=content if isinstance(content, bytes) else None,
-            )
-
-    async def text_to_domain(
-        self,
-        upload_file: UploadFile,
-        max_size: int | None = None,
-        limit_setting_name: str | None = None,
-        on_disk_hook: Callable[[Path], None] | None = None,
-        preserve_source_bytes: bool = False,
-    ) -> FileBaseWithContent:
-        if max_size is None:
-            max_size = get_settings().upload_file_to_session_max_size
-            if limit_setting_name is None:
-                limit_setting_name = "UPLOAD_FILE_TO_SESSION_MAX_SIZE"
-
-        return await self._get_content(
-            upload_file,
-            file_type=FileType.TEXT,
-            max_size=max_size,
-            extractor=self.text_extractor.extract,
-            limit_setting_name=limit_setting_name,
-            on_disk_hook=on_disk_hook,
-            preserve_source_bytes=preserve_source_bytes,
+        filepath = Path(
+            await self.file_size_service.save_file_to_disk(upload_file.file)
         )
-
-    async def image_to_domain(
-        self,
-        upload_file: UploadFile,
-        max_size: int | None = None,
-        limit_setting_name: str | None = None,
-    ) -> FileBaseWithContent:
-        if max_size is None:
-            max_size = get_settings().upload_image_to_session_max_size
-            if limit_setting_name is None:
-                limit_setting_name = "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"
-
-        file = await self._get_content(
-            upload_file,
-            file_type=FileType.IMAGE,
-            max_size=max_size,
-            extractor=self.image_extractor.extract,
-            limit_setting_name=limit_setting_name,
-        )
-
-        # Vision images are base64-encoded into every model request (and
-        # replayed for the rest of the session), so store them downscaled.
-        if file.blob is not None:
-            processed = downscale_image(file.blob, file.mimetype)
-            file.blob = processed.blob
-            file.mimetype = processed.mimetype
-            file.size = len(processed.blob)
-            file.checksum = hashlib.sha256(processed.blob).hexdigest()
-
-        return file
-
-    async def to_domain_with_derivatives(
-        self,
-        upload_file: UploadFile,
-        max_size: int | None = None,
-        limit_setting_name: str | None = None,
-    ) -> tuple[FileBaseWithContent, list[FileBaseWithContent]]:
-        """Like to_domain, but document uploads (PDF/DOCX/PPTX) also yield
-        their visual content as derived image files.
-
-        Image extraction is best-effort: it runs inside the upload's temp-file
-        window (the stream is closed afterwards) and never breaks the upload.
-        """
-        settings = get_settings()
-        content_type = (upload_file.content_type or "").split(";")[0].strip()
-
-        extractor: Callable[[Path], list[ProcessedImage]] | None = None
-        if settings.attachment_image_extraction:
-            if content_type == TextMimeTypes.PDF.value:
-
-                def _extract_pdf(filepath: Path) -> list[ProcessedImage]:
-                    return extract_images_from_pdf(
-                        filepath,
-                        max_images=settings.attachment_max_extracted_images,
-                    )
-
-                extractor = _extract_pdf
-            elif content_type in (
-                TextMimeTypes.DOCX.value,
-                TextMimeTypes.PPTX.value,
-            ):
-
-                def _extract_office(filepath: Path) -> list[ProcessedImage]:
-                    return extract_images_from_office(
-                        filepath,
-                        mimetype=content_type,
-                        max_images=settings.attachment_max_extracted_images,
-                    )
-
-                extractor = _extract_office
-
-        if extractor is None:
-            return (
-                await self.to_domain(
-                    upload_file,
-                    max_size=max_size,
-                    limit_setting_name=limit_setting_name,
+        media_type = (upload_file.content_type or "").split(";", 1)[
+            0
+        ].strip() or "application/octet-stream"
+        try:
+            yield PreparedFileUpload(
+                name=sanitize_filename(upload_file.filename),
+                file_type=FileType.DOCUMENT,
+                display_media_type=media_type,
+                contents=(
+                    PendingFileContent(
+                        variant=FileContentVariant.ORIGINAL,
+                        chunks=_path_chunks(filepath),
+                        declared_media_type=media_type,
+                        verified_media_type=media_type,
+                    ),
                 ),
-                [],
             )
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filepath)
 
-        extracted: list[ProcessedImage] = []
-        extract = extractor
-
-        def collect_images(filepath: Path) -> None:
-            extracted.extend(extract(filepath))
-
-        file = await self.text_to_domain(
-            upload_file,
-            max_size=max_size,
-            limit_setting_name=limit_setting_name,
-            on_disk_hook=collect_images,
-            preserve_source_bytes=_is_docx_upload(upload_file),
-        )
-
-        derivatives: list[FileBaseWithContent] = []
-        for index, image in enumerate(extracted, start=1):
-            label = (
-                f"page {image.page_number}"
-                if image.page_number is not None
-                else f"image {index}"
-            )
-            derivatives.append(
-                FileBaseWithContent(
-                    name=f"{file.name} ({label})",
-                    checksum=hashlib.sha256(image.blob).hexdigest(),
-                    size=len(image.blob),
-                    file_type=FileType.IMAGE,
-                    mimetype=image.mimetype,
-                    blob=image.blob,
-                )
-            )
-        return file, derivatives
-
-    async def audio_to_domain(
+    @asynccontextmanager
+    async def prepare_upload(
         self,
         upload_file: UploadFile,
+        *,
+        upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
         max_size: int | None = None,
-        limit_setting_name: str | None = None,
-    ) -> FileBaseWithContent:
-        if max_size is None:
-            max_size = get_settings().transcription_max_file_size
-            if limit_setting_name is None:
-                limit_setting_name = "TRANSCRIPTION_MAX_FILE_SIZE"
+        limit_name: str | None = None,
+    ) -> AsyncGenerator[PreparedFileUpload]:
+        """Classify one upload into exact and derived content variants.
 
-        return await self._get_content(
-            upload_file,
-            file_type=FileType.AUDIO,
-            max_size=max_size,
-            extractor=bytes_extractor,
-            limit_setting_name=limit_setting_name,
-        )
-
-    async def document_to_domain(
-        self,
-        upload_file: UploadFile,
-        max_size: int | None = None,
-        limit_setting_name: str | None = None,
-    ) -> FileBaseWithContent:
-        if max_size is None:
-            max_size = get_settings().upload_max_file_size
-            if limit_setting_name is None:
-                limit_setting_name = "UPLOAD_MAX_FILE_SIZE"
-
-        return await self._get_content(
-            upload_file,
-            file_type=FileType.DOCUMENT,
-            max_size=max_size,
-            extractor=bytes_extractor,
-            limit_setting_name=limit_setting_name,
-        )
-
-    async def to_domain(
-        self,
-        upload_file: UploadFile,
-        max_size: int | None = None,
-        limit_setting_name: str | None = None,
-    ) -> FileBaseWithContent:
-        content_type = (upload_file.content_type or "").split(";", 1)[0].strip()
+        The exact source remains on the owner-only temporary path and is exposed
+        as a bounded stream. Derived text and model inputs are separate variants;
+        callers never need to infer whether a transformed value is the original.
+        """
+        content_type = (upload_file.content_type or "").split(";")[0].strip()
         if ImageMimeTypes.has_value(content_type):
-            return await self.image_to_domain(
-                upload_file,
-                max_size=max_size,
-                limit_setting_name=limit_setting_name,
-            )
+            file_type = FileType.IMAGE
+            if upload_admission_snapshot is None:
+                raise RuntimeError("Upload admission snapshot is required")
+            admission_max_size = upload_admission_snapshot.session_image_maximum_bytes
+            if max_size is None or admission_max_size < max_size:
+                max_size = admission_max_size
+                limit_name = limit_name or UploadLimitUseCase.SESSION_IMAGE.value
         elif AudioMimeTypes.has_value(content_type):
-            return await self.audio_to_domain(
-                upload_file,
+            file_type = FileType.AUDIO
+            if upload_admission_snapshot is None:
+                raise RuntimeError("Upload admission snapshot is required")
+            admission_max_size = upload_admission_snapshot.session_audio_maximum_bytes
+            if max_size is None or admission_max_size < max_size:
+                max_size = admission_max_size
+                limit_name = limit_name or UploadLimitUseCase.SESSION_AUDIO.value
+        else:
+            file_type = FileType.TEXT
+            if upload_admission_snapshot is None:
+                raise RuntimeError("Upload admission snapshot is required")
+            admission_max_size = upload_admission_snapshot.session_file_maximum_bytes
+            if max_size is None or admission_max_size < max_size:
+                max_size = admission_max_size
+                limit_name = limit_name or UploadLimitUseCase.SESSION_FILE.value
+
+        file_size = self.file_size_service.get_file_size(upload_file.file)
+        if file_size > max_size:
+            raise FileTooLargeException(
+                file_size=file_size,
                 max_size=max_size,
-                limit_setting_name=limit_setting_name,
+                limit_name=limit_name,
             )
 
-        return await self.text_to_domain(
-            upload_file,
-            max_size=max_size,
-            limit_setting_name=limit_setting_name,
-            preserve_source_bytes=_is_docx_upload(upload_file),
+        filepath = Path(
+            await self.file_size_service.save_file_to_disk(upload_file.file)
         )
+        display_name = sanitize_filename(upload_file.filename)
+        media_type = content_type or "application/octet-stream"
+
+        try:
+            original = PendingFileContent(
+                variant=FileContentVariant.ORIGINAL,
+                chunks=_path_chunks(filepath),
+                declared_media_type=media_type,
+                verified_media_type=media_type,
+            )
+
+            if file_type is FileType.IMAGE:
+                image = self.image_extractor.extract(
+                    filepath,
+                    media_type,
+                    upload_file.filename,
+                )
+                processed = downscale_image(image, media_type)
+                model_input = PendingFileContent(
+                    variant=FileContentVariant.MODEL_INPUT,
+                    chunks=_bytes_chunks(processed.blob),
+                    declared_media_type=processed.mimetype,
+                    verified_media_type=processed.mimetype,
+                )
+                yield PreparedFileUpload(
+                    name=display_name,
+                    file_type=file_type,
+                    display_media_type=media_type,
+                    contents=(original, model_input),
+                )
+                return
+
+            if file_type is FileType.AUDIO:
+                yield PreparedFileUpload(
+                    name=display_name,
+                    file_type=file_type,
+                    display_media_type=media_type,
+                    contents=(original,),
+                )
+                return
+
+            extracted_text = self.text_extractor.extract(
+                filepath,
+                media_type,
+                upload_file.filename,
+            ).encode("utf-8")
+            extracted = PendingFileContent(
+                variant=FileContentVariant.EXTRACTED_TEXT,
+                chunks=_bytes_chunks(extracted_text),
+                declared_media_type="text/plain",
+                verified_media_type="text/plain",
+            )
+
+            derivatives: list[PreparedFileUpload] = []
+            settings = get_settings()
+            derivative_extractor: Callable[[Path], list[ProcessedImage]] | None = None
+            if settings.attachment_image_extraction:
+                if media_type == TextMimeTypes.PDF.value:
+
+                    def extract_pdf(path: Path) -> list[ProcessedImage]:
+                        return extract_images_from_pdf(
+                            path,
+                            max_images=settings.attachment_max_extracted_images,
+                        )
+
+                    derivative_extractor = extract_pdf
+                elif media_type in (
+                    TextMimeTypes.DOCX.value,
+                    TextMimeTypes.PPTX.value,
+                ):
+
+                    def extract_office(path: Path) -> list[ProcessedImage]:
+                        return extract_images_from_office(
+                            path,
+                            mimetype=media_type,
+                            max_images=settings.attachment_max_extracted_images,
+                        )
+
+                    derivative_extractor = extract_office
+
+            if derivative_extractor is not None:
+                for index, image in enumerate(
+                    derivative_extractor(filepath),
+                    start=1,
+                ):
+                    label = (
+                        f"page {image.page_number}"
+                        if image.page_number is not None
+                        else f"image {index}"
+                    )
+                    derivatives.append(
+                        PreparedFileUpload(
+                            name=f"{display_name} ({label})",
+                            file_type=FileType.IMAGE,
+                            display_media_type=image.mimetype,
+                            contents=(
+                                PendingFileContent(
+                                    variant=FileContentVariant.DERIVED_PAGE,
+                                    chunks=_bytes_chunks(image.blob),
+                                    declared_media_type=image.mimetype,
+                                    verified_media_type=image.mimetype,
+                                    ordinal=index - 1,
+                                    page_number=image.page_number,
+                                ),
+                            ),
+                        )
+                    )
+
+            yield PreparedFileUpload(
+                name=display_name,
+                file_type=file_type,
+                display_media_type=media_type,
+                contents=(original, extracted),
+                derivatives=tuple(derivatives),
+            )
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filepath)

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { FlowRunContractTemplateReadiness } from "@eneo/eneo-js";
+  import { m } from "$lib/paraglide/messages";
   import type { FlowRunBlocker } from "$lib/features/flows/flowRunWizard";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
   import {
@@ -33,7 +34,7 @@
       <span
         class="border-default text-secondary rounded-full border px-2.5 py-1 text-xs font-medium"
       >
-        v{publishedFlowVersion ?? "—"}
+        {m.flow_run_template_version_badge({ version: publishedFlowVersion ?? "—" })}
       </span>
     </div>
     <div class="mt-4 flex flex-col gap-3">

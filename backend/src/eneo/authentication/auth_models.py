@@ -711,31 +711,6 @@ class ApiKeyUsageResponse(BaseModel):
     next_cursor: Optional[datetime] = None
 
 
-class ApiKeyPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    truncated_key: str
-
-
-class ApiKey(ApiKeyPublic):
-    key: str
-
-
-class ApiKeyCreated(ApiKey):
-    hashed_key: str
-
-
-class ApiKeyInDB(ApiKey):
-    user_id: Optional[UUID]
-    assistant_id: Optional[UUID]
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class CreateUserResponse(BaseModel):
-    token: AccessToken
-    api_key: ApiKey
-
-
 class OpenIdConnectLogin(BaseModel):
     code: str
     code_verifier: str

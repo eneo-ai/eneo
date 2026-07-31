@@ -32,7 +32,11 @@ from eneo.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,
     StepExecutionRuntimeDeps,
 )
+from eneo.flows.runtime.step_handlers import pass_through as pass_through_handler_module
 from eneo.flows.runtime.step_handlers import resolve_handler_mode
+from eneo.flows.runtime.step_handlers import (
+    template_fill as template_fill_handler_module,
+)
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep
 from eneo.flows.runtime.step_handlers.compose_text import ComposeTextStepHandler
 from eneo.flows.runtime.step_handlers.http_post import HttpPostStepHandler
@@ -229,8 +233,7 @@ async def test_pass_through_handler_wraps_completion_output(monkeypatch) -> None
     completion_output = _step_output()
     complete_step_execution = AsyncMock(return_value=completion_output)
     monkeypatch.setattr(
-        "eneo.flows.runtime.step_handlers.pass_through.complete_step_execution",
-        complete_step_execution,
+        pass_through_handler_module, "complete_step_execution", complete_step_execution
     )
 
     async def _prepare(
@@ -287,11 +290,13 @@ async def test_template_fill_handler_activates_resolved_inputs_once_before_rende
     activate_resolved_input_edges = AsyncMock(side_effect=_activate)
     complete_template_fill_step = AsyncMock(side_effect=_complete)
     monkeypatch.setattr(
-        "eneo.flows.runtime.step_handlers.template_fill.prepare_template_fill_step",
+        template_fill_handler_module,
+        "prepare_template_fill_step",
         prepare_template_fill_step,
     )
     monkeypatch.setattr(
-        "eneo.flows.runtime.step_handlers.template_fill.complete_template_fill_step",
+        template_fill_handler_module,
+        "complete_template_fill_step",
         complete_template_fill_step,
     )
 
@@ -346,11 +351,13 @@ async def test_template_fill_handler_activation_failure_prevents_render(
     )
     complete_template_fill_step = AsyncMock()
     monkeypatch.setattr(
-        "eneo.flows.runtime.step_handlers.template_fill.prepare_template_fill_step",
+        template_fill_handler_module,
+        "prepare_template_fill_step",
         prepare_template_fill_step,
     )
     monkeypatch.setattr(
-        "eneo.flows.runtime.step_handlers.template_fill.complete_template_fill_step",
+        template_fill_handler_module,
+        "complete_template_fill_step",
         complete_template_fill_step,
     )
     handler = TemplateFillStepHandler(

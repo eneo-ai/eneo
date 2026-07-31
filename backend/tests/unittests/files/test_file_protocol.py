@@ -1,23 +1,20 @@
-"""Tests for FileProtocol type-specific size limits.
+"""Tests for FileProtocol limits from the immutable upload-admission snapshot."""
 
-Verifies that each file type handler (text, image, audio) uses its own
-configured max_size from settings when no explicit override is passed —
-which is the normal path from FileService.save_file().
-"""
-
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from docx import Document
 from fastapi import UploadFile
 
 from eneo.files import file_protocol as file_protocol_module
-from eneo.files.file_models import FileType
+from eneo.files.file_models import FileContentVariant
 from eneo.files.file_protocol import FileProtocol
 from eneo.main.exceptions import FileTooLargeException
+from eneo.object_content.content import StorageKind
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 # ── Fake settings ────────────────────────────────────────────────────────
 
@@ -26,13 +23,28 @@ IMAGE_MAX = 20_000_000  # 20 MB
 AUDIO_MAX = 200_000_000  # 200 MB
 
 _FAKE_SETTINGS = SimpleNamespace(
-    upload_file_to_session_max_size=TEXT_MAX,
-    upload_image_to_session_max_size=IMAGE_MAX,
-    transcription_max_file_size=AUDIO_MAX,
-    upload_max_file_size=TEXT_MAX,
     upload_tmp_dir=Path("/tmp"),
     attachment_image_extraction=False,
-    attachment_max_extracted_images=8,
+    attachment_max_extracted_images=10,
+)
+_UPLOAD_ADMISSION = UploadAdmissionSnapshot(
+    policy_revision=7,
+    session_storage_target=StorageKind.POSTGRES_INLINE,
+    session_operator_ceiling_bytes=250_000_000,
+    session_file_maximum_bytes=TEXT_MAX,
+    session_image_maximum_bytes=IMAGE_MAX,
+    session_audio_maximum_bytes=AUDIO_MAX,
+    knowledge_file_maximum_bytes=30_000_000,
+    knowledge_audio_maximum_bytes=220_000_000,
+)
+_OBJECT_STORE_ENVELOPE = 10_000_000
+_OBJECT_STORE_ADMISSION = replace(
+    _UPLOAD_ADMISSION,
+    session_storage_target=StorageKind.OBJECT_STORE,
+    session_operator_ceiling_bytes=_OBJECT_STORE_ENVELOPE,
+    session_file_maximum_bytes=_OBJECT_STORE_ENVELOPE,
+    session_image_maximum_bytes=_OBJECT_STORE_ENVELOPE,
+    session_audio_maximum_bytes=_OBJECT_STORE_ENVELOPE,
 )
 
 
@@ -42,6 +54,11 @@ _FAKE_SETTINGS = SimpleNamespace(
 @pytest.fixture(autouse=True)
 def patch_settings(monkeypatch):
     monkeypatch.setattr(file_protocol_module, "get_settings", lambda: _FAKE_SETTINGS)
+    monkeypatch.setattr(
+        file_protocol_module,
+        "downscale_image",
+        lambda blob, mimetype: SimpleNamespace(blob=blob, mimetype=mimetype),
+    )
 
 
 @pytest.fixture
@@ -81,25 +98,113 @@ def _make_upload(content_type: str, size: int) -> tuple[UploadFile, int]:
     return upload, size
 
 
-def _make_upload_with_bytes(
-    *,
-    filename: str,
-    content_type: str,
-    content: bytes,
-) -> UploadFile:
-    return UploadFile(
-        file=BytesIO(content),
-        filename=filename,
-        headers={"content-type": content_type},
+async def _content_bytes(content) -> bytes:
+    return b"".join([chunk async for chunk in content.chunks])
+
+
+async def _prepare(protocol: FileProtocol, upload: UploadFile):
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
+        return prepared
+
+
+@pytest.mark.asyncio
+async def test_prepare_pdf_preserves_original_and_extracted_text_variants(
+    protocol, tmp_path
+):
+    original = b"%PDF exact source bytes"
+    upload = UploadFile(
+        file=BytesIO(original),
+        filename="report.pdf",
+        headers={"content-type": "application/pdf"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(original)
+
+    async def save_original(_file):
+        path = tmp_path / "report.pdf"
+        path.write_bytes(original)
+        return str(path)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
+        by_variant = {content.variant: content for content in prepared.contents}
+        assert await _content_bytes(by_variant[FileContentVariant.ORIGINAL]) == original
+        assert (
+            await _content_bytes(by_variant[FileContentVariant.EXTRACTED_TEXT])
+            == b"extracted text"
+        )
+
+
+@pytest.mark.asyncio
+async def test_prepare_image_keeps_original_separate_from_model_input(
+    protocol, tmp_path, monkeypatch
+):
+    original = b"exact uploaded image"
+    upload = UploadFile(
+        file=BytesIO(original),
+        filename="photo.png",
+        headers={"content-type": "image/png"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(original)
+
+    async def save_original(_file):
+        path = tmp_path / "photo.png"
+        path.write_bytes(original)
+        return str(path)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+    monkeypatch.setattr(
+        file_protocol_module,
+        "downscale_image",
+        lambda _blob, _mimetype: SimpleNamespace(
+            blob=b"bounded model image",
+            mimetype="image/jpeg",
+        ),
     )
 
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
+        by_variant = {content.variant: content for content in prepared.contents}
+        assert await _content_bytes(by_variant[FileContentVariant.ORIGINAL]) == original
+        assert (
+            await _content_bytes(by_variant[FileContentVariant.MODEL_INPUT])
+            == b"bounded model image"
+        )
 
-def _build_template_bytes() -> bytes:
-    document = Document()
-    document.add_paragraph("{{Body}}")
-    payload = BytesIO()
-    document.save(payload)
-    return payload.getvalue()
+
+@pytest.mark.asyncio
+async def test_prepare_audio_preserves_exact_original(protocol, tmp_path):
+    original = b"exact audio bytes"
+    upload = UploadFile(
+        file=BytesIO(original),
+        filename="meeting.mp3",
+        headers={"content-type": "audio/mpeg"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(original)
+
+    async def save_original(_file):
+        path = tmp_path / "meeting.mp3"
+        path.write_bytes(original)
+        return str(path)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
+        assert len(prepared.contents) == 1
+        content = prepared.contents[0]
+        assert content.variant is FileContentVariant.ORIGINAL
+        assert await _content_bytes(content) == original
 
 
 # ── Tests: text files use TEXT_MAX ───────────────────────────────────────
@@ -107,10 +212,10 @@ def _build_template_bytes() -> bytes:
 
 @pytest.mark.asyncio
 async def test_text_under_limit_accepted(protocol):
-    upload, size = _make_upload("text/plain", TEXT_MAX - 1)
+    upload, size = _make_upload("text/plain", TEXT_MAX)
     protocol.file_size_service.get_file_size.return_value = size
 
-    result = await protocol.to_domain(upload)
+    result = await _prepare(protocol, upload)
 
     assert result.file_type.value == "text"
 
@@ -121,10 +226,66 @@ async def test_text_over_limit_rejected(protocol):
     protocol.file_size_service.get_file_size.return_value = size
 
     with pytest.raises(FileTooLargeException) as exc_info:
-        await protocol.to_domain(upload)
+        await _prepare(protocol, upload)
 
     assert exc_info.value.max_size == TEXT_MAX
-    assert exc_info.value.setting_name == "UPLOAD_FILE_TO_SESSION_MAX_SIZE"
+    assert exc_info.value.limit_name == "session_file"
+
+
+@pytest.mark.asyncio
+async def test_domain_limit_can_make_upload_admission_stricter(protocol):
+    domain_maximum = 5_000_000
+    upload, size = _make_upload("text/plain", domain_maximum + 1)
+    protocol.file_size_service.get_file_size.return_value = size
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        async with protocol.prepare_upload(
+            upload,
+            upload_admission_snapshot=_UPLOAD_ADMISSION,
+            max_size=domain_maximum,
+            limit_name="flow_runtime_input",
+        ):
+            pass
+
+    assert exc_info.value.max_size == domain_maximum
+    assert exc_info.value.limit_name == "flow_runtime_input"
+
+
+@pytest.mark.asyncio
+async def test_domain_limit_cannot_relax_upload_admission(protocol):
+    upload, size = _make_upload("text/plain", TEXT_MAX + 1)
+    protocol.file_size_service.get_file_size.return_value = size
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        async with protocol.prepare_upload(
+            upload,
+            upload_admission_snapshot=_UPLOAD_ADMISSION,
+            max_size=TEXT_MAX * 2,
+            limit_name="flow_runtime_input",
+        ):
+            pass
+
+    assert exc_info.value.max_size == TEXT_MAX
+    assert exc_info.value.limit_name == "flow_runtime_input"
+
+
+@pytest.mark.asyncio
+async def test_object_store_envelope_plus_one_rejected_before_disk_spool(protocol):
+    upload, size = _make_upload("text/plain", _OBJECT_STORE_ENVELOPE + 1)
+    protocol.file_size_service.get_file_size.return_value = size
+    protocol.file_size_service.save_file_to_disk = AsyncMock(
+        side_effect=AssertionError("oversized upload must not reach disk spooling")
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        async with protocol.prepare_upload(
+            upload,
+            upload_admission_snapshot=_OBJECT_STORE_ADMISSION,
+        ):
+            pass
+
+    assert exc_info.value.max_size == _OBJECT_STORE_ENVELOPE
+    protocol.file_size_service.save_file_to_disk.assert_not_awaited()
 
 
 # ── Tests: image files use IMAGE_MAX ─────────────────────────────────────
@@ -132,10 +293,10 @@ async def test_text_over_limit_rejected(protocol):
 
 @pytest.mark.asyncio
 async def test_image_under_limit_accepted(protocol):
-    upload, size = _make_upload("image/png", IMAGE_MAX - 1)
+    upload, size = _make_upload("image/png", IMAGE_MAX)
     protocol.file_size_service.get_file_size.return_value = size
 
-    result = await protocol.to_domain(upload)
+    result = await _prepare(protocol, upload)
 
     assert result.file_type.value == "image"
 
@@ -146,10 +307,10 @@ async def test_image_over_limit_rejected(protocol):
     protocol.file_size_service.get_file_size.return_value = size
 
     with pytest.raises(FileTooLargeException) as exc_info:
-        await protocol.to_domain(upload)
+        await _prepare(protocol, upload)
 
     assert exc_info.value.max_size == IMAGE_MAX
-    assert exc_info.value.setting_name == "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"
+    assert exc_info.value.limit_name == "session_image"
 
 
 # ── Tests: audio files use AUDIO_MAX (the 200 MB fix) ───────────────────
@@ -158,10 +319,10 @@ async def test_image_over_limit_rejected(protocol):
 @pytest.mark.asyncio
 async def test_audio_under_limit_accepted(protocol):
     """Audio files up to AUDIO_MAX (200 MB) should be accepted — this was the bug."""
-    upload, size = _make_upload("audio/mpeg", AUDIO_MAX - 1)
+    upload, size = _make_upload("audio/mpeg", AUDIO_MAX)
     protocol.file_size_service.get_file_size.return_value = size
 
-    result = await protocol.to_domain(upload)
+    result = await _prepare(protocol, upload)
 
     assert result.file_type.value == "audio"
 
@@ -172,10 +333,10 @@ async def test_audio_over_limit_rejected(protocol):
     protocol.file_size_service.get_file_size.return_value = size
 
     with pytest.raises(FileTooLargeException) as exc_info:
-        await protocol.to_domain(upload)
+        await _prepare(protocol, upload)
 
     assert exc_info.value.max_size == AUDIO_MAX
-    assert exc_info.value.setting_name == "TRANSCRIPTION_MAX_FILE_SIZE"
+    assert exc_info.value.limit_name == "session_audio"
 
 
 @pytest.mark.asyncio
@@ -184,7 +345,7 @@ async def test_audio_50mb_accepted(protocol):
     upload, size = _make_upload("audio/mpeg", 50_000_000)
     protocol.file_size_service.get_file_size.return_value = size
 
-    result = await protocol.to_domain(upload)
+    result = await _prepare(protocol, upload)
 
     assert result.file_type.value == "audio"
 
@@ -206,7 +367,7 @@ async def test_to_domain_routes_audio_mime_types(protocol):
         upload, size = _make_upload(mime, 1000)
         protocol.file_size_service.get_file_size.return_value = size
 
-        result = await protocol.to_domain(upload)
+        result = await _prepare(protocol, upload)
 
         assert result.file_type.value == "audio", f"MIME {mime} should route to audio"
 
@@ -218,12 +379,13 @@ async def test_to_domain_routes_image_mime_types(protocol):
         upload, size = _make_upload(mime, 1000)
         protocol.file_size_service.get_file_size.return_value = size
 
-        result = await protocol.to_domain(upload)
+        result = await _prepare(protocol, upload)
 
         assert result.file_type.value == "image", f"MIME {mime} should route to image"
-        # Image data is stored as a blob, never decoded into the text column.
-        assert result.blob == b"image-bytes"
-        assert result.text is None
+        assert {content.variant for content in result.contents} == {
+            FileContentVariant.ORIGINAL,
+            FileContentVariant.MODEL_INPUT,
+        }
 
 
 @pytest.mark.asyncio
@@ -233,90 +395,9 @@ async def test_to_domain_routes_text_mime_types(protocol):
         upload, size = _make_upload(mime, 1000)
         protocol.file_size_service.get_file_size.return_value = size
 
-        result = await protocol.to_domain(upload)
+        result = await _prepare(protocol, upload)
 
         assert result.file_type.value == "text", f"MIME {mime} should route to text"
-
-
-@pytest.mark.asyncio
-async def test_to_domain_keeps_docx_uploads_on_generic_text_path(protocol):
-    template_bytes = _build_template_bytes()
-    upload = _make_upload_with_bytes(
-        filename="template.docx",
-        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        content=template_bytes,
-    )
-    protocol.file_size_service.get_file_size.return_value = len(template_bytes)
-
-    result = await protocol.to_domain(upload)
-
-    assert result.file_type == FileType.TEXT
-    assert result.text == "extracted text"
-    assert result.blob == template_bytes
-    assert result.size == len(template_bytes)
-
-
-@pytest.mark.asyncio
-async def test_to_domain_preserves_named_docx_when_client_omits_mimetype(protocol):
-    template_bytes = _build_template_bytes()
-    upload = _make_upload_with_bytes(
-        filename="template.docx",
-        content_type="",
-        content=template_bytes,
-    )
-    protocol.file_size_service.get_file_size.return_value = len(template_bytes)
-
-    result = await protocol.to_domain(upload)
-
-    assert result.text == "extracted text"
-    assert result.blob == template_bytes
-    assert result.size == len(template_bytes)
-
-
-@pytest.mark.asyncio
-async def test_derivative_upload_path_preserves_docx_source_bytes(
-    protocol, monkeypatch
-):
-    template_bytes = _build_template_bytes()
-    upload = _make_upload_with_bytes(
-        filename="template.docx",
-        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        content=template_bytes,
-    )
-    protocol.file_size_service.get_file_size.return_value = len(template_bytes)
-    monkeypatch.setattr(_FAKE_SETTINGS, "attachment_image_extraction", True)
-    monkeypatch.setattr(
-        file_protocol_module,
-        "extract_images_from_office",
-        lambda *_args, **_kwargs: [],
-    )
-
-    result, derivatives = await protocol.to_domain_with_derivatives(upload)
-
-    assert result.file_type == FileType.TEXT
-    assert result.text == "extracted text"
-    assert result.blob == template_bytes
-    assert result.size == len(template_bytes)
-    assert derivatives == []
-
-
-@pytest.mark.asyncio
-async def test_document_to_domain_preserves_docx_template_bytes(protocol):
-    template_bytes = _build_template_bytes()
-    upload = _make_upload_with_bytes(
-        filename="template.docx",
-        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        content=template_bytes,
-    )
-    protocol.file_size_service.get_file_size.return_value = len(template_bytes)
-
-    result = await protocol.document_to_domain(upload)
-
-    assert result.file_type == FileType.DOCUMENT
-    assert result.blob == template_bytes
-    assert result.text is None
-    assert result.name == "template.docx"
-    protocol.text_extractor.extract.assert_not_called()
 
 
 # ── Test: each type has independent limits ───────────────────────────────
@@ -324,14 +405,10 @@ async def test_document_to_domain_preserves_docx_template_bytes(protocol):
 
 @pytest.mark.asyncio
 async def test_audio_limit_is_independent_of_text_limit(protocol):
-    """
-    Regression test for the original bug: audio was limited by UPLOAD_MAX_FILE_SIZE (10 MB)
-    instead of TRANSCRIPTION_MAX_FILE_SIZE (200 MB). A 15 MB audio file should succeed
-    even though TEXT_MAX is 25 MB — the point is it uses AUDIO_MAX, not the old global limit.
-    """
+    """Audio admission uses the persisted transcription policy, not the text policy."""
     upload, size = _make_upload("audio/mpeg", 15_000_000)
     protocol.file_size_service.get_file_size.return_value = size
 
-    result = await protocol.to_domain(upload)
+    result = await _prepare(protocol, upload)
 
     assert result.file_type.value == "audio"

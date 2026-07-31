@@ -7,6 +7,41 @@
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
  */
 export function initFiles(client) {
+  /**
+   * @param {Object} params
+   * @param {string} params.fileId
+   * @param {number} [params.expiresIn]
+   * @param {"attachment" | "inline"} [params.contentDisposition]
+   * @param {"/api/v1/files/{id}/signed-url/" | "/api/v1/files/{id}/original/signed-url/"} endpoint
+   */
+  const requestSignedUrl = async ({ fileId, expiresIn, contentDisposition }, endpoint) => {
+    const expires_in = expiresIn ?? 3600;
+    const content_disposition = contentDisposition ?? "inline";
+
+    const res = await client.fetch(endpoint, {
+      method: "post",
+      params: { path: { id: fileId } },
+      requestBody: {
+        "application/json": {
+          content_disposition,
+          expires_in
+        }
+      }
+    });
+
+    // Keep the signed path and token, but use the public host configured by the caller.
+    const signedUrl = new URL(res.url);
+    const url = new URL(
+      `${signedUrl.pathname}${signedUrl.search}${signedUrl.hash}`,
+      client.baseUrl
+    );
+
+    return {
+      url: url.toString(),
+      expires_at: res.expires_at
+    };
+  };
+
   return {
     /**
      * List files owned by the current user.
@@ -82,28 +117,27 @@ export function initFiles(client) {
      * @throws {EneoError}
      * */
     generateSignedUrl: async ({ fileId, expiresIn, contentDisposition }) => {
-      const expires_in = expiresIn ?? 3600;
-      const content_disposition = contentDisposition ?? "inline";
+      return requestSignedUrl(
+        { fileId, expiresIn, contentDisposition },
+        "/api/v1/files/{id}/signed-url/"
+      );
+    },
 
-      const res = await client.fetch(`/api/v1/files/{id}/signed-url/`, {
-        method: "post",
-        params: { path: { id: fileId } },
-        requestBody: {
-          "application/json": {
-            content_disposition,
-            expires_in
-          }
-        }
-      });
-
-      // The backend does not necessarily know the protocol it uses, as it sits behind a reverse proxy
-      const url = new URL(res.url);
-      url.protocol = client.baseUrl.protocol;
-
-      return {
-        url: url.toString(),
-        expires_at: res.expires_at
-      };
+    /**
+     * Generate a short-lived signed URL for the exact bytes originally uploaded.
+     * Unlike `generateSignedUrl`, this never selects extracted text or another processing representation.
+     * @param {Object} params
+     * @param {string} params.fileId The file ID
+     * @param {number} [params.expiresIn] Expiry time in seconds (1–3600, default: 3600)
+     * @param {"attachment" | "inline"} [params.contentDisposition] Content disposition (default: "inline")
+     * @returns {Promise<{url: string, expires_at: number}>}
+     * @throws {EneoError}
+     * */
+    generateOriginalSignedUrl: async ({ fileId, expiresIn, contentDisposition }) => {
+      return requestSignedUrl(
+        { fileId, expiresIn, contentDisposition },
+        "/api/v1/files/{id}/original/signed-url/"
+      );
     }
   };
 }

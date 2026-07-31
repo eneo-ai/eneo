@@ -21,6 +21,7 @@ from eneo.server.dependencies.container import (
 )
 
 router = APIRouter()
+__all__ = ["router"]
 
 
 class FlowRunAuditOutboxDeadLetterResponse(BaseModel):

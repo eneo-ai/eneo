@@ -45,6 +45,7 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
 )
 from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
@@ -66,6 +67,7 @@ from eneo.flows.flow_evidence_policy import (
     FlowEvidenceAccessContext,
     flow_metadata_marks_sensitive_or_unreadable,
 )
+from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
@@ -197,8 +199,21 @@ _FILE_REPO_UNSET = object()
 
 def _file_repo() -> AsyncMock:
     repo = AsyncMock()
-    repo.get_list_by_id_for_owner.return_value = []
+    repo.get_list_by_id_and_owner.return_value = []
+    repo.get_infos_by_ids.return_value = []
     return repo
+
+
+def _settings_service() -> AsyncMock:
+    service = AsyncMock()
+    service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=10_000,
+        audio_max_size_bytes=10_000,
+    )
+    service.get_mapped_execution_policy_resolved.return_value = (
+        FlowMappedExecutionPolicy()
+    )
+    return service
 
 
 def _flow_run_rerun_repo() -> AsyncMock:
@@ -329,7 +344,9 @@ def _flow_run_service(
         runtime_upload_repo=runtime_upload_repo,
         file_repo=resolved_file_repo,
         flow_run_terminalizer=resolved_terminalizer,
-        settings_service=settings_service,
+        settings_service=(
+            settings_service if settings_service is not None else _settings_service()
+        ),
         access_policy=resolved_access_policy,
         webhook_delivery_repo=webhook_delivery_repo
         or AsyncMock(spec=FlowRunWebhookDeliveryRepository),
@@ -1689,7 +1706,8 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
     flow_run_repo.create.return_value = created_run
     file_id = uuid4()
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
-    file_repo.get_list_by_id_for_owner.return_value = [
+    file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
+    file_repo.get_infos_by_ids.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
     ]
     flow_version_repo.get.return_value = _published_flow_version(
@@ -1796,7 +1814,8 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
     flow_run_repo.create.return_value = created_run
     file_id = uuid4()
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
-    file_repo.get_list_by_id_for_owner.return_value = [
+    file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
+    file_repo.get_infos_by_ids.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
     ]
     flow_version_repo.get.return_value = _published_flow_version(
@@ -1830,14 +1849,13 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
         step_inputs={runtime_step.id: FlowRunStepInputFiles(file_ids=(file_id,))},
     )
 
-    file_repo.get_list_by_id_for_owner.assert_awaited_once_with(
+    file_repo.get_list_by_id_and_owner.assert_awaited_once_with(
         ids=[file_id],
-        owner_type="service_key",
-        owner_user_id=None,
-        owner_service_id=service_user.active_api_key.service_principal_id,
-        tenant_id=service_user.tenant_id,
-        include_transcription=False,
+        owner=FlowPrincipal.from_user(service_user).file_owner(
+            tenant_id=service_user.tenant_id
+        ),
     )
+    file_repo.get_infos_by_ids.assert_awaited_once_with([file_id])
     runtime_upload_repo.list_bound_file_ids_for_owner.assert_awaited_once()
 
 
@@ -1899,7 +1917,8 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
     )
     file_id = uuid4()
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
-    file_repo.get_list_by_id_for_owner.return_value = [
+    file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
+    file_repo.get_infos_by_ids.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
     ]
 
@@ -5014,33 +5033,6 @@ async def test_get_run_artifact_file_rejects_content_purged_row(user):
         )
     assert exc_info.value.code == "flow_run_artifact_content_unavailable"
     file_repo.get_by_id.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_get_run_artifact_file_rechecks_file_content_before_signing(user):
-    file_id = uuid4()
-    run = _run(user=user, flow_id=uuid4())
-    file_repo = AsyncMock()
-    file_repo.get_by_id.return_value = _file(
-        file_id=file_id,
-        tenant_id=user.tenant_id,
-        text=None,
-        blob=None,
-    )
-    service, run = _artifact_service(
-        user,
-        file_repo=file_repo,
-        result_file=_result_file(user=user, run=run, file_id=file_id),
-        run=run,
-    )
-
-    with pytest.raises(ResourceGoneException) as exc_info:
-        await service.get_run_artifact_file(
-            run_id=run.id,
-            flow_id=run.flow_id,
-            file_id=file_id,
-        )
-    assert exc_info.value.code == "flow_run_artifact_content_unavailable"
 
 
 @pytest.mark.asyncio

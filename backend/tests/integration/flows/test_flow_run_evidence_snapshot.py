@@ -11,7 +11,6 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import sessionmanager
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowProviderCalls,
     FlowRunRerunInvalidatedSteps,
@@ -28,6 +27,8 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
+from eneo.files.file_models import FileType
+from eneo.files.file_service import FileService
 from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application import flow_run_evidence_service
 from eneo.flows.application.flow_run_evidence_service import (
@@ -197,6 +198,7 @@ async def _add_provider_call(
 async def _add_rerun_operations_with_overrides(
     *,
     session: AsyncSession,
+    file_service: FileService,
     seed: _SnapshotSeed,
     admin_user,
     operation_count: int,
@@ -227,34 +229,25 @@ async def _add_rerun_operations_with_overrides(
             )
         )
         for override_index in range(overrides_per_operation):
-            file_id = uuid4()
             row_index = operation_index * overrides_per_operation + override_index
-            session.add_all(
-                [
-                    Files(
-                        id=file_id,
-                        tenant_id=seed.tenant_id,
-                        name=f"override-{row_index}.txt",
-                        checksum=f"{row_index + 1:064x}",
-                        size=1,
-                        mimetype="text/plain",
-                        file_type="text",
-                        owner_type="user",
-                        owner_user_id=admin_user.id,
-                        owner_service_id=None,
-                    ),
-                    FlowRuntimeUploadedFiles(
-                        file_id=file_id,
-                        flow_id=seed.flow_id,
-                        tenant_id=seed.tenant_id,
-                        uploaded_for_step_id=step_id,
-                        owner_type="user",
-                        owner_user_id=admin_user.id,
-                        owner_service_id=None,
-                    ),
-                ]
+            file = await file_service.save_generated_file(
+                payload=str(row_index).encode(),
+                name=f"override-{row_index}.txt",
+                mimetype="text/plain",
+                file_type=FileType.TEXT,
             )
-            rows.append((step_id, file_id, attempt_no, override_index))
+            session.add(
+                FlowRuntimeUploadedFiles(
+                    file_id=file.id,
+                    flow_id=seed.flow_id,
+                    tenant_id=seed.tenant_id,
+                    uploaded_for_step_id=step_id,
+                    owner_type="user",
+                    owner_user_id=admin_user.id,
+                    owner_service_id=None,
+                )
+            )
+            rows.append((step_id, file.id, attempt_no, override_index))
     await session.flush()
     session.add_all(
         [
@@ -861,9 +854,11 @@ async def test_measurements_cover_every_variable_width_evidence_projection(
 ) -> None:
     _ = setup_database
     large = "projection-marker-" + ("x" * 50_000)
+    large_file_name = "projection-file-" + ("f" * 120_000)
     control_heavy = '\n\t"\\\b\f\r' * 10_000
     payload = {"marker": large}
-    async with sessionmanager.session() as session, session.begin():
+    async with db_container() as container:
+        session = container.session()
         seed = await _seed_snapshot_run(
             session=session,
             space_factory=space_factory,
@@ -872,7 +867,13 @@ async def test_measurements_cover_every_variable_width_evidence_projection(
         await session.flush()
         result_id = uuid4()
         operation_id = uuid4()
-        file_id = uuid4()
+        file = await container.file_service(user=admin_user).save_generated_file(
+            payload=b"x",
+            name=large_file_name,
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+        )
+        file_id = file.id
         session.add_all(
             [
                 FlowStepResults(
@@ -889,18 +890,6 @@ async def test_measurements_cover_every_variable_width_evidence_projection(
                     effective_prompt=large,
                     error_message=large,
                     status="completed",
-                ),
-                Files(
-                    id=file_id,
-                    tenant_id=seed.tenant_id,
-                    name=large,
-                    checksum="a" * 64,
-                    size=1,
-                    mimetype=large,
-                    file_type="text",
-                    owner_type="user",
-                    owner_user_id=admin_user.id,
-                    owner_service_id=None,
                 ),
                 FlowRuntimeUploadedFiles(
                     file_id=file_id,
@@ -1252,7 +1241,8 @@ async def test_evidence_view_reports_rerun_override_row_saturation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _ = setup_database
-    async with sessionmanager.session() as session, session.begin():
+    async with db_container() as container:
+        session = container.session()
         seed = await _seed_snapshot_run(
             session=session,
             space_factory=space_factory,
@@ -1260,6 +1250,7 @@ async def test_evidence_view_reports_rerun_override_row_saturation(
         )
         await _add_rerun_operations_with_overrides(
             session=session,
+            file_service=container.file_service(user=admin_user),
             seed=seed,
             admin_user=admin_user,
             operation_count=3,

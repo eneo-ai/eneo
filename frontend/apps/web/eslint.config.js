@@ -82,6 +82,45 @@ export default ts.config(
     }
   },
   {
+    files: ["src/**/*.{svelte,js,ts}"],
+    rules: {
+      // Lucide's aggregate entry points re-export the full icon catalogue.
+      // Importing them makes Vite transform thousands of unused modules in
+      // both production graphs; direct icon modules keep builds bounded.
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "lucide-svelte",
+              message: 'Import the icon from "lucide-svelte/icons/<icon-name>".'
+            },
+            {
+              name: "lucide-svelte/icons",
+              message: 'Import the icon from "lucide-svelte/icons/<icon-name>".'
+            },
+            {
+              name: "lucide-svelte/icons/index",
+              message: 'Import the icon from "lucide-svelte/icons/<icon-name>".'
+            },
+            {
+              name: "@lucide/svelte",
+              message: 'Import the icon from "@lucide/svelte/icons/<icon-name>".'
+            },
+            {
+              name: "@lucide/svelte/icons",
+              message: 'Import the icon from "@lucide/svelte/icons/<icon-name>".'
+            },
+            {
+              name: "@lucide/svelte/icons/index",
+              message: 'Import the icon from "@lucide/svelte/icons/<icon-name>".'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     rules: {
       "no-undef": "off",
       "@typescript-eslint/no-unused-vars": [

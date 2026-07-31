@@ -15,8 +15,10 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { getEneo } from "$lib/core/Eneo";
+  import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { Eye, RotateCcw } from "lucide-svelte";
+  import Eye from "lucide-svelte/icons/eye";
+  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
 
   const { data } = $props();
   const eneo = getEneo();
@@ -55,9 +57,8 @@
       });
       restoreTarget = null;
       await invalidate("admin:prompt-library");
-    } catch (e) {
-      const err = e as { message?: string };
-      restoreError = err.message ?? m.governance_prompt_form_save_error();
+    } catch (error) {
+      restoreError = getErrorMessage(error, m.governance_prompt_form_save_error());
     } finally {
       isRestoring = false;
     }

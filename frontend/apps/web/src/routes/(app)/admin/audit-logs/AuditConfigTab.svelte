@@ -5,7 +5,10 @@
   import type { components } from "@eneo/eneo-js";
   import { getActionLabel, getActionDescription } from "./audit-action-labels";
   import { getCategoryLabel, getCategoryDescription } from "./audit-category-labels";
-  import { ChevronRight, Search, Check, X } from "lucide-svelte";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import Search from "lucide-svelte/icons/search";
+  import Check from "lucide-svelte/icons/check";
+  import X from "lucide-svelte/icons/x";
   import { onMount } from "svelte";
   import { slide, fly } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";

@@ -112,8 +112,8 @@ class TestClassifyMime:
     def test_unknown_mime_classified_unknown(self):
         assert classify_mime("application/x-novel")[0] is MimeSupport.UNKNOWN
 
-    def test_json_not_supported(self):
-        assert classify_mime("application/json")[0] is MimeSupport.UNKNOWN
+    def test_json_is_supported_text(self):
+        assert classify_mime("application/json")[0] is MimeSupport.SUPPORTED
 
     def test_legacy_rejection_honours_canonicalisation(self):
         state, reason = classify_mime("Application/msword; charset=utf-8")

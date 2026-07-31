@@ -10,14 +10,12 @@
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
-  import {
-    Pencil,
-    Trash2,
-    AlertTriangle,
-    Loader2,
-    ArrowRight,
-    MoreHorizontal
-  } from "lucide-svelte";
+  import Pencil from "lucide-svelte/icons/pencil";
+  import Trash2 from "lucide-svelte/icons/trash-2";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import ArrowRight from "lucide-svelte/icons/arrow-right";
+  import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors";
 

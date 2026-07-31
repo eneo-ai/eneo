@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.skills.domain.skill import SkillBindingIntent
 
 AssistantUpdateField: TypeAlias = Literal[
     "name",
@@ -27,6 +28,7 @@ AssistantUpdateField: TypeAlias = Literal[
     "data_retention_days",
     "metadata_json",
     "icon_id",
+    "skill_binding_intents",
 ]
 
 _SECURITY_RELEVANT_FIELDS: frozenset[AssistantUpdateField] = frozenset(
@@ -66,6 +68,7 @@ class AssistantUpdateCommand(BaseModel):
     data_retention_days: int | None | NotProvided = Field(default=NOT_PROVIDED)
     metadata_json: dict[str, object] | None | NotProvided = Field(default=NOT_PROVIDED)
     icon_id: UUID | None | NotProvided = Field(default=NOT_PROVIDED)
+    skill_binding_intents: list[SkillBindingIntent] | None = None
 
     def is_set(self, field_name: AssistantUpdateField) -> bool:
         return field_name in self.model_fields_set

@@ -73,9 +73,10 @@ describe("cancellation", () => {
     let resolve: ((val: MockAssistant) => void) | undefined;
     const cb = makeCallbacks({
       loadAssistant: vi.fn(
-        () => new Promise<MockAssistant>((r) => {
-          resolve = r;
-        })
+        () =>
+          new Promise<MockAssistant>((r) => {
+            resolve = r;
+          })
       )
     });
     const loader = createAssistantLoader(cb);
@@ -89,7 +90,7 @@ describe("cancellation", () => {
   });
 
   test("concurrent loads cancel previous", async () => {
-    let resolvers: Array<(val: MockAssistant) => void> = [];
+    const resolvers: Array<(val: MockAssistant) => void> = [];
     const cb = makeCallbacks({
       loadAssistant: vi.fn(
         () =>

@@ -22,8 +22,9 @@ def _make_adapter(
     )
     adapter.provider_type = provider_type
     adapter.credential_resolver = SimpleNamespace(
-        get_api_key=lambda: "test-key",
-        get_credential_field=lambda field: None,
+        provider_type=provider_type,
+        get_api_key=lambda *, required=False: "test-key",
+        get_credential_field=lambda *, field, required=False: None,
     )
     return adapter
 
@@ -122,9 +123,9 @@ class TestPrepareKwargsMaxTokens:
         assert result["max_tokens"] == 6000
 
     def test_get_token_limit_uses_input_minus_output_budget(self):
-        """Input context budget reserves the configured output budget."""
+        """The configured input budget is already independent of output."""
         adapter = _make_adapter("openai", token_limit=128000, max_output_tokens=32000)
-        assert adapter.get_token_limit_of_model() == 96000
+        assert adapter.get_token_limit_of_model() == 128000
 
     def test_no_model_kwargs_injects_nothing(self):
         """No model_kwargs → no max_tokens injection (no model_kwargs block runs)."""

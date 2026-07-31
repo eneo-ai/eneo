@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol, TypedDict
 from uuid import UUID
 
-from eneo.files.file_models import File
+from eneo.files.file_models import FileInfo, FileMetadata, FileOwner
 from eneo.flows.domain.flow import FlowRuntimeInputConfig
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
@@ -29,16 +29,13 @@ from eneo.flows.principal import FlowPrincipal
 
 
 class _FileRepositoryProtocol(Protocol):
-    async def get_list_by_id_for_owner(
+    async def get_list_by_id_and_owner(
         self,
-        *,
         ids: list[UUID],
-        owner_type: str,
-        owner_user_id: UUID | None = None,
-        owner_service_id: UUID | None = None,
-        tenant_id: UUID | None = None,
-        include_transcription: bool = True,
-    ) -> list[File]: ...
+        owner: FileOwner,
+    ) -> list[FileMetadata]: ...
+
+    async def get_infos_by_ids(self, file_ids: list[UUID]) -> list[FileInfo]: ...
 
 
 class _RuntimeUploadRepositoryProtocol(Protocol):
@@ -205,13 +202,13 @@ async def validate_submitted_step_inputs(
                 for file_id in requested_file_ids
             )
         )
-        files = await file_repo.get_list_by_id_for_owner(
+        owned_files = await file_repo.get_list_by_id_and_owner(
             ids=all_requested_file_ids,
-            owner_type=principal.principal_type.value,
-            owner_user_id=principal.principal_user_id,
-            owner_service_id=principal.principal_service_id,
-            tenant_id=tenant_id,
-            include_transcription=False,
+            owner=principal.file_owner(tenant_id=tenant_id),
+        )
+        owned_file_ids = {file.id for file in owned_files}
+        files = await file_repo.get_infos_by_ids(
+            [file_id for file_id in all_requested_file_ids if file_id in owned_file_ids]
         )
         file_by_id = {file.id: file for file in files}
         resolved_ids = set(file_by_id)

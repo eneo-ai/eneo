@@ -2,7 +2,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
-  import { Braces } from "lucide-svelte";
+  import Braces from "lucide-svelte/icons/braces";
   import type { AdvancedJsonField } from "./advancedJsonDrafts";
 
   let {

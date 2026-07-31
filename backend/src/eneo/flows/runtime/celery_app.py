@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from typing import Any, cast
 
 from celery import Celery  # pyright: ignore[reportMissingTypeStubs]
@@ -28,6 +29,8 @@ from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.main.observability import init_observability
+from eneo.object_content.content import ObjectContentUnavailableError
+from eneo.object_content.runtime import object_content_runtime
 from eneo.worker.celery import create_celery_app as create_shared_celery_app
 
 logger = get_logger(__name__)
@@ -123,9 +126,34 @@ def flow_maintenance_queue_has_live_consumer(*, timeout_seconds: float = 1.0) ->
     return False
 
 
+async def _start_flow_worker_async_resources() -> None:
+    object_content_runtime.start()
+    try:
+        await object_content_runtime.validate_configuration()
+    except ObjectContentUnavailableError:
+        # Match API startup semantics: a transient storage dependency outage
+        # keeps the process live while task execution fails explicitly until
+        # readiness recovers.
+        pass
+    aiohttp_client.start()
+
+
+async def _close_flow_worker_async_resources() -> None:
+    await object_content_runtime.stop()
+    await aiohttp_client.stop()
+    await sessionmanager.close()
+
+
+def _run_on_flow_task_loop(coroutine: Coroutine[Any, Any, None]) -> None:
+    # Import lazily because the task module owns the process-long async loop and
+    # imports this Celery application during registration.
+    from eneo.flows.runtime.tasks import get_flow_task_loop
+
+    asyncio.run_coroutine_threadsafe(coroutine, get_flow_task_loop()).result()
+
+
 def _close_flow_worker_resources() -> None:
-    asyncio.run(aiohttp_client.stop())
-    asyncio.run(sessionmanager.close())
+    _run_on_flow_task_loop(_close_flow_worker_async_resources())
 
 
 @worker_process_init.connect  # pyright: ignore[reportUnknownMemberType]
@@ -133,7 +161,7 @@ def _on_flow_worker_process_init(*_args: Any, **_kwargs: Any) -> None:  # pyrigh
     init_observability()
     settings = get_settings()
     sessionmanager.init(settings.database_url)
-    aiohttp_client.start()
+    _run_on_flow_task_loop(_start_flow_worker_async_resources())
     logger.info("Initialized flow celery worker process resources")
 
 

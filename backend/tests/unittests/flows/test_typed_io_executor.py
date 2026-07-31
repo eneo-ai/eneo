@@ -28,6 +28,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
 )
+from eneo.files.file_models import FileType
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
@@ -111,6 +112,8 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     space_repo = AsyncMock()
     completion_service = AsyncMock()
     file_repo = AsyncMock()
+    file_content_loader = AsyncMock()
+    file_service = AsyncMock()
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     flow_run_terminalizer = SimpleNamespace()
@@ -136,6 +139,8 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
         space_repo=space_repo,
         completion_service=completion_service,
         file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=file_service,
         template_asset_repo=template_asset_repo,
         encryption_service=encryption_service,
         flow_run_terminalizer=flow_run_terminalizer,
@@ -3193,7 +3198,7 @@ async def test_render_verbatim_renders_input_text_without_llm_or_rag(user):
         return_value=([], {"status": "should_not_run"}, [])
     )
     stored_file = SimpleNamespace(id=uuid4())
-    executor.file_repo.add = AsyncMock(return_value=stored_file)
+    executor.file_service.save_generated_file = AsyncMock(return_value=stored_file)
 
     output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
@@ -3206,6 +3211,7 @@ async def test_render_verbatim_renders_input_text_without_llm_or_rag(user):
     assert output.model_parameters_json == {"mode": "render_verbatim"}
     assert output.artifacts is not None
     assert output.artifacts[0]["file_id"] == str(stored_file.id)
+    executor.file_service.save_generated_file.assert_awaited_once()
     assert any(d.code == "render_verbatim_used" for d in output.diagnostics)
 
 
@@ -3411,7 +3417,7 @@ async def test_document_outputs_generate_downloadable_artifacts(
     step = _runtime_step(output_type=output_type)
 
     stored_file = SimpleNamespace(id=uuid4())
-    executor.file_repo.add = AsyncMock(return_value=stored_file)
+    executor.file_service.save_generated_file = AsyncMock(return_value=stored_file)
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step(response_text="Rapport")
     )
@@ -3425,6 +3431,12 @@ async def test_document_outputs_generate_downloadable_artifacts(
     assert artifact["mimetype"] == expected_mimetype
     assert artifact["name"].endswith(expected_ext)
     assert artifact["size"] > 0
+    executor.file_service.save_generated_file.assert_awaited_once_with(
+        payload=f"{output_type}:Rapport".encode(),
+        name=f"flow-step-{step.step_order}{expected_ext}",
+        mimetype=expected_mimetype,
+        file_type=FileType.DOCUMENT,
+    )
 
 
 @pytest.mark.asyncio
@@ -3435,7 +3447,7 @@ async def test_docx_output_handles_empty_assistant_response(user):
     step = _runtime_step(output_type="docx")
 
     stored_file = SimpleNamespace(id=uuid4())
-    executor.file_repo.add = AsyncMock(return_value=stored_file)
+    executor.file_service.save_generated_file = AsyncMock(return_value=stored_file)
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step(response_text="")
     )
@@ -3448,6 +3460,7 @@ async def test_docx_output_handles_empty_assistant_response(user):
         output.artifacts[0]["mimetype"]
         == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+    executor.file_service.save_generated_file.assert_awaited_once()
 
 
 # --- Audit logging tests for HTTP input ---

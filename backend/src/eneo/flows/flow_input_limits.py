@@ -3,11 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
-from eneo.main.logging import get_logger
-
-logger = get_logger(__name__)
 
 FLOW_INPUT_MIN_LIMIT_BYTES = 1
 FLOW_INPUT_MAX_LIMIT_BYTES = 2 * 1024**3
@@ -40,19 +36,28 @@ class FlowInputLimitsSource(Protocol):
     async def get_flow_input_limits_resolved(self) -> FlowInputLimits: ...
 
 
+class FlowInputLimitDefaults(Protocol):
+    @property
+    def session_file_maximum_bytes(self) -> int: ...
+
+    @property
+    def session_audio_maximum_bytes(self) -> int: ...
+
+
 async def resolve_flow_input_limits_from_source(
     source: FlowInputLimitsSource | None,
 ) -> FlowInputLimits:
-    if source is not None:
-        return await source.get_flow_input_limits_resolved()
-    return resolve_flow_input_limits(None)
+    if source is None:
+        raise RuntimeError("A Flow input limits source is required")
+    return await source.get_flow_input_limits_resolved()
 
 
-def _default_limits(defaults: Any | None = None) -> FlowInputLimits:
-    source = defaults or get_settings()
+def _default_limits(defaults: FlowInputLimitDefaults | None) -> FlowInputLimits:
+    if defaults is None:
+        raise RuntimeError("Flow input limit defaults are required")
     return FlowInputLimits(
-        file_max_size_bytes=int(source.upload_max_file_size),
-        audio_max_size_bytes=int(source.transcription_max_file_size),
+        file_max_size_bytes=defaults.session_file_maximum_bytes,
+        audio_max_size_bytes=defaults.session_audio_maximum_bytes,
         max_files_per_run=None,
         audio_max_files_per_run=DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     )
@@ -127,9 +132,9 @@ def validate_flow_input_limits_object(input_limits: Any) -> dict[str, Any]:
 def resolve_flow_input_limits(
     tenant_flow_settings: dict[str, Any] | None,
     *,
-    defaults: Any | None = None,
+    defaults: FlowInputLimitDefaults | None = None,
 ) -> FlowInputLimits:
-    """Resolve effective flow input limits with tolerant fallback behavior."""
+    """Resolve tenant policy beneath the current upload-admission ceiling."""
     resolved_defaults = _default_limits(defaults)
     input_limits = _extract_input_limits(tenant_flow_settings)
 
@@ -137,26 +142,16 @@ def resolve_flow_input_limits(
     audio_limit = resolved_defaults.audio_max_size_bytes
 
     if "file_max_size_bytes" in input_limits:
-        try:
-            file_limit = _parse_limit(
-                input_limits["file_max_size_bytes"], "file_max_size_bytes"
-            )
-        except BadRequestException:
-            logger.warning(
-                "Ignoring invalid tenant flow setting: file_max_size_bytes",
-                extra={"value": input_limits.get("file_max_size_bytes")},
-            )
+        file_limit = min(
+            _parse_limit(input_limits["file_max_size_bytes"], "file_max_size_bytes"),
+            resolved_defaults.file_max_size_bytes,
+        )
 
     if "audio_max_size_bytes" in input_limits:
-        try:
-            audio_limit = _parse_limit(
-                input_limits["audio_max_size_bytes"], "audio_max_size_bytes"
-            )
-        except BadRequestException:
-            logger.warning(
-                "Ignoring invalid tenant flow setting: audio_max_size_bytes",
-                extra={"value": input_limits.get("audio_max_size_bytes")},
-            )
+        audio_limit = min(
+            _parse_limit(input_limits["audio_max_size_bytes"], "audio_max_size_bytes"),
+            resolved_defaults.audio_max_size_bytes,
+        )
 
     max_files = resolved_defaults.max_files_per_run
     audio_max_files = resolved_defaults.audio_max_files_per_run
@@ -166,30 +161,18 @@ def resolve_flow_input_limits(
         if raw is None:
             max_files = None  # explicit null means unlimited
         else:
-            try:
-                max_files = _parse_optional_file_count(
-                    raw, "max_files_per_run", FLOW_INPUT_MAX_FILES_COUNT
-                )
-            except BadRequestException:
-                logger.warning(
-                    "Ignoring invalid tenant flow setting: max_files_per_run",
-                    extra={"value": raw},
-                )
+            max_files = _parse_optional_file_count(
+                raw, "max_files_per_run", FLOW_INPUT_MAX_FILES_COUNT
+            )
 
     if "audio_max_files_per_run" in input_limits:
         raw = input_limits["audio_max_files_per_run"]
         if raw is None:
             audio_max_files = None
         else:
-            try:
-                audio_max_files = _parse_optional_file_count(
-                    raw, "audio_max_files_per_run", FLOW_INPUT_MAX_AUDIO_FILES_COUNT
-                )
-            except BadRequestException:
-                logger.warning(
-                    "Ignoring invalid tenant flow setting: audio_max_files_per_run",
-                    extra={"value": raw},
-                )
+            audio_max_files = _parse_optional_file_count(
+                raw, "audio_max_files_per_run", FLOW_INPUT_MAX_AUDIO_FILES_COUNT
+            )
 
     return FlowInputLimits(
         file_max_size_bytes=file_limit,

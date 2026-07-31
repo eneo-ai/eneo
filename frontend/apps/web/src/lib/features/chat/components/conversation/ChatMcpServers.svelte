@@ -16,7 +16,8 @@
   import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Plug, ShieldCheck } from "lucide-svelte";
+  import Plug from "lucide-svelte/icons/plug";
+  import ShieldCheck from "lucide-svelte/icons/shield-check";
   import type { SvelteSet } from "svelte/reactivity";
 
   type McpServer = {

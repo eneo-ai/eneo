@@ -15,7 +15,11 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Bot, AppWindow, LayoutGrid, FileText, Search } from "lucide-svelte";
+  import Bot from "lucide-svelte/icons/bot";
+  import AppWindow from "lucide-svelte/icons/app-window";
+  import LayoutGrid from "lucide-svelte/icons/layout-grid";
+  import FileText from "lucide-svelte/icons/file-text";
+  import Search from "lucide-svelte/icons/search";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";

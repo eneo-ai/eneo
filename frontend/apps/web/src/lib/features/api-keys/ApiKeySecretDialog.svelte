@@ -1,6 +1,9 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, Check, Copy, Key } from "lucide-svelte";
+  import AlertCircle from "lucide-svelte/icons/alert-circle";
+  import Check from "lucide-svelte/icons/check";
+  import Copy from "lucide-svelte/icons/copy";
+  import Key from "lucide-svelte/icons/key";
   import { toast } from "svelte-sonner";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";

@@ -1,6 +1,5 @@
 export type HttpTestVariablesParseResult =
-  | { ok: true; value: Record<string, unknown> }
-  | { ok: false };
+  { ok: true; value: Record<string, unknown> } | { ok: false };
 
 export function parseHttpTestVariables(raw: string): HttpTestVariablesParseResult {
   const trimmed = raw.trim();

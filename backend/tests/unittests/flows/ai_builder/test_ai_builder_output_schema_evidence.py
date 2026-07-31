@@ -218,6 +218,29 @@ def test_selection_ignores_question_payload_on_wrong_tool() -> None:
     assert resolution.conflict_pending is True
 
 
+def test_selection_fails_closed_for_non_json_persisted_arguments() -> None:
+    first = _candidate("decision", 1)
+    second = _candidate("count", 2)
+
+    resolution = resolve_attachment_output_schema(
+        conversation=_selection_conversation(
+            (first, second),
+            selected_values=[second.fingerprint],
+            options=[
+                {
+                    "id": second.fingerprint,
+                    "value": object(),
+                }
+            ],
+        ),
+        candidates=(first, second),
+        authoritative_evidence=None,
+    )
+
+    assert resolution.conflict_pending is True
+    assert resolution.evidence is None
+
+
 def test_example_output_inference_builds_an_open_conservative_schema() -> None:
     source = ExampleOutputJsonSource(
         file_id=UUID(int=1),

@@ -14,11 +14,15 @@ Scope enforcement defaults to True (env flag + feature flag fail-closed).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import UploadFile
 
-from eneo.files.file_models import FileCreate, FileType
+from eneo.authentication.principal_types import PrincipalType
+from eneo.server.dependencies.container import load_container_upload_admission
 from eneo.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
@@ -174,6 +178,7 @@ async def _seed_info_blob(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 group_id=UUID(group_id),
+                content_hash=sha256(text.encode("utf-8")).digest(),
             )
         )
     return str(blob.id)
@@ -230,21 +235,15 @@ async def _create_user(db_container, *, tenant_id: UUID):
 async def _create_user_owned_file(
     db_container,
     *,
-    user_id: UUID,
-    tenant_id: UUID,
+    user,
 ) -> str:
-    async with db_container() as container:
-        repo = container.file_repo()
-        file = await repo.add(
-            FileCreate(
-                name=f"owned-{uuid4().hex[:8]}.txt",
-                checksum=uuid4().hex,
-                size=13,
-                mimetype="text/plain",
-                file_type=FileType.TEXT,
-                text="owned content",
-                user_id=user_id,
-                tenant_id=tenant_id,
+    async with db_container(user=user) as container:
+        await load_container_upload_admission(container)
+        file = await container.file_service().save_file(
+            UploadFile(
+                file=BytesIO(b"owned content"),
+                filename=f"owned-{uuid4().hex[:8]}.txt",
+                headers={"content-type": "text/plain"},
             )
         )
     return str(file.id)
@@ -879,8 +878,7 @@ async def test_space_scoped_user_key_cannot_delete_another_users_file(
     other_user = await _create_user(db_container, tenant_id=default_user.tenant_id)
     file_id = await _create_user_owned_file(
         db_container,
-        user_id=other_user.id,
-        tenant_id=default_user.tenant_id,
+        user=other_user,
     )
     space = await _create_space(api_client, token=bearer_token)
     key = await _create_api_key(
@@ -899,7 +897,8 @@ async def test_space_scoped_user_key_cannot_delete_another_users_file(
 
     async with db_container() as container:
         file = await container.file_repo().get_by_id(file_id=UUID(file_id))
-    assert file.user_id == other_user.id
+    assert file.owner_type is PrincipalType.USER
+    assert file.owner_user_id == other_user.id
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,15 @@ type TextMatch = {
   end: number;
 };
 
+type NativeHighlightRuntime = {
+  CSS?: { highlights?: HighlightRegistry };
+  Highlight?: typeof Highlight;
+};
+
+function getNativeHighlightRuntime(): NativeHighlightRuntime {
+  return globalThis;
+}
+
 export function createDocumentHighlighter(container: HTMLElement): FlowDocumentHighlighter {
   if (supportsNativeHighlights()) {
     return new NativeHighlighter(container);
@@ -30,10 +39,7 @@ export function createDocumentHighlighter(container: HTMLElement): FlowDocumentH
 }
 
 function supportsNativeHighlights(): boolean {
-  const runtime = globalThis as {
-    CSS?: { highlights?: { set: (name: string, value: unknown) => void; delete: (name: string) => void } };
-    Highlight?: new (...ranges: Range[]) => unknown;
-  };
+  const runtime = getNativeHighlightRuntime();
   return Boolean(runtime.CSS?.highlights && runtime.Highlight);
 }
 
@@ -98,8 +104,8 @@ class NativeHighlighter implements FlowDocumentHighlighter {
   }
 
   highlight(groups: HighlightGroupInput[]): number {
-    const highlights = (globalThis as any).CSS?.highlights;
-    const HighlightCtor = (globalThis as any).Highlight as (new (...ranges: Range[]) => unknown) | undefined;
+    const { CSS: css, Highlight: HighlightCtor } = getNativeHighlightRuntime();
+    const highlights = css?.highlights;
     if (!highlights || !HighlightCtor) {
       return 0;
     }
@@ -138,7 +144,7 @@ class NativeHighlighter implements FlowDocumentHighlighter {
   }
 
   clearGroup(group: string): void {
-    (globalThis as any).CSS?.highlights?.delete(group);
+    getNativeHighlightRuntime().CSS?.highlights?.delete(group);
     this.rangeMap.delete(group);
     if (this.currentGroup === group) {
       this.currentGroup = "chunk-match";
@@ -148,7 +154,7 @@ class NativeHighlighter implements FlowDocumentHighlighter {
 
   clearAll(): void {
     for (const group of this.rangeMap.keys()) {
-      (globalThis as any).CSS?.highlights?.delete(group);
+      getNativeHighlightRuntime().CSS?.highlights?.delete(group);
     }
     this.rangeMap.clear();
     this.currentGroup = "chunk-match";
@@ -196,7 +202,7 @@ class NativeHighlighter implements FlowDocumentHighlighter {
     const containerRect = this.container.getBoundingClientRect();
     this.container.scrollTo({
       top: rect.top - containerRect.top + this.container.scrollTop - 80,
-      behavior: "smooth",
+      behavior: "smooth"
     });
   }
 }
@@ -289,7 +295,7 @@ class FallbackHighlighter implements FlowDocumentHighlighter {
 
   scrollToNextMatch(): void {
     const marks = Array.from(
-      this.container.querySelectorAll(`mark[data-highlight-group="${this.currentGroup}"]`),
+      this.container.querySelectorAll(`mark[data-highlight-group="${this.currentGroup}"]`)
     );
     if (marks.length === 0) {
       return;
@@ -300,7 +306,7 @@ class FallbackHighlighter implements FlowDocumentHighlighter {
 
   scrollToPrevMatch(): void {
     const marks = Array.from(
-      this.container.querySelectorAll(`mark[data-highlight-group="${this.currentGroup}"]`),
+      this.container.querySelectorAll(`mark[data-highlight-group="${this.currentGroup}"]`)
     );
     if (marks.length === 0) {
       return;

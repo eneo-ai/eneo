@@ -1,0 +1,629 @@
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, Response
+
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_dependencies import require_session_auth
+from eneo.main.container.container import Container
+from eneo.main.models import CursorPaginatedResponse
+from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
+from eneo.skills.domain.skill import (
+    DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
+    MAX_SKILL_ADOPTION_PAGE_LIMIT,
+    PersonalChatPinAdvanceOutcome,
+)
+from eneo.skills.presentation.skill_audit import (
+    audit_skill_created,
+    skill_audit_extra,
+)
+from eneo.skills.presentation.skill_models import (
+    AppFleetAdvanceCountsPublic,
+    AppFleetAdvancePublic,
+    AppFleetAdvanceRequest,
+    AppPinAdvanceOutcomePublic,
+    AssistantFleetAdvanceCountsPublic,
+    AssistantFleetAdvancePublic,
+    AssistantFleetAdvanceRequest,
+    AssistantPinAdvanceOutcomePublic,
+    OrganizationSkillPublic,
+    OrganizationSkillSummaryPagePublic,
+    PersonalChatPinAdvancePublic,
+    PersonalChatPinAdvanceRequest,
+    PublishedSkillPublic,
+    PublishedSkillSummaryPagePublic,
+    SkillAdoptionProjectionPagePublic,
+    SkillCreateRequest,
+    SkillPublishRequest,
+    SkillRevisionCreateRequest,
+    SkillRevisionPublic,
+    SkillRevisionRestorePublic,
+    SkillRevisionRestoreRequest,
+    SkillRevisionSummaryPublic,
+)
+
+router = APIRouter(
+    prefix="/skills",
+    tags=["skills"],
+    dependencies=[Depends(require_session_auth)],
+)
+
+_ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+_DEFAULT_PAGE_LIMIT = 25
+_MAX_PAGE_LIMIT = 100
+
+
+@router.get(
+    "/catalogue/",
+    response_model=PublishedSkillSummaryPagePublic,
+    description="List approved Skills in the current tenant's catalogue.",
+    responses=responses.get_responses([403]),
+)
+async def list_catalogue(
+    container: _ContainerWithUser,
+    limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_LIMIT)] = _DEFAULT_PAGE_LIMIT,
+    cursor: str | None = None,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+) -> PublishedSkillSummaryPagePublic:
+    page = await container.organization_skill_service().list_catalogue(
+        limit=limit,
+        cursor=cursor,
+        search=search,
+    )
+    assembler = container.skill_assembler()
+    return PublishedSkillSummaryPagePublic(
+        items=[assembler.published_summary_to_public(skill) for skill in page.items],
+        limit=page.limit,
+        next_cursor=page.next_cursor,
+    )
+
+
+@router.get(
+    "/catalogue/{skill_id}/",
+    response_model=PublishedSkillPublic,
+    description="Open the exact approved revision of a catalogue Skill.",
+    responses=responses.get_responses([403, 404]),
+)
+async def get_catalogue_skill(
+    skill_id: UUID,
+    container: _ContainerWithUser,
+) -> PublishedSkillPublic:
+    skill = await container.organization_skill_service().get_catalogue_skill(
+        skill_id=skill_id
+    )
+    return container.skill_assembler().published_to_public(skill)
+
+
+@router.get(
+    "/organization/",
+    response_model=OrganizationSkillSummaryPagePublic,
+    description="List organisation Skill drafts and publication status.",
+    responses=responses.get_responses([403]),
+)
+async def list_organization_skills(
+    container: _ContainerWithUser,
+    limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_LIMIT)] = _DEFAULT_PAGE_LIMIT,
+    cursor: str | None = None,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+) -> OrganizationSkillSummaryPagePublic:
+    page = await container.organization_skill_service().list_organization_skills(
+        limit=limit,
+        cursor=cursor,
+        search=search,
+    )
+    assembler = container.skill_assembler()
+    return OrganizationSkillSummaryPagePublic(
+        items=[
+            assembler.organization_summary_to_public(projection)
+            for projection in page.items
+        ],
+        limit=page.limit,
+        next_cursor=page.next_cursor,
+    )
+
+
+@router.post(
+    "/organization/",
+    response_model=OrganizationSkillPublic,
+    status_code=201,
+    description="Create an organisation Skill draft.",
+    responses=responses.get_responses([400, 403, 409]),
+)
+async def create_organization_skill(
+    payload: SkillCreateRequest,
+    container: _ContainerWithUser,
+) -> OrganizationSkillPublic:
+    skill = await container.organization_skill_service().create_organization_skill(
+        slug=payload.slug,
+        display_name=payload.display_name,
+        description=payload.description,
+        instructions=payload.instructions,
+    )
+    await audit_skill_created(container=container, skill=skill)
+    projection = (
+        await container.organization_skill_service().project_organization_skill(
+            skill=skill
+        )
+    )
+    return container.skill_assembler().organization_to_public(projection)
+
+
+@router.get(
+    "/organization/{skill_id}/",
+    response_model=OrganizationSkillPublic,
+    responses=responses.get_responses([403, 404]),
+)
+async def get_organization_skill(
+    skill_id: UUID,
+    container: _ContainerWithUser,
+) -> OrganizationSkillPublic:
+    projection = (
+        await container.organization_skill_service().get_organization_skill_projection(
+            skill_id=skill_id
+        )
+    )
+    return container.skill_assembler().organization_to_public(projection)
+
+
+@router.get(
+    "/organization/{skill_id}/adoption/",
+    response_model=SkillAdoptionProjectionPagePublic,
+    description=(
+        "List structural Assistant and App adoption of an organisation Skill, "
+        "with full-result revision totals."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def get_organization_skill_adoption(
+    skill_id: UUID,
+    container: _ContainerWithUser,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=MAX_SKILL_ADOPTION_PAGE_LIMIT),
+    ] = DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+) -> SkillAdoptionProjectionPagePublic:
+    projection = await container.organization_skill_service().get_adoption_projection(
+        skill_id=skill_id,
+        limit=limit,
+        cursor=cursor,
+    )
+    return container.skill_assembler().adoption_projection_to_public(projection)
+
+
+@router.get(
+    "/organization/{skill_id}/revisions/",
+    response_model=CursorPaginatedResponse[SkillRevisionSummaryPublic],
+    description="List immutable revisions of an organisation Skill.",
+    responses=responses.get_responses([403, 404]),
+)
+async def list_organization_skill_revisions(
+    skill_id: UUID,
+    container: _ContainerWithUser,
+    limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_LIMIT)] = _DEFAULT_PAGE_LIMIT,
+    cursor: Annotated[str | None, Query(pattern=r"^[1-9]\d*$")] = None,
+) -> CursorPaginatedResponse[SkillRevisionSummaryPublic]:
+    page = await container.organization_skill_service().list_revision_summaries(
+        skill_id=skill_id,
+        limit=limit,
+        cursor=cursor,
+    )
+    assembler = container.skill_assembler()
+    return CursorPaginatedResponse(
+        items=[
+            assembler.revision_summary_to_public(revision) for revision in page.items
+        ],
+        limit=page.limit,
+        next_cursor=str(page.next_cursor) if page.next_cursor is not None else None,
+        previous_cursor=None,
+        total_count=page.total_count,
+    )
+
+
+@router.get(
+    "/organization/{skill_id}/revisions/{revision_id}/",
+    response_model=SkillRevisionPublic,
+    description="Open one immutable organisation Skill revision.",
+    responses=responses.get_responses([403, 404]),
+)
+async def get_organization_skill_revision(
+    skill_id: UUID,
+    revision_id: UUID,
+    container: _ContainerWithUser,
+) -> SkillRevisionPublic:
+    revision = await container.organization_skill_service().get_revision(
+        skill_id=skill_id,
+        revision_id=revision_id,
+    )
+    return container.skill_assembler().revision_to_public(revision)
+
+
+@router.post(
+    "/organization/{skill_id}/revisions/",
+    response_model=SkillRevisionPublic,
+    status_code=201,
+    description=(
+        "Create the next immutable organisation Skill revision; identical current "
+        "content is a no-op."
+    ),
+    responses={
+        200: {
+            "model": SkillRevisionPublic,
+            "description": "The submitted content already matches the current revision.",
+        },
+        **responses.get_responses([400, 403, 404]),
+    },
+)
+async def create_organization_skill_revision(
+    skill_id: UUID,
+    payload: SkillRevisionCreateRequest,
+    container: _ContainerWithUser,
+    response: Response,
+) -> SkillRevisionPublic:
+    change = await container.organization_skill_service().create_revision(
+        skill_id=skill_id,
+        display_name=payload.display_name,
+        description=payload.description,
+        instructions=payload.instructions,
+    )
+    revision = change.revision
+    if not change.created:
+        response.status_code = 200
+    else:
+        skill = change.skill
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.SKILL_REVISION_CREATED,
+            entity_type=EntityType.SKILL,
+            entity_id=skill.id,
+            description=(
+                f"Created revision {revision.revision_number} of Skill "
+                f"'{revision.display_name}'"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=skill,
+                changes={
+                    "current_revision": {
+                        "old": change.previous_revision_number,
+                        "new": revision.revision_number,
+                    }
+                },
+                extra={
+                    **skill_audit_extra(skill),
+                    "skill_revision_id": str(revision.id),
+                    "content_digest": revision.content_digest,
+                    "instruction_length": len(revision.instructions),
+                },
+            ),
+        )
+    return container.skill_assembler().revision_to_public(revision)
+
+
+@router.post(
+    "/organization/{skill_id}/revisions/{source_revision_id}/restore/",
+    response_model=SkillRevisionRestorePublic,
+    description="Restore historical content as the next immutable revision.",
+    responses=responses.get_responses([403, 404, 409]),
+)
+async def restore_organization_skill_revision(
+    skill_id: UUID,
+    source_revision_id: UUID,
+    payload: SkillRevisionRestoreRequest,
+    container: _ContainerWithUser,
+) -> SkillRevisionRestorePublic:
+    outcome = await container.organization_skill_service().restore_revision(
+        skill_id=skill_id,
+        source_revision_id=source_revision_id,
+        reviewed_current_revision_id=payload.reviewed_current_revision_id,
+    )
+    revision = outcome.change.revision
+    if outcome.change.created:
+        skill = outcome.change.skill
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.SKILL_REVISION_RESTORED,
+            entity_type=EntityType.SKILL,
+            entity_id=skill.id,
+            description=(
+                f"Restored revision {outcome.source_revision.revision_number} "
+                f"of Skill '{revision.display_name}' as revision "
+                f"{revision.revision_number}"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=skill,
+                changes={
+                    "current_revision": {
+                        "old": outcome.change.previous_revision_number,
+                        "new": revision.revision_number,
+                    }
+                },
+                extra={
+                    **skill_audit_extra(skill),
+                    "skill_revision_id": str(revision.id),
+                    "restored_from_revision_id": str(outcome.source_revision.id),
+                    "restored_from_revision_number": (
+                        outcome.source_revision.revision_number
+                    ),
+                    "content_digest": revision.content_digest,
+                    "instruction_length": len(revision.instructions),
+                },
+            ),
+        )
+    return SkillRevisionRestorePublic(
+        revision=container.skill_assembler().revision_to_public(revision),
+        created=outcome.change.created,
+        restored_from_revision_id=outcome.source_revision.id,
+        restored_from_revision_number=outcome.source_revision.revision_number,
+    )
+
+
+@router.post(
+    "/organization/{skill_id}/publish/",
+    response_model=OrganizationSkillPublic,
+    description="Publish the exact organisation Skill revision just reviewed.",
+    responses=responses.get_responses([403, 404, 409]),
+)
+async def publish_organization_skill(
+    skill_id: UUID,
+    payload: SkillPublishRequest,
+    container: _ContainerWithUser,
+) -> OrganizationSkillPublic:
+    change = await container.organization_skill_service().publish(
+        skill_id=skill_id,
+        expected_revision_id=payload.expected_revision_id,
+    )
+    if change.changed:
+        skill = change.skill
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.SKILL_PUBLISHED,
+            entity_type=EntityType.SKILL,
+            entity_id=skill.id,
+            description=(
+                f"Published revision {skill.published_revision_number} "
+                f"of Skill '{skill.current_revision.display_name}'"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=skill,
+                changes={
+                    "published_revision_number": {
+                        "old": change.previous_published_revision_number,
+                        "new": skill.published_revision_number,
+                    },
+                    "is_active": {
+                        "old": change.previous_is_active,
+                        "new": skill.is_active,
+                    },
+                },
+                extra=skill_audit_extra(skill),
+            ),
+        )
+    projection = (
+        await container.organization_skill_service().project_organization_skill(
+            skill=change.skill
+        )
+    )
+    return container.skill_assembler().organization_to_public(projection)
+
+
+@router.post(
+    "/organization/{skill_id}/personal-chat/advance/",
+    response_model=PersonalChatPinAdvancePublic,
+    description=(
+        "Move the Personal Chat binding of this Skill to its currently "
+        "published revision. Guarded by the pinned revision the "
+        "administrator reviewed, so a concurrent binding change is refused "
+        "instead of overwritten."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def advance_personal_chat_binding(
+    skill_id: UUID,
+    payload: PersonalChatPinAdvanceRequest,
+    container: _ContainerWithUser,
+) -> PersonalChatPinAdvancePublic:
+    service = container.organization_skill_service()
+    advance = await service.advance_personal_chat_binding(
+        skill_id=skill_id,
+        expected_pinned_revision_id=payload.expected_pinned_revision_id,
+        expected_published_revision_id=payload.expected_published_revision_id,
+    )
+    # The service raises for every refusal outcome; only these two can
+    # return, and both always carry the revision numbers.
+    assert advance.outcome in (
+        PersonalChatPinAdvanceOutcome.ADVANCED,
+        PersonalChatPinAdvanceOutcome.ALREADY_CURRENT,
+    )
+    assert advance.from_revision_number is not None
+    assert advance.to_revision_number is not None
+    if advance.outcome is PersonalChatPinAdvanceOutcome.ADVANCED:
+        skill = await service.get_organization_skill(skill_id=skill_id)
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.SKILL_BINDINGS_ADVANCED,
+            entity_type=EntityType.SKILL,
+            entity_id=skill.id,
+            description=(
+                f"Moved the Personal Chat binding of Skill "
+                f"'{skill.current_revision.display_name}' to published "
+                f"revision {advance.to_revision_number}"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=skill,
+                changes={
+                    "personal_chat_revision_number": {
+                        "old": advance.from_revision_number,
+                        "new": advance.to_revision_number,
+                    },
+                },
+                extra={**skill_audit_extra(skill), "surface": "personal_chat"},
+            ),
+        )
+    return PersonalChatPinAdvancePublic(
+        outcome=advance.outcome,
+        from_revision_number=advance.from_revision_number,
+        to_revision_number=advance.to_revision_number,
+    )
+
+
+@router.post(
+    "/organization/{skill_id}/assistants/advance/",
+    response_model=AssistantFleetAdvancePublic,
+    description=(
+        "Move one bounded chunk of Assistant bindings to the reviewed "
+        "published Skill revision."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def advance_assistant_bindings(
+    skill_id: UUID,
+    payload: AssistantFleetAdvanceRequest,
+    container: _ContainerWithUser,
+) -> AssistantFleetAdvancePublic:
+    outcome = await container.organization_skill_service().advance_assistant_bindings(
+        skill_id=skill_id,
+        expected_published_revision_id=payload.expected_published_revision_id,
+        cursor=payload.cursor,
+    )
+    return AssistantFleetAdvancePublic(
+        run_id=outcome.run_id,
+        next_cursor=outcome.cursor.serialize() if outcome.cursor is not None else None,
+        counts=AssistantFleetAdvanceCountsPublic(
+            advanced=outcome.advanced_count,
+            concurrent_change=outcome.concurrent_change_count,
+            incompatible=outcome.incompatible_count,
+        ),
+        outcomes=[
+            AssistantPinAdvanceOutcomePublic(
+                assistant_id=result.assistant_id,
+                outcome=result.outcome,
+                reason=result.reason,
+            )
+            for result in outcome.results
+        ],
+    )
+
+
+@router.post(
+    "/organization/{skill_id}/apps/advance/",
+    response_model=AppFleetAdvancePublic,
+    description=(
+        "Move one bounded chunk of App bindings to the reviewed published "
+        "Skill revision. Existing queued App runs keep their retained revision."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def advance_app_bindings(
+    skill_id: UUID,
+    payload: AppFleetAdvanceRequest,
+    container: _ContainerWithUser,
+) -> AppFleetAdvancePublic:
+    outcome = await container.organization_skill_service().advance_app_bindings(
+        skill_id=skill_id,
+        expected_published_revision_id=payload.expected_published_revision_id,
+        cursor=payload.cursor,
+    )
+    return AppFleetAdvancePublic(
+        run_id=outcome.run_id,
+        next_cursor=outcome.cursor.serialize() if outcome.cursor is not None else None,
+        counts=AppFleetAdvanceCountsPublic(
+            advanced=outcome.advanced_count,
+            concurrent_change=outcome.concurrent_change_count,
+            incompatible=outcome.incompatible_count,
+        ),
+        outcomes=[
+            AppPinAdvanceOutcomePublic(
+                app_id=result.app_id,
+                outcome=result.outcome,
+                reason=result.reason,
+            )
+            for result in outcome.results
+        ],
+    )
+
+
+@router.post(
+    "/organization/{skill_id}/unpublish/",
+    response_model=OrganizationSkillPublic,
+    description="Remove an organisation Skill from new catalogue use.",
+    responses=responses.get_responses([403, 404]),
+)
+async def unpublish_organization_skill(
+    skill_id: UUID,
+    container: _ContainerWithUser,
+) -> OrganizationSkillPublic:
+    change = await container.organization_skill_service().unpublish(skill_id=skill_id)
+    if change.changed:
+        skill = change.skill
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.SKILL_UNPUBLISHED,
+            entity_type=EntityType.SKILL,
+            entity_id=skill.id,
+            description=f"Unpublished Skill '{skill.current_revision.display_name}'",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=skill,
+                changes={
+                    "published_revision_number": {
+                        "old": change.previous_published_revision_number,
+                        "new": None,
+                    },
+                    "is_active": {
+                        "old": change.previous_is_active,
+                        "new": skill.is_active,
+                    },
+                },
+                extra=skill_audit_extra(skill),
+            ),
+        )
+    projection = (
+        await container.organization_skill_service().project_organization_skill(
+            skill=change.skill
+        )
+    )
+    return container.skill_assembler().organization_to_public(projection)
+
+
+@router.delete(
+    "/organization/{skill_id}/",
+    status_code=204,
+    description="Delete an eligible organisation Skill draft.",
+    responses=responses.get_responses([403, 404, 409]),
+)
+async def delete_organization_skill(
+    skill_id: UUID,
+    container: _ContainerWithUser,
+) -> None:
+    skill = await container.organization_skill_service().delete(skill_id=skill_id)
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.SKILL_DELETED,
+        entity_type=EntityType.SKILL,
+        entity_id=skill.id,
+        description=f"Deleted Skill '{skill.current_revision.display_name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=skill,
+            extra=skill_audit_extra(skill),
+        ),
+    )

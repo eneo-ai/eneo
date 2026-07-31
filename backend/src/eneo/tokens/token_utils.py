@@ -17,6 +17,8 @@ import base64
 import io
 import json
 import logging
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Optional, cast
 
 import litellm
@@ -35,6 +37,17 @@ _FALLBACK_MESSAGE_OVERHEAD_TOKENS = 4
 # Fallback when an image's dimensions cannot be read: the cost of a 2048×1024
 # upload (files are stored downscaled to at most 2048px on the long edge).
 _FALLBACK_IMAGE_TOKENS = openai_image_tokens(2048, 1024)
+
+
+class TokenCountSource(StrEnum):
+    LITELLM = "litellm"
+    FALLBACK_ESTIMATE = "fallback_estimate"
+
+
+@dataclass(frozen=True)
+class TokenCount:
+    tokens: int
+    source: TokenCountSource
 
 
 def count_image_tokens(width: int, height: int, model_name: str = "") -> int:
@@ -154,33 +167,93 @@ def _fallback_message_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
-def count_message_tokens(messages: list[dict[str, Any]], model_name: str = "") -> int:
-    """Count tokens for OpenAI-format chat messages.
+def _fallback_tool_tokens(tools: list[dict[str, Any]]) -> int:
+    return len(json.dumps(tools)) // 4
+
+
+def _measure_messages_with_litellm(
+    messages: list[dict[str, Any]],
+    model_name: str,
+) -> int:
+    stripped, image_tokens = _split_image_blocks(messages, model_name)
+    text_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
+        model=model_name,
+        messages=stripped,
+    )
+    return text_tokens + image_tokens
+
+
+def measure_message_tokens(
+    messages: list[dict[str, Any]], model_name: str = ""
+) -> TokenCount:
+    """Measure OpenAI-format chat messages and identify the counter used.
 
     Includes per-message scaffolding overhead and image_url content blocks,
     so the input must have the same shape as the payload sent to the provider.
     """
     if not messages:
-        return 0
+        return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
 
     try:
-        stripped, image_tokens = _split_image_blocks(messages, model_name)
-        text_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
-            model=model_name, messages=stripped
+        return TokenCount(
+            tokens=_measure_messages_with_litellm(messages, model_name),
+            source=TokenCountSource.LITELLM,
         )
-        return text_tokens + image_tokens
     except Exception as e:
         logger.error(
             f"Message token counting failed for model '{model_name}' "
             f"({len(messages)} messages), using fallback estimate: {e}"
         )
-        return _fallback_message_tokens(messages)
+        return TokenCount(
+            tokens=_fallback_message_tokens(messages),
+            source=TokenCountSource.FALLBACK_ESTIMATE,
+        )
 
 
-def count_tool_tokens(tools: list[dict[str, Any]], model_name: str = "") -> int:
-    """Count tokens consumed by tool/function definitions sent with a request."""
+def measure_message_token_delta(
+    base_messages: list[dict[str, Any]],
+    composed_messages: list[dict[str, Any]],
+    model_name: str = "",
+) -> TokenCount:
+    """Measure a message delta without mixing tokenization strategies."""
+    if base_messages == composed_messages:
+        return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
+
+    try:
+        base_tokens = _measure_messages_with_litellm(base_messages, model_name)
+        composed_tokens = _measure_messages_with_litellm(
+            composed_messages,
+            model_name,
+        )
+        source = TokenCountSource.LITELLM
+    except Exception as error:
+        logger.error(
+            "Message token delta failed for model '%s'; recomputing both "
+            "messages with the fallback estimate: %s",
+            model_name,
+            error,
+        )
+        base_tokens = _fallback_message_tokens(base_messages)
+        composed_tokens = _fallback_message_tokens(composed_messages)
+        source = TokenCountSource.FALLBACK_ESTIMATE
+
+    return TokenCount(
+        tokens=max(composed_tokens - base_tokens, 0),
+        source=source,
+    )
+
+
+def count_message_tokens(messages: list[dict[str, Any]], model_name: str = "") -> int:
+    """Count tokens for OpenAI-format chat messages."""
+    return measure_message_tokens(messages, model_name).tokens
+
+
+def measure_tool_tokens(
+    tools: list[dict[str, Any]], model_name: str = ""
+) -> TokenCount:
+    """Measure tool definitions and identify the counter used."""
     if not tools:
-        return 0
+        return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
 
     try:
         with_tools = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
@@ -191,14 +264,57 @@ def count_tool_tokens(tools: list[dict[str, Any]], model_name: str = "") -> int:
         without_tools = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
             model=model_name, messages=[{"role": "user", "content": ""}]
         )
-        return max(with_tools - without_tools, 0)
+        return TokenCount(
+            tokens=max(with_tools - without_tools, 0),
+            source=TokenCountSource.LITELLM,
+        )
     except Exception as e:
-        serialized = json.dumps(tools)
         logger.error(
             f"Tool token counting failed for model '{model_name}' "
             f"({len(tools)} tools), falling back to len//4: {e}"
         )
-        return len(serialized) // 4
+        return TokenCount(
+            tokens=_fallback_tool_tokens(tools),
+            source=TokenCountSource.FALLBACK_ESTIMATE,
+        )
+
+
+def measure_provider_input_tokens(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    model_name: str = "",
+) -> TokenCount:
+    """Measure the exact chat messages and tools proposed for one provider call."""
+
+    stripped_messages, image_tokens = _split_image_blocks(messages, model_name)
+    try:
+        payload_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
+            model=model_name,
+            messages=stripped_messages,
+            tools=tools,  # pyright: ignore[reportArgumentType]  # litellm accepts plain dicts
+        )
+        return TokenCount(
+            tokens=payload_tokens + image_tokens,
+            source=TokenCountSource.LITELLM,
+        )
+    except Exception as error:
+        logger.error(
+            "Provider input token counting failed for model '%s' "
+            "(%d messages, %d tools), using one fallback estimate: %s",
+            model_name,
+            len(messages),
+            len(tools),
+            error,
+        )
+        return TokenCount(
+            tokens=_fallback_message_tokens(messages) + _fallback_tool_tokens(tools),
+            source=TokenCountSource.FALLBACK_ESTIMATE,
+        )
+
+
+def count_tool_tokens(tools: list[dict[str, Any]], model_name: str = "") -> int:
+    """Count tokens consumed by tool/function definitions sent with a request."""
+    return measure_tool_tokens(tools, model_name).tokens
 
 
 def count_assistant_prompt_tokens(prompt: Optional[str], model_name: str) -> int:

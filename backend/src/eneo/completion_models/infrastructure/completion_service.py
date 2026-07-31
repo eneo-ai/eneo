@@ -4,6 +4,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal, Optional, TypeAlias
+from uuid import UUID
 
 import redis.asyncio as aioredis
 
@@ -22,6 +23,8 @@ from eneo.completion_models.domain.provider_call_observer import (
     ProviderCallObserver,
     ProviderCallReason,
 )
+from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
+from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
@@ -29,7 +32,9 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import SETTINGS, Settings, get_settings
+from eneo.main.exceptions import ProviderInactiveException
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.mcp_servers.infrastructure.proxy import (
     MCPProxySession,
     MCPProxySessionFactory,
@@ -41,18 +46,26 @@ from eneo.tokens.token_utils import log_token_count_drift
 from eneo.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
-    from eneo.completion_models.domain.completion_model import (
-        CompletionModel as DomainCompletionModel,
+    from eneo.completion_models.infrastructure.adapters.base_adapter import (
+        CompletionModelAdapter,
     )
     from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+        TenantCompletionModel,
         TenantModelAdapter,
     )
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.database.database import AsyncSession
     from eneo.main.container.container import Container
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+        MCPServerToolRepository,
+    )
+    from eneo.model_providers.infrastructure.litellm_provider import (
+        ResolvedLiteLLMProvider,
+    )
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
+    from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -267,18 +280,27 @@ class CompletionContextPreview:
     model_route: str
 
 
+@dataclass(frozen=True)
+class SkillActivationPreflightAdapterLoad:
+    adapters: dict[UUID, "CompletionModelAdapter"]
+    unavailable_model_ids: frozenset[UUID]
+
+
 class CompletionService:
     def __init__(
         self,
         context_builder: ContextBuilder,
         tenant: Optional["TenantInDB"] = None,
+        user: Optional["UserInDB"] = None,
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
         redis_client: Optional[aioredis.Redis] = None,
+        mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
+        self.user = user
         self.config = config or SETTINGS
         if encryption_service is None:
             encryption_settings: Settings | None = (
@@ -288,6 +310,7 @@ class CompletionService:
         self.encryption_service = encryption_service
         self.session = session
         self.redis_client = redis_client
+        self.mcp_server_tool_repo = mcp_server_tool_repo
         self._mcp_proxy_factory = MCPProxySessionFactory(
             encryption_service=self.encryption_service
         )
@@ -295,7 +318,7 @@ class CompletionService:
 
     async def _get_adapter(
         self,
-        model: CompletionModel | DomainCompletionModel,
+        model: "TenantCompletionModel",
     ) -> "TenantModelAdapter":
         """
         Get the adapter for the given model.
@@ -303,9 +326,6 @@ class CompletionService:
         All models must have a provider_id linking to a ModelProvider.
         Uses TenantModelAdapter which routes through LiteLLM.
         """
-        from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
-            TenantModelAdapter,
-        )
         from eneo.model_providers.infrastructure.litellm_provider import (
             load_active_litellm_provider,
         )
@@ -343,6 +363,18 @@ class CompletionService:
             provider_id=model.provider_id,
             tenant_id=self.tenant.id,
         )
+        return self._create_tenant_model_adapter(model=model, provider=provider)
+
+    def _create_tenant_model_adapter(
+        self,
+        *,
+        model: "TenantCompletionModel",
+        provider: "ResolvedLiteLLMProvider",
+    ) -> "TenantModelAdapter":
+        from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+            TenantModelAdapter,
+        )
+
         credential_resolver = provider.create_credential_resolver(
             self.encryption_service
         )
@@ -366,7 +398,7 @@ class CompletionService:
 
     async def resolve_model_route(
         self,
-        model: CompletionModel | DomainCompletionModel,
+        model: "TenantCompletionModel",
     ) -> ResolvedCompletionModelRoute:
         adapter = await self._get_adapter(model)
         litellm_model, litellm_kwargs = adapter.resolve_litellm_params()
@@ -382,6 +414,118 @@ class CompletionService:
     ) -> StructuredOutputCapabilityDecision:
         adapter = await self._get_adapter(model)
         return adapter.resolve_structured_output_capability()
+
+    async def prepare_skill_activation_preflight(
+        self,
+        *,
+        model: CompletionModel,
+        prompt: str,
+        prompt_files: list[File],
+        mcp_servers: list["MCPServer"],
+        skill_runtime: SkillActivationRuntime,
+        adapter: "CompletionModelAdapter | None" = None,
+    ) -> ProviderInput:
+        """Build a deterministic upper bound for save-time activation checks.
+
+        The persisted, permission-filtered MCP catalogue is used without live
+        discovery or a network connection. Runtime still performs the final
+        per-user check after live tool narrowing.
+        """
+        if adapter is None:
+            adapter = await self._get_adapter(model)
+        enabled_servers = [server for server in mcp_servers if server.is_enabled]
+        mcp_proxy: MCPProxySession | None = None
+        if enabled_servers and model.supports_tool_calling:
+            mcp_proxy = self._mcp_proxy_factory.create(
+                enabled_servers,
+                identity_headers=build_identity_headers(self.user, self.tenant),
+                mcp_server_tool_repo=self.mcp_server_tool_repo,
+            )
+
+        try:
+            context = self.context_builder.build_context(
+                input_str="",
+                max_tokens=adapter.get_token_limit_of_model(),
+                model_name=adapter.get_model_route(),
+                prompt=prompt,
+                prompt_files=prompt_files,
+                mcp_tools=(
+                    [skill_runtime.tool_definition]
+                    if skill_runtime.tool_definition is not None
+                    else None
+                ),
+                extra_tool_dicts=(
+                    mcp_proxy.get_tools_for_llm() if mcp_proxy is not None else None
+                ),
+                vision=model.vision,
+            )
+            return adapter.prepare_provider_input(
+                context,
+                mcp_proxy=mcp_proxy,
+                skill_runtime=skill_runtime,
+            )
+        finally:
+            if mcp_proxy is not None:
+                await mcp_proxy.close()
+
+    async def load_skill_activation_preflight_adapters(
+        self,
+        models: Sequence[CompletionModel],
+        *,
+        allow_inactive_providers: bool = False,
+    ) -> SkillActivationPreflightAdapterLoad:
+        """Load each distinct model adapter once for one save-time preflight."""
+        from eneo.model_providers.infrastructure.litellm_provider import (
+            load_active_litellm_provider,
+        )
+
+        adapters: dict[UUID, CompletionModelAdapter] = {}
+        providers: dict[UUID, ResolvedLiteLLMProvider] = {}
+        inactive_provider_ids: set[UUID] = set()
+        unavailable_model_ids: set[UUID] = set()
+        for model in models:
+            if model.id in adapters:
+                continue
+            if not model.provider_id:
+                raise ValueError(
+                    f"Model '{model.name}' is missing required provider_id. "
+                    "All models must be associated with a ModelProvider."
+                )
+            if not self.session:
+                raise ValueError(
+                    f"Model '{model.name}' requires database session to load provider credentials. "
+                    "Please ensure the CompletionService is initialized with a database session."
+                )
+            if self.tenant is None:
+                raise ValueError(
+                    f"Model '{model.name}' requires tenant context to load its provider."
+                )
+            if model.provider_id in inactive_provider_ids:
+                unavailable_model_ids.add(model.id)
+                continue
+            provider = providers.get(model.provider_id)
+            if provider is None:
+                try:
+                    provider = await load_active_litellm_provider(
+                        session=self.session,
+                        provider_id=model.provider_id,
+                        tenant_id=self.tenant.id,
+                    )
+                except ProviderInactiveException:
+                    if not allow_inactive_providers:
+                        raise
+                    inactive_provider_ids.add(model.provider_id)
+                    unavailable_model_ids.add(model.id)
+                    continue
+                providers[model.provider_id] = provider
+            adapters[model.id] = self._create_tenant_model_adapter(
+                model=model,
+                provider=provider,
+            )
+        return SkillActivationPreflightAdapterLoad(
+            adapters=adapters,
+            unavailable_model_ids=frozenset(unavailable_model_ids),
+        )
 
     @staticmethod
     def is_valid_arguments(arguments: str):
@@ -507,6 +651,7 @@ class CompletionService:
         reject_context_over_limit: bool = False,
         provider_call_observer: ProviderCallObserver | None = None,
         provider_call_reason: ProviderCallReason = "initial",
+        skill_runtime: SkillActivationRuntime | None = None,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -537,6 +682,11 @@ class CompletionService:
         model_adapter = await self._get_adapter(model)
         if model_kwargs is not None:
             model_kwargs = model_kwargs.filter_unsupported(model.supported_model_kwargs)
+        initial_skill_tokens = (
+            skill_runtime.snapshot().measurement.tokens
+            if skill_runtime is not None
+            else 0
+        )
 
         # Make sure everything fits in the context of the model
         max_tokens = model_adapter.get_token_limit_of_model()
@@ -555,11 +705,18 @@ class CompletionService:
         # every MCP server, with no per-server-kind branching.
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
+            # Build the acting user/tenant identity headers once; each client
+            # forwards them only to its server when forward_identity is set.
+            identity_headers = build_identity_headers(self.user, self.tenant)
             mcp_proxy = self._mcp_proxy_factory.create(
                 mcp_servers,
                 chat_session_id=session.id if session is not None else None,
                 db_session=self.session,
+                identity_headers=identity_headers,
+                mcp_server_tool_repo=self.mcp_server_tool_repo,
             )
+            if model.supports_tool_calling:
+                await mcp_proxy.prepare_tools_for_context()
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
             )
@@ -578,6 +735,12 @@ class CompletionService:
                 version=version,
                 use_image_generation=use_image_generation,
                 web_search_results=web_search_results,
+                mcp_tools=(
+                    [skill_runtime.tool_definition]
+                    if skill_runtime is not None
+                    and skill_runtime.tool_definition is not None
+                    else None
+                ),
                 vision=model.vision,
                 extra_tool_dicts=(
                     mcp_proxy.get_tools_for_llm()
@@ -609,7 +772,10 @@ class CompletionService:
                     mcp_proxy=mcp_proxy,
                     provider_call_observer=provider_call_observer,
                     provider_call_reason=provider_call_reason,
+                    skill_runtime=skill_runtime,
                 )
+                adapter_input_estimate = completion.input_token_estimate
+                usage = completion.usage
             finally:
                 # Ensure cleanup for non-streaming
                 if mcp_proxy:
@@ -623,6 +789,7 @@ class CompletionService:
                     context=context,
                     model_kwargs=model_kwargs,
                     mcp_proxy=mcp_proxy,
+                    skill_runtime=skill_runtime,
                 )
             except BaseException:
                 # If stream prep fails, close the proxy here — the streaming_wrapper's
@@ -696,12 +863,27 @@ class CompletionService:
                         await mcp_proxy.close()
 
             completion = self._handle_tool_call(streaming_wrapper())
+            adapter_input_estimate = None
+            usage = None
 
-        usage = getattr(completion, "usage", None) if not stream else None
+        final_skill_tokens = (
+            skill_runtime.snapshot().measurement.tokens
+            if skill_runtime is not None
+            else 0
+        )
+        total_token_count = (
+            adapter_input_estimate
+            if adapter_input_estimate is not None
+            else context.token_count
+            + max(
+                final_skill_tokens - initial_skill_tokens,
+                0,
+            )
+        )
         if usage is not None:
             log_token_count_drift(
                 model_name=model_adapter.get_model_route(),
-                predicted=context.token_count,
+                predicted=total_token_count,
                 actual=usage.prompt_tokens,
             )
 
@@ -709,7 +891,7 @@ class CompletionService:
             completion=completion,
             model=model,
             extended_logging=logging_details,
-            total_token_count=context.token_count,
+            total_token_count=total_token_count,
             usage=usage,
         )
 

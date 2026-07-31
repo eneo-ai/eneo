@@ -6,6 +6,7 @@ const meta: MetaRecord = {
   architecture: "Architecture",
   flows: "Eneo Flows",
   "flows-for-developers": "Flows for Developers",
+  "object-content-architecture": "Object Content Architecture",
   "audit-logging": "Audit Logging",
   "api-key-management": "API Key Management",
   "release-sboms": "Release SBOMs",

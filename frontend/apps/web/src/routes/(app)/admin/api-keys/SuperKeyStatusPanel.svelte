@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { AlertCircle } from "lucide-svelte";
+  import AlertCircle from "lucide-svelte/icons/alert-circle";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";

@@ -1,10 +1,8 @@
 <script lang="ts">
-  import {
-    Calendar as CalendarIcon,
-    AlertTriangle,
-    Infinity as InfinityIcon,
-    ChevronDown
-  } from "lucide-svelte";
+  import CalendarIcon from "lucide-svelte/icons/calendar";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import InfinityIcon from "lucide-svelte/icons/infinity";
+  import ChevronDown from "lucide-svelte/icons/chevron-down";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";

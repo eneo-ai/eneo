@@ -17,15 +17,13 @@
   import { IconInfo } from "@eneo/icons/info";
   import { IconCopy } from "@eneo/icons/copy";
   import { IconCheck } from "@eneo/icons/check";
-  import {
-    CircleCheck,
-    CircleX,
-    Calendar,
-    Shield,
-    FileText,
-    Settings,
-    Trash2
-  } from "lucide-svelte";
+  import CircleCheck from "lucide-svelte/icons/circle-check";
+  import CircleX from "lucide-svelte/icons/circle-x";
+  import Calendar from "lucide-svelte/icons/calendar";
+  import Shield from "lucide-svelte/icons/shield";
+  import FileText from "lucide-svelte/icons/file-text";
+  import Settings from "lucide-svelte/icons/settings";
+  import Trash2 from "lucide-svelte/icons/trash-2";
   import { fade, slide, scale } from "svelte/transition";
   import { onDestroy, untrack } from "svelte";
   import { getEneo } from "$lib/core/Eneo";

@@ -10,17 +10,16 @@ re-embedding, not repointing), so the lifecycle is soft-delete only:
 """
 
 from datetime import datetime, timezone
+from hashlib import sha256
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
 from eneo.database.tables.ai_models_table import EmbeddingModels
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionState
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.spaces_table import SpacesEmbeddingModels
-from eneo.embedding_models.domain.embedding_model_repo import (
-    EmbeddingModelRepository,
-)
 from eneo.embedding_models.infrastructure.embedding_model_cleanup_worker import (
     cleanup_orphaned_embedding_models,
 )
@@ -92,7 +91,7 @@ class TestEmbeddingModelSoftDelete:
             ).scalar_one()
             assert row.deleted_at is not None
 
-            repo = EmbeddingModelRepository(session, admin_user)
+            repo = container.embedding_model_repo2()
             assert all(m.id != model_id for m in await repo.all())
             assert await repo.one_or_none(model_id) is None
 
@@ -124,6 +123,9 @@ class TestEmbeddingModelSoftDelete:
             info_blob = InfoBlobs(
                 text="historical chunk",
                 size=10,
+                content_hash=sha256(b"historical chunk").digest(),
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.ACTIVE.value,
                 user_id=admin_user.id,
                 tenant_id=admin_user.tenant_id,
                 embedding_model_id=model_id,
@@ -222,6 +224,9 @@ class TestEmbeddingModelCleanupWorker:
                 InfoBlobs(
                     text="historical chunk",
                     size=10,
+                    content_hash=sha256(b"historical chunk").digest(),
+                    source_id=uuid4(),
+                    version_state=InfoBlobVersionState.ACTIVE.value,
                     user_id=admin_user.id,
                     tenant_id=admin_user.tenant_id,
                     embedding_model_id=model_id,

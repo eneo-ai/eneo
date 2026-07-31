@@ -4473,50 +4473,21 @@ async def test_ai_builder_cancel_serializes_attachment_cleanup_with_turn_accepta
             target_kind=TargetKind.CREATE,
             flow_id=None,
         )
-        existing_file_id, accepted_file_id = (
-            (
-                await container.session().execute(
-                    insert(Files)
-                    .values(
-                        [
-                            {
-                                "name": "existing.txt",
-                                "text": "existing",
-                                "blob": None,
-                                "checksum": uuid4().hex,
-                                "size": 8,
-                                "mimetype": "text/plain",
-                                "file_type": "text",
-                                "transcription": None,
-                                "owner_type": "user",
-                                "owner_user_id": user.id,
-                                "owner_service_id": None,
-                                "tenant_id": user.tenant_id,
-                                "parent_file_id": None,
-                            },
-                            {
-                                "name": "accepted.txt",
-                                "text": "accepted",
-                                "blob": None,
-                                "checksum": uuid4().hex,
-                                "size": 8,
-                                "mimetype": "text/plain",
-                                "file_type": "text",
-                                "transcription": None,
-                                "owner_type": "user",
-                                "owner_user_id": user.id,
-                                "owner_service_id": None,
-                                "tenant_id": user.tenant_id,
-                                "parent_file_id": None,
-                            },
-                        ]
-                    )
-                    .returning(Files.id)
-                )
-            )
-            .scalars()
-            .all()
+        file_service = container.file_service()
+        existing_file = await file_service.save_generated_file(
+            payload=b"existing",
+            name="existing.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
         )
+        accepted_file = await file_service.save_generated_file(
+            payload=b"accepted",
+            name="accepted.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+        )
+        existing_file_id = existing_file.id
+        accepted_file_id = accepted_file.id
         await container.session().execute(
             insert(BuilderSessionFiles).values(
                 session_id=session.id,
@@ -8326,7 +8297,10 @@ async def test_template_create_rolls_back_then_retries_and_replays_one_asset(
         )
     )
     async with db_container() as container:
-        template_file = await container.file_service().get_file_by_id(template_file_id)
+        template_file = await container.file_service().get_file_content(
+            template_file_id,
+            include_text_original_bytes=True,
+        )
         assert template_file.file_type is FileType.TEXT
         assert template_file.mimetype == DOCX_MIME
         assert template_file.blob == template_bytes

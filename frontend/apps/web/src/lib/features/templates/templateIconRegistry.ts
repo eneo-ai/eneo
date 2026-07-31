@@ -1,70 +1,68 @@
-import {
-  Archive,
-  Bell,
-  BookOpen,
-  Bot,
-  Brain,
-  Briefcase,
-  BriefcaseBusiness,
-  Building,
-  Calendar,
-  ChartColumn,
-  ChartPie,
-  CircleCheck,
-  ClipboardCheck,
-  ClipboardList,
-  Clock,
-  Code,
-  CreditCard,
-  Database,
-  DollarSign,
-  Eye,
-  Factory,
-  FileAudio,
-  FileChartColumn,
-  FileCheck,
-  FileJson,
-  FileSpreadsheet,
-  FileText,
-  FileUp,
-  FolderOpen,
-  Globe,
-  GraduationCap,
-  Handshake,
-  Heart,
-  House,
-  Image,
-  Key,
-  Landmark,
-  Layers,
-  Lightbulb,
-  ListChecks,
-  Lock,
-  Mail,
-  MapPin,
-  Megaphone,
-  MessageSquare,
-  Music,
-  Newspaper,
-  Package,
-  Rocket,
-  Scale,
-  Search,
-  Settings,
-  Shield,
-  ShieldCheck,
-  ShoppingCart,
-  Sparkles,
-  Star,
-  Stethoscope,
-  Truck,
-  User,
-  Users,
-  Video,
-  Workflow,
-  Wrench,
-  Zap
-} from "lucide-svelte";
+import Archive from "lucide-svelte/icons/archive";
+import Bell from "lucide-svelte/icons/bell";
+import BookOpen from "lucide-svelte/icons/book-open";
+import Bot from "lucide-svelte/icons/bot";
+import Brain from "lucide-svelte/icons/brain";
+import Briefcase from "lucide-svelte/icons/briefcase";
+import BriefcaseBusiness from "lucide-svelte/icons/briefcase-business";
+import Building from "lucide-svelte/icons/building";
+import Calendar from "lucide-svelte/icons/calendar";
+import ChartColumn from "lucide-svelte/icons/chart-column";
+import ChartPie from "lucide-svelte/icons/chart-pie";
+import CircleCheck from "lucide-svelte/icons/circle-check";
+import ClipboardCheck from "lucide-svelte/icons/clipboard-check";
+import ClipboardList from "lucide-svelte/icons/clipboard-list";
+import Clock from "lucide-svelte/icons/clock";
+import Code from "lucide-svelte/icons/code";
+import CreditCard from "lucide-svelte/icons/credit-card";
+import Database from "lucide-svelte/icons/database";
+import DollarSign from "lucide-svelte/icons/dollar-sign";
+import Eye from "lucide-svelte/icons/eye";
+import Factory from "lucide-svelte/icons/factory";
+import FileAudio from "lucide-svelte/icons/file-audio";
+import FileChartColumn from "lucide-svelte/icons/file-chart-column";
+import FileCheck from "lucide-svelte/icons/file-check";
+import FileJson from "lucide-svelte/icons/file-json";
+import FileSpreadsheet from "lucide-svelte/icons/file-spreadsheet";
+import FileText from "lucide-svelte/icons/file-text";
+import FileUp from "lucide-svelte/icons/file-up";
+import FolderOpen from "lucide-svelte/icons/folder-open";
+import Globe from "lucide-svelte/icons/globe";
+import GraduationCap from "lucide-svelte/icons/graduation-cap";
+import Handshake from "lucide-svelte/icons/handshake";
+import Heart from "lucide-svelte/icons/heart";
+import House from "lucide-svelte/icons/house";
+import Image from "lucide-svelte/icons/image";
+import Key from "lucide-svelte/icons/key";
+import Landmark from "lucide-svelte/icons/landmark";
+import Layers from "lucide-svelte/icons/layers";
+import Lightbulb from "lucide-svelte/icons/lightbulb";
+import ListChecks from "lucide-svelte/icons/list-checks";
+import Lock from "lucide-svelte/icons/lock";
+import Mail from "lucide-svelte/icons/mail";
+import MapPin from "lucide-svelte/icons/map-pin";
+import Megaphone from "lucide-svelte/icons/megaphone";
+import MessageSquare from "lucide-svelte/icons/message-square";
+import Music from "lucide-svelte/icons/music";
+import Newspaper from "lucide-svelte/icons/newspaper";
+import Package from "lucide-svelte/icons/package";
+import Rocket from "lucide-svelte/icons/rocket";
+import Scale from "lucide-svelte/icons/scale";
+import Search from "lucide-svelte/icons/search";
+import Settings from "lucide-svelte/icons/settings";
+import Shield from "lucide-svelte/icons/shield";
+import ShieldCheck from "lucide-svelte/icons/shield-check";
+import ShoppingCart from "lucide-svelte/icons/shopping-cart";
+import Sparkles from "lucide-svelte/icons/sparkles";
+import Star from "lucide-svelte/icons/star";
+import Stethoscope from "lucide-svelte/icons/stethoscope";
+import Truck from "lucide-svelte/icons/truck";
+import User from "lucide-svelte/icons/user";
+import Users from "lucide-svelte/icons/users";
+import Video from "lucide-svelte/icons/video";
+import Workflow from "lucide-svelte/icons/workflow";
+import Wrench from "lucide-svelte/icons/wrench";
+import Zap from "lucide-svelte/icons/zap";
 
 type TemplateIconComponent = typeof Rocket;
 

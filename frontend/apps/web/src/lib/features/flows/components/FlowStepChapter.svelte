@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack, type Snippet } from "svelte";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
-  import { ChevronDown } from "lucide-svelte";
+  import ChevronDown from "lucide-svelte/icons/chevron-down";
   import { cn } from "$lib/utils.js";
 
   // A collapsible chapter that groups related step sections. Renders as a flat

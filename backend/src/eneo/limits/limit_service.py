@@ -7,15 +7,21 @@ from eneo.files.mime_support import (
     supported_text_mimes,
 )
 from eneo.limits.limit import AttachmentLimits, FormatLimit, InfoBlobLimits, Limits
-from eneo.main.config import get_settings
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 if TYPE_CHECKING:
     from eneo.settings.setting_service import SettingService
 
 
 class LimitService:
-    def __init__(self, *, settings_service: "SettingService") -> None:
+    def __init__(
+        self,
+        *,
+        settings_service: "SettingService",
+        upload_admission: UploadAdmissionSnapshot,
+    ) -> None:
         self.settings_service = settings_service
+        self.upload_admission = upload_admission
 
     def _get_info_blob_limits(self) -> InfoBlobLimits:
         formats: list[FormatLimit] = []
@@ -24,7 +30,7 @@ class LimitService:
             formats.append(
                 FormatLimit(
                     mimetype=item,
-                    size=get_settings().upload_max_file_size,
+                    size=self.upload_admission.knowledge_file_maximum_bytes,
                     extensions=MIMETYPE_EXTENSIONS_MAPPER[item],
                     vision=False,
                 )
@@ -34,7 +40,7 @@ class LimitService:
             formats.append(
                 FormatLimit(
                     mimetype=item,
-                    size=get_settings().transcription_max_file_size,
+                    size=self.upload_admission.knowledge_audio_maximum_bytes,
                     extensions=MIMETYPE_EXTENSIONS_MAPPER[item],
                     vision=False,
                 )
@@ -49,7 +55,7 @@ class LimitService:
             formats.append(
                 FormatLimit(
                     mimetype=item,
-                    size=get_settings().upload_file_to_session_max_size,
+                    size=self.upload_admission.session_file_maximum_bytes,
                     extensions=MIMETYPE_EXTENSIONS_MAPPER[item],
                     vision=False,
                 )
@@ -59,7 +65,7 @@ class LimitService:
             formats.append(
                 FormatLimit(
                     mimetype=item,
-                    size=get_settings().upload_image_to_session_max_size,
+                    size=self.upload_admission.session_image_maximum_bytes,
                     extensions=MIMETYPE_EXTENSIONS_MAPPER[item],
                     vision=True,
                 )

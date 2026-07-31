@@ -30,6 +30,7 @@ async def test_update_assistant_rejects_flow_managed_mutation():
         await update_assistant(
             id=assistant_id,
             assistant=AssistantUpdatePublic(),
+            request=SimpleNamespace(state=SimpleNamespace(api_key=None)),
             container=container,
         )
 

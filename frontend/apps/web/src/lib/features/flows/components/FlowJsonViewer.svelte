@@ -2,6 +2,7 @@
   type JsonTokenKind = "key" | "string" | "number" | "literal" | "punctuation" | "whitespace";
 
   type JsonToken = {
+    offset: number;
     kind: JsonTokenKind;
     text: string;
   };
@@ -35,12 +36,12 @@
       if (/\s/.test(char)) {
         const start = index;
         while (index < json.length && /\s/.test(json[index])) index += 1;
-        nextTokens.push({ kind: "whitespace", text: json.slice(start, index) });
+        nextTokens.push({ offset: start, kind: "whitespace", text: json.slice(start, index) });
         continue;
       }
 
       if ("{}[]:,".includes(char)) {
-        nextTokens.push({ kind: "punctuation", text: char });
+        nextTokens.push({ offset: index, kind: "punctuation", text: char });
         index += 1;
         continue;
       }
@@ -63,6 +64,7 @@
         let lookahead = index;
         while (lookahead < json.length && /\s/.test(json[lookahead])) lookahead += 1;
         nextTokens.push({
+          offset: start,
           kind: json[lookahead] === ":" ? "key" : "string",
           text: json.slice(start, index)
         });
@@ -70,11 +72,9 @@
       }
 
       if (char === "-" || /\d/.test(char)) {
-        const match = json
-          .slice(index)
-          .match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+        const match = json.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/);
         if (match) {
-          nextTokens.push({ kind: "number", text: match[0] });
+          nextTokens.push({ offset: index, kind: "number", text: match[0] });
           index += match[0].length;
           continue;
         }
@@ -84,12 +84,12 @@
         json.startsWith(candidate, index)
       );
       if (literal) {
-        nextTokens.push({ kind: "literal", text: literal });
+        nextTokens.push({ offset: index, kind: "literal", text: literal });
         index += literal.length;
         continue;
       }
 
-      nextTokens.push({ kind: "string", text: char });
+      nextTokens.push({ offset: index, kind: "string", text: char });
       index += 1;
     }
 
@@ -116,5 +116,7 @@
 
 <pre
   aria-label={ariaLabel}
-  class="border-default bg-hover-dimmer mt-1 overflow-auto rounded-lg border p-3 font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-words tabular-nums {maxHeightClass} {className}"
-><code>{#each tokens as token}<span class={tokenClass(token.kind)}>{token.text}</span>{/each}</code></pre>
+  class="border-default bg-hover-dimmer mt-1 overflow-auto rounded-lg border p-3 font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-words tabular-nums {maxHeightClass} {className}"><code
+    >{#each tokens as token (token.offset)}<span class={tokenClass(token.kind)}>{token.text}</span
+      >{/each}</code
+  ></pre>

@@ -31,6 +31,25 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def _predefined_role_permissions(role_name: str) -> list[str]:
+    """Load bootstrap permissions from the canonical predefined-role template."""
+    from eneo.server.dependencies.predefined_roles import (
+        load_predefined_roles_from_config,
+    )
+
+    role = next(
+        (
+            template
+            for template in load_predefined_roles_from_config()
+            if template["name"] == role_name
+        ),
+        None,
+    )
+    if role is None:
+        raise RuntimeError(f"Missing predefined role template: {role_name}")
+    return list(role["permissions"])
+
+
 # Alembic command
 def run_alembic_migrations():
     try:
@@ -105,21 +124,7 @@ def add_tenant_user(
         role = cur.fetchone()
 
         if role is None:
-            owner_permissions = [
-                "admin",
-                "personal_chat",
-                "assistants",
-                "group_chats",
-                "apps",
-                "services",
-                "collections",
-                "insights",
-                "AI",
-                "websites",
-                "integrations",
-                "shared_spaces",
-                "api_keys",
-            ]
+            owner_permissions = _predefined_role_permissions("Owner")
             add_role_query = sql.SQL(
                 "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "
                 "VALUES (%s, %s, %s, %s) RETURNING id"

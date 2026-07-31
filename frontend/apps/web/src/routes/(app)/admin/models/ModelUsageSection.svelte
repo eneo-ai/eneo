@@ -11,7 +11,7 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
-  import { Loader2 } from "lucide-svelte";
+  import Loader2 from "lucide-svelte/icons/loader-2";
   import { Button } from "$lib/components/ui/button/index.js";
   import ModelUsageBreakdown from "./ModelUsageBreakdown.svelte";
   import type { UsageDetail } from "./usage";

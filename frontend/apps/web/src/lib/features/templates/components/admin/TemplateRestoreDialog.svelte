@@ -10,7 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo.js";
   import { invalidate } from "$app/navigation";
-  import { Undo } from "lucide-svelte";
+  import Undo from "lucide-svelte/icons/undo";
   import type { Writable } from "svelte/store";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];

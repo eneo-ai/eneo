@@ -10,7 +10,7 @@ from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.assistant_table import AssistantsGroups
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.service_table import ServicesGroups
 from eneo.database.tables.users_table import Users
 from eneo.groups_legacy.api.group_models import Group, GroupCreate, GroupUpdate
@@ -57,7 +57,7 @@ class GroupRepository:
     async def update_group_size(self, group_id: UUID) -> Group | None:
         info_blobs_size_subquery = (
             sa.select(sa.func.coalesce(sa.func.sum(InfoBlobs.size), 0))
-            .where(InfoBlobs.group_id == group_id)
+            .where(InfoBlobs.group_id == group_id, active_info_blob_version())
             .scalar_subquery()
         )
 

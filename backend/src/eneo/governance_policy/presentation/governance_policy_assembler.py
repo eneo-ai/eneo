@@ -13,12 +13,18 @@ from eneo.governance_policy.presentation.governance_policy_models import (
     PolicyCompletionModelPublic,
     PolicyMcpServerPublic,
     PromptEnforcementPublic,
+    SkillsPolicyPublic,
 )
+from eneo.skills.domain.skill import SkillBindingProjection
+from eneo.skills.presentation.skill_assembler import SkillAssembler
 
 
 class GovernancePolicyAssembler:
     @staticmethod
-    def to_public(policy: GovernancePolicy) -> GovernancePolicyPublic:
+    def to_public(
+        policy: GovernancePolicy,
+        skill_bindings: list[SkillBindingProjection] | None = None,
+    ) -> GovernancePolicyPublic:
         return GovernancePolicyPublic(
             models_restriction=ModelsRestrictionPublic(
                 enabled=policy.models_restriction_enabled,
@@ -45,6 +51,12 @@ class GovernancePolicyAssembler:
             prompt_enforcement=PromptEnforcementPublic(
                 enabled=policy.prompt_enforcement_enabled,
                 prompt_library_id=policy.default_prompt_library_id,
+            ),
+            skills=SkillsPolicyPublic(
+                bindings=[
+                    SkillAssembler.assistant_binding_to_summary(binding)
+                    for binding in (skill_bindings or [])
+                ]
             ),
             updated_at=policy.updated_at,
             updated_by_user_id=policy.updated_by_user_id,

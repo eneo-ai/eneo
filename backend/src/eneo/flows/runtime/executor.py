@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 from dataclasses import dataclass, field, replace
@@ -19,8 +18,10 @@ from eneo.completion_models.domain.provider_call_observer import (
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import count_tokens
-from eneo.files.file_models import FileCreate, FileType
+from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_models import FileType
 from eneo.files.file_repo import FileRepository
+from eneo.files.file_service import FileService
 from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationResult,
     FlowRunTerminalizer,
@@ -114,7 +115,6 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import (
     PublishedDefinitionChecksumMismatchError,
     parse_verified_published_definition,
@@ -462,6 +462,8 @@ class FlowRunExecutor:
         space_repo: SpaceRepository,
         completion_service: CompletionService,
         file_repo: FileRepository,
+        file_content_loader: FileContentLoader,
+        file_service: FileService,
         template_asset_repo: FlowTemplateAssetRepository,
         encryption_service: EncryptionService,
         flow_run_terminalizer: FlowRunTerminalizer,
@@ -503,6 +505,8 @@ class FlowRunExecutor:
         self.space_repo = space_repo
         self.completion_service = completion_service
         self.file_repo = file_repo
+        self.file_content_loader = file_content_loader
+        self.file_service = file_service
         self.template_asset_repo = template_asset_repo
         self.encryption_service = encryption_service
         self.max_inline_text_bytes = resolved_config.max_inline_text_bytes
@@ -1269,8 +1273,9 @@ class FlowRunExecutor:
         return TemplateFillRuntimeDeps(
             variable_resolver=self.variable_resolver,
             file_repo=self.file_repo,
+            file_content_loader=self.file_content_loader,
+            file_service=self.file_service,
             template_asset_repo=self.template_asset_repo,
-            principal=self.principal,
             logger=logger,
         )
 
@@ -2427,8 +2432,7 @@ class FlowRunExecutor:
         )
 
         deps = OutputRuntimeDeps(
-            file_repo=self.file_repo,
-            principal=self.principal,
+            file_service=self.file_service,
             compile_validators=compile_validators,
             parse_json_output=parse_json_output,
             validate_against_contract=validate_against_contract,
@@ -2456,20 +2460,11 @@ class FlowRunExecutor:
         if len(encoded) <= self.max_inline_text_bytes:
             return text, []
 
-        owner_fields = FlowPrincipal.from_run(run).file_owner_fields()
-        file_row = await self.file_repo.add(
-            FileCreate.model_validate(
-                {
-                    "name": f"flow-{run.id}-step-{step.step_order}-output.txt",
-                    "checksum": hashlib.sha256(encoded).hexdigest(),
-                    "size": len(encoded),
-                    "mimetype": "text/plain",
-                    "file_type": FileType.TEXT,
-                    "text": text,
-                    **owner_fields,
-                    "tenant_id": run.tenant_id,
-                }
-            )
+        file_row = await self.file_service.save_generated_file(
+            payload=encoded,
+            name=f"flow-{run.id}-step-{step.step_order}-output.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
         )
         return _utf8_prefix(text, max_bytes=self.max_inline_text_bytes), [file_row.id]
 

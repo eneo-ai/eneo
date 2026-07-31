@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -268,10 +269,8 @@ def _make_file(
         text=text,
         blob=None,
         transcription=None,
-        owner_type=None,
+        owner_type=PrincipalType.USER,
         owner_user_id=uuid4(),
-        owner_api_key_id=None,
-        user_id=uuid4(),
         tenant_id=uuid4(),
     )
 

@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import tracemalloc
+from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -36,8 +37,8 @@ from eneo.data_retention.infrastructure.data_retention_service import (
     RETENTION_BATCH_SIZE,
 )
 from eneo.database.tables.flow_tables import FlowRuns
-from eneo.files.file_models import FileCreate, FileType
-from eneo.files.file_repo import FileRepository
+from eneo.files.file_models import FileType
+from eneo.files.file_service import FileService
 from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_evidence_service import (
     EMBEDDED_PROVIDER_CALL_LIMIT,
@@ -93,13 +94,17 @@ HEAVY_ATTEMPT_COUNT = HEAVY_STEP_COUNT * HEAVY_ATTEMPTS_PER_STEP
 HEAVY_PROBE_RUNS = 1
 PAGE_LIMIT = 50
 DEEP_OFFSET = 250
-# Run page, result-file hydration, live and retained token aggregation, and
+# Run page, result-file rows, live and retained token aggregation, and
 # final-output versions. Both token sources share one fixed-cost statement.
-RUN_LISTING_STATEMENT_COUNT = 4
-# Access resolution, section measurements, bounded section loads, and the run
-# token-usage projection are fixed-cost per bundle; none scales in statement
-# count with the number of steps, attempts, provider calls, or sources.
-EVIDENCE_QUERY_COUNT = 26
+# A page that contains result files adds one durable-content-reference query;
+# an empty result-file projection deliberately skips it.
+RUN_LISTING_BASE_STATEMENT_COUNT = 4
+RUN_LISTING_RESULT_FILE_REFERENCE_STATEMENT_COUNT = 1
+# Access resolution, section measurements, bounded section loads, immutable
+# resolved-input lineage, durable file projections, and run token usage are
+# fixed-cost per bundle; none scales in statement count with the number of
+# steps, attempts, provider calls, sources, or attached files.
+EVIDENCE_QUERY_COUNT = 30
 REPORT_PATH_ENV = "FLOW_RUN_LISTING_EVIDENCE_REPORT_PATH"
 SECRET_SENTINEL = "flow-evidence-secret-20260726"
 _BASE_TIME = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
@@ -268,28 +273,19 @@ async def _create_flow(
 
 async def _create_evidence_files(
     *,
-    session: AsyncSession,
-    principal: FlowPrincipal,
-    tenant_id: UUID,
+    file_service: FileService,
 ) -> tuple[tuple[UUID, UUID], UUID]:
-    file_repo = FileRepository(session=session)
     file_ids: list[UUID] = []
     for name, text in (
         ("flow-evidence-input-1.txt", "Representative evidence input 1"),
         ("flow-evidence-input-2.txt", "Representative evidence input 2"),
         ("flow-evidence-result.txt", "Representative evidence result"),
     ):
-        created = await file_repo.add(
-            FileCreate(
-                name=name,
-                text=text,
-                checksum=_digest(text),
-                size=len(text.encode()),
-                mimetype="text/plain",
-                file_type=FileType.TEXT,
-                tenant_id=tenant_id,
-                **principal.file_owner_fields(),
-            )
+        created = await file_service.save_generated_file(
+            payload=text.encode(),
+            name=name,
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
         )
         file_ids.append(created.id)
     return (file_ids[0], file_ids[1]), file_ids[2]
@@ -345,7 +341,7 @@ async def _write_representative_evidence(
                     schema_version=1,
                     edges=(),
                 ),
-                attempt_start=None,
+                attempt_input=None,
             )
             assert activated is not None
             provider_call = await provider_repo.start_call_for_execution(
@@ -419,6 +415,7 @@ async def _seed_workload(
     space_factory,
     assistant_factory,
     admin_user,
+    file_service: FileService,
 ) -> _SeededWorkload:
     random_source = Random(WORKLOAD_SEED)
     model = await completion_model_factory(session, "flow-evidence-measurement-model")
@@ -457,9 +454,7 @@ async def _seed_workload(
 
     principal = FlowPrincipal.from_user(admin_user)
     input_file_ids, result_file_id = await _create_evidence_files(
-        session=session,
-        principal=principal,
-        tenant_id=admin_user.tenant_id,
+        file_service=file_service,
     )
     upload_repo = FlowRuntimeUploadRepository(session=session)
     for file_id in input_file_ids:
@@ -595,6 +590,12 @@ def _decode_explain(value: object) -> dict[str, object]:
     return _json_object(value[0], label="EXPLAIN document")
 
 
+def _statement_source(statement: str) -> str:
+    normalized = " ".join(statement.split())
+    _, separator, remainder = normalized.partition(" FROM ")
+    return remainder.split(maxsplit=1)[0] if separator else "<cte>"
+
+
 def _max_actual_rows(explain: dict[str, object]) -> float:
     plan = _json_object(explain.get("Plan"), label="EXPLAIN Plan")
     rows = plan.get("Actual Rows")
@@ -619,6 +620,7 @@ async def _measure_run_listing_page(
     run_service: FlowRunService,
     flow_id: UUID,
     offset: int,
+    expected_statement_count: int,
 ) -> tuple[FlowRunPageWithResultFilesAndTokenUsage, list[dict[str, object]]]:
     bind = session.sync_session.bind
     assert bind is not None
@@ -628,7 +630,7 @@ async def _measure_run_listing_page(
             limit=PAGE_LIMIT,
             offset=offset,
         )
-    assert len(captured) == RUN_LISTING_STATEMENT_COUNT
+    assert len(captured) == expected_statement_count
 
     connection = await session.connection()
     statement_reports: list[dict[str, object]] = []
@@ -725,6 +727,7 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
             space_factory=space_factory,
             assistant_factory=assistant_factory,
             admin_user=admin_user,
+            file_service=container.file_service(),
         )
 
         measured_count = await _run_count(
@@ -749,15 +752,22 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
         await session.execute(sa.text("ANALYZE flow_runs"))
         run_service = container.flow_run_service()
         page_reports: dict[str, object] = {}
-        for name, offset, expected_has_more in (
-            ("shallow", 0, True),
-            ("deep", DEEP_OFFSET, False),
+        for name, offset, expected_has_more, expected_statement_count in (
+            (
+                "shallow",
+                0,
+                True,
+                RUN_LISTING_BASE_STATEMENT_COUNT
+                + RUN_LISTING_RESULT_FILE_REFERENCE_STATEMENT_COUNT,
+            ),
+            ("deep", DEEP_OFFSET, False, RUN_LISTING_BASE_STATEMENT_COUNT),
         ):
             page, statement_reports = await _measure_run_listing_page(
                 session=session,
                 run_service=run_service,
                 flow_id=workload.measured_flow_ids[0],
                 offset=offset,
+                expected_statement_count=expected_statement_count,
             )
             assert len(page.items) == PAGE_LIMIT
             assert page.has_more is expected_has_more
@@ -815,7 +825,13 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
             "webhook_deliveries": len(evidence_bundle.webhook_deliveries),
             "provider_calls": evidence_bundle.provider_calls.count,
         }
-        assert len(evidence_queries) == EVIDENCE_QUERY_COUNT
+        evidence_query_sources = Counter(
+            _statement_source(query.sql) for query in evidence_queries
+        )
+        assert len(evidence_queries) == EVIDENCE_QUERY_COUNT, "\n".join(
+            f"{count} × {source}"
+            for source, count in sorted(evidence_query_sources.items())
+        )
         assert section_counts["step_results"] == EVIDENCE_STEP_COUNT
         assert section_counts["step_attempts"] == ATTEMPT_COUNT
         assert section_counts["runtime_input_files"] == INPUT_FILE_COUNT

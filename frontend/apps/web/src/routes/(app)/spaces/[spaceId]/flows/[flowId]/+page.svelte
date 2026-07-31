@@ -29,7 +29,8 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { CheckCircle2, CircleAlert } from "lucide-svelte";
+  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import CircleAlert from "lucide-svelte/icons/circle-alert";
   import {
     EneoError,
     type FlowRun,

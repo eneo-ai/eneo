@@ -3,14 +3,15 @@
 # Licensed under the MIT License.
 
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
+    resolve_personal_default,
 )
+from eneo.skills.domain.skill import PersonalChatPinOverride, SkillRuntimeResolution
 
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.prompt_library.domain.prompt_library_repo import PromptLibraryRepo
+    from eneo.skills.application.skill_service import SkillService
     from eneo.users.user import UserInDB
 
 
@@ -44,12 +46,14 @@ class EffectiveConfigService:
         prompt_library_repo: "PromptLibraryRepo",
         completion_model_crud_service: "CompletionModelCRUDService",
         mcp_server_settings_service: "MCPServerSettingsService",
+        skill_service: "SkillService",
     ) -> None:
         self.user = user
         self.policy_repo = policy_repo
         self.prompt_library_repo = prompt_library_repo
         self.completion_model_crud_service = completion_model_crud_service
         self.mcp_server_settings_service = mcp_server_settings_service
+        self.skill_service = skill_service
 
     async def resolve_for(
         self, assistant: "Assistant", *, space_is_personal: bool
@@ -70,15 +74,22 @@ class EffectiveConfigService:
                 library_prompt_text=None,
             )
 
+        return await self.resolve_personal_default()
+
+    async def resolve_personal_default(
+        self,
+        *,
+        personal_chat_pin_override: PersonalChatPinOverride | None = None,
+    ) -> EffectiveConfig:
+        """Resolve the current personal-default policy without an Assistant."""
+
         # A personal default assistant maps to exactly one scope today. When
-        # finer scopes are added, derive it from (assistant, space) here.
+        # finer scopes are added, derive the scope in this service.
         policy = await self.policy_repo.get_by_tenant(
             self.user.tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
         )
         if policy is None:
-            return resolve(
-                assistant=assistant,
-                space_is_personal=space_is_personal,
+            return resolve_personal_default(
                 policy=None,
                 tenant_completion_models=[],
                 tenant_mcp_servers=[],
@@ -90,7 +101,8 @@ class EffectiveConfigService:
         # tenant_mcp_servers only when mcp_restriction_enabled. An all-disabled
         # policy row exists for any tenant whose admin merely opened the config
         # page, so skipping these keeps the chat hot path off two full-table
-        # scans per resolution. The independent fetches run concurrently.
+        # scans per resolution. These loads stay sequential because the
+        # request-scoped repositories share one SQLAlchemy AsyncSession.
         async def _load_models() -> "list[CompletionModel]":
             if not policy.models_restriction_enabled:
                 return []
@@ -113,15 +125,27 @@ class EffectiveConfigService:
             )
             return entry.text if entry is not None else None
 
-        tenant_models, tenant_mcp_servers, library_prompt_text = await asyncio.gather(
-            _load_models(), _load_mcp_servers(), _load_prompt_text()
-        )
+        async def _load_governance_skills() -> SkillRuntimeResolution:
+            if policy.id is None:
+                return SkillRuntimeResolution(eligible=(), blocked=())
+            if personal_chat_pin_override is None:
+                return await self.skill_service.resolve_governance_bindings_for_runtime(
+                    policy_id=policy.id
+                )
+            return await self.skill_service.resolve_governance_bindings_for_runtime(
+                policy_id=policy.id,
+                personal_chat_pin_override=personal_chat_pin_override,
+            )
 
-        return resolve(
-            assistant=assistant,
-            space_is_personal=space_is_personal,
+        tenant_models = await _load_models()
+        tenant_mcp_servers = await _load_mcp_servers()
+        library_prompt_text = await _load_prompt_text()
+        governance_skill_resolution = await _load_governance_skills()
+
+        return resolve_personal_default(
             policy=policy,
             tenant_completion_models=tenant_models,
             tenant_mcp_servers=tenant_mcp_servers,
             library_prompt_text=library_prompt_text,
+            governance_skill_resolution=governance_skill_resolution,
         )

@@ -17,7 +17,7 @@ class FlowRunStepInputFileMetadata(BaseModel):
     size: int
     mimetype: str | None
     file_type: FileType
-    text_length: int | None
+    text_size_bytes: int | None
     has_text: bool
     has_transcription: bool
 
@@ -29,7 +29,7 @@ class FlowRunStepInputFileMetadata(BaseModel):
             "size": self.size,
             "mimetype": self.mimetype,
             "file_type": self.file_type.value,
-            "text_length": self.text_length,
+            "text_size_bytes": self.text_size_bytes,
             "has_text": self.has_text,
             "has_transcription": self.has_transcription,
         }

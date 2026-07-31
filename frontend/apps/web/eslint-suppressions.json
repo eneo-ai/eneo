@@ -4,19 +4,9 @@
       "count": 1
     }
   },
-  "src/lib/assets/EneoWordMark.svelte": {
-    "eneo/no-raw-color": {
-      "count": 1
-    }
-  },
   "src/lib/components/layout/Page/Header.svelte": {
     "eneo/no-raw-color": {
       "count": 1
-    }
-  },
-  "src/lib/components/toast/Toaster.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
     }
   },
   "src/lib/components/ui/alert-dialog/alert-dialog-overlay.svelte": {
@@ -154,11 +144,6 @@
       "count": 3
     }
   },
-  "src/routes/(app)/account/api-keys/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 2
-    }
-  },
   "src/routes/(app)/account/api-keys/ApiKeyTable.svelte": {
     "eneo/no-raw-color": {
       "count": 8
@@ -287,16 +272,6 @@
   "src/routes/(app)/spaces/[spaceId]/apps/[appId]/results/[resultId]/+page.svelte": {
     "eneo/no-raw-color": {
       "count": 1
-    }
-  },
-  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/AudioRecorder.svelte": {
-    "eneo/no-raw-color": {
-      "count": 18
-    }
-  },
-  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputAudioRecording.svelte": {
-    "eneo/no-raw-color": {
-      "count": 10
     }
   },
   "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputUpload.svelte": {

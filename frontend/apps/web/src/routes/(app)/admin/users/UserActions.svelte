@@ -7,7 +7,11 @@
 <script lang="ts">
   import type { User } from "@eneo/eneo-js";
   import { Button, Dialog, Dropdown } from "@eneo/ui";
-  import { MoreVertical, Edit, UserMinus, UserPlus, Trash2 } from "lucide-svelte";
+  import MoreVertical from "lucide-svelte/icons/more-vertical";
+  import Edit from "lucide-svelte/icons/edit";
+  import UserMinus from "lucide-svelte/icons/user-minus";
+  import UserPlus from "lucide-svelte/icons/user-plus";
+  import Trash2 from "lucide-svelte/icons/trash-2";
   import { invalidate } from "$app/navigation";
   import UserEditor from "./editor/UserEditor.svelte";
   import { getAppContext } from "$lib/core/AppContext";

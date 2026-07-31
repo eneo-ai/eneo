@@ -19,10 +19,11 @@ import psycopg2
 import pytest
 import sqlalchemy as sa
 
-from init_db import add_tenant_user
+from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.sessions_table import Sessions
+from init_db import add_tenant_user
 
 
 @pytest.fixture
@@ -62,6 +63,14 @@ async def _insert_service_key(
 ) -> UUID:
     key_id = uuid4()
     suffix = secrets.token_hex(4)
+    service_principal = await ApiKeysV2Repository(session).create_service_principal(
+        tenant_id=tenant_id,
+        display_name=f"Session repository test service {suffix}",
+        description=None,
+        scope_type="tenant",
+        scope_id=None,
+        created_by_user_id=creator_user_id,
+    )
     await session.execute(
         sa.insert(ApiKeysV2).values(
             id=key_id,
@@ -77,6 +86,7 @@ async def _insert_service_key(
             name=f"svc-{suffix}",
             state="active",
             created_by_user_id=creator_user_id,
+            service_principal_id=service_principal.id,
         )
     )
     return key_id

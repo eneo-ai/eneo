@@ -170,60 +170,24 @@ class TestModelRouterAdminChecks:
 
 
 # ---------------------------------------------------------------------------
-# Step 21: Legacy GET /api-keys/ Removed
+# Step 21: Legacy v1 API key endpoints removed
 # ---------------------------------------------------------------------------
 
 
-class TestLegacyGetApiKeysRemoved:
-    """Verify the legacy GET /api-keys/ mutating endpoint is removed."""
+class TestLegacyApiKeyEndpointsRemoved:
+    """The v1 key endpoints are retired; only /api/v1/api-keys (v2) mints keys."""
 
-    def test_no_get_api_keys_route(self):
-        """GET /api-keys/ should not exist (it was a mutating GET alias)."""
+    def test_no_legacy_api_key_routes(self):
         router = _get_router()
         for route in router.routes:
-            path = getattr(route, "path", "")
-            methods = getattr(route, "methods", set())
             endpoint = getattr(route, "endpoint", None)
             endpoint_name = endpoint.__name__ if endpoint else ""
-            # The removed endpoint mapped GET /api-keys/ to generate_api_key
-            if endpoint_name == "generate_api_key" and "GET" in methods:
+            if endpoint_name in ("generate_api_key", "revoke_legacy_api_key"):
+                path = getattr(route, "path", "")
                 pytest.fail(
-                    f"GET {path} still maps to generate_api_key. "
-                    "Legacy GET /api-keys/ mutating endpoint should be removed."
+                    f"{path} still maps to {endpoint_name}. "
+                    "Legacy v1 API key endpoints should be removed."
                 )
-
-    def test_post_api_keys_still_exists(self):
-        """POST /api-keys/ should still exist (correct method for mutation)."""
-        router = _get_router()
-        found = False
-        for route in router.routes:
-            endpoint = getattr(route, "endpoint", None)
-            methods = getattr(route, "methods", set())
-            if (
-                endpoint
-                and endpoint.__name__ == "generate_api_key"
-                and "POST" in methods
-            ):
-                found = True
-                break
-        assert found, "POST /api-keys/ (generate_api_key) not found"
-
-    def test_post_api_keys_has_admin_key_guard(self):
-        """POST /api-keys/ requires admin API key permission."""
-        router = _get_router()
-        for route in router.routes:
-            endpoint = getattr(route, "endpoint", None)
-            methods = getattr(route, "methods", set())
-            if (
-                endpoint
-                and endpoint.__name__ == "generate_api_key"
-                and "POST" in methods
-            ):
-                assert _route_has_dependency_named(route, "_api_key_permission_dep"), (
-                    "generate_api_key route missing require_api_key_permission guard"
-                )
-                return
-        pytest.fail("generate_api_key endpoint not found")
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +200,7 @@ class TestSignedUrlReadOverride:
 
     def test_generate_signed_url_in_files_read_overrides(self):
         assert "generate_signed_url" in FILES_READ_OVERRIDES
+        assert "generate_original_signed_url" in FILES_READ_OVERRIDES
 
     def test_files_router_has_read_overrides(self):
         """The /files router mount should have FILES_READ_OVERRIDES wired."""
@@ -340,11 +305,7 @@ class TestLimitsRouterAuth:
         container_param = sig.parameters.get("container")
         assert container_param is not None, "get_limits missing container parameter"
 
-        # The default should be Depends(get_container(with_user=True))
-        # We can't easily inspect the with_user=True arg directly, but
-        # we can verify it's using get_container by checking the source
         eneo_src = _get_eneo_src_path()
         source = (eneo_src / "limits" / "limit_router.py").read_text()
-        assert "get_container(with_user=True)" in source, (
-            "limit_router.py should use get_container(with_user=True)"
-        )
+        assert "with_user=True" in source
+        assert "with_upload_admission=True" in source

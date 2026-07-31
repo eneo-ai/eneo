@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { FlowRetentionImpactPreview } from "@eneo/eneo-js";
-  import { AlertTriangle } from "lucide-svelte";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import { m } from "$lib/paraglide/messages";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

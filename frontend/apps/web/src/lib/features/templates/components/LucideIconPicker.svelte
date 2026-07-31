@@ -1,6 +1,9 @@
 <script lang="ts">
   import { Dialog, Button } from "@eneo/ui";
-  import { Search, X, Sparkles, Check } from "lucide-svelte";
+  import Search from "lucide-svelte/icons/search";
+  import X from "lucide-svelte/icons/x";
+  import Sparkles from "lucide-svelte/icons/sparkles";
+  import Check from "lucide-svelte/icons/check";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import {

@@ -8,7 +8,8 @@
   import { IconSession } from "@eneo/icons/session";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Chart } from "@eneo/ui";
-  import { Info, BarChart3 } from "lucide-svelte";
+  import Info from "lucide-svelte/icons/info";
+  import BarChart3 from "lucide-svelte/icons/bar-chart-3";
   import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
   import { getConfig, prepareData } from "./prepareData";
   import { m } from "$lib/paraglide/messages";

@@ -1,7 +1,11 @@
 """Integration tests for the /audit/logs API endpoint."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
+
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 
 pytestmark = pytest.mark.integration
 
@@ -282,11 +286,18 @@ class TestAccessSessionEndpoint:
             },
             headers=auth_headers,
         )
-        # Pydantic validates first and returns 422 for validation errors
         assert response.status_code == 422
-        # Pydantic error format includes validation details
-        error_detail = response.json()
-        assert "detail" in error_detail
+        error = GeneralError.model_validate(response.json())
+        assert error.eneo_error_code is ErrorCodes.VALIDATION_ERROR
+        assert error.code == "request_validation_error"
+        assert isinstance(error.details, dict)
+        errors = error.details.get("errors")
+        assert isinstance(errors, list)
+        assert {
+            "location": ["body", "description"],
+            "message": "String should have at least 10 characters",
+            "type": "string_too_short",
+        } in errors
 
     async def test_create_session_success(self, client, auth_headers):
         """Verify successful session creation."""

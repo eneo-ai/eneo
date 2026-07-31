@@ -1,294 +1,178 @@
-"""Tests for file service delete-before-auth fix (Plan 1E).
-
-Covers:
-- Atomic delete_by_owner pattern: ownership checked in SQL, not in Python
-- NotFoundException for non-owned and missing files (IDOR prevention: 404, not 403)
-- Successful delete returns the deleted File record
-- Unexpected repo errors propagate (not swallowed as 404)
-"""
-
-from __future__ import annotations
-
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.files.file_models import File, FileType
+from eneo.files.file_models import FileOwner
+from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.main.exceptions import NotFoundException
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+from eneo.object_content.content import StorageKind
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 
-def _make_file(*, user_id: UUID, file_id: UUID | None = None) -> File:
-    return File(
-        id=file_id or uuid4(),
-        name="test.txt",
-        checksum="abc123",
-        size=42,
-        mimetype="text/plain",
-        file_type=FileType.TEXT,
-        text="hello",
-        blob=None,
-        transcription=None,
+def _service() -> tuple[FileService, AsyncMock, SimpleNamespace]:
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    repo = AsyncMock()
+    repo.session = MagicMock()
+    service = FileService(
+        user=user,
+        repo=repo,
+        protocol=AsyncMock(),
+        object_content=AsyncMock(),
+    )
+    service._usage = AsyncMock()
+    return service, repo, user
+
+
+def _owner(user: SimpleNamespace) -> FileOwner:
+    return FileOwner(
+        tenant_id=user.tenant_id,
         owner_type=PrincipalType.USER,
-        owner_user_id=user_id,
-        owner_service_id=None,
-        tenant_id=uuid4(),
+        owner_user_id=user.id,
     )
 
 
-def _make_service(*, user_id: UUID | None = None) -> tuple[FileService, AsyncMock]:
-    uid = user_id or uuid4()
-    user = SimpleNamespace(id=uid, tenant_id=uuid4())
+@pytest.mark.asyncio
+async def test_delete_non_owned_and_missing_files_share_the_404_path() -> None:
+    service, repo, _user = _service()
+    repo.get_by_id_and_owner_for_lifecycle.return_value = None
+
+    with pytest.raises(NotFoundException):
+        await service.delete_file(uuid4())
+
+    service._usage.lock_family.assert_not_awaited()
+    repo.delete_by_owner_for_lifecycle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deletion_preview_returns_404_if_the_file_disappears_during_read() -> (
+    None
+):
+    service, repo, user = _service()
+    file_id = uuid4()
+    repo.get_by_id_and_owner_for_lifecycle.return_value = SimpleNamespace(id=file_id)
+    service._usage.list_family.return_value = []
+
+    with pytest.raises(NotFoundException):
+        await service.get_deletion_preview(file_id)
+
+    repo.get_by_id_and_owner_for_lifecycle.assert_awaited_once_with(
+        file_id=file_id,
+        owner=_owner(user),
+    )
+    service._usage.list_family.assert_awaited_once_with(
+        root_file_id=file_id,
+        tenant_id=user.tenant_id,
+    )
+    service._usage.count_product_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_rechecks_usage_under_the_family_lock() -> None:
+    service, repo, user = _service()
+    file_id = uuid4()
+    metadata = SimpleNamespace(id=file_id)
+    public_info = SimpleNamespace(id=file_id)
+    repo.get_by_id_and_owner_for_lifecycle.return_value = metadata
+    repo.delete_by_owner_for_lifecycle.return_value = metadata
+    service._usage.lock_family.return_value = [file_id]
+    service._usage.count_product_usage.return_value = []
+    service._file_info = AsyncMock(return_value=public_info)
+
+    result = await service.delete_file(file_id)
+
+    assert result is public_info
+    repo.get_by_id_and_owner_for_lifecycle.assert_awaited_once_with(
+        file_id=file_id,
+        owner=_owner(user),
+    )
+    service._usage.lock_family.assert_awaited_once_with(
+        root_file_id=file_id,
+        tenant_id=user.tenant_id,
+    )
+    service._usage.count_product_usage.assert_awaited_once_with([file_id])
+    repo.delete_by_owner_for_lifecycle.assert_awaited_once_with(
+        id=file_id,
+        owner=_owner(user),
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_does_not_mask_database_failures() -> None:
+    service, repo, _user = _service()
+    repo.get_by_id_and_owner_for_lifecycle.side_effect = RuntimeError(
+        "database unavailable"
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await service.delete_file(uuid4())
+
+
+@pytest.mark.asyncio
+async def test_repository_delete_contains_all_owner_predicates() -> None:
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    session = AsyncMock()
+    session.execute.return_value = result
+    repository = FileRepository(session=session)
+    owner = FileOwner(
+        tenant_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
+    )
+
+    await repository.delete_by_owner_for_lifecycle(id=uuid4(), owner=owner)
+
+    statement = session.execute.call_args.args[0]
+    sql = str(statement.compile(compile_kwargs={"literal_binds": False}))
+    assert "DELETE FROM files" in sql
+    assert "files.id" in sql
+    assert "files.owner_type" in sql
+    assert "files.owner_user_id" in sql
+    assert "files.owner_service_id" in sql
+    assert "files.tenant_id" in sql
+    assert "RETURNING" in sql
+
+
+@pytest.mark.asyncio
+async def test_unready_object_store_rejects_without_inline_fallback_or_mutation() -> (
+    None
+):
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     repo = AsyncMock()
+    repo.session = MagicMock()
+    repo.session.in_transaction.return_value = False
     protocol = MagicMock()
-    svc = FileService(user=user, repo=repo, protocol=protocol)
-    return svc, repo
+    object_content = MagicMock()
+    object_content.ensure_target_ready = AsyncMock(
+        side_effect=RuntimeError("target unavailable")
+    )
+    service = FileService(
+        user=user,
+        repo=repo,
+        protocol=protocol,
+        object_content=object_content,
+        upload_admission=UploadAdmissionSnapshot(
+            policy_revision=9,
+            session_storage_target=StorageKind.OBJECT_STORE,
+            session_operator_ceiling_bytes=100,
+            session_file_maximum_bytes=100,
+            session_image_maximum_bytes=100,
+            session_audio_maximum_bytes=100,
+            knowledge_file_maximum_bytes=100,
+            knowledge_audio_maximum_bytes=100,
+        ),
+    )
 
+    with pytest.raises(RuntimeError, match="target unavailable"):
+        await service.save_file(MagicMock())
 
-# ---------------------------------------------------------------------------
-# Tests — Service layer (delete_file)
-# ---------------------------------------------------------------------------
-
-
-class TestDeleteFile:
-    """FileService.delete_file() unit tests."""
-
-    @pytest.mark.asyncio
-    async def test_delete_file_calls_delete_by_owner_with_typed_owner(self):
-        """delete_file must use principal-aware delete (atomic), not plain delete."""
-        svc, repo = _make_service()
-        file_id = uuid4()
-        expected_file = _make_file(user_id=svc.user.id, file_id=file_id)
-        repo.delete_by_owner_principal = AsyncMock(return_value=expected_file)
-
-        await svc.delete_file(file_id)
-
-        repo.delete_by_owner_principal.assert_awaited_once_with(
-            id=file_id,
-            owner_type="user",
-            owner_user_id=svc.user.id,
-            owner_service_id=None,
-            tenant_id=svc.user.tenant_id,
-        )
-        repo.delete.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_delete_non_owned_file_returns_404(self):
-        """delete_by_owner returns None (wrong owner) → NotFoundException (404, not 403).
-
-        This is IDOR prevention: don't reveal whether a file exists.
-        """
-        svc, repo = _make_service()
-        file_id = uuid4()
-        repo.delete_by_owner_principal = AsyncMock(return_value=None)
-
-        with pytest.raises(NotFoundException):
-            await svc.delete_file(file_id)
-
-    @pytest.mark.asyncio
-    async def test_delete_missing_file_returns_404(self):
-        """delete_by_owner returns None (file doesn't exist) → NotFoundException.
-
-        Same code path as wrong-owner — indistinguishable by design.
-        """
-        svc, repo = _make_service()
-        nonexistent_id = uuid4()
-        repo.delete_by_owner_principal = AsyncMock(return_value=None)
-
-        with pytest.raises(NotFoundException):
-            await svc.delete_file(nonexistent_id)
-
-    @pytest.mark.asyncio
-    async def test_delete_owned_file_returns_deleted_record(self):
-        """Successful delete returns the deleted File object."""
-        svc, repo = _make_service()
-        file_id = uuid4()
-        expected_file = _make_file(user_id=svc.user.id, file_id=file_id)
-        repo.delete_by_owner_principal = AsyncMock(return_value=expected_file)
-
-        result = await svc.delete_file(file_id)
-
-        assert result is expected_file
-        assert result.id == file_id
-        assert result.owner_user_id == svc.user.id
-
-    @pytest.mark.asyncio
-    async def test_delete_unexpected_error_propagates(self):
-        """Unexpected repo errors are NOT swallowed as NotFoundException.
-
-        If the DB is down or something unexpected happens, it should propagate
-        as-is, not be masked as a 404.
-        """
-        svc, repo = _make_service()
-        repo.delete_by_owner_principal = AsyncMock(
-            side_effect=RuntimeError("database connection lost")
-        )
-
-        with pytest.raises(RuntimeError, match="database connection lost"):
-            await svc.delete_file(uuid4())
-
-
-# ---------------------------------------------------------------------------
-# Tests — Repo layer (delete_by_owner_principal SQL pattern)
-# ---------------------------------------------------------------------------
-
-
-class TestDeleteByOwnerRepo:
-    """FileRepository.delete_by_owner_principal() SQL pattern verification.
-
-    Tests that the repo method issues the correct atomic SQL and interprets results.
-    Uses a mocked session to verify the SQL statement structure.
-    """
-
-    @pytest.mark.asyncio
-    async def test_delete_by_owner_principal_returns_none_when_no_match(self):
-        """When DELETE RETURNING yields no row, returns None (not exception)."""
-        from eneo.files.file_repo import FileRepository
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        repo = FileRepository(session=mock_session)
-        result = await repo.delete_by_owner_principal(
-            id=uuid4(),
-            owner_type="user",
-            owner_user_id=uuid4(),
-        )
-
-        assert result is None
-        mock_session.execute.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_delete_by_owner_principal_returns_file_when_match(self):
-        """When DELETE RETURNING yields a row, returns a validated File model."""
-        from eneo.files.file_repo import FileRepository
-
-        user_id = uuid4()
-        file_id = uuid4()
-        tenant_id = uuid4()
-
-        # Create a mock row that model_validate can consume
-        mock_row = MagicMock()
-        mock_row.id = file_id
-        mock_row.tenant_id = tenant_id
-        mock_row.name = "test.txt"
-        mock_row.checksum = "abc"
-        mock_row.size = 100
-        mock_row.mimetype = "text/plain"
-        mock_row.file_type = FileType.TEXT
-        mock_row.text = "content"
-        mock_row.blob = None
-        mock_row.transcription = None
-        mock_row.owner_type = PrincipalType.USER
-        mock_row.owner_user_id = user_id
-        mock_row.owner_service_id = None
-        mock_row.created_at = None
-        mock_row.updated_at = None
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_row
-
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        repo = FileRepository(session=mock_session)
-
-        with patch.object(
-            File,
-            "model_validate",
-            return_value=_make_file(user_id=user_id, file_id=file_id),
-        ) as mock_validate:
-            result = await repo.delete_by_owner_principal(
-                id=file_id,
-                owner_type="user",
-                owner_user_id=user_id,
-            )
-
-        assert result is not None
-        assert result.id == file_id
-        assert result.owner_user_id == user_id
-        mock_validate.assert_called_once_with(mock_row)
-
-    @pytest.mark.asyncio
-    async def test_delete_by_owner_principal_sql_includes_owner_predicates(self):
-        """The DELETE statement must include id and typed owner predicates.
-
-        This verifies the atomic pattern — ownership is checked in SQL, not
-        in a separate Python check that could race.
-        """
-        from eneo.files.file_repo import FileRepository
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        repo = FileRepository(session=mock_session)
-        file_id = uuid4()
-        user_id = uuid4()
-
-        await repo.delete_by_owner_principal(
-            id=file_id,
-            owner_type="user",
-            owner_user_id=user_id,
-        )
-
-        # Inspect the SQL statement that was executed
-        call_args = mock_session.execute.call_args
-        stmt = call_args[0][0]
-        compiled = stmt.compile(compile_kwargs={"literal_binds": False})
-        sql_text = str(compiled)
-
-        assert "DELETE FROM" in sql_text.upper()
-        assert "RETURNING" in sql_text.upper()
-        assert "files.id" in sql_text or "id" in sql_text
-        assert "owner_type" in sql_text
-        assert "owner_user_id" in sql_text
-
-
-class TestGetByIdRepo:
-    """FileRepository.get_by_id() behavior for missing/existing rows."""
-
-    @pytest.mark.asyncio
-    async def test_get_by_id_missing_raises_not_found(self):
-        """Missing file should raise NotFoundException (not validation error)."""
-        from eneo.files.file_repo import FileRepository
-
-        mock_session = AsyncMock()
-        repo = FileRepository(session=mock_session)
-        repo._delegate.get = AsyncMock(return_value=None)
-
-        with pytest.raises(NotFoundException):
-            await repo.get_by_id(uuid4())
-
-    @pytest.mark.asyncio
-    async def test_get_by_id_returns_validated_file(self):
-        """Existing file should be validated and returned as File model."""
-        from eneo.files.file_repo import FileRepository
-
-        owner_id = uuid4()
-        file_id = uuid4()
-        expected = _make_file(user_id=owner_id, file_id=file_id)
-
-        mock_session = AsyncMock()
-        repo = FileRepository(session=mock_session)
-        repo._delegate.get = AsyncMock(return_value=MagicMock())
-
-        with patch.object(
-            File, "model_validate", return_value=expected
-        ) as mock_validate:
-            result = await repo.get_by_id(file_id=file_id)
-
-        assert result is expected
-        mock_validate.assert_called_once()
+    object_content.ensure_target_ready.assert_awaited_once_with(
+        StorageKind.OBJECT_STORE
+    )
+    protocol.prepare_upload.assert_not_called()
+    object_content.capture_for_target.assert_not_called()
+    repo.add_metadata.assert_not_awaited()

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
+
+from pydantic import TypeAdapter, ValidationError
 
 from eneo.flows.ai_builder.planning_state import (
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
@@ -26,7 +27,7 @@ from eneo.flows.output_processing import (
     schema_yields_top_level_object,
     validate_schema_syntax,
 )
-from eneo.json_types import JsonObject
+from eneo.json_types import JsonObject, JsonValue
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
@@ -38,6 +39,8 @@ OUTPUT_SCHEMA_FIELD_NAME_MAX_JSON_BYTES = 80
 EXAMPLE_OUTPUT_MAX_JSON_BYTES = 16 * 1024
 EXAMPLE_OUTPUT_MAX_FIELDS = 100
 EXAMPLE_OUTPUT_MAX_DEPTH = 5
+
+_JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
 
 OutputSchemaLimitReason = Literal["raw_bytes", "canonical_bytes", "depth"]
 
@@ -158,7 +161,10 @@ def parse_output_schema_candidate(raw_json: str) -> JsonObject | None:
         ) from error
     if not isinstance(parsed, dict):
         return None
-    candidate = cast(JsonObject, parsed)
+    try:
+        candidate = _JSON_OBJECT_ADAPTER.validate_python(parsed, strict=True)
+    except ValidationError:
+        return None
     if not _looks_like_json_schema(candidate):
         return None
     _validate_json_depth(candidate)
@@ -446,7 +452,11 @@ def _infer_example_output_json_schema(
         raise _ExampleOutputInferenceDeclined("depth") from None
     if not isinstance(parsed, dict):
         raise _ExampleOutputInferenceDeclined("top_level_not_object")
-    schema = _infer_example_output_value_schema(parsed, depth=1)
+    try:
+        example = _JSON_OBJECT_ADAPTER.validate_python(parsed, strict=True)
+    except ValidationError:
+        raise _ExampleOutputInferenceDeclined("invalid_json") from None
+    schema = _infer_example_output_value_schema(example, depth=1)
     if _inferred_schema_field_count(schema) > EXAMPLE_OUTPUT_MAX_FIELDS:
         raise _ExampleOutputInferenceDeclined("field_count")
     return schema
@@ -457,7 +467,7 @@ def _reject_nonstandard_json_constant(value: str) -> object:
 
 
 def _infer_example_output_value_schema(
-    value: object,
+    value: JsonValue,
     *,
     depth: int,
 ) -> JsonObject:
@@ -475,33 +485,31 @@ def _infer_example_output_value_schema(
         return {"type": "string"}
     if isinstance(value, dict):
         properties: JsonObject = {}
-        for raw_name, nested_value in value.items():
-            properties[str(raw_name)] = _infer_example_output_value_schema(
+        for name, nested_value in value.items():
+            properties[name] = _infer_example_output_value_schema(
                 nested_value,
                 depth=depth + 1,
             )
         return {"type": "object", "properties": properties}
-    if isinstance(value, list):
-        schema: JsonObject = {"type": "array"}
-        if not value:
-            return schema
-        item_schemas = [
-            _infer_example_output_value_schema(
-                item,
-                depth=depth + 1,
-            )
-            for item in value
-        ]
-        first = item_schemas[0]
-        if first and all(item == first for item in item_schemas[1:]):
-            schema["items"] = first
+    schema: JsonObject = {"type": "array"}
+    if not value:
         return schema
-    raise _ExampleOutputInferenceDeclined("invalid_json")
+    item_schemas = [
+        _infer_example_output_value_schema(
+            item,
+            depth=depth + 1,
+        )
+        for item in value
+    ]
+    first = item_schemas[0]
+    if first and all(item == first for item in item_schemas[1:]):
+        schema["items"] = first
+    return schema
 
 
 def _inferred_schema_field_count(schema: JsonObject) -> int:
     count = 0
-    stack: list[object] = [schema]
+    stack: list[JsonValue] = [schema]
     while stack:
         current = stack.pop()
         if not isinstance(current, dict):
@@ -537,8 +545,12 @@ def _latest_persisted_conflict_selection(
         for tool_call in tool_calls_from_message(message):
             if tool_call.name != ASK_STRUCTURED_QUESTION_TOOL_NAME:
                 continue
-            arguments = tool_call.arguments
-            if not isinstance(arguments, Mapping):
+            try:
+                arguments = _JSON_OBJECT_ADAPTER.validate_python(
+                    tool_call.arguments,
+                    strict=True,
+                )
+            except ValidationError:
                 continue
             if arguments.get("question_id") != "output_schema_conflict":
                 continue
@@ -565,12 +577,12 @@ def _latest_persisted_conflict_selection(
     return answered
 
 
-def _option_fingerprints(raw_options: object) -> frozenset[str] | None:
+def _option_fingerprints(raw_options: JsonValue | None) -> frozenset[str] | None:
     if not isinstance(raw_options, list):
         return None
     fingerprints: set[str] = set()
     for raw_option in raw_options:
-        if not isinstance(raw_option, Mapping):
+        if not isinstance(raw_option, dict):
             return None
         raw_id = raw_option.get("id")
         raw_value = raw_option.get("value")
@@ -595,7 +607,7 @@ def project_output_schema_fields(schema: JsonObject) -> OutputSchemaFieldProject
     fields: list[str] = []
     total_count = 0
     for raw_name in properties:
-        name = " ".join(str(raw_name).split())
+        name = " ".join(raw_name.split())
         if not name:
             continue
         total_count += 1
@@ -634,8 +646,8 @@ def _truncate_json_display(value: str, *, max_serialized_bytes: int) -> str:
     return f"{''.join(retained)}{ellipsis}"
 
 
-def _validate_json_depth(value: object) -> None:
-    stack: list[tuple[object, int]] = [(value, 1)]
+def _validate_json_depth(value: JsonValue) -> None:
+    stack: list[tuple[JsonValue, int]] = [(value, 1)]
     while stack:
         current, depth = stack.pop()
         if depth > OUTPUT_SCHEMA_MAX_DEPTH:

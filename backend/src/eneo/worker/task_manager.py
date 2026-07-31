@@ -67,7 +67,7 @@ class TaskManager:
     def _log_status(self, status: Status):
         logger.info(f"Status for {self.job_id}: {status}")
 
-    async def _publish_status(self, status: Status):
+    async def publish_status(self, status: Status):
         if self.channel_type is not None:
             user_id = self.user.id
             channel = Channel(
@@ -130,16 +130,19 @@ class TaskManager:
     def successful(self) -> bool | None:
         return self.success
 
+    def mark_job_handled(self) -> None:
+        self._job_already_handled = True
+
     async def set_status(self, status: Status):
         self._log_status(status)
-        await self._publish_status(status=status)
+        await self.publish_status(status=status)
         if self.job_service is not None:
             await self.job_service.set_status(self.job_id, status)
 
     async def complete_job(self):
         if self._job_already_handled:
             return
-        await self._publish_status(status=Status.COMPLETE)
+        await self.publish_status(status=Status.COMPLETE)
         if self.job_service is not None:
             try:
                 await self.job_service.complete_job(self.job_id, self._result_location)
@@ -152,7 +155,7 @@ class TaskManager:
     async def fail_job(self, message: str | None = None):
         if self._job_already_handled:
             return
-        await self._publish_status(status=Status.FAILED)
+        await self.publish_status(status=Status.FAILED)
 
         if message:
             logger.warning(

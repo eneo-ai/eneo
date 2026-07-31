@@ -198,7 +198,10 @@ async def rerun_flow_run_step(
     rerun_in: FlowRunStepRerunRequest,
     background_tasks: BackgroundTasks,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_upload_admission=True,
+        )
     ),
 ):
     dispatch_run = None

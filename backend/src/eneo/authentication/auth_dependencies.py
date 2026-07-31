@@ -9,9 +9,7 @@ from eneo.authentication.api_key_resolver import (
     check_resource_permission,
 )
 from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
-from eneo.authentication.auth_factory import get_auth_service
-from eneo.authentication.auth_models import ApiKeyInDB, ApiKeyPermission
-from eneo.authentication.auth_service import AuthService
+from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import UnauthorizedException
@@ -19,7 +17,8 @@ from eneo.main.logging import get_logger
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from eneo.server.dependencies.container import get_container
-from eneo.users.user import UserInDB
+from eneo.tenants.tenant import TenantState
+from eneo.users.user import UserInDB, UserState
 
 logger = get_logger(__name__)
 
@@ -105,16 +104,6 @@ async def get_user_from_token_or_assistant_api_key_without_assistant_id(
         _raise_api_key_http_error(exc, request=request)
 
 
-def get_api_key(hashed: bool = True) -> Callable[..., Awaitable[ApiKeyInDB | None]]:
-    async def _get_api_key(
-        api_key: Annotated[str, Security(_get_api_key_from_header)],
-        auth_service: Annotated[AuthService, Depends(get_auth_service)],
-    ) -> ApiKeyInDB | None:
-        return await auth_service.get_api_key(api_key, hash_key=hashed)
-
-    return _get_api_key
-
-
 def require_permission(permission: Permission) -> Callable[..., Awaitable[None]]:
     async def _dep(
         user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -125,13 +114,6 @@ def require_permission(permission: Permission) -> Callable[..., Awaitable[None]]
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
     return _dep
-
-
-def get_api_key_context(request: Request) -> ApiKeyInDB | None:
-    api_key = getattr(request.state, "api_key", None)
-    if isinstance(api_key, ApiKeyInDB):
-        return api_key
-    return None
 
 
 def require_api_key_permission(
@@ -167,7 +149,10 @@ async def require_session_auth(
     if getattr(request.state, "api_key", None) is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint requires a session token.",
+            detail={
+                "code": "session_auth_required",
+                "message": "This endpoint requires a session token.",
+            },
         )
 
 
@@ -197,6 +182,23 @@ async def require_user_identity(
                     "specific user."
                 ),
             },
+        )
+
+
+async def require_platform_admin(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Require the deployment authority on a currently eligible real user."""
+    if (
+        user.state is not UserState.ACTIVE
+        or user.deleted_at is not None
+        or user.tenant.state is not TenantState.ACTIVE
+        or Permission.ADMIN not in user.permissions
+        or not user.is_platform_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Active tenant admin platform authority is required.",
         )
 
 
@@ -259,6 +261,7 @@ APPS_READ_OVERRIDES: frozenset[str] = frozenset(
 FILES_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "generate_signed_url",
+        "generate_original_signed_url",
     }
 )
 

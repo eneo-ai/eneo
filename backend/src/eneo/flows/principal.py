@@ -6,6 +6,7 @@ from uuid import UUID
 
 from eneo.audit.domain.actor_types import ActorType
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileOwner
 
 if TYPE_CHECKING:
     from eneo.users.user import UserInDB
@@ -95,6 +96,14 @@ class FlowPrincipal:
             "owner_user_id": self.principal_user_id,
             "owner_service_id": self.principal_service_id,
         }
+
+    def file_owner(self, *, tenant_id: UUID) -> FileOwner:
+        return FileOwner(
+            tenant_id=tenant_id,
+            owner_type=self.principal_type,
+            owner_user_id=self.principal_user_id,
+            owner_service_id=self.principal_service_id,
+        )
 
     def audit_actor_fields(self) -> FlowAuditActorFields:
         if self.principal_type == PrincipalType.SERVICE_KEY:

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Clock } from "lucide-svelte";
+  import Clock from "lucide-svelte/icons/clock";
   import { m } from "$lib/paraglide/messages";
   import { createDateFormatter } from "$lib/features/api-keys/apiKeyTableUtils";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";

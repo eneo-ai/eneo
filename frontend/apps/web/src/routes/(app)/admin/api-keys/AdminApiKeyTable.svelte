@@ -14,19 +14,17 @@
     formatUsageMetric,
     formatRelativeDate
   } from "$lib/features/api-keys/apiKeyTableUtils";
-  import {
-    ChevronDown,
-    Key,
-    Globe,
-    Server,
-    Shield,
-    Clock,
-    Calendar,
-    Activity,
-    User,
-    Link,
-    AlertTriangle
-  } from "lucide-svelte";
+  import ChevronDown from "lucide-svelte/icons/chevron-down";
+  import Key from "lucide-svelte/icons/key";
+  import Globe from "lucide-svelte/icons/globe";
+  import Server from "lucide-svelte/icons/server";
+  import Shield from "lucide-svelte/icons/shield";
+  import Clock from "lucide-svelte/icons/clock";
+  import Calendar from "lucide-svelte/icons/calendar";
+  import Activity from "lucide-svelte/icons/activity";
+  import User from "lucide-svelte/icons/user";
+  import Link from "lucide-svelte/icons/link";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import { slide } from "svelte/transition";
   import { SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import {

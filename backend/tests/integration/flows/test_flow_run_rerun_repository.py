@@ -7,11 +7,11 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
@@ -21,6 +21,7 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
+from eneo.files.file_models import FileType
 from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_evidence_bundle import (
     build_evidence_bundle,
@@ -91,6 +92,9 @@ from eneo.flows.published_definition import (
     parse_published_runtime_steps,
 )
 from eneo.flows.runtime.step_result_builder import build_terminal_attempt_input
+from eneo.main.container.container import Container
+
+pytestmark = pytest.mark.usefixtures("object_content_runtime_ready")
 
 _DEFAULT_RERUN_FILE_IDS = object()
 _EXPECTED_RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
@@ -277,23 +281,6 @@ def _published_step(step: FlowStep) -> dict[str, object]:
     }
 
 
-def _file(*, user_id: UUID, tenant_id: UUID, name: str) -> Files:
-    return Files(
-        name=name,
-        text="rerun input file",
-        blob=None,
-        checksum=f"checksum-{name}",
-        size=128,
-        mimetype="application/pdf",
-        file_type="document",
-        transcription=None,
-        owner_type="user",
-        owner_user_id=user_id,
-        owner_service_id=None,
-        tenant_id=tenant_id,
-    )
-
-
 async def _create_completed_rerun_scenario(
     *,
     session: AsyncSession,
@@ -310,18 +297,22 @@ async def _create_completed_rerun_scenario(
         model.id,
         space_id=space.id,
     )
-    rerun_file_a = _file(
-        user_id=admin_user.id,
-        tenant_id=admin_user.tenant_id,
+    file_service = Container(
+        session=providers.Object(session),
+        user=providers.Object(admin_user),
+    ).file_service()
+    rerun_file_a = await file_service.save_generated_file(
+        payload=b"rerun input file",
         name=f"rerun-a-{uuid4()}.pdf",
+        mimetype="application/pdf",
+        file_type=FileType.DOCUMENT,
     )
-    rerun_file_b = _file(
-        user_id=admin_user.id,
-        tenant_id=admin_user.tenant_id,
+    rerun_file_b = await file_service.save_generated_file(
+        payload=b"rerun input file",
         name=f"rerun-b-{uuid4()}.pdf",
+        mimetype="application/pdf",
+        file_type=FileType.DOCUMENT,
     )
-    session.add_all([rerun_file_a, rerun_file_b])
-    await session.flush()
 
     flow_repo = FlowRepository(session=session)
     flow = await flow_repo.create(

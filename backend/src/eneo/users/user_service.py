@@ -1957,6 +1957,3 @@ class UserService:
             user_id=user.id
         )
         return user
-
-    async def generate_api_key(self, user_id: UUID):
-        return await self.auth_service.create_user_api_key("inp", user_id=user_id)

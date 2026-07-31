@@ -22,7 +22,9 @@
 -->
 
 <script lang="ts">
-  import { CircleAlert, RefreshCw, Sparkles } from "lucide-svelte";
+  import CircleAlert from "lucide-svelte/icons/circle-alert";
+  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import Sparkles from "lucide-svelte/icons/sparkles";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

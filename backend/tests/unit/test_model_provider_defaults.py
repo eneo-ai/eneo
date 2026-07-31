@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 from eneo.model_providers.presentation.model_provider_router import get_model_defaults
@@ -47,7 +47,7 @@ def test_lookup_model_defaults_prefixed_match():
 
 async def test_get_model_defaults_endpoint_returns_found_payload():
     with patch(
-        "eneo.model_providers.domain.model_defaults._get_model_cost",
+        "litellm.model_cost",
         {
             "gpt-5.2": {
                 "max_input_tokens": 272_000,
@@ -58,7 +58,7 @@ async def test_get_model_defaults_endpoint_returns_found_payload():
             }
         },
     ):
-        result = await get_model_defaults(model_name="gpt-5.2")
+        result = await get_model_defaults(model_name="gpt-5.2", _user=MagicMock())
 
     assert result == {
         "found": True,
@@ -67,4 +67,7 @@ async def test_get_model_defaults_endpoint_returns_found_payload():
         "supports_vision": False,
         "supports_function_calling": True,
         "supports_reasoning": True,
+        "input_cost_per_token": None,
+        "output_cost_per_token": None,
+        "cost_per_minute": None,
     }

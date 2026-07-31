@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { FlowStep } from "@eneo/eneo-js";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import {
     parsePromptSegments,
     getChipClasses,
@@ -23,14 +24,14 @@
   } = $props();
 
   const classificationContext = $derived.by(() => {
-    const knownFieldNames = new Set<string>();
+    const knownFieldNames = new SvelteSet<string>();
     for (const field of formSchema?.fields ?? []) {
       const name = (field.name ?? "").trim();
       if (name) knownFieldNames.add(name);
     }
 
-    const knownStepNames = new Map<number, string>();
-    const stepOutputTypes = new Map<number, string>();
+    const knownStepNames = new SvelteMap<number, string>();
+    const stepOutputTypes = new SvelteMap<number, string>();
     for (const step of steps) {
       const name = (step.user_description ?? "").trim();
       if (name) knownStepNames.set(step.step_order, name);
@@ -56,7 +57,7 @@
     class:py-1={!compact}
     class:py-0.5={compact}
   >
-    {#each segments as segment}
+    {#each segments as segment, index (`${index}:${segment.type}:${segment.value}`)}
       {#if segment.type === "text"}
         {#if !compact}
           <span class="text-secondary text-xs">{segment.value}</span>

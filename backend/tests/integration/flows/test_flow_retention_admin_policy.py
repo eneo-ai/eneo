@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from uuid import UUID, uuid4
 
 import pytest
@@ -19,9 +20,16 @@ from eneo.database.tables.flow_classification_retention_policy_table import (
 )
 from eneo.database.tables.flow_tables import (
     FlowRuns,
+    FlowRunStepInputFiles,
     FlowRuntimeUploadedFiles,
     Flows,
     FlowVersions,
+)
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    InlineContentPayloads,
+    ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
@@ -31,6 +39,58 @@ from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+def _inline_content(
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    payload: bytes,
+    created_at: datetime,
+) -> ObjectContents:
+    digest = sha256(payload).digest()
+    return ObjectContents(
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        storage_kind="postgres_inline",
+        state="available",
+        access_class="private_resource",
+        sha256=digest,
+        size_bytes=len(payload),
+        declared_media_type="text/plain",
+        verified_media_type="text/plain",
+        idempotency_key=f"flow-retention-preview-{uuid4()}",
+        request_fingerprint=digest,
+        available_at=created_at,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
+def _object_store_content(
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    size_bytes: int,
+    created_at: datetime,
+) -> ObjectContents:
+    digest = sha256(str(uuid4()).encode()).digest()
+    return ObjectContents(
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        storage_kind="object_store",
+        state="available",
+        access_class="private_resource",
+        sha256=digest,
+        size_bytes=size_bytes,
+        declared_media_type="application/octet-stream",
+        verified_media_type="application/octet-stream",
+        idempotency_key=f"flow-retention-preview-{uuid4()}",
+        request_fingerprint=digest,
+        available_at=created_at,
+        created_at=created_at,
+        updated_at=created_at,
+    )
 
 
 @pytest.fixture
@@ -158,15 +218,11 @@ async def _add_unattached_upload(
     flow_id: UUID,
     created_at: datetime,
 ) -> None:
+    payload = b"x" * 128
     file = Files(
         name=f"unattached-{uuid4()}.txt",
-        text="preview source",
-        blob=None,
-        checksum=f"preview-{uuid4()}",
-        size=128,
         mimetype="text/plain",
         file_type="text",
-        transcription=None,
         owner_type="user",
         owner_user_id=user_id,
         owner_service_id=None,
@@ -174,20 +230,39 @@ async def _add_unattached_upload(
         created_at=created_at,
         updated_at=created_at,
     )
-    session.add(file)
+    content = _inline_content(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        payload=payload,
+        created_at=created_at,
+    )
+    session.add_all([file, content])
     await session.flush()
-    session.add(
-        FlowRuntimeUploadedFiles(
-            file_id=file.id,
-            flow_id=flow_id,
-            tenant_id=tenant_id,
-            uploaded_for_step_id=uuid4(),
-            owner_type="user",
-            owner_user_id=user_id,
-            owner_service_id=None,
-            created_at=created_at,
-            updated_at=created_at,
-        )
+    session.add_all(
+        [
+            InlineContentPayloads(
+                content_id=content.id,
+                storage_kind="postgres_inline",
+                payload=payload,
+            ),
+            FileContentReferences(
+                file_id=file.id,
+                content_id=content.id,
+                variant="original",
+                ordinal=0,
+            ),
+            FlowRuntimeUploadedFiles(
+                file_id=file.id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+                uploaded_for_step_id=uuid4(),
+                owner_type="user",
+                owner_user_id=user_id,
+                owner_service_id=None,
+                created_at=created_at,
+                updated_at=created_at,
+            ),
+        ]
     )
 
 
@@ -219,6 +294,29 @@ async def test_preview_has_constant_query_count_and_natural_representative_plan(
 
     async with db_container() as container:
         old = datetime.now(timezone.utc) - timedelta(days=45)
+        duplicate_file_id, duplicate_content_id = (
+            await container.session().execute(
+                sa.select(
+                    FlowRuntimeUploadedFiles.file_id,
+                    FileContentReferences.content_id,
+                )
+                .join(
+                    FileContentReferences,
+                    FileContentReferences.file_id == FlowRuntimeUploadedFiles.file_id,
+                )
+                .where(FlowRuntimeUploadedFiles.flow_id == flow_id)
+                .limit(1)
+            )
+        ).one()
+        container.session().add(
+            FileContentReferences(
+                file_id=duplicate_file_id,
+                content_id=duplicate_content_id,
+                variant="extracted_text",
+                ordinal=0,
+            )
+        )
+        await container.session().flush()
         representative_runs = [
             FlowRuns(
                 flow_id=flow_id,
@@ -242,13 +340,8 @@ async def test_preview_has_constant_query_count_and_natural_representative_plan(
         representative_files = [
             Files(
                 name=f"representative-unattached-{uuid4()}.txt",
-                text="preview source",
-                blob=None,
-                checksum=f"representative-preview-{uuid4()}",
-                size=128,
                 mimetype="text/plain",
                 file_type="text",
-                transcription=None,
                 owner_type="user",
                 owner_user_id=admin_user.id,
                 owner_service_id=None,
@@ -258,7 +351,60 @@ async def test_preview_has_constant_query_count_and_natural_representative_plan(
             )
             for _index in range(63)
         ]
-        container.session().add_all(representative_runs + representative_files)
+        representative_payload = b"x" * 128
+        large_content_size = 2**63 - 1
+        large_content = _object_store_content(
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            size_bytes=large_content_size,
+            created_at=old,
+        )
+        representative_contents = [large_content] + [
+            _inline_content(
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                payload=representative_payload,
+                created_at=old,
+            )
+            for _index in range(62)
+        ]
+        container.session().add_all(
+            representative_runs + representative_files + representative_contents
+        )
+        await container.session().flush()
+        container.session().add_all(
+            [
+                InlineContentPayloads(
+                    content_id=content.id,
+                    storage_kind="postgres_inline",
+                    payload=representative_payload,
+                )
+                for content in representative_contents[1:]
+            ]
+            + [
+                ObjectStoreObjects(
+                    content_id=large_content.id,
+                    storage_kind="object_store",
+                    object_key=f"retention-preview/{uuid4()}",
+                    verification_chunk_size_bytes=1,
+                    verification_chunk_sha256=large_content.sha256,
+                    remote_observed_at=old,
+                )
+            ]
+            + [
+                FileContentReferences(
+                    file_id=file.id,
+                    content_id=content.id,
+                    variant="original",
+                    ordinal=0,
+                )
+                for file, content in zip(
+                    representative_files,
+                    representative_contents,
+                    strict=True,
+                )
+            ]
+        )
         await container.session().flush()
         representative_classifications = [
             SecurityClassification(
@@ -310,6 +456,60 @@ async def test_preview_has_constant_query_count_and_natural_representative_plan(
             ]
         )
         await container.session().flush()
+        attached_step_id = uuid4()
+        container.session().add_all(
+            [
+                FlowRunStepInputFiles(
+                    flow_run_id=representative_runs[0].id,
+                    flow_id=flow_id,
+                    tenant_id=admin_user.tenant_id,
+                    step_id=attached_step_id,
+                    step_order=1,
+                    attempt_no=1,
+                    file_id=file_id,
+                    ordinal=ordinal,
+                )
+                for ordinal, file_id in enumerate(
+                    (
+                        duplicate_file_id,
+                        representative_files[0].id,
+                        representative_files[1].id,
+                    )
+                )
+            ]
+        )
+        await container.session().flush()
+        content_reference_rows = (
+            await container.session().execute(
+                sa.select(
+                    FlowRuntimeUploadedFiles.file_id,
+                    FileContentReferences.content_id,
+                    ObjectContents.size_bytes,
+                )
+                .join(
+                    FileContentReferences,
+                    FileContentReferences.file_id == FlowRuntimeUploadedFiles.file_id,
+                )
+                .join(
+                    ObjectContents,
+                    sa.and_(
+                        ObjectContents.id == FileContentReferences.content_id,
+                        ObjectContents.tenant_id == FlowRuntimeUploadedFiles.tenant_id,
+                    ),
+                )
+                .where(FlowRuntimeUploadedFiles.flow_id == flow_id)
+            )
+        ).all()
+        assert len(content_reference_rows) == 65
+        assert (
+            sum(
+                {
+                    (row.file_id, row.content_id): row.size_bytes
+                    for row in content_reference_rows
+                }.values()
+            )
+            == large_content_size + 63 * 128
+        )
         classification_policy_count = await container.session().scalar(
             sa.select(sa.func.count())
             .select_from(FlowClassificationRetentionPolicies)
@@ -417,8 +617,11 @@ async def test_preview_has_constant_query_count_and_natural_representative_plan(
     assert canonical_off_candidates == []
     assert enabled_preview.run_history.newly_eligible_count == 256
     assert enabled_preview.run_history.no_longer_eligible_count == 0
-    assert enabled_preview.runtime_uploads.newly_eligible_count == 64
-    assert enabled_preview.runtime_uploads.newly_eligible_bytes == 64 * 128
+    assert (
+        enabled_preview.run_history.newly_eligible_bytes == large_content_size + 2 * 128
+    )
+    assert enabled_preview.runtime_uploads.newly_eligible_count == 61
+    assert enabled_preview.runtime_uploads.newly_eligible_bytes == 61 * 128
     assert enabled_preview.lifecycle_blockers.undelivered_audit_count == 0
     assert enabled_preview.lifecycle_blockers.unresolved_webhook_count == 0
     assert enabled_preview.lifecycle_blockers.active_rerun_count == 0
@@ -427,7 +630,7 @@ async def test_preview_has_constant_query_count_and_natural_representative_plan(
     assert disabled_preview.run_history.newly_eligible_count == 0
     assert disabled_preview.run_history.no_longer_eligible_count == 256
     assert disabled_preview.runtime_uploads.newly_eligible_count == 0
-    assert disabled_preview.runtime_uploads.no_longer_eligible_count == 64
+    assert disabled_preview.runtime_uploads.no_longer_eligible_count == 61
     assert disabled_preview.runtime_uploads.proposed_eligible_bytes == 0
     assert disabled_preview.latent_space_retention_days == (7,)
     assert disabled_preview.latent_flow_retention_days == (3,)
@@ -444,6 +647,58 @@ async def test_preview_has_constant_query_count_and_natural_representative_plan(
         "flow_classification_retention_policies" in plan
         for plan in (plans[0], plans[2])
     )
+
+
+async def test_preview_fails_closed_when_eligible_upload_lacks_primary_content(
+    db_container,
+    admin_user,
+    retention_existing_data,
+) -> None:
+    flow_id, _classification_id = retention_existing_data
+    old = datetime.now(timezone.utc) - timedelta(days=45)
+
+    async with db_container() as container:
+        file = Files(
+            name=f"missing-retention-content-{uuid4()}.txt",
+            mimetype="text/plain",
+            file_type="text",
+            owner_type="user",
+            owner_user_id=admin_user.id,
+            owner_service_id=None,
+            tenant_id=admin_user.tenant_id,
+            created_at=old,
+            updated_at=old,
+        )
+        container.session().add(file)
+        await container.session().flush()
+        container.session().add(
+            FlowRuntimeUploadedFiles(
+                file_id=file.id,
+                flow_id=flow_id,
+                tenant_id=admin_user.tenant_id,
+                uploaded_for_step_id=uuid4(),
+                owner_type="user",
+                owner_user_id=admin_user.id,
+                owner_service_id=None,
+                created_at=old,
+                updated_at=old,
+            )
+        )
+        await container.session().flush()
+
+        retention_service = DataRetentionService(container.session())
+        with pytest.raises(
+            RuntimeError,
+            match="1 File row\\(s\\) without durable primary content",
+        ):
+            await retention_service.preview_flow_retention_organization_change(
+                tenant_id=admin_user.tenant_id,
+                proposal=FlowRetentionOrganizationProposal(
+                    flow_run_history_retention_days=30,
+                    flow_runtime_upload_abandonment_days=30,
+                ),
+                previewed_at=datetime.now(timezone.utc),
+            )
 
 
 async def test_concurrent_same_organization_preview_allows_one_mutation_and_audit(

@@ -8,7 +8,7 @@
   import { Page, Settings } from "$lib/components/layout";
   import { Button } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
-  import { Plus } from "lucide-svelte";
+  import Plus from "lucide-svelte/icons/plus";
   import { m } from "$lib/paraglide/messages";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import MCPServerDialog from "./MCPServerDialog.svelte";

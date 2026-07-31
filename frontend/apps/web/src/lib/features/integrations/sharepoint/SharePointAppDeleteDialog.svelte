@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button, Dialog, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import { AlertTriangle } from "lucide-svelte";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import type { Writable } from "svelte/store";
   import { getEneo } from "$lib/core/Eneo";
 

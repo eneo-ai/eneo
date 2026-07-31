@@ -149,14 +149,14 @@
           <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
         </Settings.Row>
         <Settings.Row
-          title="API key settings"
-          description="Scope enforcement, strict mode, and expiry notification controls are now managed on the API keys admin page."
+          title={m.api_keys_admin_runtime_settings_title()}
+          description={m.api_keys_admin_runtime_settings_description()}
         >
           <a
             href={resolve("/(app)/admin/api-keys")}
             class="text-accent-default hover:text-accent-default/80 text-sm font-medium"
           >
-            Open `/admin/api-keys`
+            {m.api_keys_manage_all()}
           </a>
         </Settings.Row>
         <Settings.Row

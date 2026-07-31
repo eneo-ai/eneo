@@ -7,9 +7,36 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from eneo.files.file_models import (
+    FileInUseError,
+    FileOriginalNotFoundError,
+)
 from eneo.main.exceptions import EXCEPTION_MAP, ErrorCodes, UnauthorizedException
 from eneo.main.models import GeneralError
 from eneo.main.request_context import get_request_context
+from eneo.object_content.content import (
+    ContentTooLargeError,
+    InvalidContentRangeError,
+    ObjectContentBusyError,
+    ObjectContentIdempotencyConflictError,
+    ObjectContentIntegrityError,
+    ObjectContentStateError,
+    ObjectContentUnavailableError,
+)
+from eneo.object_content.deployment_policy import (
+    DeploymentPolicyConflict,
+    ObjectStoreTargetNotSelectable,
+)
+from eneo.skills.domain.skill import (
+    PublishedSkillDeletionError,
+    SkillBlockedForBindingError,
+    SkillExecutionBlockConflictError,
+    SkillHasActiveAppRunsError,
+    SkillHasBindingsError,
+    SkillNotPublishedForBindingError,
+    SkillRuntimePolicyChangedError,
+    SkillSlugConflictError,
+)
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -158,8 +185,82 @@ def _exception_context(
 logger = logging.getLogger(__name__)
 
 
+# Domain exceptions that carry their own HTTP status, reason code and English
+# fallback. They live here rather than in eneo.main.exceptions because the
+# server adapter may depend on a domain package without reversing that
+# dependency. One map, so "where do I register this?" has one answer.
+DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
+    # --- Object content and files ---
+    ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
+    ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
+    ObjectContentIdempotencyConflictError: (409, None, ErrorCodes.UNIQUE_ERROR),
+    ObjectContentStateError: (409, None, ErrorCodes.BAD_REQUEST),
+    ObjectContentBusyError: (409, None, ErrorCodes.RESOURCE_NOT_READY),
+    FileInUseError: (409, None, ErrorCodes.FILE_IN_USE),
+    FileOriginalNotFoundError: (404, None, ErrorCodes.FILE_ORIGINAL_NOT_FOUND),
+    ContentTooLargeError: (413, None, ErrorCodes.FILE_TOO_LARGE),
+    InvalidContentRangeError: (416, None, ErrorCodes.BAD_REQUEST),
+    DeploymentPolicyConflict: (409, None, ErrorCodes.DEPLOYMENT_POLICY_CONFLICT),
+    ObjectStoreTargetNotSelectable: (
+        409,
+        None,
+        ErrorCodes.OBJECT_STORE_NOT_SELECTABLE,
+    ),
+    # --- Skill lifecycle conflicts ---
+    SkillSlugConflictError: (
+        409,
+        "A Skill with this identifier already exists in this scope. "
+        "Choose a different identifier.",
+        ErrorCodes.SKILL_SLUG_TAKEN,
+    ),
+    PublishedSkillDeletionError: (
+        409,
+        "Previously published Skills are retained for audit history "
+        "and cannot be deleted.",
+        ErrorCodes.SKILL_PUBLISHED_NOT_DELETABLE,
+    ),
+    SkillHasActiveAppRunsError: (
+        409,
+        "This Skill is required by a queued or running App run. "
+        "Wait for it to finish before deleting the Skill.",
+        ErrorCodes.SKILL_IN_USE_BY_APP_RUN,
+    ),
+    SkillHasBindingsError: (
+        409,
+        "This Skill is still attached. Remove every binding before deleting it.",
+        ErrorCodes.SKILL_STILL_ATTACHED,
+    ),
+    SkillNotPublishedForBindingError: (
+        400,
+        "Bindings can only move to published organisation Skill versions",
+        ErrorCodes.SKILL_NOT_PUBLISHED_FOR_BINDING,
+    ),
+    SkillBlockedForBindingError: (
+        400,
+        "Blocked organisation Skills cannot receive new or changed bindings",
+        ErrorCodes.SKILL_BLOCKED_FOR_BINDING,
+    ),
+    SkillExecutionBlockConflictError: (
+        409,
+        "This execution block changed after you reviewed it. "
+        "Reload the Skill before unblocking.",
+        ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
+    ),
+    SkillRuntimePolicyChangedError: (
+        409,
+        "The organisation's Skill policy changed while this move was being "
+        "validated. Run the update again against the current policy.",
+        ErrorCodes.SKILL_RUNTIME_POLICY_CHANGED,
+    ),
+}
+
+
 def add_exception_handlers(app: FastAPI):
-    for exception, (status_code, error_message, error_code) in EXCEPTION_MAP.items():
+    exception_handlers = (
+        *EXCEPTION_MAP.items(),
+        *DOMAIN_EXCEPTION_MAP.items(),
+    )
+    for exception, (status_code, error_message, error_code) in exception_handlers:
 
         def handler(
             request: Request,

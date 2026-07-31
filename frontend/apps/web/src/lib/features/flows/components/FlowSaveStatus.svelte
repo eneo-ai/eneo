@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import { CheckCircle2, Loader2, Circle } from "lucide-svelte";
+  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import Circle from "lucide-svelte/icons/circle";
   import { fade } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
 

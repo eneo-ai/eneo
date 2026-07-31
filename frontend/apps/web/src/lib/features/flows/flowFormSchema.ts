@@ -1,14 +1,7 @@
 import flowVariableDefinitions from "./flowVariableDefinitions.generated.json";
 
 export type FlowFormFieldType =
-  | "text"
-  | "number"
-  | "date"
-  | "select"
-  | "multiselect"
-  | "email"
-  | "textarea"
-  | "string";
+  "text" | "number" | "date" | "select" | "multiselect" | "email" | "textarea" | "string";
 
 export type FlowFormField = {
   name: string;

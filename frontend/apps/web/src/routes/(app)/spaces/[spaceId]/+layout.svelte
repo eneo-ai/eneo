@@ -45,7 +45,7 @@
     class="border-default flex flex-col border-r-[0.5px] max-md:hidden md:max-w-[17rem] md:min-w-[17rem]"
   >
     <SpaceSelector></SpaceSelector>
-    <SpaceMenu></SpaceMenu>
+    <SpaceMenu space={$currentSpace}></SpaceMenu>
   </div>
 
   <!-- Below md the sidebar collapses to a slim rail; the hamburger opens the
@@ -83,7 +83,7 @@
     >
       <Sheet.Title class="sr-only">{m.space_nav_title()}</Sheet.Title>
       <SpaceSelector></SpaceSelector>
-      <SpaceMenu></SpaceMenu>
+      <SpaceMenu space={$currentSpace}></SpaceMenu>
     </Sheet.Content>
   </Sheet.Root>
 

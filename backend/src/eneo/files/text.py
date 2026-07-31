@@ -8,6 +8,7 @@ import magic
 import pdfplumber
 import pptx
 from docx2python import docx2python
+from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 from pptx.exc import PackageNotFoundError
 
@@ -26,6 +27,15 @@ class ExtractionError(Exception):
         self.message = message
         self.code = code
         super().__init__(self.message)
+
+
+class NoExtractableTextError(ExtractionError):
+    """Raised when extraction or transcription produces no usable text."""
+
+    def __init__(self, filename: str):
+        super().__init__(
+            f"File '{filename}' contains no extractable text", "NO_EXTRACTABLE_TEXT"
+        )
 
 
 class EncryptedFileError(ExtractionError):
@@ -304,6 +314,9 @@ class TextExtractor:
 
             return TextSanitizer.sanitize(extracted_text)
 
+        except PDFPasswordIncorrect as e:
+            logger.warning(f"Password-protected PDF rejected: {display_name}")
+            raise EncryptedFileError(display_name) from e
         except PDFSyntaxError as e:
             logger.warning(f"PDF read error for {display_name}: {e}")
             raise CorruptFileError(display_name, str(e))

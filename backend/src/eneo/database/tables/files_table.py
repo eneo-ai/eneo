@@ -2,8 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import BYTEA
+from sqlalchemy import CheckConstraint, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BasePublic
@@ -14,13 +13,8 @@ from eneo.files.file_models import FileType
 
 class Files(BasePublic):
     name: Mapped[str] = mapped_column()
-    text: Mapped[Optional[str]] = mapped_column(Text)
-    blob: Mapped[Optional[bytes]] = mapped_column(BYTEA)
-    checksum: Mapped[str] = mapped_column(index=True)
-    size: Mapped[int] = mapped_column()
     mimetype: Mapped[Optional[str]] = mapped_column()
     file_type: Mapped[str] = mapped_column(server_default=FileType.TEXT)
-    transcription: Mapped[Optional[str]] = mapped_column()
 
     # Foreign keys
     owner_type: Mapped[str] = mapped_column(nullable=False, server_default="user")

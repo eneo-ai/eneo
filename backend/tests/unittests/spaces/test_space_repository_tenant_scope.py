@@ -32,6 +32,7 @@ def _repo(*, tenant_id=None, user=None):
         tenant=_tenant(tenant_id or uuid4()),
         user=user,
         factory=SimpleNamespace(),
+        file_content_loader=SimpleNamespace(),
         app_repo=SimpleNamespace(),
         assistant_repo=SimpleNamespace(),
         completion_model_repo=SimpleNamespace(),

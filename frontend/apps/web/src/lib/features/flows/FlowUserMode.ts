@@ -12,9 +12,8 @@ type FlowUserMode = "user" | "power_user";
 
 const STORAGE_KEY = "eneo:flow-user-mode";
 
-const [getFlowUserMode, setFlowUserMode] = createContext<Writable<FlowUserMode>>(
-  "Flow user mode toggle"
-);
+const [getFlowUserMode, setFlowUserMode] =
+  createContext<Writable<FlowUserMode>>("Flow user mode toggle");
 
 function initFlowUserMode(): Writable<FlowUserMode> {
   let initial: FlowUserMode = "user";

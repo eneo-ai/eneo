@@ -30,6 +30,7 @@ from eneo.main.models import (
     ModelId,
     NotProvided,
     PaginatedPermissions,
+    ResourcePermission,
     ResourcePermissionsMixin,
     partial_model,
 )
@@ -216,6 +217,7 @@ class SpacePublic(SpaceDashboard):
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
     group_members: PaginatedPermissions[SpaceGroupMember]
+    skill_permissions: list[ResourcePermission]
 
     default_assistant: Optional[DefaultAssistant] = None
 

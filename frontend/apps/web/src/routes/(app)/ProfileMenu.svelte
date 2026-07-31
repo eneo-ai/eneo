@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { User, KeyRound, Building2, LogOut } from "lucide-svelte";
+  import User from "lucide-svelte/icons/user";
+  import KeyRound from "lucide-svelte/icons/key-round";
+  import Building2 from "lucide-svelte/icons/building-2";
+  import LogOut from "lucide-svelte/icons/log-out";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { m } from "$lib/paraglide/messages";

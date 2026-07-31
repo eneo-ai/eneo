@@ -11,6 +11,7 @@ import {
   getBackendUrl,
   getBackendServerUrl
 } from "./lib/core/environment.server";
+import { fetchWithTransientRetry } from "./lib/core/transientFetch.server";
 import { sequence } from "@sveltejs/kit/hooks";
 import { paraglideMiddleware } from "$lib/paraglide/server";
 
@@ -107,5 +108,5 @@ export const handleFetch: HandleFetch = async ({ request, fetch }) => {
     request = new Request(request.url.replace(backendUrl, serverUrl), request);
   }
 
-  return fetch(request);
+  return fetchWithTransientRetry(request, fetch);
 };

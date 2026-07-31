@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { Monitor, Sun, Moon } from "lucide-svelte";
+  import Monitor from "lucide-svelte/icons/monitor";
+  import Sun from "lucide-svelte/icons/sun";
+  import Moon from "lucide-svelte/icons/moon";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { cn } from "$lib/utils";
   import { getThemeStore, type Theme } from "$lib/core/theme";

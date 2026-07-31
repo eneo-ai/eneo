@@ -7,7 +7,7 @@
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { writable, type Writable } from "svelte/store";
-  import { AlertTriangle } from "lucide-svelte";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import SharePointAppDeleteDialog from "./SharePointAppDeleteDialog.svelte";
 
   // Types for SharePoint app configuration (until OpenAPI types are regenerated)

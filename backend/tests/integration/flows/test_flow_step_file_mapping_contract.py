@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -8,7 +9,6 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from eneo.database.database import sessionmanager
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepInputFiles,
@@ -17,6 +17,13 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    ObjectContents,
+)
+from eneo.files.file_models import FileContentVariant, FileInfo, FileType
+from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
+from eneo.files.file_service import FileService
 from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
@@ -37,6 +44,7 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
 from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.object_content.content import ContentFailureCode, ContentState
 
 
 def _flow(
@@ -76,26 +84,60 @@ def _flow(
     )
 
 
-def _file(
+async def _bytes(payload: bytes) -> AsyncIterator[bytes]:
+    yield payload
+
+
+async def _save_test_file(
     *,
-    user_id: UUID,
-    tenant_id: UUID,
+    file_service: FileService,
     name: str,
     text: str | None = "file text",
-) -> Files:
-    return Files(
-        name=name,
-        text=text,
-        blob=None,
-        checksum=f"checksum-{name}",
-        size=128,
-        mimetype="application/pdf",
-        file_type="document",
-        transcription=None,
-        owner_type="user",
-        owner_user_id=user_id,
-        owner_service_id=None,
-        tenant_id=tenant_id,
+) -> FileInfo:
+    source_payload = f"durable source for {name}".encode("utf-8")
+    contents = [
+        PendingFileContent(
+            variant=FileContentVariant.ORIGINAL,
+            chunks=_bytes(source_payload),
+            declared_media_type="application/pdf",
+            verified_media_type="application/pdf",
+        )
+    ]
+    if text is not None:
+        contents.append(
+            PendingFileContent(
+                variant=FileContentVariant.EXTRACTED_TEXT,
+                chunks=_bytes(text.encode("utf-8")),
+                declared_media_type="text/plain",
+                verified_media_type="text/plain",
+            )
+        )
+    return await file_service.save_prepared_file(
+        PreparedFileUpload(
+            name=name,
+            file_type=FileType.DOCUMENT,
+            display_media_type="application/pdf",
+            contents=tuple(contents),
+        )
+    )
+
+
+async def _mark_primary_content_unavailable(*, session, file_id: UUID) -> None:
+    content_id = await session.scalar(
+        sa.select(FileContentReferences.content_id).where(
+            FileContentReferences.file_id == file_id,
+            FileContentReferences.variant == FileContentVariant.ORIGINAL.value,
+        )
+    )
+    assert content_id is not None
+    await session.execute(
+        sa.update(ObjectContents)
+        .where(ObjectContents.id == content_id)
+        .values(
+            state=ContentState.FAILED.value,
+            failure_code=ContentFailureCode.BACKEND_MISSING.value,
+            failure_detail="Simulated missing durable content",
+        )
     )
 
 
@@ -241,6 +283,7 @@ async def test_semantic_run_payload_separates_input_file_projection(
 ):
     async with db_container() as container:
         session = container.session()
+        file_service = container.file_service(user=admin_user)
         model = await completion_model_factory(session, "gpt-4o-mini")
         space = await space_factory(session, "Flows step file mapping", [model.id])
         assistant = await assistant_factory(
@@ -249,18 +292,14 @@ async def test_semantic_run_payload_separates_input_file_projection(
             model.id,
             space_id=space.id,
         )
-        input_file_a = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        input_file_a = await _save_test_file(
+            file_service=file_service,
             name="a.pdf",
         )
-        input_file_b = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        input_file_b = await _save_test_file(
+            file_service=file_service,
             name="b.pdf",
         )
-        session.add_all([input_file_a, input_file_b])
-        await session.flush()
         input_file_a_id = input_file_a.id
         input_file_b_id = input_file_b.id
 
@@ -358,6 +397,7 @@ async def test_same_runtime_file_id_can_bind_to_multiple_steps(
 ):
     async with db_container() as container:
         session = container.session()
+        file_service = container.file_service(user=admin_user)
         model = await completion_model_factory(session, "gpt-4o-mini")
         space = await space_factory(session, "Flows shared runtime file", [model.id])
         assistant = await assistant_factory(
@@ -366,13 +406,10 @@ async def test_same_runtime_file_id_can_bind_to_multiple_steps(
             model.id,
             space_id=space.id,
         )
-        input_file = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        input_file = await _save_test_file(
+            file_service=file_service,
             name="shared.pdf",
         )
-        session.add(input_file)
-        await session.flush()
         input_file_id = input_file.id
 
         base_flow = _flow(
@@ -474,6 +511,7 @@ async def test_current_step_input_file_read_model_uses_relational_current_attemp
 ):
     async with db_container() as container:
         session = container.session()
+        file_service = container.file_service(user=admin_user)
         model = await completion_model_factory(session, "gpt-4o-mini")
         space = await space_factory(session, "Flows current runtime inputs", [model.id])
         assistant = await assistant_factory(
@@ -482,23 +520,18 @@ async def test_current_step_input_file_read_model_uses_relational_current_attemp
             model.id,
             space_id=space.id,
         )
-        file_a = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        file_a = await _save_test_file(
+            file_service=file_service,
             name="current-a.pdf",
         )
-        file_b = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        file_b = await _save_test_file(
+            file_service=file_service,
             name="current-b.pdf",
         )
-        file_c = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        file_c = await _save_test_file(
+            file_service=file_service,
             name="current-c.pdf",
         )
-        session.add_all([file_a, file_b, file_c])
-        await session.flush()
         file_a_id = file_a.id
         file_b_id = file_b.id
         file_c_id = file_c.id
@@ -753,11 +786,11 @@ async def test_current_step_input_file_read_model_uses_relational_current_attemp
         for metadata in metadata_by_step_result_id[step_result_id_by_order[1]]
     ] == [file_b_id, file_a_id]
     first_metadata = metadata_by_step_result_id[step_result_id_by_order[1]][0]
-    assert first_metadata.checksum == "checksum-current-b.pdf"
-    assert first_metadata.size == 128
+    assert first_metadata.checksum == file_b.checksum
+    assert first_metadata.size == file_b.size
     assert first_metadata.mimetype == "application/pdf"
     assert first_metadata.file_type.value == "document"
-    assert first_metadata.text_length == len("file text")
+    assert first_metadata.text_size_bytes == len("file text".encode("utf-8"))
     assert first_metadata.has_text is True
     assert first_metadata.has_transcription is False
     assert [
@@ -783,13 +816,11 @@ async def test_step_result_file_requires_matching_step_attempt(
 ):
     async with db_container() as container:
         session = container.session()
-        output_file = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        file_service = container.file_service(user=admin_user)
+        output_file = await _save_test_file(
+            file_service=file_service,
             name="orphan-attempt-output.pdf",
         )
-        session.add(output_file)
-        await session.flush()
         output_file_id = output_file.id
 
         flow, step, run, _ = await _create_running_step_file_flow(
@@ -862,6 +893,7 @@ async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_att
 ):
     async with db_container() as container:
         session = container.session()
+        file_service = container.file_service(user=admin_user)
         model = await completion_model_factory(session, "gpt-4o-mini")
         space = await space_factory(session, "Flows step result files", [model.id])
         assistant = await assistant_factory(
@@ -870,27 +902,26 @@ async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_att
             model.id,
             space_id=space.id,
         )
-        generated_file = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        generated_file = await _save_test_file(
+            file_service=file_service,
             name="generated.pdf",
         )
-        artifact_file = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        artifact_file = await _save_test_file(
+            file_service=file_service,
             name="artifact.pdf",
         )
-        purged_file = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+        purged_file = await _save_test_file(
+            file_service=file_service,
             name="purged.pdf",
             text=None,
         )
-        session.add_all([generated_file, artifact_file, purged_file])
-        await session.flush()
         generated_file_id = generated_file.id
         artifact_file_id = artifact_file.id
         purged_file_id = purged_file.id
+        await _mark_primary_content_unavailable(
+            session=session,
+            file_id=purged_file_id,
+        )
 
         flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
@@ -1061,7 +1092,7 @@ async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_att
     assert [item.file_id for item in listed_files_for_runs] == [purged_file_id]
     assert artifact_projection is not None
     assert artifact_projection.availability == "available"
-    assert artifact_projection.checksum == "checksum-artifact.pdf"
+    assert artifact_projection.checksum == artifact_file.checksum
     assert purged_projection is not None
     assert purged_projection.availability == "content_purged"
     assert cross_tenant_projection is None
@@ -1085,7 +1116,7 @@ async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_att
     ],
 )
 async def test_late_step_result_save_after_terminalization_preserves_result_files(
-    setup_database,
+    db_container,
     completion_model_factory,
     space_factory,
     assistant_factory,
@@ -1094,14 +1125,12 @@ async def test_late_step_result_save_after_terminalization_preserves_result_file
     target_step_status,
     target_attempt_status,
 ):
-    async with sessionmanager.session() as setup_session, setup_session.begin():
-        late_file = _file(
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
+    async with db_container(user=admin_user) as setup_container:
+        setup_session = setup_container.session()
+        late_file = await _save_test_file(
+            file_service=setup_container.file_service(user=admin_user),
             name=f"late-{target_status.value}.pdf",
         )
-        setup_session.add(late_file)
-        await setup_session.flush()
         late_file_id = late_file.id
         flow, step, run, run_repo = await _create_running_step_file_flow(
             session=setup_session,

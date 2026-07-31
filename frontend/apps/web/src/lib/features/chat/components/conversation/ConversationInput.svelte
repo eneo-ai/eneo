@@ -16,7 +16,9 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { Globe, AlertTriangle, X } from "lucide-svelte";
+  import Globe from "lucide-svelte/icons/globe";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import X from "lucide-svelte/icons/x";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 

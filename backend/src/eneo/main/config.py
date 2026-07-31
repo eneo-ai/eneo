@@ -380,12 +380,6 @@ class Settings(BaseSettings):
     mobilityguard_client_secret: Optional[str] = None
     mobilityguard_tenant_id: Optional[str] = None
 
-    # Max sizes
-    upload_file_to_session_max_size: int
-    upload_image_to_session_max_size: int
-    upload_max_file_size: int
-    transcription_max_file_size: int
-
     # Visual content in document attachments (PDF pages with images/graphics,
     # DOCX/PPTX embedded images) is extracted as derived image files so vision
     # models can read it (capped per document to bound token cost)
@@ -404,6 +398,11 @@ class Settings(BaseSettings):
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000
 
+    # The Skill attachment guardrail lives in the stored tenant runtime
+    # policy (skill_runtime_policies). The historical SKILL_MAX_BINDINGS
+    # environment value is read once by migration 202607240310 as a seed and
+    # has no runtime effect.
+
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
 
@@ -417,6 +416,7 @@ class Settings(BaseSettings):
     using_access_management: bool = True
     using_iam: bool = False
     using_image_generation: bool = False
+    show_chat_debug_panel: bool = False
 
     # Max concurrent embedding API calls across all crawls (module-level semaphore)
     # Controls parallelism during page batch persistence to avoid overwhelming embedding APIs
@@ -430,7 +430,6 @@ class Settings(BaseSettings):
     api_key_last_used_min_interval_seconds: int = 900
     api_key_used_audit_sample_rate: float = 1.0
     api_key_rotation_grace_hours: int = 24
-    api_key_legacy_endpoints_enabled: bool = True
     api_key_rate_limit_window_seconds: int = 3600
     api_key_rate_limit_fail_open: bool = False
     api_key_rate_limit_tenant_default: int = 10000

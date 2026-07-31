@@ -200,7 +200,7 @@ function parseUrl(baseUrl, endpoint, params) {
     Object.entries(params.query).forEach(([param, value]) => {
       const values = Array.isArray(value) ? value : [value];
       values.forEach((queryValue) => {
-        if (queryValue !== undefined) {
+        if (queryValue !== undefined && queryValue !== null) {
           url.searchParams.append(param, String(queryValue));
         }
       });

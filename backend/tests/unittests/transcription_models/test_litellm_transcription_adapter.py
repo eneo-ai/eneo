@@ -12,11 +12,12 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
 
 class _CredentialResolverStub:
     provider_id = "provider-id"
+    provider_type = "openai"
 
-    def get_api_key(self) -> str:
+    def get_api_key(self, *, required: bool = False) -> str:
         return "test-key"
 
-    def get_credential_field(self, *, field: str) -> str | None:
+    def get_credential_field(self, *, field: str, required: bool = False) -> str | None:
         return None
 
 
@@ -39,7 +40,7 @@ async def test_kb_whisper_language_fallback_only_when_language_is_auto(
         return SimpleNamespace(text="transcript")
 
     monkeypatch.setattr(
-        "eneo.transcription_models.infrastructure.adapters.litellm_transcription.litellm.atranscription",
+        "eneo.transcription_models.infrastructure.adapters.litellm_transcription.litellm_transport.atranscription",
         AsyncMock(side_effect=fake_atranscription),
     )
     audio_path = tmp_path / "chunk.wav"

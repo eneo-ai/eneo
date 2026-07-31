@@ -11,10 +11,14 @@ pattern to prevent regressions from commit 58b73e9e.
 """
 
 import uuid
+from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException, Request
 
+from eneo.assistants.api import assistant_router
 from eneo.assistants.api.assistant_models import (
     AskAssistant,
     AssistantResponse,
@@ -34,6 +38,27 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.main.exceptions import UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, ModelId
 from eneo.sessions.session import SessionFeedback, SessionInDB
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillActivationMode,
+    SkillBindingIntent,
+    SkillBindingReference,
+    SkillBindingSource,
+)
+from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
+
+
+def _request(*, api_key=None) -> Request:
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/assistants/test/",
+            "headers": [],
+        }
+    )
+    request.state.api_key = api_key
+    return request
 
 
 @pytest.fixture
@@ -360,6 +385,7 @@ class TestUpdateAssistant:
         await update_assistant(
             id=assistant_id,
             assistant=AssistantUpdatePublic(name="Renamed"),
+            request=_request(),
             container=mock_container,
         )
 
@@ -382,6 +408,7 @@ class TestUpdateAssistant:
         await update_assistant(
             id=assistant_id,
             assistant=AssistantUpdatePublic(name="Renamed", completion_model=None),
+            request=_request(),
             container=mock_container,
         )
 
@@ -407,6 +434,7 @@ class TestUpdateAssistant:
                 name="Renamed",
                 completion_model=ModelId(id=uuid.uuid4()),
             ),
+            request=_request(),
             container=mock_container,
         )
 
@@ -536,3 +564,139 @@ class TestLegacyAssistantSessionAuthorization:
             )
 
         unauthorized_container.session_service.return_value.leave_feedback.assert_not_awaited()
+
+
+async def test_update_assistant_rejects_api_key_skill_facet_before_service_call():
+    container = MagicMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await update_assistant(
+            id=uuid.uuid4(),
+            assistant=AssistantUpdatePublic(skill_bindings=[]),
+            request=_request(api_key=MagicMock()),
+            container=container,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert "session token" in str(exc_info.value.detail)
+    container.assistant_service.assert_not_called()
+
+
+def _skill_binding(*, position: int) -> ResolvedSkillBinding:
+    return ResolvedSkillBinding(
+        skill_id=uuid.uuid4(),
+        skill_revision_id=uuid.uuid4(),
+        current_revision_id=uuid.uuid4(),
+        skill_space_id=uuid.uuid4(),
+        slug=f"skill-{position}",
+        revision_number=position + 1,
+        current_revision_number=position + 1,
+        display_name=f"Skill {position}",
+        description="Description must not enter parent audit evidence",
+        instructions="Sensitive instructions must not enter audit evidence",
+        content_digest=str(position + 1) * 64,
+        position=position,
+        source=SkillBindingSource.SPACE,
+        is_active=True,
+    )
+
+
+async def test_update_assistant_audits_mode_only_skill_change_without_bodies(
+    monkeypatch,
+):
+    assistant_id = uuid.uuid4()
+    space_id = uuid.uuid4()
+    current_user = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        active_api_key=None,
+        email="editor@example.com",
+        username="editor",
+    )
+    old_assistant = SimpleNamespace(
+        id=assistant_id,
+        name="Assistant",
+        space_id=space_id,
+        origin=AssistantOrigin.USER,
+        managing_flow_id=None,
+    )
+    updated_assistant = SimpleNamespace(
+        id=assistant_id,
+        name="Assistant",
+        space_id=space_id,
+        type=None,
+    )
+    before_binding = _skill_binding(position=0)
+    before = [before_binding]
+    after = [
+        replace(
+            before_binding,
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        )
+    ]
+    references = [
+        AssistantSkillBindingInput(
+            skill_id=binding.skill_id,
+            skill_revision_id=binding.skill_revision_id,
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        )
+        for binding in after
+    ]
+    service = SimpleNamespace(
+        get_assistant=AsyncMock(return_value=(old_assistant, [])),
+        update_assistant=AsyncMock(return_value=(updated_assistant, [])),
+    )
+    skill_repo = SimpleNamespace(
+        list_assistant_bindings=AsyncMock(side_effect=[before, after])
+    )
+    audit_service = SimpleNamespace(log_async=AsyncMock())
+    container = SimpleNamespace(
+        assistant_service=lambda: service,
+        skill_repo=lambda: skill_repo,
+        user=lambda: current_user,
+        space_service=lambda: SimpleNamespace(
+            get_space=AsyncMock(return_value=SimpleNamespace(id=space_id, name="Space"))
+        ),
+        audit_service=lambda: audit_service,
+    )
+    response = SimpleNamespace(id=assistant_id)
+    monkeypatch.setattr(
+        assistant_router,
+        "_build_assistant_update_changes",
+        MagicMock(return_value=({}, [])),
+    )
+    monkeypatch.setattr(
+        assistant_router,
+        "_assistant_response",
+        AsyncMock(return_value=response),
+    )
+
+    result = await update_assistant(
+        id=assistant_id,
+        assistant=AssistantUpdatePublic(skill_bindings=references),
+        request=_request(),
+        container=container,
+    )
+
+    assert result is response
+    service.update_assistant.assert_awaited_once()
+    assert service.update_assistant.await_args.kwargs[
+        "update"
+    ].skill_binding_intents == [
+        SkillBindingIntent(
+            reference=SkillBindingReference(
+                skill_id=reference.skill_id,
+                skill_revision_id=reference.skill_revision_id,
+            ),
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        )
+        for reference in references
+    ]
+    audit_service.log_async.assert_awaited_once()
+    audit_call = audit_service.log_async.await_args.kwargs
+    assert audit_call["action"] == ActionType.ASSISTANT_UPDATED
+    skills_change = audit_call["metadata"]["changes"]["skills"]
+    assert skills_change["old"][0]["activation_mode"] == "always"
+    assert skills_change["new"][0]["activation_mode"] == "on_demand"
+    assert "instructions" not in str(skills_change)
+    assert "description" not in str(skills_change)

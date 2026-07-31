@@ -18,6 +18,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
 )
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
 from eneo.questions.question import ToolCallInfo
 
@@ -117,8 +118,9 @@ def test_context_with_messages(context_builder: ContextBuilder):
         name="test_file.pdf",
         checksum="",
         size=0,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
-        user_id=uuid4(),
         file_type=FileType.TEXT,
     )
 
@@ -164,8 +166,9 @@ def test_context_with_images(context_builder: ContextBuilder):
         name="test_file.png",
         checksum="",
         size=0,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
-        user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 
@@ -183,8 +186,9 @@ def test_context_with_messages_and_images(context_builder: ContextBuilder):
         blob="data",
         checksum="",
         size=0,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
-        user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 
@@ -504,8 +508,9 @@ def _image_file(blob: bytes = _PNG_1PX) -> File:
         mimetype="image/png",
         checksum="",
         size=len(blob),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
-        user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 

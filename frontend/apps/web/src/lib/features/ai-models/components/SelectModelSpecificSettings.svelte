@@ -191,7 +191,13 @@
     class="border-default hover:bg-hover-stronger flex min-h-[4.125rem] items-center justify-between gap-8 border-b px-4 py-3"
   >
     <div class="flex items-center gap-2">
-      <p class="w-36" aria-label={getKwargLabel(kwargName)}>{getKwargLabel(kwargName)}</p>
+      {#if isSelectKwargName(kwargName)}
+        <label class="w-36" for={`model-setting-${kwargName}`}>
+          {getKwargLabel(kwargName)}
+        </label>
+      {:else}
+        <p class="w-36">{getKwargLabel(kwargName)}</p>
+      {/if}
       <Tooltip text={getKwargTooltip(kwargName)}>
         <IconQuestionMark class="text-muted hover:text-primary" />
       </Tooltip>
@@ -199,6 +205,7 @@
 
     {#if isSelectKwargName(kwargName)}
       <select
+        id={`model-setting-${kwargName}`}
         value={selectValues[kwargName] ?? ""}
         on:change={(event) => setSelectKwarg(kwargName, event.currentTarget.value)}
         class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"

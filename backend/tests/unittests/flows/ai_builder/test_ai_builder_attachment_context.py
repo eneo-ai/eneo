@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 from docx import Document
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     _FILE_ROLE_PRIORITY,
@@ -59,10 +60,8 @@ def _make_file(
         text=text,
         blob=blob if blob is not None else (b"x" if text is None else None),
         transcription=transcription,
-        owner_type=None,
+        owner_type=PrincipalType.USER,
         owner_user_id=uuid4(),
-        owner_api_key_id=None,
-        user_id=uuid4(),
         tenant_id=uuid4(),
     )
 

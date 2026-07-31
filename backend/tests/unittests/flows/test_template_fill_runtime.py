@@ -11,6 +11,7 @@ import pytest
 from docx import Document
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileType
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
 )
@@ -45,7 +46,6 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
-from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
 from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from eneo.flows.runtime.template_fill_runtime import (
@@ -204,6 +204,45 @@ def _logger() -> SimpleNamespace:
     )
 
 
+def _runtime_deps(
+    *,
+    file_repo: AsyncMock | None = None,
+    template_asset_repo: AsyncMock | None = None,
+    template_file: SimpleNamespace | None = None,
+    file_content_loader: AsyncMock | None = None,
+    file_service: AsyncMock | None = None,
+) -> TemplateFillRuntimeDeps:
+    if file_repo is None:
+        file_repo = AsyncMock()
+    if template_asset_repo is None:
+        template_asset_repo = AsyncMock()
+    if file_content_loader is None:
+        file_content_loader = AsyncMock()
+    if file_service is None:
+        file_service = AsyncMock()
+        file_service.save_generated_file.return_value = SimpleNamespace(id=uuid4())
+    if template_file is not None:
+        metadata = SimpleNamespace(
+            id=template_file.id,
+            name=template_file.name,
+            checksum=template_file.checksum,
+        )
+        file_repo.get_by_id.return_value = metadata
+        file_content_loader.load.return_value = {metadata.id: template_file}
+        if template_asset_repo.get.side_effect is None:
+            template_asset_repo.get.return_value = SimpleNamespace(
+                file_id=template_file.id
+            )
+    return TemplateFillRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=file_service,
+        template_asset_repo=template_asset_repo,
+        logger=_logger(),
+    )
+
+
 async def execute_template_fill_step(
     *,
     step: RuntimeStep,
@@ -234,22 +273,18 @@ async def test_prepare_template_fill_step_static_binding_adds_no_resolved_input_
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
     step = _step()
     step.output_config["bindings"] = {"title": "Statisk titel"}
@@ -275,22 +310,18 @@ async def test_prepare_template_fill_step_records_exact_dynamic_binding_source()
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
     step = _step()
     step.output_config["bindings"] = {
@@ -328,22 +359,18 @@ async def test_template_fill_activation_failure_prevents_render_and_persist(
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
     render_docx_template = MagicMock()
     monkeypatch.setattr(
@@ -368,7 +395,7 @@ async def test_template_fill_activation_failure_prevents_render_and_persist(
         )
 
     render_docx_template.assert_not_called()
-    file_repo.add.assert_not_awaited()
+    deps.file_service.save_generated_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -380,23 +407,21 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     template_file_id = uuid4()
     step = _step(template_asset_id=template_asset_id)
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    file_service = AsyncMock()
+    file_service.save_generated_file.return_value = SimpleNamespace(id=uuid4())
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
+        file_service=file_service,
     )
 
     output = await execute_template_fill_step(
@@ -413,11 +438,13 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     )
     assert output.artifacts == [
         {
-            "file_id": str(file_repo.add.return_value.id),
+            "file_id": str(file_service.save_generated_file.return_value.id),
             "name": "step_2_output.docx",
             "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "size": len(file_repo.add.await_args.args[0].blob),
-            "checksum": file_repo.add.await_args.args[0].checksum,
+            "size": len(file_service.save_generated_file.await_args.kwargs["payload"]),
+            "checksum": hashlib.sha256(
+                file_service.save_generated_file.await_args.kwargs["payload"]
+            ).hexdigest(),
             "file_type": "document",
         }
     ]
@@ -440,7 +467,14 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
     assert output.num_tokens_input == 0
     assert output.num_tokens_output == 0
     assert '"title": "Social medias påverkan"' in output.input_text
-    file_repo.add.assert_awaited_once()
+    file_service.save_generated_file.assert_awaited_once()
+    save_kwargs = file_service.save_generated_file.await_args.kwargs
+    assert save_kwargs["name"] == "step_2_output.docx"
+    assert (
+        save_kwargs["mimetype"]
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert save_kwargs["file_type"] == FileType.DOCUMENT
     template_asset_repo.get.assert_awaited_once_with(
         asset_id=template_asset_id,
         tenant_id=run.tenant_id,
@@ -534,15 +568,12 @@ async def test_builder_approved_template_contract_materializes_and_renders_witho
         output_type=terminal.output_type,
     )
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            name="builder-template.docx",
-            checksum="checksum",
-            blob=template_bytes,
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
+    template_file = SimpleNamespace(
+        id=file_id,
+        name="builder-template.docx",
+        checksum="checksum",
+        blob=template_bytes,
+    )
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=file_id)
 
@@ -550,12 +581,10 @@ async def test_builder_approved_template_contract_materializes_and_renders_witho
         step=runtime_step,
         run=run,
         state=state,
-        deps=TemplateFillRuntimeDeps(
-            variable_resolver=FlowVariableResolver(),
+        deps=_runtime_deps(
             file_repo=file_repo,
             template_asset_repo=template_asset_repo,
-            principal=FlowPrincipal.from_run(run),
-            logger=_logger(),
+            template_file=template_file,
         ),
     )
 
@@ -586,23 +615,18 @@ async def test_execute_template_fill_step_loads_template_asset_by_tenant() -> No
     template_asset_id = uuid4()
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     output = await execute_template_fill_step(
@@ -618,10 +642,12 @@ async def test_execute_template_fill_step_loads_template_asset_by_tenant() -> No
         asset_id=template_asset_id,
         tenant_id=run.tenant_id,
     )
-    file_repo.get_list_by_id_and_tenant.assert_awaited_once_with(
-        ids=[template_file_id],
+    file_repo.get_by_id.assert_awaited_once_with(
+        file_id=template_file_id,
         tenant_id=run.tenant_id,
-        include_transcription=False,
+    )
+    deps.file_content_loader.load.assert_awaited_once_with(
+        [file_repo.get_by_id.return_value]
     )
     assert output.output_payload_extensions["template_provenance"] == {
         "template_name": "template.docx",
@@ -643,23 +669,18 @@ async def test_execute_template_fill_step_resolves_asset_id_only_config() -> Non
         template_asset_id=template_asset_id,
     )
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=asset_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
+    template_file = SimpleNamespace(
+        id=asset_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=asset_file_id)
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     output = await execute_template_fill_step(
@@ -673,10 +694,12 @@ async def test_execute_template_fill_step_resolves_asset_id_only_config() -> Non
         asset_id=template_asset_id,
         tenant_id=run.tenant_id,
     )
-    file_repo.get_list_by_id_and_tenant.assert_awaited_once_with(
-        ids=[asset_file_id],
+    file_repo.get_by_id.assert_awaited_once_with(
+        file_id=asset_file_id,
         tenant_id=run.tenant_id,
-        include_transcription=False,
+    )
+    deps.file_content_loader.load.assert_awaited_once_with(
+        [file_repo.get_by_id.return_value]
     )
     assert output.output_payload_extensions["template_provenance"] == {
         "template_name": "template.docx",
@@ -698,12 +721,9 @@ async def test_execute_template_fill_step_reports_missing_template_asset() -> No
     template_asset_repo = AsyncMock()
     template_asset_repo.get.side_effect = NotFoundException("missing asset")
     file_repo = AsyncMock()
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
     )
 
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -717,7 +737,8 @@ async def test_execute_template_fill_step_reports_missing_template_asset() -> No
         )
 
     assert exc_info.value.code == FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value
-    file_repo.get_list_by_id_and_tenant.assert_not_awaited()
+    file_repo.get_by_id.assert_not_awaited()
+    deps.file_content_loader.load.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -730,13 +751,10 @@ async def test_execute_template_fill_step_reports_missing_template_asset_file() 
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = []
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    file_repo.get_by_id.side_effect = NotFoundException("missing file")
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
     )
 
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -750,6 +768,7 @@ async def test_execute_template_fill_step_reports_missing_template_asset_file() 
         )
 
     assert exc_info.value.code == FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value
+    deps.file_content_loader.load.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -765,12 +784,9 @@ async def test_execute_template_fill_step_rejects_template_file_id_identity() ->
     step.output_config["template_file_id"] = str(template_file_id)
     template_asset_repo = AsyncMock()
     file_repo = AsyncMock()
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
     )
 
     with pytest.raises(
@@ -784,7 +800,8 @@ async def test_execute_template_fill_step_rejects_template_file_id_identity() ->
         )
 
     template_asset_repo.get.assert_not_awaited()
-    file_repo.get_list_by_id_and_tenant.assert_not_awaited()
+    file_repo.get_by_id.assert_not_awaited()
+    deps.file_content_loader.load.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -799,20 +816,16 @@ async def test_execute_template_fill_step_reports_missing_template_asset_content
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=None,
-        )
-    ]
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=None,
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -840,20 +853,16 @@ async def test_execute_template_fill_step_reports_template_asset_checksum_drift(
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="other-checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="other-checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=template_asset_repo,
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -877,20 +886,16 @@ async def test_execute_template_fill_step_rejects_checksum_drift() -> None:
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="other-checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="other-checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     with pytest.raises(TypedIOValidationException, match="checksum"):
@@ -901,7 +906,7 @@ async def test_execute_template_fill_step_rejects_checksum_drift() -> None:
             deps=deps,
         )
 
-    file_repo.add.assert_not_called()
+    deps.file_service.save_generated_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -911,21 +916,16 @@ async def test_execute_template_fill_step_allows_explicit_empty_binding() -> Non
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     step = _step()
@@ -978,21 +978,16 @@ async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_
     )
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_summary_only_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_summary_only_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
     step = _step()
     step.output_config["bindings"] = {"slutsats": "{{step_1.output.text}}"}
@@ -1045,20 +1040,16 @@ async def test_execute_template_fill_step_reports_failed_upstream_step_clearly()
     )
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     with pytest.raises(TypedIOValidationException, match="failed earlier in the run"):
@@ -1079,20 +1070,16 @@ async def test_execute_template_fill_step_reports_missing_template_blob_clearly(
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=None,
-        )
-    ]
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=None,
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     with pytest.raises(
@@ -1116,21 +1103,19 @@ async def test_execute_template_fill_step_reports_generated_document_save_failur
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.side_effect = RuntimeError("storage unavailable")
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    file_service = AsyncMock()
+    file_service.save_generated_file.side_effect = RuntimeError("storage unavailable")
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
+        file_service=file_service,
     )
 
     with pytest.raises(TypedIOValidationException, match="saving the generated DOCX"):
@@ -1151,26 +1136,21 @@ async def test_execute_template_fill_step_reports_generated_document_read_failur
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
     monkeypatch.setattr(
         template_fill_runtime_module,
         "extract_docx_text",
         lambda blob: (_ for _ in ()).throw(RuntimeError("document parse failed")),
     )
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     with pytest.raises(TypedIOValidationException, match="reading the generated DOCX"):
@@ -1189,12 +1169,9 @@ async def test_execute_template_fill_step_rejects_template_file_id_key() -> None
     state = _state(result=result)
     step = _step()
     step.output_config["template_file_id"] = str(uuid4())
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=AsyncMock(),
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
     )
 
     with pytest.raises(
@@ -1215,12 +1192,9 @@ async def test_execute_template_fill_step_rejects_non_string_binding_values() ->
     state = _state(result=result)
     step = _step()
     step.output_config["bindings"]["summary"] = {"bad": "value"}
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=AsyncMock(),
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
     )
 
     with pytest.raises(TypedIOValidationException, match="must be a string expression"):
@@ -1240,13 +1214,10 @@ async def test_execute_template_fill_step_reports_missing_published_template_fil
     result = _completed_result(run=run)
     state = _state(result=result)
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = []
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    file_repo.get_by_id.side_effect = NotFoundException("missing file")
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
     )
 
     with pytest.raises(
@@ -1269,25 +1240,21 @@ async def test_execute_template_fill_step_reports_render_stage_failure(
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
     monkeypatch.setattr(
         template_fill_runtime_module,
         "render_docx_template",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("render broke")),
     )
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     with pytest.raises(TypedIOValidationException, match="rendering the DOCX template"):
@@ -1306,21 +1273,16 @@ async def test_execute_template_fill_step_supports_datum_system_variable() -> No
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
     step = _step()
     step.output_config["bindings"]["author"] = "{{datum}}"
@@ -1353,21 +1315,16 @@ async def test_execute_template_fill_step_formats_json_binding_in_summary() -> N
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
     step = _step()
     step.output_config["bindings"]["summary"] = "{{step_1.output.structured}}"
@@ -1402,21 +1359,16 @@ async def test_execute_template_fill_step_supports_unicode_placeholder_names() -
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_unicode_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_unicode_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
     step = _step()
     step.output_config["placeholders"] = ["ämne", "summary"]
@@ -1447,21 +1399,16 @@ async def test_execute_template_fill_step_preserves_long_summary_in_persisted_te
     state = _state(result=result)
     template_file_id = uuid4()
     file_repo = AsyncMock()
-    file_repo.get_list_by_id_and_tenant.return_value = [
-        SimpleNamespace(
-            id=template_file_id,
-            name="template.docx",
-            checksum="checksum",
-            blob=_build_template_bytes(),
-        )
-    ]
-    file_repo.add.return_value = SimpleNamespace(id=uuid4())
-    deps = TemplateFillRuntimeDeps(
-        variable_resolver=FlowVariableResolver(),
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
         file_repo=file_repo,
         template_asset_repo=AsyncMock(),
-        principal=FlowPrincipal.from_run(run),
-        logger=_logger(),
+        template_file=template_file,
     )
 
     output = await execute_template_fill_step(

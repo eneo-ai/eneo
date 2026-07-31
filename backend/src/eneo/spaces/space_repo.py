@@ -1,4 +1,6 @@
 from collections.abc import Sequence
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 from uuid import UUID
 
@@ -24,7 +26,7 @@ from eneo.database.tables.group_chats_table import (
     GroupChatsTable,
 )
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.info_blobs_table import InfoBlobs as InfoBlobsTable
 from eneo.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
@@ -64,9 +66,12 @@ from eneo.database.tables.spaces_table import (
     SpacesUsers,
 )
 from eneo.database.tables.user_groups_table import UserGroups
+from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
+from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
+from eneo.files.file_models import File, FileMetadata
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -75,10 +80,19 @@ from eneo.main.exceptions import (
 from eneo.main.logging import get_logger
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from eneo.spaces.space import Space
+from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
+from eneo.user_groups.user_group import UserGroupState
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class AssistantMCPServerProjection:
+    space_id: UUID
+    assistant_id: UUID
+    mcp_servers: "tuple[MCPServer, ...]"
 
 
 class _HasId(Protocol):
@@ -130,6 +144,7 @@ class SpaceRepository:
         session: AsyncSession,
         tenant: "TenantInDB",
         factory: SpaceFactory,
+        file_content_loader: FileContentLoader,
         app_repo: Optional["AppRepository"],
         assistant_repo: "AssistantRepository",
         completion_model_repo: "CompletionModelRepository",
@@ -148,6 +163,7 @@ class SpaceRepository:
         self.tenant_id = tenant.id
         self.user = user
         self.factory = factory
+        self.file_content_loader = file_content_loader
         self.app_repo = app_repo
         self.completion_model_repo = completion_model_repo
         self.transcription_model_repo = transcription_model_repo
@@ -161,6 +177,35 @@ class SpaceRepository:
                 "SpaceRepository operation requires a user-scoped repository."
             )
         return self.user
+
+    async def _load_application_attachments(
+        self,
+        *,
+        tenant_id: UUID,
+        assistants: Sequence[Assistants],
+        apps: Sequence[Apps],
+    ) -> tuple[dict[UUID, list[File]], dict[UUID, list[File]]]:
+        groups = [
+            FileAttachmentGroup(
+                owner_kind=owner_kind,
+                owner_id=record.id,
+                tenant_id=tenant_id,
+                files=tuple(
+                    FileMetadata.model_validate(attachment.file)
+                    for attachment in record.attachments
+                ),
+            )
+            for owner_kind, records in (
+                ("assistant", assistants),
+                ("app", apps),
+            )
+            for record in records
+        ]
+        loaded = await self.file_content_loader.load_attachment_groups(groups)
+        return (
+            {record.id: loaded[("assistant", record.id)] for record in assistants},
+            {record.id: loaded[("app", record.id)] for record in apps},
+        )
 
     def _options(self) -> list[Any]:
         return [
@@ -241,7 +286,7 @@ class SpaceRepository:
 
         ib_count_sq = (
             sa.select(sa.func.count(sa.distinct(ib.id)))
-            .where(ib.group_id == c.id)
+            .where(ib.group_id == c.id, active_info_blob_version())
             .correlate(c)
             .scalar_subquery()
         )
@@ -634,7 +679,10 @@ class SpaceRepository:
         def _set_size_subquery(collection: "Collection"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                .where(InfoBlobsTable.group_id == collection.id)
+                .where(
+                    InfoBlobsTable.group_id == collection.id,
+                    active_info_blob_version(),
+                )
                 .scalar_subquery()
             )
 
@@ -712,7 +760,10 @@ class SpaceRepository:
         def _set_size_subquery(website: "Website"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                .where(InfoBlobsTable.website_id == website.id)
+                .where(
+                    InfoBlobsTable.website_id == website.id,
+                    active_info_blob_version(),
+                )
                 .scalar_subquery()
             )
 
@@ -816,6 +867,7 @@ class SpaceRepository:
         space_id: UUID,
         assistant_id: UUID,
         mcp_servers: list["MCPServer"],
+        assistant_tool_overrides: dict[UUID, bool] | None = None,
     ) -> list["MCPServer"]:
         """Load tools for assistant's MCP servers and apply space + assistant-level overrides.
 
@@ -874,22 +926,37 @@ class SpaceRepository:
             for override in space_overrides_db
         }
 
-        # Load assistant-level tool overrides
-        assistant_overrides_query = sa.select(AssistantMCPServerTools).where(
-            AssistantMCPServerTools.assistant_id == assistant_id
-        )
-        assistant_overrides_result = await self.session.execute(
-            assistant_overrides_query
-        )
-        assistant_overrides_db = assistant_overrides_result.scalars().all()
+        if assistant_tool_overrides is None:
+            assistant_overrides_query = sa.select(AssistantMCPServerTools).where(
+                AssistantMCPServerTools.assistant_id == assistant_id
+            )
+            assistant_overrides_result = await self.session.execute(
+                assistant_overrides_query
+            )
+            assistant_overrides_db = assistant_overrides_result.scalars().all()
+            assistant_tool_overrides = {
+                override.mcp_server_tool_id: override.is_enabled
+                for override in assistant_overrides_db
+            }
 
-        # Create map: tool_id -> is_enabled (assistant level)
-        assistant_tool_overrides = {
-            override.mcp_server_tool_id: override.is_enabled
-            for override in assistant_overrides_db
-        }
+        return self._project_assistant_mcp_server_tools(
+            mcp_servers=mcp_servers,
+            tools_db=tools_db,
+            tenant_tool_settings=tenant_tool_settings,
+            space_tool_overrides=space_tool_overrides,
+            assistant_tool_overrides=assistant_tool_overrides,
+        )
 
-        # Group tools by server
+    @staticmethod
+    def _project_assistant_mcp_server_tools(
+        *,
+        mcp_servers: list["MCPServer"],
+        tools_db: Sequence[MCPServerToolsTable],
+        tenant_tool_settings: dict[UUID, bool],
+        space_tool_overrides: dict[UUID, bool],
+        assistant_tool_overrides: dict[UUID, bool],
+    ) -> list["MCPServer"]:
+        """Apply the canonical tenant, Space and Assistant tool hierarchy."""
         from collections import defaultdict
 
         from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
@@ -944,6 +1011,102 @@ class SpaceRepository:
             server.tools = tools_by_server.get(server.id, [])
 
         return mcp_servers
+
+    async def project_assistants_mcp_servers(
+        self,
+        projections: Sequence[AssistantMCPServerProjection],
+    ) -> dict[UUID, list["MCPServer"]]:
+        """Project several Assistants with one bounded set of policy reads."""
+        from eneo.database.tables.assistant_table import AssistantMCPServerTools
+
+        if not projections:
+            return {}
+
+        server_ids = {
+            server.id for projection in projections for server in projection.mcp_servers
+        }
+        if not server_ids:
+            return {projection.assistant_id: [] for projection in projections}
+
+        tools_result = await self.session.execute(
+            sa.select(MCPServerToolsTable)
+            .where(MCPServerToolsTable.mcp_server_id.in_(server_ids))
+            .order_by(MCPServerToolsTable.name)
+        )
+        tools_db: list[MCPServerToolsTable] = list(tools_result.scalars().all())
+        tool_ids = {tool.id for tool in tools_db}
+
+        tenant_settings_result = await self.session.execute(
+            sa.select(MCPServerToolSettingsTable).where(
+                MCPServerToolSettingsTable.tenant_id == self.tenant_id,
+                MCPServerToolSettingsTable.mcp_server_tool_id.in_(tool_ids),
+            )
+        )
+        tenant_tool_settings = {
+            setting.mcp_server_tool_id: setting.is_enabled
+            for setting in tenant_settings_result.scalars().all()
+        }
+
+        space_ids = {projection.space_id for projection in projections}
+        space_overrides_result = await self.session.execute(
+            sa.select(SpacesMCPServerTools).where(
+                SpacesMCPServerTools.space_id.in_(space_ids),
+                SpacesMCPServerTools.mcp_server_tool_id.in_(tool_ids),
+            )
+        )
+        space_tool_overrides: dict[UUID, dict[UUID, bool]] = {}
+        for override in space_overrides_result.scalars().all():
+            space_tool_overrides.setdefault(override.space_id, {})[
+                override.mcp_server_tool_id
+            ] = override.is_enabled
+
+        assistant_ids = {projection.assistant_id for projection in projections}
+        assistant_overrides_result = await self.session.execute(
+            sa.select(AssistantMCPServerTools).where(
+                AssistantMCPServerTools.assistant_id.in_(assistant_ids),
+                AssistantMCPServerTools.mcp_server_tool_id.in_(tool_ids),
+            )
+        )
+        assistant_tool_overrides: dict[UUID, dict[UUID, bool]] = {}
+        for override in assistant_overrides_result.scalars().all():
+            assistant_tool_overrides.setdefault(override.assistant_id, {})[
+                override.mcp_server_tool_id
+            ] = override.is_enabled
+
+        return {
+            projection.assistant_id: self._project_assistant_mcp_server_tools(
+                mcp_servers=deepcopy(list(projection.mcp_servers)),
+                tools_db=tools_db,
+                tenant_tool_settings=tenant_tool_settings,
+                space_tool_overrides=space_tool_overrides.get(projection.space_id, {}),
+                assistant_tool_overrides=assistant_tool_overrides.get(
+                    projection.assistant_id, {}
+                ),
+            )
+            for projection in projections
+        }
+
+    async def project_assistant_mcp_servers(
+        self,
+        *,
+        space_id: UUID,
+        assistant_id: UUID,
+        mcp_servers: list["MCPServer"],
+        tool_settings: list[tuple[UUID, bool]] | None = None,
+    ) -> list["MCPServer"]:
+        """Project staged assistant tool settings through the canonical policy.
+
+        Copies the read-model entities because tool projection is intentionally
+        mutable and save-time validation must not alter the loaded Space.
+        """
+        return await self._load_assistant_mcp_server_tools_with_overrides(
+            space_id=space_id,
+            assistant_id=assistant_id,
+            mcp_servers=deepcopy(mcp_servers),
+            assistant_tool_overrides=(
+                dict(tool_settings) if tool_settings is not None else None
+            ),
+        )
 
     async def _get_assistants(
         self,
@@ -1358,6 +1521,14 @@ class SpaceRepository:
             include_hidden=include_hidden_assistants,
         )
         apps = await self._get_apps(space_id=entry_in_db.id)
+        (
+            assistant_attachments,
+            app_attachments,
+        ) = await self._load_application_attachments(
+            tenant_id=entry_in_db.tenant_id,
+            assistants=assistants,
+            apps=apps,
+        )
         group_chats = await self._get_group_chats(space_id=entry_in_db.id)
         services = await self._get_services(space_id=entry_in_db.id)
 
@@ -1371,8 +1542,10 @@ class SpaceRepository:
             transcription_models=transcription_models,
             mcp_servers=mcp_servers,
             assistants_in_db=assistants,
+            assistant_attachments=assistant_attachments,
             group_chats_in_db=group_chats,
             apps_in_db=apps,
+            app_attachments=app_attachments,
             services_in_db=services,
             integration_knowledge_in_db=integration_knowledge_union,
             security_classification=entry_in_db.security_classification,
@@ -1447,6 +1620,85 @@ class SpaceRepository:
             raise NotFoundException()
 
         return space
+
+    async def get_applications_projection(
+        self, id: UUID
+    ) -> SpaceApplicationsProjection:
+        space_in_db = await self.session.scalar(
+            sa.select(Spaces).where(Spaces.id == id)
+        )
+        if space_in_db is None:
+            raise NotFoundException()
+
+        member_roles = dict(
+            (
+                await self.session.execute(
+                    sa.select(SpacesUsers.user_id, SpacesUsers.role)
+                    .join(Users, Users.id == SpacesUsers.user_id)
+                    .where(SpacesUsers.space_id == id)
+                    .where(Users.deleted_at.is_(None))
+                )
+            )
+            .tuples()
+            .all()
+        )
+        group_member_roles = dict(
+            (
+                await self.session.execute(
+                    sa.select(
+                        SpacesUserGroups.user_group_id,
+                        SpacesUserGroups.role,
+                    )
+                    .join(
+                        UserGroups,
+                        UserGroups.id == SpacesUserGroups.user_group_id,
+                    )
+                    .where(SpacesUserGroups.space_id == id)
+                    .where(
+                        sa.or_(
+                            UserGroups.state.is_(None),
+                            UserGroups.state != UserGroupState.DELETED.value,
+                        )
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+        assistants = (
+            await self.session.scalars(
+                sa.select(Assistants)
+                .where(Assistants.space_id == id)
+                .order_by(Assistants.created_at)
+            )
+        ).all()
+        group_chats = (
+            await self.session.scalars(
+                sa.select(GroupChatsTable).where(GroupChatsTable.space_id == id)
+            )
+        ).all()
+        apps = (
+            await self.session.scalars(
+                sa.select(Apps).where(Apps.space_id == id).order_by(Apps.created_at)
+            )
+        ).all()
+        services = (
+            await self.session.scalars(
+                sa.select(Services).where(Services.space_id == id)
+            )
+        ).all()
+        completion_models = await self.completion_model_repo.all(with_deprecated=True)
+
+        return self.factory.create_applications_projection(
+            space_in_db=space_in_db,
+            member_roles=member_roles,
+            group_member_roles=group_member_roles,
+            assistants_in_db=assistants,
+            group_chats_in_db=group_chats,
+            apps_in_db=apps,
+            services_in_db=services,
+            completion_models=completion_models,
+        )
 
     async def update(
         self,
@@ -1552,10 +1804,20 @@ class SpaceRepository:
             if include_applications:
                 assistants = await self._get_assistants(space_id=record.id)
                 apps = await self._get_apps(space_id=record.id)
+                (
+                    assistant_attachments,
+                    app_attachments,
+                ) = await self._load_application_attachments(
+                    tenant_id=record.tenant_id,
+                    assistants=assistants,
+                    apps=apps,
+                )
                 group_chats = await self._get_group_chats(space_id=record.id)
             else:
                 assistants: Sequence[Assistants] = []
                 apps: Sequence[Apps] = []
+                assistant_attachments: dict[UUID, list[File]] = {}
+                app_attachments: dict[UUID, list[File]] = {}
                 group_chats: Sequence[GroupChatsTable] = []
 
             spaces.append(
@@ -1563,7 +1825,9 @@ class SpaceRepository:
                     record,
                     user=user,
                     assistants_in_db=assistants,
+                    assistant_attachments=assistant_attachments,
                     apps_in_db=apps,
+                    app_attachments=app_attachments,
                     group_chats_in_db=group_chats,
                 )
             )

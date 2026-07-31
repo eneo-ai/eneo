@@ -46,10 +46,7 @@ const FLOW_PREFIX = "flow:";
  *   - `assistant:{assistantId}`
  *   - `flow:{code}`
  */
-export function parseValidationError(
-  key: string,
-  values: string[]
-): ParsedValidationError | null {
+export function parseValidationError(key: string, values: string[]): ParsedValidationError | null {
   for (const prefix of STEP_SCOPED_PREFIXES) {
     if (key.startsWith(prefix)) {
       const rest = key.slice(prefix.length);

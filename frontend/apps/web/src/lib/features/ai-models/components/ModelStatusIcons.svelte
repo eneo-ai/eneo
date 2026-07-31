@@ -68,7 +68,11 @@
 
 <script lang="ts">
   import { Tooltip } from "@eneo/ui";
-  import { TriangleAlert, Brain, Eye, Wrench, Clock } from "lucide-svelte";
+  import TriangleAlert from "lucide-svelte/icons/triangle-alert";
+  import Brain from "lucide-svelte/icons/brain";
+  import Eye from "lucide-svelte/icons/eye";
+  import Wrench from "lucide-svelte/icons/wrench";
+  import Clock from "lucide-svelte/icons/clock";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;

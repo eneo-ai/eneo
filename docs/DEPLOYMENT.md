@@ -166,6 +166,8 @@ docker network create proxy_tier
 docker compose up -d
 ```
 
+> **Note on networks**: `proxy_tier` is the only network you create manually. The compose file also defines two managed networks: `data_net` (internal — PostgreSQL and Redis are isolated from the internet and from Traefik/frontend) and `module_net` (used by optional module containers). See the [network isolation section](deployment/README.md#network-isolation) for details, and [MODULES.md](deployment/MODULES.md) for enabling optional modules.
+
 The initial startup may take a few minutes as Docker downloads the necessary container images. Once done, you can visit `https://your-domain.com` in your browser.
 
 ### Step 4: First-Time Login (Critical Security Step)
@@ -213,15 +215,15 @@ docker compose down
 
 Eneo uses several Docker volumes for persistent data storage:
 
-| Volume | Path | Description |
-|--------|------|-------------|
-| `eneo_postgres_data` | `/var/lib/postgresql/data` | PostgreSQL database storage |
-| `eneo_redis_data` | `/data` | Redis cache and job queue state |
-| `eneo_backend_data` | `/app/data` | Backend application data |
-| `eneo_exports_data` | `/app/exports` | Audit log exports (auto-cleaned after 24h) |
-| `traefik_letsencrypt` | `/letsencrypt` | SSL certificates |
+| Docker volume | Path | Description |
+|---------------|------|-------------|
+| `eneo_eneo_postgres_data` | `/var/lib/postgresql/data` | PostgreSQL database storage |
+| `eneo_eneo_redis_data` | `/data` | Redis cache and job queue state |
+| `eneo_eneo_backend_data` | `/app/data` | Backend application data |
+| `eneo_eneo_temp_files` | `/tmp` | Temporary files and audit log exports (auto-cleaned after 24h) |
+| `eneo_traefik_letsencrypt` | `/letsencrypt` | SSL certificates |
 
-> **Note**: The `eneo_exports_data` volume is shared between `backend` and `worker` services for large audit log exports. Export files are automatically cleaned up after 24 hours.
+> **Note**: Docker volume names include the fixed Compose project prefix from `name: eneo`. The corresponding Compose volume keys in `docker-compose.yml` omit the first `eneo_` prefix.
 
 ## 🔄 Upgrading Your Eneo Instance
 
@@ -294,7 +296,7 @@ docker compose exec db pg_dump -U eneo eneo_db > backup_$(date +%Y%m%d).sql
 
 # Back up your volumes
 docker compose down
-docker run --rm -v eneo_postgres_data:/data -v $(pwd):/backup ubuntu tar czf /backup/postgres_data_backup.tar.gz /data
+docker run --rm -v eneo_eneo_postgres_data:/data -v $(pwd):/backup ubuntu tar czf /backup/postgres_data_backup.tar.gz /data
 ```
 
 ### Upgrading Between Minor Versions
@@ -338,7 +340,7 @@ docker compose exec db pg_dump -U eneo eneo_db > backup.sql
 docker compose down
 
 # 3. Remove volumes (ensures clean state)
-docker volume rm eneo_postgres_data eneo_redis_data eneo_backend_data
+docker volume rm eneo_eneo_postgres_data eneo_eneo_redis_data eneo_eneo_backend_data
 # Verify volumes are removed: docker volume ls
 
 # 4. Start with fresh installation
@@ -525,8 +527,16 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
 - Go to the admin panel, navigate to the "Models" page, select the "Transcription" tab, and enable a model like Whisper
 
 ### Errors when uploading large files (e.g., PDFs)
-- The default upload limits might be too low
-- Increase the values in `env_backend.env` (values are in bytes, 10485760 = 10MB):
-  ```bash
-  UPLOAD_MAX_FILE_SIZE=10485760
-  ```
+- Ask a platform admin to review configured and effective limits in **Admin >
+  Storage**. Policy updates apply without restarting backend or worker.
+- For PostgreSQL-inline session uploads, the effective limit is the smaller of
+  the admin policy and the operator-owned
+  `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+- For object-store session uploads, the effective limit is the smaller of the
+  admin policy and the portable multipart envelope derived from deployment
+  transport settings.
+- FastAPI/Starlette multipart parsing happens before route admission and may
+  use temporary disk. Eneo's admission check rejects an oversized File or Icon
+  before its own capture/spool or any storage mutation. Use
+  ingress/request-body limits and configure and monitor temporary-disk capacity
+  to protect that earlier parsing boundary.

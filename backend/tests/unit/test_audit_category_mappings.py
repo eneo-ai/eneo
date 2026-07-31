@@ -142,6 +142,7 @@ class TestCategoryMappings:
         file_actions = [
             ActionType.FILE_UPLOADED,
             ActionType.FILE_DELETED,
+            ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED,
         ]
 
         for action_type in file_actions:

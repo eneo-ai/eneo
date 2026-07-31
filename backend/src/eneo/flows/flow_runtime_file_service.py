@@ -12,7 +12,7 @@ from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError
 
 from eneo.database.database import AsyncSession
-from eneo.files.file_models import File
+from eneo.files.file_models import FileInfo
 from eneo.files.file_service import FileService
 from eneo.files.mime_support import canonicalize_mime
 from eneo.flows.enums import FlowRuntimeInputFormat
@@ -206,7 +206,7 @@ class FlowRuntimeFileService:
         flow_id: UUID,
         step_id: UUID,
         upload_file: UploadFile,
-    ) -> File:
+    ) -> FileInfo:
         runtime_inputs = await load_published_runtime_inputs(
             flow_service=self.flow_service,
             flow_version_repo=self.flow_version_repo,
@@ -241,7 +241,7 @@ class FlowRuntimeFileService:
             policy=policy,
         )
 
-    async def delete_runtime_file(self, *, flow_id: UUID, file_id: UUID) -> File:
+    async def delete_runtime_file(self, *, flow_id: UUID, file_id: UUID) -> FileInfo:
         published = await load_published_flow_runtime(
             flow_service=self.flow_service,
             flow_id=flow_id,
@@ -279,7 +279,7 @@ class FlowRuntimeFileService:
         step_id: UUID,
         upload_file: UploadFile,
         policy: FlowFileInputPolicy,
-    ) -> File:
+    ) -> FileInfo:
         max_size = await self._validate_upload_with_policy(
             flow_id=flow_id,
             upload_file=upload_file,

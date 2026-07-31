@@ -71,7 +71,6 @@ export const load: PageLoad = async (event) => {
   const partnerPromise = getPartner();
   const historyPromise = listSessions();
   const initialSessionPromise = loadSession();
-
   const partner = await partnerPromise;
 
   // Help assistants run behind the scenes to support users and must never be

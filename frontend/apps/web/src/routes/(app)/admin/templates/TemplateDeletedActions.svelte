@@ -7,7 +7,9 @@
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
   import { Button, Dropdown } from "@eneo/ui";
-  import { MoreVertical, Undo, Trash2 } from "lucide-svelte";
+  import MoreVertical from "lucide-svelte/icons/more-vertical";
+  import Undo from "lucide-svelte/icons/undo";
+  import Trash2 from "lucide-svelte/icons/trash-2";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
   import TemplateRestoreDialog from "$lib/features/templates/components/admin/TemplateRestoreDialog.svelte";

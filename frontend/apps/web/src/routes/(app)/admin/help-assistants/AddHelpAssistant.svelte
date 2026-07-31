@@ -7,7 +7,7 @@
 <script lang="ts">
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Plus } from "lucide-svelte";
+  import Plus from "lucide-svelte/icons/plus";
   import { invalidate } from "$app/navigation";
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";

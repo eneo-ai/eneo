@@ -1,0 +1,569 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createClient } from "../client/client.js";
+import { initSkills } from "./skills.js";
+
+test("Skill catalogue keeps the bounded cursor page contract", async () => {
+  const page = {
+    items: [{ id: "skill-1", slug: "payroll" }],
+    count: 1,
+    limit: 25,
+    next_cursor: "payroll",
+    previous_cursor: null,
+    total_count: 2
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.list({
+    spaceId: "space-1",
+    limit: 25,
+    cursor: "benefits",
+    query: "payroll"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{space_id}/skills/",
+      request: {
+        method: "get",
+        params: {
+          path: { space_id: "space-1" },
+          query: { limit: 25, cursor: "benefits", q: "payroll" }
+        }
+      }
+    }
+  ]);
+});
+
+test("revision summaries use the bounded collection contract", async () => {
+  const page = {
+    items: [
+      {
+        id: "revision-2",
+        skill_id: "skill-1",
+        revision_number: 2,
+        display_name: "Payroll",
+        created_at: "2026-07-20T12:00:00Z"
+      }
+    ],
+    count: 1,
+    limit: 25,
+    next_cursor: "2",
+    previous_cursor: null,
+    total_count: 3
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.listRevisionSummaries({
+    spaceId: "space-1",
+    skillId: "skill-1",
+    limit: 25,
+    cursor: "3"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/",
+      request: {
+        method: "get",
+        params: {
+          path: { space_id: "space-1", skill_id: "skill-1" },
+          query: { limit: 25, cursor: "3" }
+        }
+      }
+    }
+  ]);
+  assert.equal("listRevisions" in skills, false);
+});
+
+test("one exact revision is loaded from the scoped member route", async () => {
+  const revision = { id: "revision-2", instructions: "Full instructions" };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return revision;
+    }
+  });
+
+  const result = await skills.getRevision({
+    spaceId: "space-1",
+    skillId: "skill-1",
+    revisionId: "revision-2"
+  });
+
+  assert.equal(result, revision);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{revision_id}/",
+      request: {
+        method: "get",
+        params: {
+          path: {
+            space_id: "space-1",
+            skill_id: "skill-1",
+            revision_id: "revision-2"
+          }
+        }
+      }
+    }
+  ]);
+});
+
+test("restore copies a selected revision through its scoped action route", async () => {
+  const outcome = {
+    revision: { id: "revision-4", revision_number: 4 },
+    created: true,
+    restored_from_revision_id: "revision-2",
+    restored_from_revision_number: 2
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return outcome;
+    }
+  });
+
+  const result = await skills.restoreRevision({
+    spaceId: "space-1",
+    skillId: "skill-1",
+    sourceRevisionId: "revision-2",
+    reviewed_current_revision_id: "revision-3"
+  });
+
+  assert.equal(result, outcome);
+  assert.deepEqual(calls, [
+    {
+      endpoint:
+        "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/",
+      request: {
+        method: "post",
+        params: {
+          path: {
+            space_id: "space-1",
+            skill_id: "skill-1",
+            source_revision_id: "revision-2"
+          }
+        },
+        requestBody: {
+          "application/json": {
+            reviewed_current_revision_id: "revision-3"
+          }
+        }
+      }
+    }
+  ]);
+});
+
+test("organisation restore sends the revision reviewed by the administrator", async () => {
+  const calls = [];
+  const response = { revision: { id: "revision-4" }, created: true };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.restoreRevision({
+    skillId: "skill-1",
+    sourceRevisionId: "revision-2",
+    reviewed_current_revision_id: "revision-3"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/",
+      request: {
+        method: "post",
+        params: {
+          path: {
+            skill_id: "skill-1",
+            source_revision_id: "revision-2"
+          }
+        },
+        requestBody: {
+          "application/json": {
+            reviewed_current_revision_id: "revision-3"
+          }
+        }
+      }
+    }
+  ]);
+});
+
+test("organisation publication sends the reviewed revision", async () => {
+  const calls = [];
+  const response = { id: "skill-1", publication_state: "published" };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.publish({
+    skillId: "skill-1",
+    expected_revision_id: "revision-3"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/publish/",
+      request: {
+        method: "post",
+        params: { path: { skill_id: "skill-1" } },
+        requestBody: {
+          "application/json": { expected_revision_id: "revision-3" }
+        }
+      }
+    }
+  ]);
+});
+
+test("personal chat advance sends the reviewed pinned revision", async () => {
+  const calls = [];
+  const response = {
+    outcome: "advanced",
+    from_revision_number: 1,
+    to_revision_number: 2
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.advancePersonalChat({
+    skillId: "skill-1",
+    expected_pinned_revision_id: "revision-1",
+    expected_published_revision_id: "revision-2"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/personal-chat/advance/",
+      request: {
+        method: "post",
+        params: { path: { skill_id: "skill-1" } },
+        requestBody: {
+          "application/json": {
+            expected_pinned_revision_id: "revision-1",
+            expected_published_revision_id: "revision-2"
+          }
+        }
+      }
+    }
+  ]);
+});
+
+test("Assistant advance sends the reviewed published revision and opaque cursor", async () => {
+  const calls = [];
+  const response = {
+    run_id: "run-1",
+    next_cursor: "run-1:next",
+    counts: {
+      advanced: 1,
+      concurrent_change: 1,
+      incompatible: 1
+    },
+    outcomes: [
+      {
+        assistant_id: "assistant-1",
+        outcome: "advanced"
+      },
+      {
+        assistant_id: "assistant-2",
+        outcome: "concurrent_change"
+      },
+      {
+        assistant_id: "assistant-3",
+        outcome: "incompatible",
+        reason: "context_window"
+      }
+    ]
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.advanceAssistants({
+    skillId: "skill-1",
+    expected_published_revision_id: "revision-2",
+    cursor: "run-1:current"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/assistants/advance/",
+      request: {
+        method: "post",
+        params: { path: { skill_id: "skill-1" } },
+        requestBody: {
+          "application/json": {
+            expected_published_revision_id: "revision-2",
+            cursor: "run-1:current"
+          }
+        }
+      }
+    }
+  ]);
+});
+
+test("App advance sends the reviewed published revision and opaque cursor", async () => {
+  const calls = [];
+  const response = {
+    run_id: "run-1",
+    next_cursor: "run-1:next",
+    counts: {
+      advanced: 1,
+      concurrent_change: 1,
+      incompatible: 1
+    },
+    outcomes: [
+      {
+        app_id: "app-1",
+        outcome: "advanced"
+      },
+      {
+        app_id: "app-2",
+        outcome: "concurrent_change"
+      },
+      {
+        app_id: "app-3",
+        outcome: "incompatible",
+        reason: "context_window"
+      }
+    ]
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.advanceApps({
+    skillId: "skill-1",
+    expected_published_revision_id: "revision-2",
+    cursor: "run-1:current"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/apps/advance/",
+      request: {
+        method: "post",
+        params: { path: { skill_id: "skill-1" } },
+        requestBody: {
+          "application/json": {
+            expected_published_revision_id: "revision-2",
+            cursor: "run-1:current"
+          }
+        }
+      }
+    }
+  ]);
+});
+
+test("organisation revision summaries use the shared cursor contract", async () => {
+  const page = {
+    items: [],
+    count: 0,
+    limit: 25,
+    next_cursor: null,
+    previous_cursor: null,
+    total_count: 0
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.organization.listRevisionSummaries({
+    skillId: "skill-1",
+    limit: 25,
+    cursor: "3"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/revisions/",
+      request: {
+        method: "get",
+        params: {
+          path: { skill_id: "skill-1" },
+          query: { limit: 25, cursor: "3" }
+        }
+      }
+    }
+  ]);
+});
+
+test("organisation adoption uses the bounded read-only projection route", async () => {
+  const page = {
+    items: [],
+    summary: {
+      assistant_count: 0,
+      app_count: 0,
+      distinct_space_count: 0,
+      behind_published_count: 0,
+      personal_chat: null,
+      revision_counts: []
+    },
+    limit: 25,
+    next_cursor: null
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.organization.getAdoption({
+    skillId: "skill-1",
+    limit: 25,
+    cursor: "opaque-cursor"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/adoption/",
+      request: {
+        method: "get",
+        params: {
+          path: { skill_id: "skill-1" },
+          query: { limit: 25, cursor: "opaque-cursor" }
+        }
+      }
+    }
+  ]);
+});
+
+test("catalogue reads use the tenant-scoped projection", async () => {
+  const calls = [];
+  const page = { items: [], limit: 25, next_cursor: null };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.catalogue.list({
+    limit: 25,
+    cursor: "payroll",
+    search: "benefits"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/catalogue/",
+      request: {
+        method: "get",
+        params: {
+          query: { limit: 25, cursor: "payroll", search: "benefits" }
+        }
+      }
+    }
+  ]);
+});
+
+test("catalogue reads omit absent optional query values", async () => {
+  const urls = [];
+  const client = createClient({
+    baseUrl: "https://eneo.example",
+    token: "token",
+    fetch: async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ items: [], limit: 25, next_cursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+  });
+
+  await initSkills(client).catalogue.list({ limit: 25, cursor: null, search: null });
+
+  assert.deepEqual(urls, ["https://eneo.example/api/v1/skills/catalogue/?limit=25"]);
+});
+
+test("Assistant binding list and configuration preserve their independent contracts", async () => {
+  const calls = [];
+  const bindings = [{ skill_id: "skill-1", revision_id: "revision-1", position: 0 }];
+  const configuration = {
+    bindings: [],
+    runtime: {
+      effective_model_id: "model-1",
+      effective_mode: "selective",
+      fallback_reason: null,
+      skill_context_tokens: 120,
+      skill_context_token_limit: 800,
+      token_count_source: "litellm"
+    }
+  };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return endpoint.endsWith("/configuration/") ? configuration : bindings;
+    }
+  });
+
+  assert.equal(
+    await skills.listAssistantBindings({ spaceId: "space-1", assistantId: "assistant-1" }),
+    bindings
+  );
+  assert.equal(
+    await skills.getAssistantConfiguration({ spaceId: "space-1", assistantId: "assistant-1" }),
+    configuration
+  );
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/",
+      request: {
+        method: "get",
+        params: { path: { space_id: "space-1", assistant_id: "assistant-1" } }
+      }
+    },
+    {
+      endpoint: "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
+      request: {
+        method: "get",
+        params: { path: { space_id: "space-1", assistant_id: "assistant-1" } }
+      }
+    }
+  ]);
+});

@@ -104,10 +104,12 @@ def test_create_space_assistant_from_db_pins_optional_user_projection(
     tenant_scoped_assistant = factory.create_space_assistant_from_db(
         assistant_in_db=assistant_row,
         user=None,
+        attachments=[],
     )
     user_scoped_assistant = factory.create_space_assistant_from_db(
         assistant_in_db=assistant_row,
         user=user,
+        attachments=[],
     )
 
     assert tenant_scoped_assistant.user is None
@@ -128,6 +130,7 @@ def test_create_space_assistant_preserves_persisted_model_kwargs(
     assistant = factory.create_space_assistant_from_db(
         assistant_in_db=assistant_row,
         user=user,
+        attachments=[],
         completion_models=[completion_model],
     )
 

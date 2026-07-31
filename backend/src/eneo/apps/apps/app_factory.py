@@ -49,7 +49,7 @@ class AppFactory:
         return ModelKwargs.model_validate(completion_model_kwargs)
 
     @staticmethod
-    def _create_completion_model_sparse(
+    def create_completion_model_sparse(
         completion_model: CompletionModels,
     ) -> CompletionModelSparse:
         sparse_model = CompletionModelSparse.model_validate(completion_model)
@@ -146,11 +146,13 @@ class AppFactory:
     def create_app_from_db(
         self,
         app_in_db: Apps,
+        *,
+        attachments: Sequence[File],
         prompt: Prompt | None = None,
         transcription_model: TranscriptionModel | None = None,
     ) -> App:
         completion_model = (
-            self._create_completion_model_sparse(app_in_db.completion_model)
+            self.create_completion_model_sparse(app_in_db.completion_model)
             if app_in_db.completion_model is not None
             else None
         )
@@ -159,9 +161,10 @@ class AppFactory:
             InputField.model_validate(input_field)
             for input_field in app_in_db.input_fields
         ]
-        attachments = [
-            File.model_validate(attachment.file) for attachment in app_in_db.attachments
-        ]
+        if completion_model is not None:
+            model_kwargs = model_kwargs.filter_unsupported(
+                completion_model.supported_model_kwargs
+            )
         source_template = (
             self.app_template_factory.create_app_template(app_in_db.template)
             if app_in_db.template
@@ -181,7 +184,7 @@ class AppFactory:
             completion_model=completion_model,
             completion_model_kwargs=model_kwargs,
             input_fields=input_fields,
-            attachments=attachments,
+            attachments=list(attachments),
             published=app_in_db.published,
             source_template=source_template,
             transcription_model=transcription_model,
@@ -192,6 +195,8 @@ class AppFactory:
     def create_space_app_from_db(
         self,
         app_in_db: Apps,
+        *,
+        attachments: Sequence[File],
         completion_models: Sequence["CompletionModel"] | None = None,
         transcription_models: Sequence[TranscriptionModel] | None = None,
     ) -> App:
@@ -212,9 +217,6 @@ class AppFactory:
             for input_field in app_in_db.input_fields
         ]
         model_kwargs = self._create_model_kwargs(app_in_db.completion_model_kwargs)
-        attachments = [
-            File.model_validate(attachment.file) for attachment in app_in_db.attachments
-        ]
 
         source_template = (
             self.app_template_factory.create_app_template(app_in_db.template)
@@ -252,7 +254,7 @@ class AppFactory:
             completion_model=completion_model,
             completion_model_kwargs=model_kwargs,
             input_fields=input_fields,
-            attachments=attachments,
+            attachments=list(attachments),
             published=app_in_db.published,
             source_template=source_template,
             transcription_model=transcription_model,

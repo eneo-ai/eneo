@@ -746,10 +746,14 @@ your public URL.
 
 **Solutions**:
 1. **Check file size limits**:
-   ```bash
-   # Verify upload limits in backend/.env
-   UPLOAD_MAX_FILE_SIZE=10485760  # 10MB in bytes
-   ```
+   - Ask a platform admin to review configured and effective values in **Admin
+     > Storage**. Policy changes apply without restarting backend or worker.
+   - For PostgreSQL-inline session uploads, the effective limit is the smaller
+     of the admin policy and the operator-owned
+     `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+   - For object-store session uploads, the effective limit is the smaller of
+     the admin policy and the configured portable multipart envelope. The
+     constraining source is visible in **Admin > Storage**.
 
 2. **Verify worker is running**:
    ```bash

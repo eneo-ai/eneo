@@ -18,7 +18,9 @@
         document.documentElement.dataset.theme = theme;
       }
       const t = theme || "system";
-      const isDark = t === "dark" || (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+      const isDark =
+        t === "dark" ||
+        (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
       document.documentElement.classList.toggle("dark", isDark);
     </script>
   </head>

@@ -115,6 +115,13 @@ def pytest_sessionfinish(
     with the process and this is a no-op — zero impact on normal runs. Set
     PYTEST_SHUTDOWN_WATCHDOG_SECONDS=0 to disable.
     """
+    # An xdist worker remains connected to its controller through execnet after
+    # its local session finishes. That receiver thread is intentionally
+    # non-daemon and may outlive this hook while another worker is still busy;
+    # only the controller owns the lifetime of the complete test run.
+    if hasattr(session.config, "workerinput"):
+        return
+
     try:
         budget = float(os.getenv("PYTEST_SHUTDOWN_WATCHDOG_SECONDS", "60"))
     except ValueError:

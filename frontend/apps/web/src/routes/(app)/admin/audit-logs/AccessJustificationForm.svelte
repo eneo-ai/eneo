@@ -1,7 +1,8 @@
 <script lang="ts">
   import { Button, Input, Select } from "@eneo/ui";
   import * as m from "$lib/paraglide/messages";
-  import { Shield, ArrowRight } from "lucide-svelte";
+  import Shield from "lucide-svelte/icons/shield";
+  import ArrowRight from "lucide-svelte/icons/arrow-right";
   import { slide, fade, fly } from "svelte/transition";
   import { writable } from "svelte/store";
   import { goto } from "$app/navigation";

@@ -46,6 +46,7 @@ if TYPE_CHECKING:
         ProviderCallObserver,
         ProviderCallReason,
     )
+    from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
@@ -275,18 +276,24 @@ class Assistant(Entity):
     def has_mcp(self) -> bool:
         return bool(self.mcp_servers)
 
-    def _mcp_servers_for_completion(self) -> list["MCPServer"]:
+    def _mcp_servers_for_completion(
+        self,
+        mcp_servers: Sequence["MCPServer"] | None = None,
+    ) -> list["MCPServer"]:
+        effective_mcp_servers = list(
+            self.mcp_servers if mcp_servers is None else mcp_servers
+        )
         if self.has_knowledge():
-            if self.mcp_servers:
+            if effective_mcp_servers:
                 logger.warning(
                     "assistant_mcp_suppressed_due_to_knowledge",
                     extra={
                         "assistant_id": str(self.id),
-                        "mcp_server_count": len(self.mcp_servers),
+                        "mcp_server_count": len(effective_mcp_servers),
                     },
                 )
             return []
-        return self.mcp_servers
+        return effective_mcp_servers
 
     def update(
         self,
@@ -440,6 +447,7 @@ class Assistant(Entity):
         mcp_servers_override: Optional[list["MCPServer"]] = None,
         prompt_override: str | None = None,
         completion_prompt_files: list["File"] | None = None,
+        skill_runtime: "SkillActivationRuntime | None" = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -511,8 +519,9 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=list(web_search_results or []),
-            mcp_servers=[] if self.has_knowledge() else effective_mcp_servers,
+            mcp_servers=self._mcp_servers_for_completion(effective_mcp_servers),
             require_tool_approval=require_tool_approval,
+            skill_runtime=skill_runtime,
         )
 
         return response, datastore_result

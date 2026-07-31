@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import os
 from tempfile import SpooledTemporaryFile
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from eneo.admin.quota_service import QuotaService
 from eneo.files.audio import AudioMimeTypes
@@ -11,9 +11,13 @@ from eneo.files.mime_support import MimeSupport, classify_mime
 from eneo.files.text import TextMimeTypes
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.jobs.job_service import JobService
-from eneo.jobs.task_models import TaskParams, Transcription, UploadInfoBlob
-from eneo.main.config import get_settings
+from eneo.jobs.job_staging import stage_job_file
+from eneo.jobs.task_models import Transcription, UploadInfoBlob
 from eneo.main.exceptions import FileNotSupportedException, FileTooLargeException
+from eneo.object_content.deployment_policy import (
+    UploadAdmissionSnapshot,
+    UploadLimitUseCase,
+)
 from eneo.users.user import UserInDB
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.websites.domain.crawl_run import CrawlType
@@ -26,12 +30,14 @@ class TaskService:
         file_size_service: FileSizeService,
         job_service: JobService,
         quota_service: QuotaService,
+        upload_admission: UploadAdmissionSnapshot | None = None,
     ) -> None:
         super().__init__()
         self.user = user
         self.file_size_service = file_size_service
         self.job_service = job_service
         self.quota_service = quota_service
+        self.upload_admission = upload_admission
 
     @staticmethod
     def get_task_type(mimetype: str):
@@ -46,15 +52,20 @@ class TaskService:
             return Task.TRANSCRIPTION
         raise FileNotSupportedException(f"{mimetype} not supported.")
 
-    @staticmethod
-    def get_max_size(task: Task):
+    def get_max_size(self, task: Task) -> tuple[int, str | None]:
+        if self.upload_admission is None:
+            raise RuntimeError("Upload admission snapshot is required")
+
         match task:
             case Task.UPLOAD_FILE:
-                return get_settings().upload_max_file_size, "UPLOAD_MAX_FILE_SIZE"
+                return (
+                    self.upload_admission.knowledge_file_maximum_bytes,
+                    UploadLimitUseCase.KNOWLEDGE_FILE.value,
+                )
             case Task.TRANSCRIPTION:
                 return (
-                    get_settings().transcription_max_file_size,
-                    "TRANSCRIPTION_MAX_FILE_SIZE",
+                    self.upload_admission.knowledge_audio_maximum_bytes,
+                    UploadLimitUseCase.KNOWLEDGE_AUDIO.value,
                 )
             case _:
                 return 0, None
@@ -62,14 +73,14 @@ class TaskService:
     async def validate_file_size(
         self, file: SpooledTemporaryFile[bytes], task: Task
     ) -> None:
-        max_size, setting_name = self.get_max_size(task)
+        max_size, limit_name = self.get_max_size(task)
         file_size = await asyncio.to_thread(self.file_size_service.get_file_size, file)
 
         if file_size > max_size:
             raise FileTooLargeException(
                 file_size=file_size,
                 max_size=max_size,
-                setting_name=setting_name,
+                limit_name=limit_name,
             )
 
     async def ensure_quota(self, file: SpooledTemporaryFile[bytes], task: Task) -> None:
@@ -92,12 +103,12 @@ class TaskService:
         await self.validate_file_size(file, task_type)
         await self.ensure_quota(file, task_type)
 
-        filepath = await self.file_size_service.save_file_to_disk(file)
+        job_id = uuid4()
+        filepath = await stage_job_file(file, job_id)
 
         try:
             if task_type == Task.UPLOAD_FILE:
-                params: TaskParams = UploadInfoBlob(
-                    filepath=filepath,
+                params: UploadInfoBlob | Transcription = UploadInfoBlob(
                     filename=filename,
                     user_id=self.user.id,
                     group_id=group_id,
@@ -107,7 +118,6 @@ class TaskService:
             else:
                 # task_type == Task.TRANSCRIPTION (get_task_type raises for any other value)
                 params = Transcription(
-                    filepath=filepath,
                     filename=filename,
                     user_id=self.user.id,
                     group_id=group_id,
@@ -116,8 +126,11 @@ class TaskService:
                 )
 
             # Set name of the job to the filename being processed
-            job = await self.job_service.queue_job(
-                task_type, name=filename, task_params=params
+            job = await self.job_service.queue_durable_knowledge_job(
+                task_type,
+                name=filename,
+                task_params=params,
+                job_id=job_id,
             )
         except BaseException:
             with contextlib.suppress(FileNotFoundError):

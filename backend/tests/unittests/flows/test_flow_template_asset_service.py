@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import io
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -12,9 +11,14 @@ from docx import Document
 from fastapi import UploadFile
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.files.file_models import File, FileCreate, FileType
-from eneo.files.file_protocol import FileProtocol
-from eneo.files.file_service import FileService
+from eneo.files.file_models import (
+    File,
+    FileContentVariant,
+    FileInfo,
+    FileMetadata,
+    FileType,
+)
+from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
 from eneo.flows.domain.flow import Flow, FlowTemplateAsset
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from eneo.flows.flow_template_asset_service import (
@@ -29,37 +33,6 @@ from eneo.main.exceptions import (
 )
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-
-
-class _OpenSession:
-    def in_transaction(self) -> bool:
-        return True
-
-
-class _TemplateFileSizeService:
-    def __init__(self, tmp_path: Path, forced_size: int | None = None):
-        self.tmp_path = tmp_path
-        self.forced_size = forced_size
-
-    def get_file_size(self, file: io.BytesIO) -> int:
-        if self.forced_size is not None:
-            return self.forced_size
-        position = file.tell()
-        file.seek(0, io.SEEK_END)
-        size = file.tell()
-        file.seek(position)
-        return size
-
-    async def save_file_to_disk(self, file: io.BytesIO) -> str:
-        destination = self.tmp_path / uuid4().hex
-        position = file.tell()
-        file.seek(0)
-        destination.write_bytes(file.read())
-        file.seek(position)
-        return str(destination)
-
-    def get_file_checksum(self, filepath: Path) -> str:
-        return hashlib.sha256(filepath.read_bytes()).hexdigest()
 
 
 class _ReadGuard(io.BytesIO):
@@ -80,6 +53,55 @@ def _upload(filename: str, content: bytes) -> UploadFile:
         file=io.BytesIO(content),
         filename=filename,
         headers={"content-type": DOCX_MIME},
+    )
+
+
+async def _chunks(payload: bytes):
+    yield payload
+
+
+def _prepared_template(
+    payload: bytes,
+    *,
+    filename: str = "template.docx",
+) -> PreparedFileUpload:
+    return PreparedFileUpload(
+        name=filename,
+        file_type=FileType.DOCUMENT,
+        display_media_type=DOCX_MIME,
+        contents=(
+            PendingFileContent(
+                variant=FileContentVariant.ORIGINAL,
+                chunks=_chunks(payload),
+                declared_media_type=DOCX_MIME,
+                verified_media_type=DOCX_MIME,
+            ),
+        ),
+    )
+
+
+def _prepared_context(prepared: PreparedFileUpload) -> MagicMock:
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=prepared)
+    context.__aexit__ = AsyncMock(return_value=False)
+    return context
+
+
+def _saved_file(user, payload: bytes, *, filename: str = "template.docx") -> FileInfo:
+    now = datetime.now(timezone.utc)
+    return FileInfo(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name=filename,
+        checksum=hashlib.sha256(payload).hexdigest(),
+        size=len(payload),
+        mimetype=DOCX_MIME,
+        file_type=FileType.DOCUMENT,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
+        owner_service_id=None,
+        tenant_id=user.tenant_id,
     )
 
 
@@ -140,6 +162,7 @@ async def test_template_asset_operations_require_persisted_parent_flow_id(
         user=user,
         flow_repo=flow_repo,
         file_repo=file_repo,
+        file_content_loader=AsyncMock(),
         file_service=file_service,
         template_asset_repo=template_asset_repo,
         flow_version_repo=flow_version_repo,
@@ -163,36 +186,81 @@ async def test_template_asset_operations_require_persisted_parent_flow_id(
     template_asset_repo.get.assert_not_awaited()
     template_asset_repo.soft_delete.assert_not_awaited()
     flow_version_repo.has_template_asset_reference.assert_not_awaited()
-    file_service.document_from_upload.assert_not_awaited()
+    file_service.prepare_document_upload.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_asset_with_file_hydrates_relationship_content(user) -> None:
+    flow = _flow_for_user(user)
+    asset = _asset_for_flow(flow, user)
+    now = datetime.now(timezone.utc)
+    metadata = FileMetadata(
+        id=asset.file_id,
+        created_at=now,
+        updated_at=now,
+        name=asset.name,
+        file_type=FileType.DOCUMENT,
+        mimetype=asset.mimetype,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
+        owner_service_id=None,
+        tenant_id=user.tenant_id,
+    )
+    template_bytes = _build_template_bytes()
+    hydrated_file = File(
+        id=metadata.id,
+        created_at=metadata.created_at,
+        updated_at=metadata.updated_at,
+        name=metadata.name,
+        checksum=hashlib.sha256(template_bytes).hexdigest(),
+        size=len(template_bytes),
+        mimetype=metadata.mimetype,
+        file_type=metadata.file_type,
+        blob=template_bytes,
+        owner_type=metadata.owner_type,
+        owner_user_id=metadata.owner_user_id,
+        owner_service_id=metadata.owner_service_id,
+        tenant_id=metadata.tenant_id,
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = flow
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = asset
+    file_repo = AsyncMock()
+    file_repo.get_by_id.return_value = metadata
+    file_content_loader = AsyncMock()
+    file_content_loader.load.return_value = {metadata.id: hydrated_file}
+    service = FlowTemplateAssetService(
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=AsyncMock(),
+        template_asset_repo=template_asset_repo,
+        flow_version_repo=AsyncMock(),
+    )
+
+    result = await service.get_asset_with_file(flow_id=flow.id, asset_id=asset.id)
+
+    assert result == (asset, hydrated_file)
+    file_repo.get_by_id.assert_awaited_once_with(
+        file_id=asset.file_id,
+        tenant_id=user.tenant_id,
+    )
+    file_content_loader.load.assert_awaited_once_with(
+        [metadata],
+        include_text_original_bytes=True,
+    )
 
 
 @pytest.mark.asyncio
 async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     user,
-    tmp_path: Path,
 ) -> None:
     template_bytes = _build_template_bytes()
     flow = _flow_for_user(user)
-    text_extractor = MagicMock()
-    image_extractor = MagicMock()
-    protocol = FileProtocol(
-        file_size_service=_TemplateFileSizeService(tmp_path),
-        text_extractor=text_extractor,
-        image_extractor=image_extractor,
-    )
     file_repo = AsyncMock()
-    file_repo.session = _OpenSession()
     now = datetime.now(timezone.utc)
-
-    async def add_file(file_create: FileCreate) -> File:
-        return File(
-            id=uuid4(),
-            created_at=now,
-            updated_at=now,
-            **file_create.model_dump(mode="python"),
-        )
-
-    file_repo.add.side_effect = add_file
     flow_repo = AsyncMock()
     flow_repo.get.return_value = flow
     template_asset_repo = AsyncMock()
@@ -206,55 +274,56 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
         )
 
     template_asset_repo.create.side_effect = create_asset
-    file_service = FileService(user=user, repo=file_repo, protocol=protocol)
+    prepared = _prepared_template(template_bytes)
+    saved_file = _saved_file(user, template_bytes)
+    file_service = MagicMock()
+    file_service.prepare_document_upload.return_value = _prepared_context(prepared)
+    file_service.save_prepared_file = AsyncMock(return_value=saved_file)
     service = FlowTemplateAssetService(
         user=user,
         flow_repo=flow_repo,
         file_repo=file_repo,
+        file_content_loader=AsyncMock(),
         file_service=file_service,
         template_asset_repo=template_asset_repo,
         flow_version_repo=AsyncMock(),
     )
 
+    upload = _upload("template.docx", template_bytes)
     asset = await service.upload_asset(
         flow_id=flow.id,
-        upload_file=_upload("template.docx", template_bytes),
+        upload_file=upload,
     )
 
-    file_repo.add.assert_awaited_once()
-    saved_file_create = file_repo.add.await_args.args[0]
-    assert saved_file_create.file_type == FileType.DOCUMENT
-    assert saved_file_create.blob == template_bytes
-    assert saved_file_create.text is None
-    assert saved_file_create.name == "template.docx"
-    assert saved_file_create.mimetype == DOCX_MIME
+    file_service.prepare_document_upload.assert_called_once_with(upload)
+    file_service.save_prepared_file.assert_awaited_once_with(prepared)
     template_asset_repo.create.assert_awaited_once()
+    assert template_asset_repo.create.await_args.kwargs["file_id"] == saved_file.id
+    assert template_asset_repo.create.await_args.kwargs["checksum"] == (
+        saved_file.checksum
+    )
     assert template_asset_repo.create.await_args.kwargs["placeholders"] == ["Body"]
     assert asset.placeholders == ["Body"]
-    text_extractor.extract.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
     user,
-    tmp_path: Path,
 ) -> None:
     flow = _flow_for_user(user)
-    protocol = FileProtocol(
-        file_size_service=_TemplateFileSizeService(tmp_path),
-        text_extractor=MagicMock(),
-        image_extractor=MagicMock(),
-    )
     file_repo = AsyncMock()
-    file_repo.session = _OpenSession()
     flow_repo = AsyncMock()
     flow_repo.get.return_value = flow
     template_asset_repo = AsyncMock()
-    file_service = FileService(user=user, repo=file_repo, protocol=protocol)
+    prepared = _prepared_template(b"not-a-docx")
+    file_service = MagicMock()
+    file_service.prepare_document_upload.return_value = _prepared_context(prepared)
+    file_service.save_prepared_file = AsyncMock()
     service = FlowTemplateAssetService(
         user=user,
         flow_repo=flow_repo,
         file_repo=file_repo,
+        file_content_loader=AsyncMock(),
         file_service=file_service,
         template_asset_repo=template_asset_repo,
         flow_version_repo=AsyncMock(),
@@ -267,7 +336,7 @@ async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
         )
 
     assert exc_info.value.code == "flow_template_invalid_archive"
-    file_repo.add.assert_not_awaited()
+    file_service.save_prepared_file.assert_not_awaited()
     template_asset_repo.create.assert_not_awaited()
 
 
@@ -310,6 +379,7 @@ async def test_create_from_existing_attached_file_reuses_authorized_file(user) -
         user=user,
         flow_repo=flow_repo,
         file_repo=AsyncMock(),
+        file_content_loader=AsyncMock(),
         file_service=file_service,
         template_asset_repo=template_asset_repo,
         flow_version_repo=AsyncMock(),
@@ -320,7 +390,10 @@ async def test_create_from_existing_attached_file_reuses_authorized_file(user) -
         file_id=attached_file.id,
     )
 
-    file_service.get_owned_file_for_key_share.assert_awaited_once_with(attached_file.id)
+    file_service.get_owned_file_for_key_share.assert_awaited_once_with(
+        attached_file.id,
+        include_text_original_bytes=True,
+    )
     file_service.save_file_content.assert_not_awaited()
     template_asset_repo.create.assert_awaited_once_with(
         flow_id=flow.id,
@@ -354,6 +427,7 @@ async def test_create_from_existing_attached_file_rejects_missing_content(user) 
         user=user,
         flow_repo=flow_repo,
         file_repo=AsyncMock(),
+        file_content_loader=AsyncMock(),
         file_service=file_service,
         template_asset_repo=template_asset_repo,
         flow_version_repo=AsyncMock(),
@@ -406,6 +480,7 @@ async def test_create_from_existing_attached_file_reuses_active_same_file_asset(
         user=user,
         flow_repo=flow_repo,
         file_repo=AsyncMock(),
+        file_content_loader=AsyncMock(),
         file_service=file_service,
         template_asset_repo=template_asset_repo,
         flow_version_repo=AsyncMock(),
@@ -437,6 +512,7 @@ async def test_create_from_existing_attached_file_reports_deleted_file(user) -> 
         user=user,
         flow_repo=flow_repo,
         file_repo=AsyncMock(),
+        file_content_loader=AsyncMock(),
         file_service=file_service,
         template_asset_repo=AsyncMock(),
         flow_version_repo=AsyncMock(),
@@ -452,24 +528,29 @@ async def test_create_from_existing_attached_file_reports_deleted_file(user) -> 
 @pytest.mark.asyncio
 async def test_upload_asset_rejects_oversized_docx_before_reading_body(
     user,
-    tmp_path: Path,
 ) -> None:
     flow = _flow_for_user(user)
-    protocol = FileProtocol(
-        file_size_service=_TemplateFileSizeService(tmp_path, forced_size=10**12),
-        text_extractor=MagicMock(),
-        image_extractor=MagicMock(),
-    )
     file_repo = AsyncMock()
-    file_repo.session = _OpenSession()
     flow_repo = AsyncMock()
     flow_repo.get.return_value = flow
     template_asset_repo = AsyncMock()
-    file_service = FileService(user=user, repo=file_repo, protocol=protocol)
+    file_service = MagicMock()
+    rejected_context = MagicMock()
+    rejected_context.__aenter__ = AsyncMock(
+        side_effect=FileTooLargeException(
+            file_size=10**12,
+            max_size=10,
+            limit_name="session_file",
+        )
+    )
+    rejected_context.__aexit__ = AsyncMock(return_value=False)
+    file_service.prepare_document_upload.return_value = rejected_context
+    file_service.save_prepared_file = AsyncMock()
     service = FlowTemplateAssetService(
         user=user,
         flow_repo=flow_repo,
         file_repo=file_repo,
+        file_content_loader=AsyncMock(),
         file_service=file_service,
         template_asset_repo=template_asset_repo,
         flow_version_repo=AsyncMock(),
@@ -483,7 +564,8 @@ async def test_upload_asset_rejects_oversized_docx_before_reading_body(
     with pytest.raises(FileTooLargeException):
         await service.upload_asset(flow_id=flow.id, upload_file=upload)
 
-    file_repo.add.assert_not_awaited()
+    file_service.prepare_document_upload.assert_called_once_with(upload)
+    file_service.save_prepared_file.assert_not_awaited()
     template_asset_repo.create.assert_not_awaited()
 
 
@@ -501,6 +583,7 @@ async def test_delete_asset_soft_deletes_unpinned_template_asset(user) -> None:
         user=user,
         flow_repo=flow_repo,
         file_repo=AsyncMock(),
+        file_content_loader=AsyncMock(),
         file_service=AsyncMock(),
         template_asset_repo=template_asset_repo,
         flow_version_repo=flow_version_repo,
@@ -536,6 +619,7 @@ async def test_delete_asset_rejects_published_definition_pin(user) -> None:
         user=user,
         flow_repo=flow_repo,
         file_repo=AsyncMock(),
+        file_content_loader=AsyncMock(),
         file_service=AsyncMock(),
         template_asset_repo=template_asset_repo,
         flow_version_repo=flow_version_repo,
@@ -567,6 +651,7 @@ async def test_delete_asset_hides_wrong_flow_asset(user) -> None:
         user=user,
         flow_repo=flow_repo,
         file_repo=AsyncMock(),
+        file_content_loader=AsyncMock(),
         file_service=AsyncMock(),
         template_asset_repo=template_asset_repo,
         flow_version_repo=flow_version_repo,

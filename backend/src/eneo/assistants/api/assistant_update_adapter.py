@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from eneo.assistants.api.assistant_models import AssistantUpdatePublic
 from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.skills.presentation.skill_assembler import (
+    assistant_skill_binding_intents_from_input,
+)
 
 
 def to_standalone_assistant_update_command(
@@ -54,6 +57,10 @@ def _extract_common_update_fields(
         command_fields["mcp_tools"] = [
             (tool.tool_id, tool.is_enabled) for tool in (assistant.mcp_tools or [])
         ]
+    if "skill_bindings" in payload:
+        command_fields["skill_binding_intents"] = (
+            assistant_skill_binding_intents_from_input(assistant.skill_bindings or [])
+        )
 
     if "completion_model_kwargs" in payload:
         command_fields["completion_model_kwargs"] = assistant.completion_model_kwargs

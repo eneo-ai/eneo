@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, ForeignKey
+from sqlalchemy import CheckConstraint, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
@@ -53,13 +53,6 @@ class Spaces(BasePublic):
 
     tenant_space_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("spaces.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-
-    __table_args__ = (
-        CheckConstraint(
-            SPACE_DATA_RETENTION_DAYS_RANGE_CHECK,
-            name="ck_spaces_data_retention_days_range",
-        ),
     )
 
     tenant_space: Mapped[Optional["Spaces"]] = relationship(
@@ -114,6 +107,19 @@ class Spaces(BasePublic):
         relationship(viewonly=True)
     )
     mcp_servers_mapping: Mapped[list["SpacesMCPServers"]] = relationship(viewonly=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            SPACE_DATA_RETENTION_DAYS_RANGE_CHECK,
+            name="ck_spaces_data_retention_days_range",
+        ),
+        Index(
+            "uq_spaces_tenant_id_id",
+            "tenant_id",
+            "id",
+            unique=True,
+        ),
+    )
 
 
 class SpacesEmbeddingModels(BaseCrossReference):

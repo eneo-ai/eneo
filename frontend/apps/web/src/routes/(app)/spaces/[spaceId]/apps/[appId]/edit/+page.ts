@@ -1,8 +1,27 @@
 import { requireUuidRouteParam } from "$lib/core/routeParams";
+import {
+  emptySkillBindingCatalogPage,
+  loadSkillBindingCatalogPage
+} from "$lib/features/skills/skillBindingCatalog";
 
 export const load = async (event) => {
-  const { eneo } = await event.parent();
+  event.depends("space:skills");
+  event.depends("organization:skills");
+  const { eneo, currentSpace } = await event.parent();
   const appId = requireUuidRouteParam(event.params.appId, "App");
-  const app = await eneo.apps.get({ id: appId });
-  return { app };
+  const canReadSkills = currentSpace.skill_permissions?.includes("read") ?? false;
+  const [app, skills, skillBindings] = await Promise.all([
+    eneo.apps.get({ id: appId }),
+    canReadSkills
+      ? loadSkillBindingCatalogPage({
+          eneo,
+          spaceId: currentSpace.id,
+          organizationSpace: currentSpace.organization === true
+        })
+      : Promise.resolve(emptySkillBindingCatalogPage()),
+    canReadSkills
+      ? eneo.skills.listAppBindings({ spaceId: currentSpace.id, appId })
+      : Promise.resolve([])
+  ]);
+  return { app, skills, skillBindings };
 };

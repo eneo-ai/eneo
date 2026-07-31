@@ -25,17 +25,12 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.api_key_notification_auto_follow import (
     auto_follow_on_publish,
 )
-from eneo.authentication.api_key_router_helpers import (
-    error_responses as api_key_error_responses,
-)
 from eneo.authentication.auth_dependencies import (
     get_scope_filter,
     require_resource_permission_for_method,
     require_user_for_creation,
-    require_user_identity,
 )
 from eneo.authentication.auth_models import (
-    ApiKey,
     ApiKeyNotificationTargetType,
     audit_actor_for,
 )
@@ -61,6 +56,9 @@ from eneo.sessions.session_protocol import (
     to_session_public,
     to_sessions_paginated_response,
 )
+from eneo.skills.presentation.skill_assembler import (
+    skill_binding_audit_entries,
+)
 from eneo.spaces.api.space_models import TransferApplicationRequest
 
 if TYPE_CHECKING:
@@ -70,39 +68,26 @@ if TYPE_CHECKING:
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
-    "key": "ina_6f2c9b3a8f...7b31",
-    "truncated_key": "7b31",
-}
-
-
-def _flow_managed_mutation_error(
-    *, assistant_id: UUID, flow_id: UUID | None
-) -> HTTPException:
-    message = (
-        "This assistant is flow-managed and must be modified through "
-        f"/api/v1/flows/{flow_id}/assistants/{assistant_id}/"
-        if flow_id is not None
-        else "This assistant is flow-managed and must be modified through flow endpoints."
-    )
-    return HTTPException(
-        status_code=400,
-        detail={
-            "code": "flow_managed_assistant",
-            "message": message,
-            "context": {
-                "assistant_id": str(assistant_id),
-                "flow_id": str(flow_id) if flow_id is not None else None,
-            },
-        },
-    )
-
 
 def _raise_if_flow_managed(assistant: "Assistant", assistant_id: UUID) -> None:
     if assistant.origin == AssistantOrigin.FLOW_MANAGED:
-        raise _flow_managed_mutation_error(
-            assistant_id=assistant_id,
-            flow_id=assistant.managing_flow_id,
+        flow_id = assistant.managing_flow_id
+        message = (
+            "This assistant is flow-managed and must be modified through "
+            f"/api/v1/flows/{flow_id}/assistants/{assistant_id}/"
+            if flow_id is not None
+            else "This assistant is flow-managed and must be modified through flow endpoints."
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "flow_managed_assistant",
+                "message": message,
+                "context": {
+                    "assistant_id": str(assistant_id),
+                    "flow_id": str(flow_id) if flow_id is not None else None,
+                },
+            },
         )
 
 
@@ -611,15 +596,30 @@ def _build_assistant_update_changes(
 async def update_assistant(
     id: UUID,
     assistant: AssistantUpdatePublic,
+    request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated"""
+    if (
+        assistant.skill_bindings is not None
+        and getattr(request.state, "api_key", None) is not None
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Skill binding changes require a session token.",
+        )
+
     service = container.assistant_service()
     current_user = container.user()
 
     # Get old state for change tracking
     old_assistant, _ = await service.get_assistant(assistant_id=id)
     _raise_if_flow_managed(old_assistant, id)
+    before_skill_entries: list[dict[str, object]] | None = None
+    if assistant.skill_bindings is not None:
+        before_skill_entries = skill_binding_audit_entries(
+            await container.skill_repo().list_assistant_bindings(assistant_id=id)
+        )
 
     # Snapshot old MCP tool overrides before update (not on domain entity)
     old_mcp_tool_overrides = None
@@ -649,6 +649,16 @@ async def update_assistant(
         description=update.description,
         old_mcp_tool_overrides=old_mcp_tool_overrides,
     )
+    if before_skill_entries is not None:
+        after_skill_entries = skill_binding_audit_entries(
+            await container.skill_repo().list_assistant_bindings(assistant_id=id)
+        )
+        if before_skill_entries != after_skill_entries:
+            changes["skills"] = {
+                "old": before_skill_entries,
+                "new": after_skill_entries,
+            }
+            change_summary.append("Skills")
 
     # Get space for context
     space = None
@@ -695,7 +705,7 @@ async def update_assistant(
     "/{id}/",
     status_code=204,
     description="Delete an assistant.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_assistant(
     id: UUID,
@@ -1027,103 +1037,11 @@ async def leave_feedback(
     return to_session_public(session)
 
 
-@router.get(
-    "/{id}/api-keys/",
-    response_model=ApiKey,
-    tags=["Legacy API Keys"],
-    summary="Generate legacy assistant API key",
-    deprecated=True,
-    description=(
-        "Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys."
-        " This returns a legacy assistant-scoped key."
-    ),
-    responses={
-        200: {
-            "description": "Legacy assistant API key created and returned once.",
-            "content": {
-                "application/json": {"example": _LEGACY_ASSISTANT_API_KEY_EXAMPLE}
-            },
-        },
-        410: {
-            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "code": "deprecated_endpoint",
-                        "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
-                    }
-                }
-            },
-        },
-        **api_key_error_responses([401, 403]),
-    },
-)
-async def generate_read_only_assistant_key(
-    id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_identity_guard: None = Depends(require_user_identity),
-):
-    """Generates a read-only api key for this assistant.
-
-    This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
-    and `POST /api/v1/assistants/{id}/sessions/{session_id}/`."""
-    settings = get_settings()
-    if not settings.api_key_legacy_endpoints_enabled:
-        raise HTTPException(
-            status_code=410,
-            detail={
-                "code": "deprecated_endpoint",
-                "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
-            },
-        )
-    service = container.assistant_service()
-    user = container.user()
-
-    # Generate API key
-    api_key = await service.generate_api_key(id)
-
-    # Get assistant info for audit log
-    assistant, _ = await service.get_assistant(id)
-
-    # Get space for context
-    space = None
-    if assistant.space_id:
-        try:
-            space_service = container.space_service()
-            space = await space_service.get_space(assistant.space_id)
-        except Exception:
-            space = None
-
-    # Build extra context for API key generation
-    extra = {
-        "truncated_key": api_key.truncated_key,
-        "key_type": "assistant_read_only",
-    }
-
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.API_KEY_GENERATED,
-        entity_type=EntityType.API_KEY,
-        entity_id=id,  # Use assistant ID as entity ID for assistant API keys
-        description=f"Generated read-only API key for assistant '{assistant.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=assistant,
-            space=space,
-            extra=extra,
-        ),
-    )
-
-    return api_key
-
-
 @router.post(
     "/{id}/transfer/",
     status_code=204,
     description="Transfer an assistant to another space.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def transfer_assistant_to_space(
     id: UUID,
@@ -1214,7 +1132,7 @@ async def get_prompts(
     "/{id}/publish/",
     response_model=AssistantPublic,
     description="Publish or unpublish an assistant.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def publish_assistant(
     id: UUID,
@@ -1224,9 +1142,6 @@ async def publish_assistant(
     service = container.assistant_service()
     assembler = container.assistant_assembler()
     user = container.user()
-
-    existing_assistant, _ = await service.get_assistant(id)
-    _raise_if_flow_managed(existing_assistant, id)
 
     # Publish/unpublish assistant
     assistant, permissions = await service.publish_assistant(
@@ -1364,7 +1279,7 @@ async def add_mcp_to_assistant(
     "/{id}/mcp-servers/{mcp_server_id}/",
     status_code=204,
     description="Remove an MCP server from an assistant.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def remove_mcp_from_assistant(
     id: UUID,

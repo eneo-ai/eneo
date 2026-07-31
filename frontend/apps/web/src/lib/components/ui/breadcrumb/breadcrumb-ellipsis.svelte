@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { HTMLAttributes } from "svelte/elements";
   import { cn, type WithElementRef, type WithoutChildren } from "$lib/utils.js";
+  import { m } from "$lib/paraglide/messages";
   import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
 
   let {
@@ -19,5 +20,5 @@
   {...restProps}
 >
   <MoreHorizontalIcon />
-  <span class="sr-only">More</span>
+  <span class="sr-only">{m.more()}</span>
 </span>

@@ -26,6 +26,10 @@ export {
   type FlowRunReservedInputPayloadKey
 } from "./src/flows/flow-run-reserved-input-payload-keys.js";
 export {
+  DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
+  OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE
+} from "./src/errorCodes.js";
+export {
   JSONRequestBody,
   type EneoBinaryResponse,
   type EneoFetchFunction,

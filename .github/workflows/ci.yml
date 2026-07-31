@@ -26,10 +26,6 @@ env:
   POSTGRES_DB: placeholder
   REDIS_HOST: localhost
   REDIS_PORT: 6379
-  UPLOAD_FILE_TO_SESSION_MAX_SIZE: 10485760
-  UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: 10485760
-  UPLOAD_MAX_FILE_SIZE: 10485760
-  TRANSCRIPTION_MAX_FILE_SIZE: 10485760
   MAX_IN_QUESTION: 1
   API_PREFIX: /api/v1
   API_KEY_LENGTH: 64
@@ -368,9 +364,6 @@ jobs:
 
       - name: Build frontend
         run: bun run build
-        env:
-          # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
-          NODE_OPTIONS: --max-old-space-size=6144
 
   frontend-e2e:
     name: Frontend E2E
@@ -417,9 +410,6 @@ jobs:
         working-directory: frontend/apps/web
         env:
           SVELTE_KIT_OUT_DIR: .svelte-kit-e2e
-          NODE_OPTIONS: --max-old-space-size=6144
-          ENEO_BACKEND_URL: http://localhost:8124
-          PUBLIC_ENEO_BACKEND_URL: http://localhost:8124
         run: bun run build
 
       - name: Run E2E tests
@@ -427,16 +417,29 @@ jobs:
         env:
           # The workflow owns the stack lifecycle, so Playwright must not manage it.
           E2E_MANAGE_STACK: "0"
-          E2E_BACKEND_URL: http://localhost:8124
+          # Keep SSR and direct API helpers on one deterministic loopback path.
+          E2E_BACKEND_URL: http://127.0.0.1:8124
           E2E_JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789 # matches the e2e-backend JWT_SECRET
         run: bun run test:e2e
+
+      - name: Capture E2E stack diagnostics
+        if: ${{ failure() }}
+        run: |
+          mkdir -p e2e-artifacts
+          docker compose -f docker-compose.e2e.ci.yml ps --all \
+            > e2e-artifacts/compose-ps.txt
+          docker compose -f docker-compose.e2e.ci.yml logs \
+            --no-color --timestamps \
+            > e2e-artifacts/compose.log
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: frontend/apps/web/playwright-report
+          path: |
+            frontend/apps/web/playwright-report
+            e2e-artifacts
           retention-days: 7
           if-no-files-found: ignore
 
@@ -653,6 +656,19 @@ jobs:
           (matrix.image == 'frontend' && needs.changes.outputs.docker_frontend == 'true') ||
           (matrix.image == 'devcontainer' && needs.changes.outputs.docker_devcontainer == 'true')
         uses: actions/checkout@v4
+
+      # The frontend production build needs more memory than the hosted runner
+      # can provide without swap once it runs inside Docker. Keep this scoped to
+      # the frontend image; the other images build within the runner's RAM.
+      - name: Add swap for frontend image build
+        if: >-
+          matrix.image == 'frontend' &&
+          (github.event_name != 'pull_request' || needs.changes.outputs.docker_frontend == 'true')
+        run: |
+          sudo fallocate --length 4G /mnt/eneo-frontend.swap
+          sudo chmod 600 /mnt/eneo-frontend.swap
+          sudo mkswap /mnt/eneo-frontend.swap
+          sudo swapon /mnt/eneo-frontend.swap
 
       - name: Build Docker image
         if: >-

@@ -25,6 +25,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import SupportedMod
 from eneo.completion_models.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
+from eneo.files.file_models import FileType
 from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
@@ -442,6 +443,8 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     space_repo.get_space_by_assistant = AsyncMock(side_effect=_get_space_by_assistant)
     completion_service = AsyncMock()
     file_repo = AsyncMock()
+    file_content_loader = AsyncMock()
+    file_service = AsyncMock()
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     flow_run_terminalizer = SimpleNamespace()
@@ -467,6 +470,8 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
         space_repo=space_repo,
         completion_service=completion_service,
         file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=file_service,
         template_asset_repo=template_asset_repo,
         encryption_service=encryption_service,
         flow_run_terminalizer=flow_run_terminalizer,
@@ -475,7 +480,7 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     return executor, flow_repo, flow_run_repo, flow_version_repo
 
 
-def test_executor_derives_service_principal_owner_from_runtime_actor(user):
+def test_executor_keeps_service_principal_actor_and_canonical_file_service(user):
     service_principal = _service_principal(user)
     api_key_id = uuid4()
     actor = FlowRunActor.from_service_principal_run(
@@ -487,11 +492,12 @@ def test_executor_derives_service_principal_owner_from_runtime_actor(user):
 
     assert executor.runtime_actor is actor
     assert executor.principal is actor.principal
-    assert executor._template_fill_runtime_deps().principal.file_owner_fields() == {
+    assert actor.principal.file_owner_fields() == {
         "owner_type": PrincipalType.SERVICE_KEY.value,
         "owner_user_id": None,
         "owner_service_id": service_principal.id,
     }
+    assert executor._template_fill_runtime_deps().file_service is executor.file_service
 
 
 def _empty_execution_state() -> RunExecutionState:
@@ -722,6 +728,8 @@ def test_executor_accepts_grouped_config(user):
     space_repo = AsyncMock()
     completion_service = AsyncMock()
     file_repo = AsyncMock()
+    file_content_loader = AsyncMock()
+    file_service = AsyncMock()
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     config = FlowRunExecutorConfig(
@@ -758,6 +766,8 @@ def test_executor_accepts_grouped_config(user):
         space_repo=space_repo,
         completion_service=completion_service,
         file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=file_service,
         template_asset_repo=template_asset_repo,
         encryption_service=encryption_service,
         flow_run_terminalizer=AsyncMock(),
@@ -2358,7 +2368,9 @@ async def test_apply_output_cap_persists_file_when_over_limit(user):
     executor, _, _, _ = _build_executor(user)
     executor.max_inline_text_bytes = 5
     file_id = uuid4()
-    executor.file_repo.add = AsyncMock(return_value=SimpleNamespace(id=file_id))
+    executor.file_service.save_generated_file = AsyncMock(
+        return_value=SimpleNamespace(id=file_id)
+    )
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = SimpleNamespace(step_order=1)
     long_text = "abcdefghi"
@@ -2372,7 +2384,12 @@ async def test_apply_output_cap_persists_file_when_over_limit(user):
     assert persisted_text == "abcde"
     assert len(persisted_text.encode("utf-8")) <= executor.max_inline_text_bytes
     assert file_ids == [file_id]
-    executor.file_repo.add.assert_awaited_once()
+    executor.file_service.save_generated_file.assert_awaited_once_with(
+        payload=long_text.encode(),
+        name=f"flow-{run.id}-step-{step.step_order}-output.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+    )
 
 
 @pytest.mark.asyncio
@@ -2380,7 +2397,9 @@ async def test_apply_output_cap_preview_is_valid_utf8_within_byte_limit(user):
     executor, _, _, _ = _build_executor(user)
     executor.max_inline_text_bytes = 5
     file_id = uuid4()
-    executor.file_repo.add = AsyncMock(return_value=SimpleNamespace(id=file_id))
+    executor.file_service.save_generated_file = AsyncMock(
+        return_value=SimpleNamespace(id=file_id)
+    )
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = SimpleNamespace(step_order=1)
     utf8_text = "ååå"  # 6 bytes in UTF-8, exceeds 5-byte cap.
@@ -2395,9 +2414,12 @@ async def test_apply_output_cap_preview_is_valid_utf8_within_byte_limit(user):
     assert len(persisted_text.encode("utf-8")) <= executor.max_inline_text_bytes
     assert len((persisted_text + "å").encode("utf-8")) > executor.max_inline_text_bytes
     assert file_ids == [file_id]
-    create_arg = executor.file_repo.add.await_args.args[0]
-    assert create_arg.owner_type == PrincipalType.USER
-    assert create_arg.owner_user_id == user.id
+    executor.file_service.save_generated_file.assert_awaited_once_with(
+        payload=utf8_text.encode(),
+        name=f"flow-{run.id}-step-{step.step_order}-output.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+    )
 
 
 def test_build_output_payload_marks_capped_text_output():

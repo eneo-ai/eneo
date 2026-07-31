@@ -2,17 +2,15 @@
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { EneoError, type FlowPackageDependencyResolution, type Eneo } from "@eneo/eneo-js";
-  import {
-    AlertTriangle,
-    CheckCircle2,
-    FileArchive,
-    FileDown,
-    Loader2,
-    PackageOpen,
-    RefreshCw,
-    Upload,
-    UploadCloud
-  } from "lucide-svelte";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import FileArchive from "lucide-svelte/icons/file-archive";
+  import FileDown from "lucide-svelte/icons/file-down";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import PackageOpen from "lucide-svelte/icons/package-open";
+  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import Upload from "lucide-svelte/icons/upload";
+  import UploadCloud from "lucide-svelte/icons/upload-cloud";
   import { toast } from "$lib/components/toast";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

@@ -245,10 +245,17 @@ router = APIRouter(
 
 
 EventStream = AsyncGenerator[AIBuilderStreamEvent, None]
-ContainerWithUserDep = Annotated[Container, Depends(get_container(with_user=True))]
+ContainerWithUserDep = Annotated[
+    Container, Depends(get_container(with_user=True, with_upload_admission=True))
+]
 ContainerWithUserExplicitTransactionDep = Annotated[
     Container,
-    Depends(get_container_for_explicit_transaction(with_user=True)),
+    Depends(
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_upload_admission=True,
+        )
+    ),
 ]
 
 

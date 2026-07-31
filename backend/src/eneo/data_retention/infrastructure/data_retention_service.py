@@ -3,6 +3,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, TypeAlias, TypedDict, cast
 from uuid import UUID
 
@@ -41,6 +42,7 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.files.file_repo import primary_file_content_size_expression
 from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus
 from eneo.flows.domain.flow import FlowProviderCallTokenUsage, FlowRunTokenUsage
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
@@ -982,6 +984,7 @@ class DataRetentionService:
             .mappings()
             .one()
         )
+        _raise_for_missing_retention_primary_content(run_row, upload_row)
         run_history = _flow_retention_data_impact_from_row(run_row)
         runtime_uploads = _flow_retention_data_impact_from_row(upload_row)
         blockers = FlowRetentionLifecycleBlockers(
@@ -1216,30 +1219,39 @@ class DataRetentionService:
             )
             .cte("flow_retention_preview_candidates")
         )
-        input_file_refs = sa.select(
-            FlowRunStepInputFiles.flow_run_id.label("run_id"),
-            FlowRunStepInputFiles.tenant_id.label("tenant_id"),
-            FlowRunStepInputFiles.file_id.label("file_id"),
-        ).join(
-            candidates,
-            FlowRunStepInputFiles.flow_run_id == candidates.c.run_id,
+        input_file_refs = (
+            sa.select(
+                FlowRunStepInputFiles.flow_run_id.label("run_id"),
+                FlowRunStepInputFiles.tenant_id.label("tenant_id"),
+                FlowRunStepInputFiles.file_id.label("file_id"),
+            )
+            .join(
+                candidates,
+                FlowRunStepInputFiles.flow_run_id == candidates.c.run_id,
+            )
+            .where(candidates.c.proposed_due)
         )
-        result_file_refs = sa.select(
-            FlowRunStepResultFiles.flow_run_id.label("run_id"),
-            FlowRunStepResultFiles.tenant_id.label("tenant_id"),
-            FlowRunStepResultFiles.file_id.label("file_id"),
-        ).join(
-            candidates,
-            FlowRunStepResultFiles.flow_run_id == candidates.c.run_id,
+        result_file_refs = (
+            sa.select(
+                FlowRunStepResultFiles.flow_run_id.label("run_id"),
+                FlowRunStepResultFiles.tenant_id.label("tenant_id"),
+                FlowRunStepResultFiles.file_id.label("file_id"),
+            )
+            .join(
+                candidates,
+                FlowRunStepResultFiles.flow_run_id == candidates.c.run_id,
+            )
+            .where(candidates.c.proposed_due)
         )
         file_refs = input_file_refs.union(result_file_refs).cte(
             "flow_retention_preview_file_refs"
         )
-        file_bytes = (
+        file_sizes = (
             sa.select(
                 file_refs.c.run_id,
-                sa.func.coalesce(sa.func.sum(Files.size), 0).label("file_bytes"),
+                primary_file_content_size_expression().label("file_bytes"),
             )
+            .select_from(file_refs)
             .join(
                 Files,
                 sa.and_(
@@ -1247,7 +1259,21 @@ class DataRetentionService:
                     Files.tenant_id == file_refs.c.tenant_id,
                 ),
             )
-            .group_by(file_refs.c.run_id)
+            .cte("flow_retention_preview_file_sizes")
+        )
+        file_bytes = (
+            sa.select(
+                file_sizes.c.run_id,
+                sa.func.coalesce(
+                    sa.func.sum(file_sizes.c.file_bytes),
+                    0,
+                ).label("file_bytes"),
+                sa.func.count()
+                .filter(file_sizes.c.file_bytes.is_(None))
+                .label("missing_primary_content_count"),
+            )
+            .select_from(file_sizes)
+            .group_by(file_sizes.c.run_id)
             .cte("flow_retention_preview_file_bytes")
         )
         undelivered_audit = flow_run_undelivered_audit_exists(candidates.c.run_id)
@@ -1333,6 +1359,10 @@ class DataRetentionService:
                     active_rerun,
                 )
                 .label("active_rerun_count"),
+                sa.func.coalesce(
+                    sa.func.sum(file_bytes.c.missing_primary_content_count),
+                    0,
+                ).label("missing_primary_content_count"),
             )
             .select_from(candidates)
             .outerjoin(file_bytes, file_bytes.c.run_id == candidates.c.run_id)
@@ -1390,66 +1420,109 @@ class DataRetentionService:
             and proposal.runtime_upload_abandonment_days
             < proposal.organization_minimum_retention_days
         )
-        newly_due = sa.and_(proposed_due, sa.not_(current_due))
-        no_longer_due = sa.and_(current_due, sa.not_(proposed_due))
         attached_to_run = sa.exists(
             sa.select(1).where(
                 FlowRunStepInputFiles.file_id == FlowRuntimeUploadedFiles.file_id,
                 FlowRunStepInputFiles.tenant_id == FlowRuntimeUploadedFiles.tenant_id,
             )
         )
+        upload_candidates = (
+            sa.select(
+                FlowRuntimeUploadedFiles.file_id.label("file_id"),
+                FlowRuntimeUploadedFiles.tenant_id.label("tenant_id"),
+                FlowRuntimeUploadedFiles.created_at.label("retention_anchor"),
+                current_due.label("current_due"),
+                proposed_due.label("proposed_due"),
+                proposed_delete_after_due.label("proposed_delete_after_due"),
+                proposed_minimum_satisfied.label("proposed_minimum_satisfied"),
+                _retention_deadline(
+                    anchor=FlowRuntimeUploadedFiles.created_at,
+                    retention_days=proposal.runtime_upload_abandonment_days,
+                ).label("proposed_delete_after_at"),
+                _retention_deadline(
+                    anchor=FlowRuntimeUploadedFiles.created_at,
+                    retention_days=proposal.organization_minimum_retention_days,
+                ).label("proposed_minimum_not_before_at"),
+            )
+            .where(
+                FlowRuntimeUploadedFiles.tenant_id == tenant_id,
+                sa.not_(attached_to_run),
+            )
+            .cte("flow_retention_preview_upload_candidates")
+        )
+        newly_due = sa.and_(
+            upload_candidates.c.proposed_due,
+            sa.not_(upload_candidates.c.current_due),
+        )
+        no_longer_due = sa.and_(
+            upload_candidates.c.current_due,
+            sa.not_(upload_candidates.c.proposed_due),
+        )
+        upload_file_sizes = (
+            sa.select(
+                upload_candidates.c.file_id,
+                upload_candidates.c.tenant_id,
+                primary_file_content_size_expression().label("file_bytes"),
+            )
+            .select_from(upload_candidates)
+            .join(
+                Files,
+                sa.and_(
+                    Files.id == upload_candidates.c.file_id,
+                    Files.tenant_id == upload_candidates.c.tenant_id,
+                ),
+            )
+            .where(upload_candidates.c.proposed_due)
+            .cte("flow_retention_preview_upload_file_sizes")
+        )
         return (
             sa.select(
-                sa.func.count().filter(current_due).label("current_eligible_count"),
-                sa.func.count().filter(proposed_due).label("proposed_eligible_count"),
+                sa.func.count()
+                .filter(upload_candidates.c.current_due)
+                .label("current_eligible_count"),
+                sa.func.count()
+                .filter(upload_candidates.c.proposed_due)
+                .label("proposed_eligible_count"),
                 sa.func.count().filter(newly_due).label("newly_eligible_count"),
                 sa.func.count().filter(no_longer_due).label("no_longer_eligible_count"),
-                sa.func.coalesce(sa.func.sum(Files.size).filter(proposed_due), 0).label(
-                    "proposed_eligible_bytes"
-                ),
-                sa.func.coalesce(sa.func.sum(Files.size).filter(newly_due), 0).label(
-                    "newly_eligible_bytes"
-                ),
-                sa.func.min(FlowRuntimeUploadedFiles.created_at)
-                .filter(proposed_due)
+                sa.func.coalesce(
+                    sa.func.sum(upload_file_sizes.c.file_bytes).filter(
+                        upload_candidates.c.proposed_due
+                    ),
+                    0,
+                ).label("proposed_eligible_bytes"),
+                sa.func.coalesce(
+                    sa.func.sum(upload_file_sizes.c.file_bytes).filter(newly_due),
+                    0,
+                ).label("newly_eligible_bytes"),
+                sa.func.min(upload_candidates.c.retention_anchor)
+                .filter(upload_candidates.c.proposed_due)
                 .label("earliest_proposed_anchor"),
-                sa.func.max(FlowRuntimeUploadedFiles.created_at)
-                .filter(proposed_due)
+                sa.func.max(upload_candidates.c.retention_anchor)
+                .filter(upload_candidates.c.proposed_due)
                 .label("latest_proposed_anchor"),
-                sa.func.min(
-                    _retention_deadline(
-                        anchor=FlowRuntimeUploadedFiles.created_at,
-                        retention_days=proposal.runtime_upload_abandonment_days,
-                    )
-                ).label("earliest_proposed_delete_after_at"),
-                sa.func.max(
-                    _retention_deadline(
-                        anchor=FlowRuntimeUploadedFiles.created_at,
-                        retention_days=proposal.runtime_upload_abandonment_days,
-                    )
-                ).label("latest_proposed_delete_after_at"),
-                sa.func.min(
-                    _retention_deadline(
-                        anchor=FlowRuntimeUploadedFiles.created_at,
-                        retention_days=proposal.organization_minimum_retention_days,
-                    )
-                ).label("earliest_proposed_minimum_not_before_at"),
-                sa.func.max(
-                    _retention_deadline(
-                        anchor=FlowRuntimeUploadedFiles.created_at,
-                        retention_days=proposal.organization_minimum_retention_days,
-                    )
-                ).label("latest_proposed_minimum_not_before_at"),
+                sa.func.min(upload_candidates.c.proposed_delete_after_at).label(
+                    "earliest_proposed_delete_after_at"
+                ),
+                sa.func.max(upload_candidates.c.proposed_delete_after_at).label(
+                    "latest_proposed_delete_after_at"
+                ),
+                sa.func.min(upload_candidates.c.proposed_minimum_not_before_at).label(
+                    "earliest_proposed_minimum_not_before_at"
+                ),
+                sa.func.max(upload_candidates.c.proposed_minimum_not_before_at).label(
+                    "latest_proposed_minimum_not_before_at"
+                ),
                 sa.func.count()
                 .filter(
-                    proposed_delete_after_due,
-                    sa.not_(proposed_minimum_satisfied),
+                    upload_candidates.c.proposed_delete_after_due,
+                    sa.not_(upload_candidates.c.proposed_minimum_satisfied),
                 )
                 .label("minimum_not_satisfied_count"),
                 sa.func.count()
                 .filter(
-                    proposed_delete_after_due,
-                    proposed_minimum_satisfied,
+                    upload_candidates.c.proposed_delete_after_due,
+                    upload_candidates.c.proposed_minimum_satisfied,
                     sa.literal(
                         proposal.organization_no_purge,
                         type_=sa.Boolean(),
@@ -1459,18 +1532,20 @@ class DataRetentionService:
                 sa.func.count()
                 .filter(sa.literal(proposed_policy_conflict, type_=sa.Boolean()))
                 .label("policy_conflict_count"),
+                sa.func.count()
+                .filter(
+                    upload_candidates.c.proposed_due,
+                    upload_file_sizes.c.file_bytes.is_(None),
+                )
+                .label("missing_primary_content_count"),
             )
-            .select_from(FlowRuntimeUploadedFiles)
-            .join(
-                Files,
+            .select_from(upload_candidates)
+            .outerjoin(
+                upload_file_sizes,
                 sa.and_(
-                    Files.id == FlowRuntimeUploadedFiles.file_id,
-                    Files.tenant_id == FlowRuntimeUploadedFiles.tenant_id,
+                    upload_file_sizes.c.file_id == upload_candidates.c.file_id,
+                    upload_file_sizes.c.tenant_id == upload_candidates.c.tenant_id,
                 ),
-            )
-            .where(
-                FlowRuntimeUploadedFiles.tenant_id == tenant_id,
-                sa.not_(attached_to_run),
             )
         )
 
@@ -2642,7 +2717,18 @@ def _flow_retention_data_impact_from_row(
 
 def _retention_row_int(row: RowMapping, key: str) -> int:
     value = row[key]
-    return value if isinstance(value, int) else 0
+    return int(value) if isinstance(value, (int, Decimal)) else 0
+
+
+def _raise_for_missing_retention_primary_content(*rows: RowMapping) -> None:
+    missing_count = sum(
+        _retention_row_int(row, "missing_primary_content_count") for row in rows
+    )
+    if missing_count:
+        raise RuntimeError(
+            "Flow retention preview found "
+            f"{missing_count} File row(s) without durable primary content"
+        )
 
 
 def _prune_debug_payload(payload: Any) -> Any:

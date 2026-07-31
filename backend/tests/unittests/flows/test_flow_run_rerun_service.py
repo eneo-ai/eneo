@@ -13,6 +13,7 @@ from eneo.flows.application.flow_run_rerun_service import FlowRunRerunService
 from eneo.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
 from eneo.flows.domain.flow import FlowRunStatus, RerunStepInputOverride
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunInvalidTransitionError,
     FlowRunRerunMissingCurrentResultsError,
@@ -30,6 +31,7 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
 from eneo.flows.enums import RerunDependencyKind
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_input_envelope import (
     FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
     RerunInputOverride,
@@ -40,6 +42,7 @@ from eneo.flows.flow_run_rerun_request import (
 )
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import (
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
     published_definition_checksum,
@@ -65,8 +68,21 @@ _FILE_REPO_UNSET = object()
 
 def _file_repo() -> AsyncMock:
     repo = AsyncMock()
-    repo.get_list_by_id_for_owner.return_value = []
+    repo.get_list_by_id_and_owner.return_value = []
+    repo.get_infos_by_ids.return_value = []
     return repo
+
+
+def _settings_service() -> AsyncMock:
+    service = AsyncMock()
+    service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=10_000,
+        audio_max_size_bytes=10_000,
+    )
+    service.get_mapped_execution_policy_resolved.return_value = (
+        FlowMappedExecutionPolicy()
+    )
+    return service
 
 
 def _assistant_snapshot(*, assistant_id: UUID, instructions: str) -> dict[str, object]:
@@ -120,7 +136,9 @@ def _rerun_service(
         flow_version_repo=flow_version_repo,
         runtime_upload_repo=runtime_upload_repo,
         file_repo=resolved_file_repo,
-        settings_service=settings_service,
+        settings_service=(
+            settings_service if settings_service is not None else _settings_service()
+        ),
         access_policy=access_policy,
     )
 
@@ -195,7 +213,10 @@ async def test_rerun_step_builds_repository_command(user):
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = set(
         expected_file_ids
     )
-    file_repo.get_list_by_id_for_owner.return_value = [
+    file_repo.get_list_by_id_and_owner.return_value = [
+        SimpleNamespace(id=file_id) for file_id in expected_file_ids
+    ]
+    file_repo.get_infos_by_ids.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
         for file_id in expected_file_ids
     ]
@@ -231,14 +252,11 @@ async def test_rerun_step_builds_repository_command(user):
         tenant_id=user.tenant_id,
         step_id=root_step.id,
     )
-    file_repo.get_list_by_id_for_owner.assert_awaited_once_with(
+    file_repo.get_list_by_id_and_owner.assert_awaited_once_with(
         ids=expected_file_ids,
-        owner_type="user",
-        owner_user_id=user.id,
-        owner_service_id=None,
-        tenant_id=user.tenant_id,
-        include_transcription=False,
+        owner=FlowPrincipal.from_user(user).file_owner(tenant_id=user.tenant_id),
     )
+    file_repo.get_infos_by_ids.assert_awaited_once_with(expected_file_ids)
     expected_fingerprint = build_rerun_request_fingerprint(
         FlowRunRerunRequestFingerprintInput(
             tenant_id=user.tenant_id,
@@ -1345,7 +1363,7 @@ async def test_rerun_step_rejects_inaccessible_file_before_repository(user):
     )
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-    file_repo.get_list_by_id_for_owner.return_value = []
+    file_repo.get_list_by_id_and_owner.return_value = []
 
     with pytest.raises(BadRequestException) as exc_info:
         await service.rerun_step(

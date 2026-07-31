@@ -47,7 +47,6 @@ from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from eneo.authentication.api_key_maintenance import ApiKeyMaintenanceService
 from eneo.authentication.api_key_policy import ApiKeyPolicyService
 from eneo.authentication.api_key_rate_limiter import ApiKeyRateLimiter
-from eneo.authentication.api_key_repo import ApiKeysRepository
 from eneo.authentication.api_key_resolver import ApiKeyAuthResolver
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
@@ -87,6 +86,7 @@ from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.feature_flag.feature_flag_factory import FeatureFlagFactory
 from eneo.feature_flag.feature_flag_repo import FeatureFlagRepository
 from eneo.feature_flag.feature_flag_service import FeatureFlagService
+from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_protocol import FileProtocol
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
@@ -340,6 +340,8 @@ from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
 from eneo.modules.module_repo import ModuleRepository
+from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.runtime import object_content_runtime
 from eneo.prompt_library.application.prompt_library_service import (
     PromptLibraryService,
 )
@@ -373,6 +375,12 @@ from eneo.sessions.sessions_repo import SessionRepository
 from eneo.settings.encryption_service import EncryptionService
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings_repo import SettingsRepository
+from eneo.skills.application.organization_skill_service import (
+    OrganizationSkillService,
+)
+from eneo.skills.application.skill_service import SkillService
+from eneo.skills.infrastructure.skill_repo_impl import SkillRepoImpl
+from eneo.skills.presentation.skill_assembler import SkillAssembler
 from eneo.spaces.api.space_assembler import SpaceAssembler
 from eneo.spaces.domain.resource_mover_service import ResourceMoverService
 from eneo.spaces.space_factory import SpaceFactory
@@ -500,6 +508,17 @@ def _flow_http_allow_private_networks() -> bool:
     return bool(get_settings().flow_http_allow_private_networks)
 
 
+def _object_content_service() -> ObjectContentService:
+    return object_content_runtime.service
+
+
+def _file_content_loader_for_session(session: AsyncSession) -> FileContentLoader:
+    return FileContentLoader(
+        FileRepository(session),
+        _object_content_service(),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION PROXY PATTERN FOR SESSIONLESS CONTAINERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -575,6 +594,7 @@ class Container(containers.DeclarativeContainer):
     session = providers.Dependency()
     user = providers.Dependency(instance_of=UserInDB)
     tenant = providers.Dependency(instance_of=TenantInDB)
+    upload_admission = providers.Dependency(default=providers.Object(None))
     aiohttp_client = providers.Object(aiohttp_client)
 
     # Encryption service (singleton - shared across all repositories)
@@ -643,6 +663,7 @@ class Container(containers.DeclarativeContainer):
         AppAssembler,
         user=user,
         prompt_assembler=prompt_assembler,
+        upload_admission=upload_admission,
     )
     app_run_assembler = providers.Factory(AppRunAssembler)
     app_template_assembler = providers.Factory(AppTemplateAssembler)
@@ -703,6 +724,8 @@ class Container(containers.DeclarativeContainer):
     )
     prompt_library_repo = providers.Factory(PromptLibraryRepoImpl, session=session)
     prompt_library_assembler = providers.Factory(PromptLibraryAssembler)
+    skill_repo = providers.Factory(SkillRepoImpl, session=session)
+    skill_assembler = providers.Factory(SkillAssembler)
     governance_policy_repo = providers.Factory(
         GovernancePolicyRepoImpl, session=session
     )
@@ -726,7 +749,6 @@ class Container(containers.DeclarativeContainer):
         ModelProviderRepository, session=session, tenant_id=user.provided.tenant_id
     )
 
-    api_key_repo = providers.Factory(ApiKeysRepository, session=session)
     api_key_v2_repo = providers.Factory(ApiKeysV2Repository, session=session)
     group_repo = providers.Factory(GroupRepository, session=session)
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
@@ -794,10 +816,19 @@ class Container(containers.DeclarativeContainer):
     transcription_model_enable_service = providers.Factory(
         TranscriptionModelEnableService, session=session
     )
+    object_content_service = providers.Callable(_object_content_service)
+    file_repo = providers.Factory(FileRepository, session=session)
+    file_content_loader = providers.Factory(
+        FileContentLoader,
+        repo=file_repo,
+        object_content=object_content_service,
+    )
     assistant_repo = providers.Factory(
         AssistantRepository,
         session=session,
         factory=assistant_factory,
+        file_repo=file_repo,
+        file_content_loader=file_content_loader,
         completion_model_repo=completion_model_repo2,
     )
 
@@ -805,10 +836,21 @@ class Container(containers.DeclarativeContainer):
 
     step_repo = providers.Factory(StepRepository, session=session)
     user_groups_repo = providers.Factory(UserGroupsRepository, session=session)
-    analysis_repo = providers.Factory(AnalysisRepository, session=session)
-    session_repo = providers.Factory(SessionRepository, session=session)
-    question_repo = providers.Factory(QuestionRepository, session=session)
-    file_repo = providers.Factory(FileRepository, session=session)
+    analysis_repo = providers.Factory(
+        AnalysisRepository,
+        session=session,
+        file_content_loader=file_content_loader,
+    )
+    session_repo = providers.Factory(
+        SessionRepository,
+        session=session,
+        file_content_loader=file_content_loader,
+    )
+    question_repo = providers.Factory(
+        QuestionRepository,
+        session=session,
+        file_content_loader=file_content_loader,
+    )
     crawl_run_repo = providers.Factory(CrawlRunRepository, session=session)
     flow_repo = providers.Factory(
         FlowRepository,
@@ -882,11 +924,16 @@ class Container(containers.DeclarativeContainer):
         AppRepository,
         session=session,
         factory=app_factory,
+        file_content_loader=file_content_loader,
+        file_repo=file_repo,
         prompt_repo=prompt_repo,
         transcription_model_repo=transcription_model_repo,
     )
     app_run_repo = providers.Factory(
-        AppRunRepository, session=session, factory=app_run_factory
+        AppRunRepository,
+        session=session,
+        factory=app_run_factory,
+        file_repo=file_repo,
     )
     service_repo = providers.Factory(
         ServiceRepository,
@@ -898,6 +945,7 @@ class Container(containers.DeclarativeContainer):
         tenant=tenant,
         user=user,
         factory=space_factory,
+        file_content_loader=file_content_loader,
         session=session,
         app_repo=app_repo,
         assistant_repo=assistant_repo,
@@ -910,6 +958,7 @@ class Container(containers.DeclarativeContainer):
         SpaceRepository,
         tenant=tenant,
         factory=space_factory,
+        file_content_loader=file_content_loader,
         session=session,
         app_repo=app_repo,
         assistant_repo=assistant_repo,
@@ -957,10 +1006,12 @@ class Container(containers.DeclarativeContainer):
         CompletionService,
         context_builder=context_builder,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,
         redis_client=redis_client,
+        mcp_server_tool_repo=mcp_server_tool_repo,
     )
 
     # Datastore
@@ -1043,11 +1094,7 @@ class Container(containers.DeclarativeContainer):
         TranscriptionModelService,
         transcription_model_repo=transcription_model_repo,
     )
-    auth_service = providers.Factory(
-        AuthService,
-        api_key_repo=api_key_repo,
-        api_key_v2_repo=api_key_v2_repo,
-    )
+    auth_service = providers.Factory(AuthService)
     # Feature flag service for audit logging and other toggles
     feature_flag_service = providers.Factory(
         FeatureFlagService,
@@ -1129,8 +1176,6 @@ class Container(containers.DeclarativeContainer):
     api_key_auth_resolver = providers.Factory(
         ApiKeyAuthResolver,
         api_key_repo=api_key_v2_repo,
-        legacy_repo=api_key_repo,
-        audit_service=audit_service,
     )
     audit_export_service = providers.Factory(
         AuditExportService,
@@ -1160,6 +1205,13 @@ class Container(containers.DeclarativeContainer):
         security_classification_service=security_classification_service,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+    )
+    skill_service = providers.Factory(
+        SkillService,
+        user=user,
+        repo=skill_repo,
+        space_service=space_service,
+        actor_manager=actor_manager,
     )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,
@@ -1197,6 +1249,8 @@ class Container(containers.DeclarativeContainer):
         IconService,
         icon_repo=icon_repo,
         file_size_service=file_size_service,
+        object_content=object_content_service,
+        upload_admission=upload_admission,
     )
     quota_service = providers.Factory(
         QuotaService, user=user, info_blob_repo=info_blob_repo
@@ -1207,6 +1261,7 @@ class Container(containers.DeclarativeContainer):
         file_size_service=file_size_service,
         job_service=job_service,
         quota_service=quota_service,
+        upload_admission=upload_admission,
     )
     group_service = providers.Factory(
         GroupService,
@@ -1248,6 +1303,8 @@ class Container(containers.DeclarativeContainer):
         tenant_repo=tenant_repo,
         audit_service=audit_service,
         data_retention_service=data_retention_service,
+        skill_repo=skill_repo,
+        upload_admission=upload_admission,
     )
     crawl_service = providers.Factory(
         CrawlService,
@@ -1286,6 +1343,7 @@ class Container(containers.DeclarativeContainer):
         group_service=group_service,
         space_service=space_service,
         actor_manager=actor_manager,
+        datastore=datastore,
     )
     prompt_service = providers.Factory(
         PromptService, user=user, repo=prompt_repo, factory=prompt_factory
@@ -1305,8 +1363,11 @@ class Container(containers.DeclarativeContainer):
     file_service = providers.Factory(
         FileService,
         user=user,
+        owner=providers.Object(None),
         repo=file_repo,
         protocol=file_protocol,
+        object_content=object_content_service,
+        upload_admission=upload_admission,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,
@@ -1329,12 +1390,15 @@ class Container(containers.DeclarativeContainer):
         state_repo=chat_session_mcp_state_repo,
         mcp_server_repo=mcp_server_repo,
         proxy_factory=mcp_proxy_session_factory,
+        user=user,
     )
     session_service = providers.Factory(
         SessionService,
         user=user,
         question_repo=question_repo,
         session_repo=session_repo,
+        file_service=file_service,
+        file_content_loader_factory=providers.Object(_file_content_loader_for_session),
         mcp_session_lifecycle_service=mcp_session_lifecycle_service,
     )
     resource_mover_service = providers.Factory(
@@ -1343,6 +1407,7 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         group_service=group_service,
+        skill_repo=skill_repo,
     )
     # Personal assistant governance services are declared before assistant_service
     # because runtime enforcement injects effective_config_service into
@@ -1361,6 +1426,8 @@ class Container(containers.DeclarativeContainer):
         mcp_server_settings_service=mcp_server_settings_service,
         prompt_library_service=prompt_library_service,
         model_provider_repository=model_provider_repository,
+        skill_service=skill_service,
+        space_service=space_service,
     )
     effective_config_service = providers.Factory(
         EffectiveConfigService,
@@ -1369,13 +1436,13 @@ class Container(containers.DeclarativeContainer):
         prompt_library_repo=prompt_library_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
+        skill_service=skill_service,
     )
     assistant_service = providers.Factory(
         AssistantService,
         user=user,
         repo=assistant_repo,
         space_repo=space_repo,
-        auth_service=auth_service,
         service_repo=service_repo,
         step_repo=step_repo,
         completion_model_crud_service=completion_model_crud_service,
@@ -1394,6 +1461,7 @@ class Container(containers.DeclarativeContainer):
         help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
+        skill_service=skill_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,
@@ -1422,14 +1490,23 @@ class Container(containers.DeclarativeContainer):
         factory=helper_assistants_factory,
         audit_service=audit_service,
     )
+    flow_template_asset_service = providers.Factory(
+        FlowTemplateAssetService,
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=file_service,
+        template_asset_repo=flow_template_asset_repo,
+        flow_version_repo=flow_version_repo,
+    )
     flow_service = providers.Factory(
         FlowService,
         user=user,
         flow_repo=flow_repo,
         flow_version_repo=flow_version_repo,
         assistant_service=assistant_service,
-        file_repo=file_repo,
-        template_asset_repo=flow_template_asset_repo,
+        template_asset_service=flow_template_asset_service,
         encryption_service=encryption_service,
         space_service=space_service,
     )
@@ -1487,15 +1564,6 @@ class Container(containers.DeclarativeContainer):
         flow_run_repo=flow_run_repo,
         access_policy=flow_run_access_policy,
         flow_run_terminalizer=flow_run_terminalizer,
-    )
-    flow_template_asset_service = providers.Factory(
-        FlowTemplateAssetService,
-        user=user,
-        flow_repo=flow_repo,
-        file_repo=file_repo,
-        file_service=file_service,
-        template_asset_repo=flow_template_asset_repo,
-        flow_version_repo=flow_version_repo,
     )
     flow_runtime_file_service = providers.Factory(
         FlowRuntimeFileService,
@@ -1601,6 +1669,7 @@ class Container(containers.DeclarativeContainer):
     limit_service = providers.Factory(
         LimitService,
         settings_service=settings_service,
+        upload_admission=upload_admission,
     )
 
     integration_service = providers.Factory(
@@ -1612,6 +1681,7 @@ class Container(containers.DeclarativeContainer):
         mcp_server_repo=mcp_server_repo,
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
+        mcp_state_repo=chat_session_mcp_state_repo,
         encryption_service=encryption_service,
     )
     tenant_integration_service = providers.Factory(
@@ -1706,7 +1776,6 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
-        datastore=datastore,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
     )
@@ -1721,7 +1790,6 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
-        datastore=datastore,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
@@ -1823,12 +1891,11 @@ class Container(containers.DeclarativeContainer):
         TextProcessor,
         user=user,
         extractor=text_extractor,
-        datastore=datastore,
         info_blob_service=info_blob_service,
     )
     transcriber = providers.Factory(
         Transcriber,
-        file_repo=file_repo,
+        file_service=file_service,
         tenant=tenant,
         config=config,
         encryption_service=encryption_service,
@@ -1853,6 +1920,16 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+        skill_service=skill_service,
+    )
+    organization_skill_service = providers.Factory(
+        OrganizationSkillService,
+        user=user,
+        repo=skill_repo,
+        space_service=space_service,
+        assistant_service=assistant_service,
+        app_service=app_service,
+        audit_service=audit_service,
     )
     app_run_service = providers.Factory(
         AppRunService,

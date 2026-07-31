@@ -9,6 +9,7 @@ import pytest
 
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.application import flow_run_review_checkpoint_service
 from eneo.flows.application.flow_run_review_checkpoint_service import (
     FlowRunReviewCheckpointService,
     review_open_terminal_invariant_error,
@@ -681,7 +682,8 @@ async def test_edit_review_checkpoint_rejects_utf8_text_over_inline_ceiling_befo
     access_policy.load_run.return_value = run
     checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
     monkeypatch.setattr(
-        "eneo.flows.application.flow_run_review_checkpoint_service.get_settings",
+        flow_run_review_checkpoint_service,
+        "get_settings",
         lambda: SimpleNamespace(flow_max_inline_text_bytes=4),
     )
     service = _service(

@@ -95,7 +95,9 @@ async def list_flow_run_steps(
         Path(description="Identifier of the run whose step outputs should be listed."),
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await flow_access_context.enforce_flow_scope(
         request,
@@ -171,7 +173,9 @@ async def get_flow_graph(
             "that run's version-pinned snapshot and annotated with run results."
         ),
     ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await flow_access_context.enforce_flow_scope(
         request,
@@ -247,7 +251,9 @@ async def generate_flow_run_artifact_signed_url(
     ],
     request: Request,
     signed_url_req: SignedURLRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await flow_access_context.enforce_flow_scope(
         request,

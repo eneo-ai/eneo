@@ -1,6 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import CheckConstraint, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -108,6 +109,23 @@ class Assistants(BasePublic):
             name="ck_assistants_flow_managed_hidden",
         ),
         Index("ix_assistants_origin_managing_flow", "origin", "managing_flow_id"),
+        Index(
+            "uq_assistants_space_id_id",
+            "space_id",
+            "id",
+            unique=True,
+        ),
+        # Serves the keyset walk in get_personal_defaults_page: pages order by
+        # (created_at, id) and only default assistants qualify, so a partial
+        # index gives every page an ordered range scan instead of re-sorting
+        # the tenant's remaining rows.
+        Index(
+            "ix_assistants_default_created_at_id",
+            "created_at",
+            "id",
+            postgresql_where=sa.text("is_default = true"),
+        ),
+        {"extend_existing": True},  # Temporary
     )
 
 
@@ -139,6 +157,8 @@ class AssistantsFiles(BaseCrossReference):
 
     # Relationships
     file: Mapped[Files] = relationship()
+
+    __table_args__ = (Index("ix_assistants_files_file_id", "file_id"),)
 
 
 class AssistantIntegrationKnowledge(BasePublic):

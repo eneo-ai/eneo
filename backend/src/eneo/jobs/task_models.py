@@ -1,7 +1,9 @@
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, TypeAdapter
+
+from eneo.jobs.job_models import Task
 
 
 class TaskParams(BaseModel):
@@ -23,7 +25,8 @@ class InfoBlobTask(TaskParams):
 
 
 class UploadTask(InfoBlobTask):
-    filepath: str
+    model_config = ConfigDict(extra="forbid")
+
     filename: str
     mimetype: str
 
@@ -42,6 +45,38 @@ class UploadInfoBlob(UploadTask):
 
 class Transcription(UploadTask):
     pass
+
+
+class UploadInfoBlobDispatchEnvelope(BaseModel):
+    version: Literal[1] = 1
+    task: Literal[Task.UPLOAD_FILE] = Task.UPLOAD_FILE
+    params: UploadInfoBlob
+
+
+class TranscriptionDispatchEnvelope(BaseModel):
+    version: Literal[1] = 1
+    task: Literal[Task.TRANSCRIPTION] = Task.TRANSCRIPTION
+    params: Transcription
+
+
+DispatchEnvelope = UploadInfoBlobDispatchEnvelope | TranscriptionDispatchEnvelope
+_DISPATCH_ENVELOPE_ADAPTER: TypeAdapter[DispatchEnvelope] = TypeAdapter(
+    DispatchEnvelope
+)
+
+
+def build_dispatch_envelope(
+    task: Task, params: UploadInfoBlob | Transcription
+) -> DispatchEnvelope:
+    if task == Task.UPLOAD_FILE and isinstance(params, UploadInfoBlob):
+        return UploadInfoBlobDispatchEnvelope(params=params)
+    if task == Task.TRANSCRIPTION and isinstance(params, Transcription):
+        return TranscriptionDispatchEnvelope(params=params)
+    raise ValueError(f"Unsupported durable dispatch task: {task.value}")
+
+
+def validate_dispatch_envelope(value: object) -> DispatchEnvelope:
+    return _DISPATCH_ENVELOPE_ADAPTER.validate_python(value)
 
 
 class AnalyzeConversationInsightsTask(TaskParams):

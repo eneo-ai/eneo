@@ -19,9 +19,11 @@ from psycopg2.extras import Json
 
 from alembic import command
 from alembic.config import Config
-from alembic.script import ScriptDirectory
 from eneo.database.tables.flow_tables import FlowStepAttemptResolvedInputs
-from tests.integration.migrations.alembic_test_utils import current_revisions
+from tests.integration.migrations.alembic_test_utils import (
+    current_revisions,
+    reset_public_schema,
+)
 from tests.integration.migrations.test_flow_provider_calls_migration import (
     _clear_seeded_rows,
     _insert_completed_attempt,
@@ -31,7 +33,6 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRIOR_REVISION = "202607270830_call_capabilities"
 MIGRATION_REVISION = "202607271130_resolved_edges"
-REPOSITORY_HEAD = "202607271700_call_input_indexes"
 EVIDENCE_TABLE = "flow_step_attempt_resolved_inputs"
 
 
@@ -63,14 +64,14 @@ def migration_db(test_settings) -> Iterator[MigrationDb]:
     conn = psycopg2.connect(test_settings.sync_database_url)
     conn.autocommit = True
 
-    command.upgrade(cfg, "head")
-    command.downgrade(cfg, PRIOR_REVISION)
+    reset_public_schema(conn)
+    command.upgrade(cfg, PRIOR_REVISION)
     _clear_seeded_rows(conn)
 
     try:
         yield MigrationDb(conn=conn, cfg=cfg)
     finally:
-        _clear_seeded_rows(conn)
+        reset_public_schema(conn)
         command.upgrade(cfg, "head")
         conn.close()
 
@@ -334,10 +335,6 @@ def test_empty_downgrade_and_reupgrade_keep_one_head(
 ) -> None:
     command.upgrade(migration_db.cfg, MIGRATION_REVISION)
     assert current_revisions(migration_db.conn) == {MIGRATION_REVISION}
-    assert set(ScriptDirectory.from_config(migration_db.cfg).get_heads()) == {
-        REPOSITORY_HEAD
-    }
-
     command.downgrade(migration_db.cfg, PRIOR_REVISION)
     assert current_revisions(migration_db.conn) == {PRIOR_REVISION}
     assert not _table_exists(migration_db.conn, EVIDENCE_TABLE)

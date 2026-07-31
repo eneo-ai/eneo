@@ -36,6 +36,7 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.files.file_models import FileType
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     PlanStatus,
     SessionStatus,
@@ -195,7 +196,7 @@ async def create_builder_session_for_retention(
     now: datetime,
     days_old: int,
     include_plan: bool = False,
-    include_file: bool = False,
+    file_id: UUID | None = None,
     send_lock_expires_at: datetime | None = None,
 ) -> BuilderRetentionFixture:
     retained_at = now - timedelta(days=days_old)
@@ -244,37 +245,17 @@ async def create_builder_session_for_retention(
         session.latest_plan_id = plan.id
         await async_session.flush()
 
-    file_id: UUID | None = None
-    if include_file:
-        file = Files(
-            name=f"builder-context-{uuid4()}.txt",
-            text="builder context file text",
-            blob=None,
-            checksum=f"builder-retention-{uuid4()}",
-            size=25,
-            mimetype="text/plain",
-            file_type="text",
-            transcription=None,
-            owner_type="user",
-            owner_user_id=user_id,
-            owner_service_id=None,
-            tenant_id=tenant_id,
-            created_at=retained_at,
-            updated_at=retained_at,
-        )
-        async_session.add(file)
-        await async_session.flush()
+    if file_id is not None:
         async_session.add(
             BuilderSessionFiles(
                 session_id=session.id,
-                file_id=file.id,
+                file_id=file_id,
                 tenant_id=tenant_id,
                 created_at=retained_at,
                 updated_at=retained_at,
             )
         )
         await async_session.flush()
-        file_id = file.id
 
     await async_session.execute(
         update(BuilderSessions)
@@ -920,11 +901,27 @@ async def test_builder_retention_deletes_expired_and_abandoned_sessions(
     test_tenant,
     admin_user,
     retention_service: DataRetentionService,
+    db_container,
 ):
     now = datetime.now(timezone.utc)
     test_space.data_retention_days = 30
     async_session.add(test_space)
     await async_session.flush()
+
+    async with db_container(user=admin_user) as container:
+        file_service = container.file_service()
+        old_file = await file_service.save_generated_file(
+            payload=b"old builder context file",
+            name=f"builder-context-{uuid4()}.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+        )
+        recent_file = await file_service.save_generated_file(
+            payload=b"recent builder context file",
+            name=f"builder-context-{uuid4()}.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+        )
 
     old_applied = await create_builder_session_for_retention(
         async_session,
@@ -935,7 +932,7 @@ async def test_builder_retention_deletes_expired_and_abandoned_sessions(
         now=now,
         days_old=45,
         include_plan=True,
-        include_file=True,
+        file_id=old_file.id,
     )
     old_cancelled = await create_builder_session_for_retention(
         async_session,
@@ -955,7 +952,7 @@ async def test_builder_retention_deletes_expired_and_abandoned_sessions(
         now=now,
         days_old=10,
         include_plan=True,
-        include_file=True,
+        file_id=recent_file.id,
     )
     old_chatting = await create_builder_session_for_retention(
         async_session,

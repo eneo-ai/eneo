@@ -10,7 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo.js";
   import { invalidate } from "$app/navigation";
-  import { RotateCcw } from "lucide-svelte";
+  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
   import type { Writable } from "svelte/store";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];

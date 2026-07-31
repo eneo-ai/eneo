@@ -691,7 +691,7 @@ def test_execute_flow_run_rejects_malformed_dispatch_payload_without_runtime(
         terminalize_failure,
     )
     monkeypatch.setattr(tasks_module, "_execute_flow_run_async", execute_async)
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", get_loop)
+    monkeypatch.setattr(tasks_module, "get_flow_task_loop", get_loop)
     monkeypatch.setattr(tasks_module, "logger", logger)
     base_payload = {
         "run_id": str(uuid4()),
@@ -754,7 +754,7 @@ def test_execute_flow_run_waits_for_execution_cleanup_before_timeout_terminaliza
     monkeypatch.setattr(
         tasks_module, "terminalize_flow_run_failure", _terminalize_failure
     )
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: loop)
+    monkeypatch.setattr(tasks_module, "get_flow_task_loop", lambda: loop)
     monkeypatch.setattr(
         tasks_module,
         "get_settings",
@@ -850,7 +850,7 @@ def test_execute_flow_run_cancels_uncaptured_future_before_timeout_terminalizati
         terminalize_saw_cancelled.append(pending_future.cancelled())
         terminal_sources.append(source)
 
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    monkeypatch.setattr(tasks_module, "get_flow_task_loop", lambda: object())
     monkeypatch.setattr(
         tasks_module.asyncio,
         "run_coroutine_threadsafe",
@@ -938,7 +938,7 @@ def test_flow_maintenance_task_wrappers_cancel_future_on_timeout(
         captured_coroutines.append(coroutine)
         return future
 
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    monkeypatch.setattr(tasks_module, "get_flow_task_loop", lambda: object())
     monkeypatch.setattr(
         tasks_module.asyncio,
         "run_coroutine_threadsafe",
@@ -996,7 +996,7 @@ def test_execute_flow_run_returns_failed_when_task_terminalization_fails(
         terminalize_failure,
     )
     monkeypatch.setattr(tasks_module, "_execute_flow_run_async", execute_async)
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    monkeypatch.setattr(tasks_module, "get_flow_task_loop", lambda: object())
     monkeypatch.setattr(tasks_module, "logger", logger)
     monkeypatch.setattr(
         tasks_module,
@@ -1053,7 +1053,7 @@ def test_execute_flow_run_handles_generic_exception(monkeypatch):
         "terminalize_flow_run_failure",
         terminalize_failure,
     )
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    monkeypatch.setattr(tasks_module, "get_flow_task_loop", lambda: object())
     monkeypatch.setattr(
         tasks_module,
         "get_settings",
@@ -1526,6 +1526,13 @@ def test_flow_worker_process_init_initializes_observability_db_and_http_client(
     celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
     events: list[str] = []
 
+    class ObjectContentRuntime:
+        def start(self):
+            events.append("object-content:start")
+
+        async def validate_configuration(self):
+            events.append("object-content:validate")
+
     def init_observability():
         events.append("otel")
 
@@ -1544,10 +1551,60 @@ def test_flow_worker_process_init_initializes_observability_db_and_http_client(
     monkeypatch.setattr(celery_app_module.sessionmanager, "init", init_db)
     monkeypatch.setattr(celery_app_module.aiohttp_client, "start", start_http_client)
     monkeypatch.setattr(celery_app_module.aiohttp_client, "session", None)
+    monkeypatch.setattr(
+        celery_app_module,
+        "_run_on_flow_task_loop",
+        lambda coroutine: asyncio.run(coroutine),
+    )
+    monkeypatch.setattr(
+        celery_app_module,
+        "object_content_runtime",
+        ObjectContentRuntime(),
+    )
 
     celery_app_module._on_flow_worker_process_init()
 
-    assert events == ["otel", "db:postgresql+asyncpg://db", "aiohttp"]
+    assert events == [
+        "otel",
+        "db:postgresql+asyncpg://db",
+        "object-content:start",
+        "object-content:validate",
+        "aiohttp",
+    ]
+
+
+def test_close_flow_worker_resources_releases_object_content_before_database(
+    monkeypatch,
+):
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    events: list[str] = []
+
+    class ObjectContentRuntime:
+        async def stop(self):
+            events.append("object-content")
+
+    async def stop_http_client():
+        events.append("aiohttp")
+
+    async def close_database():
+        events.append("database")
+
+    monkeypatch.setattr(
+        celery_app_module,
+        "object_content_runtime",
+        ObjectContentRuntime(),
+    )
+    monkeypatch.setattr(celery_app_module.aiohttp_client, "stop", stop_http_client)
+    monkeypatch.setattr(celery_app_module.sessionmanager, "close", close_database)
+    monkeypatch.setattr(
+        celery_app_module,
+        "_run_on_flow_task_loop",
+        lambda coroutine: asyncio.run(coroutine),
+    )
+
+    celery_app_module._close_flow_worker_resources()
+
+    assert events == ["object-content", "aiohttp", "database"]
 
 
 def test_flow_worker_process_shutdown_closes_resources(monkeypatch):

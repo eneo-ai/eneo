@@ -46,7 +46,7 @@ CATEGORY_MAPPINGS = {
     ActionType.SCIM_GROUP_DELETED.value: "admin_actions",
     ActionType.SCIM_TOKEN_CREATED.value: "admin_actions",
     ActionType.SCIM_TOKEN_REVOKED.value: "admin_actions",
-    # User Actions
+    # User Actions (45 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -63,6 +63,14 @@ CATEGORY_MAPPINGS = {
     ActionType.APP_EXECUTED.value: "user_actions",
     ActionType.APP_PUBLISHED.value: "user_actions",
     ActionType.APP_RUN_DELETED.value: "user_actions",
+    ActionType.SKILL_CREATED.value: "user_actions",
+    ActionType.SKILL_REVISION_CREATED.value: "user_actions",
+    ActionType.SKILL_REVISION_RESTORED.value: "user_actions",
+    ActionType.SKILL_STATUS_CHANGED.value: "user_actions",
+    ActionType.SKILL_PUBLISHED.value: "user_actions",
+    ActionType.SKILL_UNPUBLISHED.value: "user_actions",
+    ActionType.SKILL_BINDINGS_ADVANCED.value: "user_actions",
+    ActionType.SKILL_DELETED.value: "user_actions",
     ActionType.COLLECTION_CREATED.value: "user_actions",
     ActionType.COLLECTION_UPDATED.value: "user_actions",
     ActionType.COLLECTION_DELETED.value: "user_actions",
@@ -129,10 +137,11 @@ CATEGORY_MAPPINGS = {
     ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_ENABLED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_DISABLED.value: "security_events",
-    # File Operations
+    # File Operations (3 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
-    # Integration Events
+    ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
+    # Integration Events (12 actions)
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",
     ActionType.INTEGRATION_CONNECTED.value: "integration_events",

@@ -1,13 +1,11 @@
 <script lang="ts">
   import { EneoError, type Eneo, type Flow, type FlowPackageExportResponse } from "@eneo/eneo-js";
-  import {
-    AlertTriangle,
-    CheckCircle2,
-    Download,
-    Loader2,
-    Minus,
-    PackageOpen
-  } from "lucide-svelte";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import Download from "lucide-svelte/icons/download";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import Minus from "lucide-svelte/icons/minus";
+  import PackageOpen from "lucide-svelte/icons/package-open";
   import { toast } from "$lib/components/toast";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

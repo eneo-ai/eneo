@@ -15,6 +15,11 @@ from eneo.database.database import (
 )
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
+from eneo.object_content.deployment_policy import (
+    UploadAdmissionSnapshot,
+    load_upload_admission_snapshot,
+)
+from eneo.object_content.runtime import object_content_runtime
 from eneo.server.dependencies.auth_definitions import (
     API_KEY_HEADER,
     OAUTH2_SCHEME,
@@ -36,11 +41,14 @@ def get_container(
     with_user: bool = False,
     with_user_from_assistant_api_key: bool = False,
     with_transaction: bool = True,
+    with_upload_admission: bool = False,
 ) -> Callable[..., Awaitable[Container]]:
     if sum([with_user, with_user_from_assistant_api_key]) > 1:
         raise ValueError(
             "Only one of with_user, with_user_from_assistant_api_key can be set to True"
         )
+    if with_upload_admission and not with_user:
+        raise ValueError("Upload admission requires an authenticated user container")
 
     async def _get_container(
         session: Annotated[
@@ -61,21 +69,23 @@ def get_container(
         if request.method == "OPTIONS":
             return container
 
-        async def _authenticate_and_setup_user() -> UserInDB:
+        async def authenticate_and_prepare_container() -> UserInDB:
             user = await container.user_service().authenticate(
                 token=token, api_key=api_key, request=request
             )
             if not user.is_active:
                 await setup_user(container=container, user=user)
+            if with_upload_admission:
+                await load_container_upload_admission(container)
             return user
 
         try:
             session = cast(AsyncSession, container.session())
             if session.in_transaction():
-                user = await _authenticate_and_setup_user()
+                user = await authenticate_and_prepare_container()
             else:
                 async with session.begin():
-                    user = await _authenticate_and_setup_user()
+                    user = await authenticate_and_prepare_container()
         except ApiKeyValidationError as exc:
             _raise_api_key_http_error(exc, request=request)
 
@@ -124,6 +134,7 @@ def get_container_for_explicit_transaction(
     *,
     with_user: bool = False,
     with_user_from_assistant_api_key: bool = False,
+    with_upload_admission: bool = False,
 ) -> Callable[..., Awaitable[Container]]:
     """Return a container whose endpoint owns the database transaction.
 
@@ -134,7 +145,23 @@ def get_container_for_explicit_transaction(
         with_user=with_user,
         with_user_from_assistant_api_key=with_user_from_assistant_api_key,
         with_transaction=False,
+        with_upload_admission=with_upload_admission,
     )
+
+
+async def load_container_upload_admission(
+    container: Container,
+) -> UploadAdmissionSnapshot:
+    session = cast(AsyncSession, container.session())
+    snapshot = await load_upload_admission_snapshot(
+        session,
+        inline_maximum_bytes=object_content_runtime.inline_maximum_bytes,
+        object_store_maximum_bytes=(object_content_runtime.object_store_maximum_bytes),
+    )
+    container.override_providers(
+        upload_admission=providers.Object(snapshot),
+    )
+    return snapshot
 
 
 def get_container_for_sysadmin() -> Callable[..., Awaitable[Container]]:

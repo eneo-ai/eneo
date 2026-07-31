@@ -8,9 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
-from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
@@ -32,21 +30,13 @@ class _Run:
     tenant_id: UUID
 
 
-def _user_principal(user_id: UUID | None = None) -> FlowPrincipal:
-    return FlowPrincipal(
-        principal_type=PrincipalType.USER,
-        principal_user_id=user_id or uuid4(),
-    )
-
-
 @pytest.mark.asyncio
 async def test_process_typed_output_json_with_contract_validation() -> None:
     step = _Step(step_order=1, output_type="json", output_contract={"type": "object"})
     run = _Run(tenant_id=uuid4())
 
     deps = OutputRuntimeDeps(
-        file_repo=SimpleNamespace(add=AsyncMock()),
-        principal=_user_principal(),
+        file_service=SimpleNamespace(save_generated_file=AsyncMock()),
         compile_validators=lambda steps: {("output", 1): object()},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -82,8 +72,7 @@ async def test_process_typed_output_json_without_compiled_validator_skips_contra
         )
 
     deps = OutputRuntimeDeps(
-        file_repo=SimpleNamespace(add=AsyncMock()),
-        principal=_user_principal(),
+        file_service=SimpleNamespace(save_generated_file=AsyncMock()),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_unexpected_validate,
@@ -111,16 +100,14 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     step = _Step(step_order=3, output_type="docx", output_contract=None)
     run = _Run(tenant_id=uuid4())
     file_id = uuid4()
-    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=file_id)))
+    file_service = SimpleNamespace(
+        save_generated_file=AsyncMock(return_value=SimpleNamespace(id=file_id))
+    )
     blob = b"docx-bytes"
     mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     filename = "step-3-output.docx"
-    user_id = uuid4()
-    principal = _user_principal(user_id)
-
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=principal,
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -154,14 +141,12 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
             "file_type": "document",
         }
     ]
-    file_repo.add.assert_awaited_once()
-    file_create = file_repo.add.await_args.args[0]
-    assert file_create.file_type == FileType.DOCUMENT
-    assert file_create.blob == blob
-    assert file_create.owner_type == PrincipalType.USER
-    assert file_create.owner_user_id == user_id
-    assert file_create.owner_service_id is None
-    assert file_create.tenant_id == run.tenant_id
+    file_service.save_generated_file.assert_awaited_once_with(
+        payload=blob,
+        name=filename,
+        mimetype=mimetype,
+        file_type=FileType.DOCUMENT,
+    )
 
 
 @pytest.mark.asyncio
@@ -169,15 +154,16 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
     step = _Step(step_order=8, output_type="pdf", output_contract=None)
     run = _Run(tenant_id=uuid4())
     file_id = uuid4()
-    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=file_id)))
+    file_service = SimpleNamespace(
+        save_generated_file=AsyncMock(return_value=SimpleNamespace(id=file_id))
+    )
     raw_pdf = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"
 
     def _render_not_expected(*args, **kwargs):
         raise AssertionError("raw PDF bytes should be persisted directly")
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -200,19 +186,22 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
     assert result.artifacts is not None
     assert result.artifacts[0]["mimetype"] == "application/pdf"
     assert result.artifacts[0]["name"] == "step_8_output.pdf"
-    file_create = file_repo.add.await_args.args[0]
-    assert file_create.blob == raw_pdf.encode("latin-1")
+    file_service.save_generated_file.assert_awaited_once_with(
+        payload=raw_pdf.encode("latin-1"),
+        name="step_8_output.pdf",
+        mimetype="application/pdf",
+        file_type=FileType.DOCUMENT,
+    )
 
 
 @pytest.mark.asyncio
 async def test_process_typed_output_pdf_bytes_obeys_document_render_limits() -> None:
     step = _Step(step_order=8, output_type="pdf", output_contract=None)
     run = _Run(tenant_id=uuid4())
-    file_repo = SimpleNamespace(add=AsyncMock())
+    file_service = SimpleNamespace(save_generated_file=AsyncMock())
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -242,7 +231,7 @@ async def test_process_typed_output_pdf_bytes_obeys_document_render_limits() -> 
         "actual": 18,
         "limit": 5,
     }
-    file_repo.add.assert_not_called()
+    file_service.save_generated_file.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -252,7 +241,9 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
     step = _Step(step_order=4, output_type="docx", output_contract={"type": "object"})
     run = _Run(tenant_id=uuid4())
     file_id = uuid4()
-    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=file_id)))
+    file_service = SimpleNamespace(
+        save_generated_file=AsyncMock(return_value=SimpleNamespace(id=file_id))
+    )
     validate_calls: list[tuple[object, dict, str]] = []
     render_calls: list[tuple[object, str, int, dict | None]] = []
 
@@ -264,8 +255,7 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
         return b"docx", "application/docx", "x.docx"
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"structured": 1},
         validate_against_contract=_validate,
@@ -331,8 +321,7 @@ async def test_process_typed_output_prunes_extra_item_properties_before_validati
         validate_calls.append((data, schema, label))
 
     deps = OutputRuntimeDeps(
-        file_repo=SimpleNamespace(add=AsyncMock()),
-        principal=_user_principal(),
+        file_service=SimpleNamespace(save_generated_file=AsyncMock()),
         compile_validators=lambda steps: {("output", 4): object()},
         parse_json_output=lambda text: parsed,
         validate_against_contract=_validate,
@@ -369,7 +358,9 @@ async def test_process_typed_output_prunes_extra_item_properties_before_validati
 async def test_process_typed_output_docx_treats_empty_contract_as_structured() -> None:
     step = _Step(step_order=4, output_type="docx", output_contract={})
     run = _Run(tenant_id=uuid4())
-    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=uuid4())))
+    file_service = SimpleNamespace(
+        save_generated_file=AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    )
     render_calls: list[tuple[object, str, int, dict | None]] = []
 
     def _render_structured(data, output_type, step_order, schema=None):
@@ -377,8 +368,7 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
         return b"docx", "application/docx", "x.docx"
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: ["legacy", "data"],
         validate_against_contract=lambda data, schema, label: None,
@@ -406,14 +396,15 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
 async def test_process_typed_output_docx_without_contract_does_not_parse_json() -> None:
     step = _Step(step_order=5, output_type="docx", output_contract=None)
     run = _Run(tenant_id=uuid4())
-    file_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace(id=uuid4())))
+    file_service = SimpleNamespace(
+        save_generated_file=AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    )
 
     def _parse_not_expected(_: str) -> dict[str, bool]:
         raise AssertionError("parse_json_output should not run without output_contract")
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=_parse_not_expected,
         validate_against_contract=lambda data, schema, label: None,
@@ -438,18 +429,17 @@ async def test_process_typed_output_docx_without_contract_does_not_parse_json() 
 
     assert result.structured_output is None
     assert result.artifacts is not None
-    file_repo.add.assert_awaited_once()
+    file_service.save_generated_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_process_typed_output_unknown_type_returns_empty() -> None:
     step = _Step(step_order=6, output_type="text", output_contract=None)
     run = _Run(tenant_id=uuid4())
-    file_repo = SimpleNamespace(add=AsyncMock())
+    file_service = SimpleNamespace(save_generated_file=AsyncMock())
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -470,14 +460,14 @@ async def test_process_typed_output_unknown_type_returns_empty() -> None:
 
     assert result.structured_output is None
     assert result.artifacts is None
-    file_repo.add.assert_not_called()
+    file_service.save_generated_file.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_process_typed_output_json_contract_violation_propagates() -> None:
     step = _Step(step_order=7, output_type="json", output_contract={"type": "object"})
     run = _Run(tenant_id=uuid4())
-    file_repo = SimpleNamespace(add=AsyncMock())
+    file_service = SimpleNamespace(save_generated_file=AsyncMock())
 
     def _raise_contract(*args, **kwargs):
         raise TypedIOValidationException(
@@ -485,8 +475,7 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
         )
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {("output", 7): object()},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_raise_contract,
@@ -513,14 +502,13 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
 async def test_process_typed_output_render_failure_propagates() -> None:
     step = _Step(step_order=8, output_type="docx", output_contract=None)
     run = _Run(tenant_id=uuid4())
-    file_repo = SimpleNamespace(add=AsyncMock())
+    file_service = SimpleNamespace(save_generated_file=AsyncMock())
 
     def _fail_render(*args, **kwargs):
         raise RuntimeError("renderer unavailable")
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -540,18 +528,19 @@ async def test_process_typed_output_render_failure_propagates() -> None:
             deps=deps,
         )
 
-    file_repo.add.assert_not_called()
+    file_service.save_generated_file.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_process_typed_output_file_repo_failure_propagates() -> None:
+async def test_process_typed_output_file_service_failure_propagates() -> None:
     step = _Step(step_order=9, output_type="pdf", output_contract=None)
     run = _Run(tenant_id=uuid4())
-    file_repo = SimpleNamespace(add=AsyncMock(side_effect=RuntimeError("db down")))
+    file_service = SimpleNamespace(
+        save_generated_file=AsyncMock(side_effect=RuntimeError("storage down"))
+    )
 
     deps = OutputRuntimeDeps(
-        file_repo=file_repo,
-        principal=_user_principal(),
+        file_service=file_service,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -567,7 +556,7 @@ async def test_process_typed_output_file_repo_failure_propagates() -> None:
         ),
     )
 
-    with pytest.raises(RuntimeError, match="db down"):
+    with pytest.raises(RuntimeError, match="storage down"):
         await process_typed_output(
             full_text="some output",
             step=step,

@@ -3,6 +3,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+import eneo.flows.flow_settings as flow_settings_module
 from eneo.flows.flow_settings import FLOW_SETTINGS_UNKNOWN_TOP_LEVEL_FIELD_CODE
 from eneo.main.exceptions import BadRequestException
 from eneo.tenants.tenant import (
@@ -154,7 +155,8 @@ def test_tenant_in_db_propagates_unexpected_ai_builder_validator_error(
         raise RuntimeError("ai builder validator failed")
 
     monkeypatch.setattr(
-        "eneo.flows.flow_settings.validate_ai_builder_budget_settings_object",
+        flow_settings_module,
+        "validate_ai_builder_budget_settings_object",
         fail_validation,
     )
 
@@ -293,7 +295,8 @@ def test_tenant_in_db_propagates_unexpected_retention_policy_validator_error(
         raise RuntimeError("retention policy validator failed")
 
     monkeypatch.setattr(
-        "eneo.flows.flow_settings.validate_flow_retention_policy_object",
+        flow_settings_module,
+        "validate_flow_retention_policy_object",
         fail_validation,
     )
 

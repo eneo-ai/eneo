@@ -3,7 +3,10 @@
   import { browser } from "$app/environment";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
-  import { Info, AlertTriangle, Eye, EyeOff } from "lucide-svelte";
+  import Info from "lucide-svelte/icons/info";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import Eye from "lucide-svelte/icons/eye";
+  import EyeOff from "lucide-svelte/icons/eye-off";
   import { m } from "$lib/paraglide/messages";
   import { getChatService } from "../../ChatService.svelte";
 
@@ -47,7 +50,7 @@
   // Bar segments (left to right):
   //   1. Assistant baseline — prompt + fixed attachments before the first turn
   //   2. Locked input  — what was sent to the LLM last turn (system + MCP +
-  //      RAG + history + question, lumped together in provider's prompt_tokens)
+  //      RAG + Skills + history + question, reported as provider prompt_tokens)
   //   3. Locked output — the model's previous reply
   //   4. Pending text  — locally estimated tokens for the current input
   //   5. Pending files — locally estimated multimodal/file tokens
@@ -218,6 +221,13 @@
                 </span>
                 <span class="text-secondary tabular-nums">{fmt(chat.assistantPromptTokens)}</span>
               </div>
+              {#if chat.assistantSkillTokens > 0}
+                <div class="flex items-baseline justify-between gap-3 pl-[18px]">
+                  <span class="text-secondary">{m.context_usage_label_skills_subset()}</span>
+                  <span class="text-secondary tabular-nums">≈ {fmt(chat.assistantSkillTokens)}</span
+                  >
+                </div>
+              {/if}
             {/if}
             {#if chat.assistantAttachmentTokens > 0}
               <div class="flex items-baseline justify-between gap-3">
@@ -258,6 +268,15 @@
             <p class="text-tertiary pl-[18px] text-[10px] leading-snug">
               {m.context_usage_label_input_hint()}
             </p>
+            {#if chat.lockedSkillTokens > 0}
+              <div class="flex items-baseline justify-between gap-3 pl-[18px]">
+                <span class="text-secondary">{m.context_usage_label_skills_subset()}</span>
+                <span class="text-secondary tabular-nums">≈ {fmt(chat.lockedSkillTokens)}</span>
+              </div>
+              <p class="text-tertiary pl-[18px] text-[10px] leading-snug">
+                {m.context_usage_skills_subset_hint()}
+              </p>
+            {/if}
             <div class="flex items-baseline justify-between gap-3">
               <span class="text-default flex items-center gap-2">
                 <span class="bg-positive-stronger inline-block h-2.5 w-2.5 rounded-full"></span>

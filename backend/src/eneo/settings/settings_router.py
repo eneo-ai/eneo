@@ -48,7 +48,14 @@ from eneo.settings.settings import (
     FlowRuntimePolicyPublic,
     FlowRuntimePolicyUpdate,
     GetModelsResponse,
+    SettingsBase,
     SettingsPublic,
+    SkillExecutionBlockState,
+    SkillExecutionBlockUpdate,
+    SkillExecutionUnblockUpdate,
+    SkillRuntimeModelProjections,
+    SkillRuntimePolicyPublic,
+    SkillRuntimePolicyUpdate,
     ToggleSettingUpdate,
 )
 
@@ -189,6 +196,139 @@ def _flow_classification_retention_policy_public(
     )
 
 
+@settings_admin_router.get(
+    "/skills/{skill_id}/execution-block",
+    response_model=SkillExecutionBlockState,
+    responses=responses.get_responses([403, 404]),
+    summary="Get an organisation Skill execution block",
+    description="Return the active tenant-scoped execution block for one organisation Skill.",
+)
+async def get_skill_execution_block(
+    skill_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
+):
+    return await container.settings_service().get_skill_execution_block(
+        skill_id=skill_id
+    )
+
+
+@settings_admin_router.post(
+    "/skills/{skill_id}/execution-block",
+    response_model=SkillExecutionBlockState,
+    responses=responses.get_responses([400, 403, 404]),
+    summary="Block an organisation Skill from execution",
+    description=(
+        "Block every retained version of an organisation Skill from subsequent "
+        "runtime composition without changing its bindings or history."
+    ),
+)
+async def block_skill_execution(
+    skill_id: UUID,
+    data: SkillExecutionBlockUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
+):
+    return await container.settings_service().block_skill_execution(
+        skill_id=skill_id,
+        reason=data.reason,
+    )
+
+
+@settings_admin_router.post(
+    "/skills/{skill_id}/execution-block/unblock",
+    response_model=SkillExecutionBlockState,
+    responses=responses.get_responses([400, 403, 404, 409]),
+    summary="Unblock an organisation Skill",
+    description=(
+        "Release the exact active execution block reviewed by the tenant administrator."
+    ),
+)
+async def unblock_skill_execution(
+    skill_id: UUID,
+    data: SkillExecutionUnblockUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
+):
+    return await container.settings_service().unblock_skill_execution(
+        skill_id=skill_id,
+        expected_block_id=data.expected_block_id,
+        reason=data.reason,
+    )
+
+
+@settings_admin_router.get(
+    "/skills/runtime-policy",
+    response_model=SkillRuntimePolicyPublic,
+    responses=responses.get_responses([403]),
+    summary="Get the tenant Skill runtime policy",
+    description=(
+        "Return the stored organisation Skill runtime policy: selective-"
+        "activation enablement, attachment limit, context share, and the "
+        "per-turn activation ceiling."
+    ),
+)
+async def get_skill_runtime_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
+):
+    return await container.settings_service().get_skill_runtime_policy()
+
+
+@settings_admin_router.put(
+    "/skills/runtime-policy",
+    response_model=SkillRuntimePolicyPublic,
+    responses=responses.get_responses([400, 403]),
+    summary="Replace the tenant Skill runtime policy",
+    description=(
+        "Replace all stored Skill runtime policy values. The per-turn "
+        "activation ceiling can be lowered but never raised past the "
+        "platform bound."
+    ),
+)
+async def update_skill_runtime_policy(
+    data: SkillRuntimePolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
+):
+    return await container.settings_service().update_skill_runtime_policy(data)
+
+
+@settings_admin_router.post(
+    "/skills/runtime-policy/reset",
+    response_model=SkillRuntimePolicyPublic,
+    responses=responses.get_responses([403]),
+    summary="Restore the seeded Skill runtime policy defaults",
+    description=(
+        "Restore the product-standard seeded values, which may differ from a "
+        "deployment's migrated environment seed."
+    ),
+)
+async def reset_skill_runtime_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
+):
+    return await container.settings_service().reset_skill_runtime_policy()
+
+
+@settings_admin_router.get(
+    "/skills/runtime-policy/model-projections",
+    response_model=SkillRuntimeModelProjections,
+    responses=responses.get_responses([403]),
+    summary="Get per-model Skill context allowances",
+    description=(
+        "Return the read-only policy allowance for each accessible completion "
+        "model: input window, native tool-calling support, and the token "
+        "allowance produced by the configured context share."
+    ),
+)
+async def get_skill_runtime_model_projections(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
+):
+    return await container.settings_service().get_skill_runtime_model_projections()
+
+
 @router.get(
     "/",
     response_model=SettingsPublic,
@@ -211,7 +351,7 @@ async def get_settings(
     responses=responses.get_responses([403]),
 )
 async def upsert_settings(
-    settings: SettingsPublic,
+    settings: SettingsBase,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated."""
@@ -271,7 +411,10 @@ def get_formats():
     responses={403: _flow_settings_admin_forbidden_response()},
 )
 async def get_flow_input_limits(
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, with_upload_admission=True)),
+    ],
 ) -> FlowInputLimitsPublic:
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
@@ -301,7 +444,10 @@ async def get_flow_input_limits(
 )
 async def update_flow_input_limits(
     payload: FlowInputLimitsUpdate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, with_upload_admission=True)),
+    ],
 ) -> FlowInputLimitsPublic:
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())

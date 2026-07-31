@@ -28,9 +28,7 @@ export interface AssistantLoader {
   cancel(): void;
 }
 
-export function createAssistantLoader<T>(
-  callbacks: AssistantLoaderCallbacks<T>
-): AssistantLoader {
+export function createAssistantLoader<T>(callbacks: AssistantLoaderCallbacks<T>): AssistantLoader {
   let requestToken = 0;
 
   async function load(assistantId: string): Promise<void> {

@@ -5,7 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Check, Copy, Sparkles } from "lucide-svelte";
+  import Check from "lucide-svelte/icons/check";
+  import Copy from "lucide-svelte/icons/copy";
+  import Sparkles from "lucide-svelte/icons/sparkles";
   import { fade } from "svelte/transition";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";

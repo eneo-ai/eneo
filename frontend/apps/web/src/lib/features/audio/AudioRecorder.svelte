@@ -1014,8 +1014,9 @@
         {#if maxSizeLabel}
           <div class="size-row">
             <span class="size-display">
-              {isLiveSizeEstimated ? "≈ " : ""}{formatMegabytes(visibleRecordingBytes)} /
-              {maxSizeLabel} MB
+              {isLiveSizeEstimated ? "≈ " : ""}{m.mb({
+                value: `${formatMegabytes(visibleRecordingBytes)} / ${maxSizeLabel}`
+              })}
             </span>
             <span class="size-rate">{m.recording_size_rate({ size: recordingRateLabel })}</span>
           </div>

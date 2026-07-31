@@ -2,13 +2,24 @@
 Integration test fixtures using testcontainers for PostgreSQL and Redis.
 """
 
+import asyncio
 import json
 import os
 import socket
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+
+@dataclass(frozen=True, slots=True)
+class _DeploymentPolicySeed:
+    new_write_storage_target: str
+    session_file_limit_bytes: int
+    session_image_limit_bytes: int
+    knowledge_file_limit_bytes: int
+    transcription_audio_limit_bytes: int
 
 
 def pytest_collection_modifyitems(config, items):
@@ -136,6 +147,7 @@ from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.main import get_application
 from init_db import add_tenant_user
+from tests.fixtures import mint_v2_api_key
 
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
@@ -251,10 +263,6 @@ def test_settings(
         redis_port=redis_port,
         redis_db=1,  # Use database 1 for tests to avoid collisions with dev data
         # File upload limits
-        upload_file_to_session_max_size=10_000_000,
-        upload_image_to_session_max_size=5_000_000,
-        upload_max_file_size=100_000_000,
-        transcription_max_file_size=25_000_000,
         # API settings
         api_prefix="/api/v1",
         api_key_length=32,
@@ -436,6 +444,16 @@ async def setup_database(test_settings: Settings):
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    cursor.execute("""
+        SELECT new_write_storage_target, session_file_limit_bytes,
+            session_image_limit_bytes, knowledge_file_limit_bytes,
+            transcription_audio_limit_bytes
+        FROM object_content_deployment_policy
+        WHERE id = 1
+    """)
+    policy_row = cursor.fetchone()
+    assert policy_row is not None
+    deployment_policy_seed = _DeploymentPolicySeed(*policy_row)
     conn.commit()
     cursor.close()
 
@@ -480,14 +498,17 @@ async def setup_database(test_settings: Settings):
             assert users[0].tenant_id is not None
             print(f"✓ Test user created: {users[0].email}")
 
-    yield
+    yield deployment_policy_seed
 
     # Cleanup
     await sessionmanager.close()
 
 
 @pytest.fixture(autouse=True)
-async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
+async def cleanup_database(
+    setup_database: _DeploymentPolicySeed,
+    test_settings: Settings,
+):
     """
     Automatically truncate all tables and reseed after each test for full isolation.
 
@@ -551,6 +572,27 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    cursor.execute(
+        """
+        INSERT INTO object_content_deployment_policy (
+            id, revision, new_write_storage_target,
+            session_file_limit_bytes, session_image_limit_bytes,
+            knowledge_file_limit_bytes, transcription_audio_limit_bytes,
+            updated_by_actor
+        )
+        VALUES (1, 1, %s, %s, %s, %s, %s, 'migration')
+        """,
+        (
+            setup_database.new_write_storage_target,
+            setup_database.session_file_limit_bytes,
+            setup_database.session_image_limit_bytes,
+            setup_database.knowledge_file_limit_bytes,
+            setup_database.transcription_audio_limit_bytes,
+        ),
+    )
+    # The migration seeds this singleton once in production. Full test cleanup
+    # truncates every table, so restore the same required control-plane state.
+    cursor.execute("INSERT INTO object_content_reconciliation_state (id) VALUES (1)")
     # Add API key scope enforcement feature flags.
     conn.commit()
     cursor.close()
@@ -572,21 +614,46 @@ async def app(setup_database):
 
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
+    from eneo.object_content.runtime import object_content_runtime
     from eneo.server.dependencies.lifespan import startup
 
-    await startup()
+    try:
+        await startup()
 
-    # Verify app initialization
-    print("\n=== Application Verification ===")
-    print("✓ FastAPI app initialized")
-    # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
-    # Endpoint-level route contracts are covered by the route contract tests.
-    print(f"✓ Routes registered: {len(application.routes)} route entries")
-    print("✓ Ready for testing\n")
+        # Verify app initialization
+        print("\n=== Application Verification ===")
+        print("✓ FastAPI app initialized")
+        # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
+        # Endpoint-level route contracts are covered by the route contract tests.
+        print(f"✓ Routes registered: {len(application.routes)} route entries")
+        print("✓ Ready for testing\n")
 
-    yield application
+        yield application
+    finally:
+        # Full shutdown closes the session manager needed by cleanup_database.
+        # Release the new process-owned byte-plane clients independently so
+        # every function-scoped application gets a fresh runtime without leaks.
+        await object_content_runtime.stop()
 
-    # Note: We skip shutdown() to keep sessionmanager open for cleanup
+
+@pytest.fixture
+async def object_content_runtime_ready(setup_database):
+    """Run the durable byte plane for direct-container integration tests."""
+    from eneo.object_content.runtime import object_content_runtime
+
+    started_here = not object_content_runtime.enabled
+    if started_here:
+        object_content_runtime.start()
+        try:
+            await object_content_runtime.validate_configuration()
+        except BaseException:
+            await object_content_runtime.stop()
+            raise
+    try:
+        yield object_content_runtime
+    finally:
+        if started_here:
+            await object_content_runtime.stop()
 
 
 @pytest.fixture
@@ -626,7 +693,7 @@ def db_session(setup_database):
 
 
 @pytest.fixture
-def db_container(setup_database):
+def db_container(setup_database, test_settings: Settings):
     """
     Provide a context manager for a database container with session.
 
@@ -650,30 +717,63 @@ def db_container(setup_database):
             service = container.some_service()
     """
 
+    active_contexts = 0
+    runtime_started_here = False
+    runtime_lock = asyncio.Lock()
+
+    async def acquire_object_content_runtime() -> None:
+        nonlocal active_contexts, runtime_started_here
+        from eneo.object_content.runtime import object_content_runtime
+
+        async with runtime_lock:
+            if active_contexts == 0 and not object_content_runtime.enabled:
+                object_content_runtime.start()
+                try:
+                    await object_content_runtime.validate_configuration()
+                except BaseException:
+                    await object_content_runtime.stop()
+                    raise
+                runtime_started_here = True
+            active_contexts += 1
+
+    async def release_object_content_runtime() -> None:
+        nonlocal active_contexts, runtime_started_here
+        from eneo.object_content.runtime import object_content_runtime
+
+        async with runtime_lock:
+            active_contexts -= 1
+            if active_contexts == 0 and runtime_started_here:
+                runtime_started_here = False
+                await object_content_runtime.stop()
+
     @contextlib.asynccontextmanager
     async def _container(user=None, tenant=None):
-        async with sessionmanager.session() as session, session.begin():
-            # Create container with session first to fetch user and tenant if not provided
-            temp_container = Container(session=providers.Object(session))
+        await acquire_object_content_runtime()
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                # Create container with session first to fetch user and tenant if not provided
+                temp_container = Container(session=providers.Object(session))
 
-            # Fetch default user if not provided
-            if user is None:
-                user_repo = temp_container.user_repo()
-                user = await user_repo.get_user_by_email("test@example.com")
+                # Fetch default user if not provided
+                if user is None:
+                    user_repo = temp_container.user_repo()
+                    user = await user_repo.get_user_by_email("test@example.com")
 
-            # Fetch default tenant if not provided
-            if tenant is None:
-                tenant_repo = temp_container.tenant_repo()
-                tenants = await tenant_repo.get_all_tenants()
-                tenant = tenants[0] if tenants else None
+                # Fetch default tenant if not provided
+                if tenant is None:
+                    tenant_repo = temp_container.tenant_repo()
+                    tenants = await tenant_repo.get_all_tenants()
+                    tenant = tenants[0] if tenants else None
 
-            # Create container with all dependencies
-            container = Container(
-                session=providers.Object(session),
-                user=providers.Object(user),
-                tenant=providers.Object(tenant),
-            )
-            yield container
+                # Create container with all dependencies
+                container = Container(
+                    session=providers.Object(session),
+                    user=providers.Object(user),
+                    tenant=providers.Object(tenant),
+                )
+                yield container
+        finally:
+            await release_object_content_runtime()
 
     return _container
 
@@ -696,13 +796,15 @@ async def admin_user(db_container):
 @pytest.fixture
 async def admin_user_api_key(admin_user, db_container):
     """
-    Create an API key for the admin user.
+    Create a v2 API key for the admin user.
     This fixture creates a fresh API key for each test.
     """
     async with db_container() as container:
-        auth_service = container.auth_service()
-        api_key = await auth_service.create_user_api_key(
-            prefix="test", user_id=admin_user.id, delete_old=True
+        api_key = await mint_v2_api_key(
+            container.api_key_v2_repo(),
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            prefix="test",
         )
     return api_key
 

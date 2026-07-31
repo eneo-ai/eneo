@@ -191,6 +191,12 @@ def test_package_reader_rejects_undeclared_template_use(case: str) -> None:
     if case == "template_mode":
         step = step.model_copy(
             update={
+                # Template-fill steps do not execute a completion model. Build a
+                # normalized fixture so checksum validation does not obscure the
+                # package-profile error this test owns.
+                "assistant_spec": step.assistant_spec.model_copy(
+                    update={"model_ref": None}
+                ),
                 "output_mode": OutputMode.TEMPLATE_FILL,
                 "output_type": OutputType.DOCX,
             }

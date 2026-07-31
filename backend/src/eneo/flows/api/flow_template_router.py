@@ -70,7 +70,9 @@ async def list_flow_template_files(
         ),
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
     assets = await container.flow_template_asset_service().list_assets(flow_id=id)
@@ -121,7 +123,9 @@ async def inspect_flow_template(
         UUID,
         Query(description="Identifier of the stored template asset to inspect."),
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
     inspection = await container.flow_template_asset_service().inspect_asset(
@@ -186,7 +190,9 @@ async def upload_flow_template_file(
         ...,
         description="DOCX template file to store for later template_fill steps.",
     ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
 
@@ -260,7 +266,9 @@ async def delete_flow_template_file(
         Path(description="Identifier of the stored template asset to delete."),
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ) -> Response:
     await require_flow_edit_access(request, container, flow_id=id)
     asset = await container.flow_template_asset_service().delete_asset(
@@ -329,7 +337,9 @@ async def generate_flow_template_signed_url(
     ],
     request: Request,
     signed_url_req: SignedURLRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
     asset, file = await container.flow_template_asset_service().get_asset_with_file(

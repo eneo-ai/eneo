@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { ArrowUp, Square } from "lucide-svelte";
+  import ArrowUp from "lucide-svelte/icons/arrow-up";
+  import Square from "lucide-svelte/icons/square";
   import { Button, type ButtonProps } from "$lib/components/ui/button/index.js";
   import { cn } from "$lib/utils.js";
   import { m } from "$lib/paraglide/messages";

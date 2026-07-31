@@ -19,6 +19,8 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowVersion,
 )
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_provider_call_repo import (
@@ -52,8 +54,21 @@ _FILE_REPO_UNSET = object()
 
 def _file_repo() -> AsyncMock:
     repo = AsyncMock()
-    repo.get_list_by_id_for_owner.return_value = []
+    repo.get_list_by_id_and_owner.return_value = []
+    repo.get_infos_by_ids.return_value = []
     return repo
+
+
+def _settings_service() -> AsyncMock:
+    service = AsyncMock()
+    service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=10_000,
+        audio_max_size_bytes=10_000,
+    )
+    service.get_mapped_execution_policy_resolved.return_value = (
+        FlowMappedExecutionPolicy()
+    )
+    return service
 
 
 def _flow_run_service(
@@ -79,6 +94,7 @@ def _flow_run_service(
         runtime_upload_repo=runtime_upload_repo,
         file_repo=resolved_file_repo,
         flow_run_terminalizer=AsyncMock(),
+        settings_service=_settings_service(),
         webhook_delivery_repo=AsyncMock(spec=FlowRunWebhookDeliveryRepository),
         access_policy=FlowRunAccessPolicy(
             user=user,
@@ -228,7 +244,10 @@ async def test_create_run_stores_step_inputs_as_execution_file_rows(user):
         file_id_1,
         file_id_2,
     }
-    file_repo.get_list_by_id_for_owner.return_value = [
+    file_repo.get_list_by_id_and_owner.return_value = [
+        SimpleNamespace(id=file_id) for file_id in (file_id_2, file_id_1)
+    ]
+    file_repo.get_infos_by_ids.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
         for file_id in (file_id_2, file_id_1)
     ]

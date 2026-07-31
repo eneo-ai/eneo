@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { ChevronDown } from "lucide-svelte";
+  import ChevronDown from "lucide-svelte/icons/chevron-down";
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { cn } from "$lib/utils.js";
 

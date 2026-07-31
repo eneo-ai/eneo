@@ -8,8 +8,10 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
-from eneo.files.file_models import File, FileCreate, FileType
+from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_models import File, FileType
 from eneo.files.file_repo import FileRepository
+from eneo.files.file_service import FileService
 from eneo.flows.domain.flow import FlowRun, FlowStepResultStatus
 from eneo.flows.domain.runtime import (
     RunExecutionState,
@@ -23,7 +25,6 @@ from eneo.flows.flow_run_provenance import (
     merge_resolved_input_edges,
 )
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
-from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_text,
     render_docx_template,
@@ -43,8 +44,9 @@ _FULL_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$"
 class TemplateFillRuntimeDeps:
     variable_resolver: FlowVariableResolver
     file_repo: FileRepository
+    file_content_loader: FileContentLoader
+    file_service: FileService
     template_asset_repo: FlowTemplateAssetRepository
-    principal: FlowPrincipal
     logger: logging.Logger
 
 
@@ -96,6 +98,7 @@ async def prepare_template_fill_step(
         template_file = await _load_template_file(
             template_asset_repo=deps.template_asset_repo,
             file_repo=deps.file_repo,
+            file_content_loader=deps.file_content_loader,
             tenant_id=run.tenant_id,
             template_asset_id=template_asset_id,
             template_checksum=template_checksum,
@@ -209,19 +212,11 @@ async def complete_template_fill_step(
 
     try:
         output_checksum = hashlib.sha256(blob).hexdigest()
-        stored_file = await deps.file_repo.add(
-            FileCreate.model_validate(
-                {
-                    "file_type": FileType.DOCUMENT,
-                    "blob": blob,
-                    "name": filename,
-                    "mimetype": mimetype,
-                    "checksum": output_checksum,
-                    "size": len(blob),
-                    **deps.principal.file_owner_fields(),
-                    "tenant_id": run.tenant_id,
-                }
-            )
+        stored_file = await deps.file_service.save_generated_file(
+            payload=blob,
+            name=filename,
+            mimetype=mimetype,
+            file_type=FileType.DOCUMENT,
         )
     except Exception as exc:
         deps.logger.exception(
@@ -392,6 +387,7 @@ async def _load_template_file(
     *,
     template_asset_repo: FlowTemplateAssetRepository,
     file_repo: FileRepository,
+    file_content_loader: FileContentLoader,
     tenant_id: UUID,
     template_asset_id: UUID,
     template_checksum: str | None,
@@ -407,17 +403,17 @@ async def _load_template_file(
             code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
         ) from exc
 
-    files = await file_repo.get_list_by_id_and_tenant(
-        ids=[asset.file_id],
-        tenant_id=tenant_id,
-        include_transcription=False,
-    )
-    if not files:
+    try:
+        metadata = await file_repo.get_by_id(
+            file_id=asset.file_id,
+            tenant_id=tenant_id,
+        )
+        template_file = (await file_content_loader.load([metadata]))[metadata.id]
+    except NotFoundException:
         raise TypedIOValidationException(
             "The published DOCX template asset file is no longer available. Re-publish the flow with a current template.",
             code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
         )
-    template_file = files[0]
     if template_file.blob is None:
         raise TypedIOValidationException(
             "The published DOCX template could not be read because the saved file content is missing. Re-upload the template and publish the flow again.",

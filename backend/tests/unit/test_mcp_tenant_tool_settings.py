@@ -5,6 +5,7 @@ from uuid import uuid4
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
+from eneo.roles.permissions import Permission
 
 
 async def test_available_servers_apply_tenant_tool_overrides():
@@ -23,7 +24,7 @@ async def test_available_servers_apply_tenant_tool_overrides():
     )
     service = MCPServerSettingsService(
         mcp_server_repo=repo,
-        user=SimpleNamespace(tenant_id=tenant_id),
+        user=SimpleNamespace(tenant_id=tenant_id, permissions=[Permission.ADMIN]),
     )
 
     result = await service.get_available_mcp_servers()

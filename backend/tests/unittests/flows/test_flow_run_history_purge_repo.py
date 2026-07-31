@@ -8,6 +8,7 @@ from sqlalchemy.dialects import postgresql
 import eneo.database.tables  # noqa: F401
 from eneo.database.tables.base_class import Base
 from eneo.database.tables.files_table import Files
+from eneo.database.tables.object_content_table import FileContentReferences
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FLOW_RUN_HISTORY_PURGE_FILE_REFERENCE_TABLE_NAMES,
     FlowRunHistoryPurgeCounts,
@@ -16,18 +17,33 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
 )
 
 
-def test_flow_run_history_purge_file_reference_guard_covers_files_foreign_keys() -> (
+def test_flow_run_history_purge_file_reference_guard_covers_product_foreign_keys() -> (
     None
 ):
-    referencing_tables = frozenset(
+    product_reference_tables = frozenset(
         table.name
         for table in Base.metadata.tables.values()
         for foreign_key in table.foreign_keys
         if foreign_key.column.table.name == Files.__tablename__
         and foreign_key.column.name == "id"
+        and table.name != FileContentReferences.__tablename__
     )
 
-    assert FLOW_RUN_HISTORY_PURGE_FILE_REFERENCE_TABLE_NAMES == referencing_tables
+    assert FLOW_RUN_HISTORY_PURGE_FILE_REFERENCE_TABLE_NAMES == product_reference_tables
+
+
+def test_file_content_references_cascade_through_the_content_release_fence() -> None:
+    file_foreign_key = next(
+        foreign_key
+        for foreign_key in FileContentReferences.__table__.foreign_keys
+        if foreign_key.column.table.name == Files.__tablename__
+    )
+
+    assert file_foreign_key.ondelete == "CASCADE"
+    assert (
+        FileContentReferences.__tablename__
+        not in FLOW_RUN_HISTORY_PURGE_FILE_REFERENCE_TABLE_NAMES
+    )
 
 
 def test_flow_run_history_purge_result_aggregates_counts_and_identities() -> None:

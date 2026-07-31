@@ -675,7 +675,7 @@ def _input_file_metadata(
     size: int,
     mimetype: str | None,
     file_type: FileType,
-    text_length: int | None = None,
+    text_size_bytes: int | None = None,
     has_text: bool = False,
     has_transcription: bool = False,
 ) -> FlowRunStepInputFileMetadata:
@@ -686,7 +686,7 @@ def _input_file_metadata(
         size=size,
         mimetype=mimetype,
         file_type=file_type,
-        text_length=text_length,
+        text_size_bytes=text_size_bytes,
         has_text=has_text,
         has_transcription=has_transcription,
     )
@@ -2994,7 +2994,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
                         size=2048,
                         mimetype="application/pdf",
                         file_type=FileType.DOCUMENT,
-                        text_length=1024,
+                        text_size_bytes=1024,
                         has_text=True,
                     ),
                 )
@@ -3252,7 +3252,7 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
                         size=100,
                         mimetype="application/pdf",
                         file_type=FileType.DOCUMENT,
-                        text_length=50,
+                        text_size_bytes=50,
                         has_text=True,
                     ),
                 ),
@@ -3264,7 +3264,7 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
                         size=80,
                         mimetype="text/plain",
                         file_type=FileType.TEXT,
-                        text_length=30,
+                        text_size_bytes=30,
                         has_text=True,
                     ),
                 ),
@@ -3436,7 +3436,7 @@ def test_evidence_bundle_export_uses_relational_runtime_file_metadata() -> None:
                         size=200,
                         mimetype="application/pdf",
                         file_type=FileType.DOCUMENT,
-                        text_length=80,
+                        text_size_bytes=80,
                         has_text=True,
                     ),
                 )
@@ -3459,7 +3459,7 @@ def test_evidence_bundle_export_uses_relational_runtime_file_metadata() -> None:
         "size": 200,
         "mimetype": "application/pdf",
         "file_type": "document",
-        "text_length": 80,
+        "text_size_bytes": 80,
         "has_text": True,
         "has_transcription": False,
     }

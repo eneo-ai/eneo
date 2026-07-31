@@ -29,4 +29,5 @@ def get_settings_service_allowing_read_only_key(
         tenant_repo=container.tenant_repo(),
         audit_service=container.audit_service(),
         data_retention_service=container.data_retention_service(),
+        skill_repo=container.skill_repo(),
     )

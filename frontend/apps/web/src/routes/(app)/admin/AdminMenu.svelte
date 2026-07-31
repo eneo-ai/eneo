@@ -5,28 +5,27 @@
 -->
 
 <script lang="ts">
-  import type { Icon } from "@eneo/icons";
   import type { ComponentType } from "svelte";
-  import { IconAssistant } from "@eneo/icons/assistant";
-  import { IconAssistants } from "@eneo/icons/assistants";
-  import { IconThumb } from "@eneo/icons/thumb";
-  import { IconLibrary } from "@eneo/icons/library";
-  import { IconCPU } from "@eneo/icons/CPU";
-  import { IconBulb } from "@eneo/icons/bulb";
-  import { IconHistory } from "@eneo/icons/history";
-  import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
-  import { IconSparkles } from "@eneo/icons/sparkles";
-  import { IconKey } from "@eneo/icons/key";
-  import {
-    BookText,
-    ChartPie,
-    Database,
-    LayoutTemplate,
-    Cloud,
-    Plug,
-    ShieldCheck,
-    SlidersHorizontal
-  } from "lucide-svelte";
+  import BookOpenCheck from "lucide-svelte/icons/book-open-check";
+  import BookText from "lucide-svelte/icons/book-text";
+  import ChartPie from "lucide-svelte/icons/chart-pie";
+  import Cloud from "lucide-svelte/icons/cloud";
+  import Cpu from "lucide-svelte/icons/cpu";
+  import Database from "lucide-svelte/icons/database";
+  import Fingerprint from "lucide-svelte/icons/fingerprint";
+  import HardDrive from "lucide-svelte/icons/hard-drive";
+  import History from "lucide-svelte/icons/history";
+  import KeyRound from "lucide-svelte/icons/key-round";
+  import Landmark from "lucide-svelte/icons/landmark";
+  import LayoutTemplate from "lucide-svelte/icons/layout-template";
+  import Lightbulb from "lucide-svelte/icons/lightbulb";
+  import MessageSquareText from "lucide-svelte/icons/message-square-text";
+  import Plug from "lucide-svelte/icons/plug";
+  import ShieldCheck from "lucide-svelte/icons/shield-check";
+  import SlidersHorizontal from "lucide-svelte/icons/sliders-horizontal";
+  import Sparkles from "lucide-svelte/icons/sparkles";
+  import UserRound from "lucide-svelte/icons/user-round";
+  import UsersRound from "lucide-svelte/icons/users-round";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -44,22 +43,22 @@
     return normalizedRoute === normalizedUrl || normalizedRoute.startsWith(`${normalizedUrl}/`);
   }
 
-  type NavItem = { route: string; href: string; icon: Icon | ComponentType; label: string };
+  type NavItem = { route: string; href: string; icon: ComponentType; label: string };
   type NavGroup = { label: string; items: NavItem[] };
 
-  function navItem(route: string, icon: Icon | ComponentType, label: string): NavItem {
+  function navItem(route: string, icon: ComponentType, label: string): NavItem {
     return { route, href: localizeHref(route), icon, label };
   }
 
   const groups = $derived<NavGroup[]>([
     {
       label: m.admin_section_overview(),
-      items: [navItem("/admin", IconLibrary, m.organisation())]
+      items: [navItem("/admin", Landmark, m.overview())]
     },
     {
       label: m.admin_section_governance(),
       items: [
-        navItem("/admin/personal-assistant", IconSpeechBubble, m.governance_title()),
+        navItem("/admin/personal-assistant", MessageSquareText, m.governance_title()),
         navItem("/admin/prompt-library", BookText, m.governance_tab_prompts()),
         navItem("/admin/flow-data-retention", Database, m.flow_retention_title()),
         navItem("/admin/security-classifications", ShieldCheck, m.security_classifications())
@@ -68,7 +67,7 @@
     {
       label: m.admin_section_configuration(),
       items: [
-        navItem("/admin/models", IconCPU, m.models()),
+        navItem("/admin/models", Cpu, m.models()),
         ...(settings?.using_templates
           ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
           : []),
@@ -78,26 +77,28 @@
           SlidersHorizontal,
           m.flow_knowledge_evidence_title()
         ),
-        navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
+        navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
+        navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
-        navItem("/admin/integrations", Cloud, m.integrations())
+        navItem("/admin/integrations", Cloud, m.integrations()),
+        navItem("/admin/storage", HardDrive, m.storage_settings_nav())
       ]
     },
     {
       label: m.admin_section_analytics_logs(),
       items: [
         navItem("/admin/usage", ChartPie, m.usage()),
-        navItem("/admin/insights", IconBulb, m.insights()),
-        navItem("/admin/audit-logs", IconHistory, m.audit_logs())
+        navItem("/admin/insights", Lightbulb, m.insights()),
+        navItem("/admin/audit-logs", History, m.audit_logs())
       ]
     },
     {
       label: m.admin_section_access(),
       items: [
-        navItem("/admin/users", IconAssistant, m.users()),
-        navItem("/admin/legacy/user-groups", IconAssistants, m.user_groups()),
-        navItem("/admin/legacy/roles", IconThumb, m.roles()),
-        navItem("/admin/api-keys", IconKey, m.api_keys())
+        navItem("/admin/users", UserRound, m.users()),
+        navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
+        navItem("/admin/legacy/roles", Fingerprint, m.roles()),
+        navItem("/admin/api-keys", KeyRound, m.api_keys())
       ]
     }
   ]);
@@ -111,7 +112,7 @@
         {#each group.items as item (item.href)}
           {@const active = isSelected(item.route, currentRoute)}
           <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={active}>
+            <Sidebar.MenuButton isActive={active} class="[&_svg]:size-4.5">
               {#snippet child({ props })}
                 <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized hrefs built from typed route literals -->
                 <a href={item.href} {...props} aria-current={active ? "page" : undefined}>

@@ -6,7 +6,9 @@
   import { IconPlay } from "@eneo/icons/play";
   import { m } from "$lib/paraglide/messages";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { CheckCircle2, AlertCircle, Loader2 } from "lucide-svelte";
+  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import AlertCircle from "lucide-svelte/icons/alert-circle";
+  import Loader2 from "lucide-svelte/icons/loader-2";
 
   let {
     flow

@@ -3,6 +3,7 @@
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let availableModels: SelectableAIModel[] = [];
 
@@ -50,10 +51,12 @@
 </script>
 
 <button data-testid="select-first-assistant" on:click={() => selectAssistant("first")}>
-  First assistant
+  {m.first()}
+  {m.assistant()}
 </button>
 <button data-testid="select-second-assistant" on:click={() => selectAssistant("second")}>
-  Second assistant
+  {m.second()}
+  {m.assistant()}
 </button>
 
 <SelectAIModelV2

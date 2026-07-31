@@ -47,6 +47,12 @@ class GovernancePolicies(BasePublic):
     )
 
     __table_args__ = (
+        Index(
+            "uq_governance_policies_tenant_id_id",
+            "tenant_id",
+            "id",
+            unique=True,
+        ),
         UniqueConstraint(
             "tenant_id", "scope", name="uq_governance_policies_tenant_id_scope"
         ),

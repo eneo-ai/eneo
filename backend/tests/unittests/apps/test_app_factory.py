@@ -8,9 +8,16 @@ from pydantic import ValidationError
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.apps.apps.api.app_models import InputField, InputFieldType
 from eneo.apps.apps.app_factory import AppFactory
+from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+    persist_explicit_model_kwargs_capabilities,
+)
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import Apps
 from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.files.file_models import File, FileType
 from eneo.templates.app_template.app_template import AppTemplate
 
 
@@ -150,7 +157,11 @@ def test_create_app_from_db_preserves_completion_model_provider_type(
         supports_tool_calling=True,
         base_url=None,
         litellm_model_name=None,
-        model_kwargs_capabilities=None,
+        model_kwargs_capabilities=persist_explicit_model_kwargs_capabilities(
+            SupportedModelKwargs(
+                top_p=ModelKwargCapability(supported=True),
+            )
+        ),
         tenant_id=tenant_id,
         provider_id=provider.id,
         is_enabled=True,
@@ -177,12 +188,32 @@ def test_create_app_from_db_preserves_completion_model_provider_type(
     )
     app_record.completion_model = completion_model
     app_record.input_fields = []
-    app_record.attachments = []
+    # The ORM relation contains metadata only. Durable content is hydrated by
+    # AppRepository and must remain the factory's attachment source.
+    app_record.attachments = [MagicMock(file=MagicMock())]
     app_record.template = None
 
-    app = factory.create_app_from_db(app_record)
+    loaded_attachment = File(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="policy.txt",
+        checksum="0" * 64,
+        size=14,
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        text="durable policy",
+        owner_type=PrincipalType.USER,
+        owner_user_id=app_record.user_id,
+        tenant_id=tenant_id,
+    )
+    app = factory.create_app_from_db(
+        app_record,
+        attachments=[loaded_attachment],
+    )
 
+    assert app.attachments == [loaded_attachment]
     assert app.completion_model is not None
     assert app.completion_model.provider_type == "vllm"
-    assert app.completion_model.supported_model_kwargs.top_p.supported is False
+    assert app.completion_model.supported_model_kwargs.top_p.supported is True
     assert app.completion_model_kwargs.top_p == 0.81

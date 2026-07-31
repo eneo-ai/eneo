@@ -8,7 +8,11 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
-  import { Check, X, Loader2, ChevronRight, Wrench } from "lucide-svelte";
+  import Check from "lucide-svelte/icons/check";
+  import X from "lucide-svelte/icons/x";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import Wrench from "lucide-svelte/icons/wrench";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 

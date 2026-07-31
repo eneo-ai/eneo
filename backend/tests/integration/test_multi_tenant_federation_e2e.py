@@ -869,8 +869,9 @@ async def test_federation_callback_rejects_future_iat_beyond_leeway(
     )
 
     assert response.status_code == 500, response.text
-    detail = response.json().get("detail", "")
-    assert "unexpected" in detail.lower()
+    error = response.json()
+    assert error["code"] == "internal_error"
+    assert "unexpected" in error["message"].lower()
 
 
 @pytest.mark.integration

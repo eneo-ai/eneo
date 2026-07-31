@@ -2,14 +2,7 @@
   import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import type {
-    HttpAuthoredConfig,
-    HttpDirection,
-    HttpMethod,
-    HttpAuth,
-    HttpBody,
-    CustomHeader
-  } from "./httpConfigTypes";
+  import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
   import HttpAuthSection from "./HttpAuthSection.svelte";
   import HttpHeadersEditor from "./HttpHeadersEditor.svelte";
   import HttpBodyEditor from "./HttpBodyEditor.svelte";
@@ -50,7 +43,7 @@
     <div class="flex flex-col gap-1">
       <Input
         type="url"
-        placeholder="https://api.example.com/webhook"
+        placeholder={m.http_url_placeholder()}
         value={config.url}
         disabled={isPublished}
         aria-invalid={urlInvalid || undefined}

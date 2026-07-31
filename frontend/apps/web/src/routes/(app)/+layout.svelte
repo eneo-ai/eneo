@@ -18,7 +18,6 @@
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { Toaster } from "$lib/components/toast";
 
   export let data;
 
@@ -50,6 +49,7 @@
   $: isPersonal = currentRoute.startsWith("/spaces/personal");
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
+  const canBrowseOrganization = user.hasPermission("admin");
 </script>
 
 <!-- eslint-disable svelte/no-navigation-without-resolve -- in-page anchor -->
@@ -111,7 +111,7 @@
       <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}
         >{m.spaces()}</a
       >
-      {#if user.hasPermission("admin")}
+      {#if canBrowseOrganization}
         <a
           href={localizeHref("/spaces/organization/knowledge")}
           data-current={isOrganization ? "page" : undefined}>{m.organization()}</a
@@ -146,8 +146,6 @@
     <slot />
   </main>
 </div>
-
-<Toaster />
 
 <style lang="postcss">
   @reference "../../app.css";

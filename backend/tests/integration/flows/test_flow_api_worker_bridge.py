@@ -135,10 +135,9 @@ async def test_public_flow_run_crosses_real_broker_and_worker(
     assert attempt["attempt_no"] == 1
     assert isinstance(attempt["celery_task_id"], str)
     assert attempt["finished_at"] is not None
-    attempt_start = attempt["provenance_json"]["attempt_start"]
-    assert attempt_start["input_text_length"] == len(submitted_text)
-    assert attempt_start["requested_model"]
-    assert attempt_start["provider"]
+    assert attempt["requested_model"]
+    assert attempt["provider"]
+    assert attempt["provenance_json"] is None
 
     async with db_container() as container:
         audit_rows = (

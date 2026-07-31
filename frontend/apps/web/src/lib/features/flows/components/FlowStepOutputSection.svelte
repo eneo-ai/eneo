@@ -214,7 +214,7 @@
           value={step.output_config?.url ?? ""}
           disabled={isPublished}
           oninput={(e) => onWebhookUrlChange?.({ value: e.currentTarget.value })}
-          placeholder="https://..."
+          placeholder={m.flow_step_output_url_placeholder()}
         />
       </Settings.Row>
     {/if}

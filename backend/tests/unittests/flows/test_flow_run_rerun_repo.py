@@ -26,6 +26,7 @@ from eneo.flows.domain.run_step_input_exceptions import (
 )
 from eneo.flows.flow_run_input_envelope import RerunInputOverride
 from eneo.flows.flow_run_rerun_graph import RerunInvalidatedStep
+from eneo.flows.infrastructure import flow_run_rerun_repo
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.principal import FlowPrincipal
 
@@ -112,8 +113,7 @@ def _prepare_completed_rerun_accept_scenario(monkeypatch) -> _RerunAcceptScenari
         AsyncMock(return_value={}),
     )
     monkeypatch.setattr(
-        "eneo.flows.infrastructure.flow_run_rerun_repo.next_step_attempt_no",
-        AsyncMock(return_value=2),
+        flow_run_rerun_repo, "next_step_attempt_no", AsyncMock(return_value=2)
     )
     return _RerunAcceptScenario(
         repo=repo,

@@ -2,7 +2,7 @@
   import { m } from "$lib/paraglide/messages";
   import type { FlowStep } from "@eneo/eneo-js";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import { CircleAlert } from "lucide-svelte";
+  import CircleAlert from "lucide-svelte/icons/circle-alert";
   import {
     getInputTypeLabel,
     getOutputTypeLabel,

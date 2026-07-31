@@ -4,8 +4,8 @@
 # Complete production stack with Traefik reverse proxy and Let's Encrypt SSL
 #
 # BEFORE DEPLOYING:
-#   1. Replace "your-email@domain.com" (line 38) with your email
-#   2. Replace "your-domain.com" (lines 65, 68, 91, 94) with your domain
+#   1. Replace "your-email@domain.com" (line 55) with your email
+#   2. Replace "your-domain.com" (lines 88, 91, 116, 119) with your domain
 #   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
 #   4. Create external network: docker network create proxy_tier
 #
@@ -20,9 +20,26 @@
 #   4. frontend starts
 #
 # VOLUME MANAGEMENT:
-#   The "name: eneo" ensures consistent volume names (eneo_postgres_data, etc.)
-#   regardless of which directory you run commands from.
+#   The "name: eneo" fixes the Compose project name regardless of which
+#   directory you run commands from. Docker creates volumes with that project
+#   prefix, for example eneo_eneo_postgres_data.
 #   To completely reset: docker compose down -v && docker compose up -d
+#
+# NETWORK ISOLATION:
+#   proxy_tier (external) - Traefik, frontend, backend, worker. Internet-facing
+#                           traffic and outbound access (LLM APIs, OIDC, crawls).
+#   data_net   (internal) - PostgreSQL and Redis. No internet egress, and only
+#                           backend, worker and db-init can reach them. Frontend,
+#                           Traefik and future module containers cannot.
+#   module_net (internal) - Traefik and backend. Reserved for optional module
+#                           containers. Modules get no internet egress; all
+#                           their calls go to backend:8000, and user login is
+#                           handed off from the Eneo session (SSO) rather than
+#                           the module talking to an IdP itself.
+#   object_content_net (internal) - added by docker-compose.object-content.yml
+#                           only for the optional bundled endpoint.
+#   Backend is the single gateway between the outside world, the data layers,
+#   optional object content, and modules.
 #
 # Full documentation: ../DEPLOYMENT.md
 # ============================================================================
@@ -43,6 +60,11 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=your-email@domain.com"  # CHANGE THIS
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      # Default network for reaching routed containers. Services on multiple
+      # networks (backend) would otherwise get a random - possibly unreachable -
+      # network IP. Module containers override this with their own
+      # traefik.docker.network label on eneo_module_net.
+      - "--providers.docker.network=proxy_tier"
     ports:
       - "80:80"
       - "443:443"
@@ -51,6 +73,7 @@ services:
       - "traefik_letsencrypt:/letsencrypt"
     networks:
       - proxy_tier
+      - module_net
     labels:
       # IMPORTANT: traefik.enable=true is required for Traefik to read these labels
       # (because exposedbydefault=false is set above)
@@ -85,6 +108,16 @@ services:
     image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_backend
     restart: unless-stopped
+    environment:
+      # List form passes these through only when the deployment .env defines
+      # them. With every value absent, Eneo runs the PostgreSQL-inline backend.
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
     env_file:
       - env_backend.env
     volumes:
@@ -92,6 +125,8 @@ services:
       - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
     networks:
       - proxy_tier
+      - data_net
+      - module_net
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.eneo-backend.rule=Host(`your-domain.com`) && (PathPrefix(`/api`) || PathPrefix(`/scim`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/version`))"  # CHANGE THIS
@@ -104,6 +139,14 @@ services:
       - "traefik.http.routers.eneo-backend-secure.service=eneo-backend-svc"
       - "traefik.http.services.eneo-backend-svc.loadbalancer.server.port=8000"
       - "traefik.http.routers.eneo-backend-secure.priority=10"
+    healthcheck:
+      # Module containers (docker-compose.modules.yml) gate their startup on
+      # readiness. Liveness remains available separately at /api/livez.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/readyz', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
     depends_on:
       db:
         condition: service_healthy
@@ -120,7 +163,14 @@ services:
     container_name: eneo_worker
     restart: unless-stopped
     environment:
-      - RUN_AS_WORKER=true  # Runs ARQ worker instead of HTTP server
+      - RUN_AS_WORKER=true  # Runs today's ARQ adapter; task logic is queue-neutral
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
     env_file:
       - env_backend.env
     volumes:
@@ -128,6 +178,7 @@ services:
       - eneo_temp_files:/tmp  # Shared with backend for audit log exports (/tmp/exports)
     networks:
       - proxy_tier
+      - data_net
     depends_on:
       - backend
 
@@ -193,7 +244,7 @@ services:
     volumes:
       - eneo_postgres_data:/var/lib/postgresql/data
     networks:
-      - proxy_tier
+      - data_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -207,7 +258,7 @@ services:
     volumes:
       - eneo_redis_data:/data
     networks:
-      - proxy_tier
+      - data_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -223,7 +274,7 @@ services:
     env_file:
       - env_backend.env
     networks:
-      - proxy_tier
+      - data_net
     depends_on:
       db:
         condition: service_healthy
@@ -234,7 +285,12 @@ services:
 networks:
   proxy_tier:
     external: true
-
+  data_net:
+    driver: bridge
+    internal: true  # no internet egress; unreachable from Traefik/frontend/modules
+  module_net:
+    driver: bridge
+    internal: true  # modules have no internet egress; ingress arrives via Traefik
 volumes:
   eneo_postgres_data:
   eneo_redis_data:

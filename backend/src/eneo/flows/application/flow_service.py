@@ -11,7 +11,6 @@ from eneo.assistants.assistant_update import (
     AssistantUpdateCommand,
 )
 from eneo.files.file_models import File
-from eneo.files.file_repo import FileRepository
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
@@ -40,7 +39,7 @@ from eneo.flows.flow_review_policy import dump_flow_step_review_policy
 from eneo.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
-from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
+from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.flows.flow_validators import (
     validate_steps,
     validate_variable_alias_collisions,
@@ -81,8 +80,7 @@ class FlowService:
         flow_repo: FlowRepository,
         flow_version_repo: FlowVersionRepository,
         assistant_service: AssistantService,
-        file_repo: FileRepository,
-        template_asset_repo: FlowTemplateAssetRepository | None = None,
+        template_asset_service: FlowTemplateAssetService | None = None,
         encryption_service: EncryptionService | None = None,
         space_service: SpaceService | None = None,
     ):
@@ -90,17 +88,16 @@ class FlowService:
         self.flow_repo = flow_repo
         self.flow_version_repo = flow_version_repo
         self.assistant_service = assistant_service
-        self.file_repo = file_repo
-        self.template_asset_repo = template_asset_repo
+        self.template_asset_service = template_asset_service
         self.encryption_service = encryption_service
         self.space_service = space_service
 
-    def _require_template_asset_repo(self) -> FlowTemplateAssetRepository:
-        if self.template_asset_repo is None:
+    def _require_template_asset_service(self) -> FlowTemplateAssetService:
+        if self.template_asset_service is None:
             raise RuntimeError(
-                "FlowService requires template_asset_repo for template asset operations."
+                "FlowService requires template_asset_service for template asset operations."
             )
-        return self.template_asset_repo
+        return self.template_asset_service
 
     async def create_flow(
         self,
@@ -977,22 +974,14 @@ class FlowService:
         flow_id: UUID | None,
         asset_id: UUID,
     ) -> tuple[FlowTemplateAsset, File]:
-        template_asset_repo = self._require_template_asset_repo()
-        asset = await template_asset_repo.get(
-            asset_id=asset_id,
-            tenant_id=self.user.tenant_id,
-        )
-        if flow_id is not None and asset.flow_id != flow_id:
-            raise NotFoundException("Flow template asset not found.")
-        file = await self.file_repo.get_by_id(file_id=asset.file_id)
-        if file.tenant_id != self.user.tenant_id:
-            raise NotFoundException("Flow template asset file not found.")
-        if file.blob is None:
-            raise BadRequestException(
-                "The selected DOCX template could not be read because the file content is missing. Upload the template again or choose another DOCX file.",
-                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
+        if flow_id is None:
+            raise RuntimeError(
+                "A persisted Flow is required to resolve a template asset"
             )
-        return asset, file
+        return await self._require_template_asset_service().get_asset_with_file(
+            flow_id=flow_id,
+            asset_id=asset_id,
+        )
 
     async def _resolve_template_asset_reference(
         self,

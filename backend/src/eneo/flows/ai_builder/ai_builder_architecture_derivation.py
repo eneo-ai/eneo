@@ -76,7 +76,7 @@ def derive_architecture_commit_draft(
         tuples_chain=[
             StepTriple(
                 input_type=FlowAuthoringInputType(input_type.value),
-                output_type=output_type.value,
+                output_type=output_type,
                 output_mode=step_output_mode,
             )
         ],

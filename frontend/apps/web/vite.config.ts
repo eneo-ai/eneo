@@ -13,7 +13,7 @@ const json = readFileSync(file, "utf8");
 const pkg = JSON.parse(json);
 const browserTarget = "es2022";
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   cacheDir: process.env.VITEST ? "node_modules/.vitest" : "node_modules/.vite-web",
   build: {
     target: browserTarget,
@@ -24,26 +24,24 @@ export default defineConfig(({ mode }) => ({
       target: browserTarget
     }
   },
-  resolve:
-    mode === "test" || process.env.VITEST
-      ? {
-          conditions: ["browser"]
-        }
-      : undefined,
   plugins: [
     // Paraglide's change detection is in-memory only, so every fresh process
-    // (a second build, a vitest run) rewrites the whole catalog under
-    // src/lib/paraglide. A dev server polling the same tree then HMR-updates
-    // every module that imports messages — hundreds of components per write.
-    // Secondary tooling that already has a compiled catalog on disk can set
-    // PARAGLIDE_SKIP_COMPILE=1 to leave the running dev server undisturbed.
-    ...(process.env.PARAGLIDE_SKIP_COMPILE
+    // rewrites the whole catalog under src/lib/paraglide. Vitest loads this
+    // shared config once per project; compiling from each project can expose a
+    // half-written catalog to another project. The test lifecycle compiles the
+    // catalog once before Vitest starts. Other secondary tooling can set
+    // PARAGLIDE_SKIP_COMPILE=1 to leave a running dev server undisturbed.
+    ...(process.env.PARAGLIDE_SKIP_COMPILE || process.env.VITEST
       ? []
       : [
           paraglideVitePlugin({
             project: "./project.inlang",
             outdir: "./src/lib/paraglide",
-            strategy: ["url", "cookie", "baseLocale"]
+            strategy: ["url", "cookie", "baseLocale"],
+            // This catalogue contains thousands of messages. Paraglide's
+            // large-project structure keeps one generated module per locale
+            // instead of making Vite retain one module per message.
+            outputStructure: "locale-modules"
           }) as PluginOption
         ]),
     tailwindcss() as PluginOption,
@@ -66,8 +64,9 @@ export default defineConfig(({ mode }) => ({
         "src/lib/paraglide/**" // generated i18n catalogs
       ]
     },
-    // Two Vitest projects share the Vite/SvelteKit setup above via `extends`:
+    // Three Vitest projects share the Vite/SvelteKit setup above via `extends`:
     //   - client: component tests (*.svelte.test.ts) in a real Chromium via Playwright
+    //   - dom: deterministic high-volume component wiring tests (*.dom.test.ts) in jsdom
     //   - server: pure unit tests (*.test.ts) in Node
     // Component tests need a real DOM because Svelte 5 runes/$effect/transitions
     // misbehave under jsdom; the server project keeps unit tests fast.
@@ -90,17 +89,25 @@ export default defineConfig(({ mode }) => ({
       },
       {
         extends: "./vite.config.ts",
+        resolve: {
+          conditions: ["browser"]
+        },
+        test: {
+          name: "dom",
+          environment: "jsdom",
+          include: ["src/**/*.dom.{test,spec}.{js,ts}"]
+        }
+      },
+      {
+        extends: "./vite.config.ts",
         test: {
           name: "server",
           environment: "node",
           include: ["src/**/*.{test,spec}.{js,ts}"],
-          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}"]
+          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}", "src/**/*.dom.{test,spec}.{js,ts}"]
         }
       }
-    ],
-    resolve: {
-      conditions: ["browser"]
-    }
+    ]
   },
   server: {
     host: "0.0.0.0", // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)
@@ -140,11 +147,6 @@ export default defineConfig(({ mode }) => ({
   // externalized, and the chat page (which renders messages via @eneo/ui's
   // Markdown, also using marked) would 500 on hard refresh.
   ssr: {
-    noExternal: ["@xyflow/svelte", "@xyflow/system", "marked", "dompurify", "zod"],
-    resolve: process.env.VITEST
-      ? {
-          conditions: ["browser"]
-        }
-      : undefined
+    noExternal: ["@xyflow/svelte", "@xyflow/system", "marked", "dompurify", "zod"]
   }
-}));
+});

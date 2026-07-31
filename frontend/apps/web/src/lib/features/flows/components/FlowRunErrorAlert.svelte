@@ -57,7 +57,7 @@
         <div class="flex flex-col gap-1">
           <span class="font-medium">{affectedStepsLabel}</span>
           <ul class="flex flex-wrap gap-1.5" aria-label={affectedStepsLabel}>
-            {#each reviewPolicySteps as step}
+            {#each reviewPolicySteps as step (step.step_order)}
               <li>
                 <Badge variant="outline" class="max-w-full border-current text-current">
                   <span class="truncate">{reviewStepLabel(step)}</span>

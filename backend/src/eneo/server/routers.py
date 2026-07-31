@@ -92,6 +92,9 @@ from eneo.model_providers.presentation.model_provider_router import (
     router as model_providers_router,
 )
 from eneo.modules.module_router import router as module_router
+from eneo.object_content.deployment_policy_router import (
+    router as object_content_deployment_policy_router,
+)
 from eneo.prompt_library.presentation.prompt_library_router import (
     router as prompt_library_router,
 )
@@ -107,6 +110,10 @@ from eneo.settings.settings_router import (
 from eneo.settings.settings_router import (
     settings_admin_router,
 )
+from eneo.skills.presentation.organization_skill_router import (
+    router as organization_skill_router,
+)
+from eneo.skills.presentation.skill_router import router as skill_router
 from eneo.spaces.api.space_router import router as space_router
 from eneo.storage.presentation.storage_router import router as storage_router
 from eneo.sysadmin.sysadmin_router import router as sysadmin_router
@@ -559,6 +566,22 @@ router.include_router(
     tags=["admin", "governance-policy"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
+router.include_router(
+    object_content_deployment_policy_router,
+    prefix="/admin",
+    tags=["admin", "object-content-policy"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    skill_router,
+    dependencies=[
+        Depends(require_resource_permission_for_method("spaces")),
+        Depends(
+            require_api_key_scope_check(resource_type="space", path_param="space_id")
+        ),
+    ],
+)
+router.include_router(organization_skill_router)
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
 )

@@ -18,17 +18,15 @@
   } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
-  import {
-    Pencil,
-    Trash2,
-    AlertTriangle,
-    Loader2,
-    Box,
-    Sparkles,
-    AudioLines,
-    MoreHorizontal,
-    Check
-  } from "lucide-svelte";
+  import Pencil from "lucide-svelte/icons/pencil";
+  import Trash2 from "lucide-svelte/icons/trash-2";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import Box from "lucide-svelte/icons/box";
+  import Sparkles from "lucide-svelte/icons/sparkles";
+  import AudioLines from "lucide-svelte/icons/audio-lines";
+  import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
+  import Check from "lucide-svelte/icons/check";
   import { m } from "$lib/paraglide/messages";
 
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";

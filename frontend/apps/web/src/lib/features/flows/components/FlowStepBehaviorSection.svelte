@@ -7,7 +7,7 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { CircleAlert } from "lucide-svelte";
+  import CircleAlert from "lucide-svelte/icons/circle-alert";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconLockClosed } from "@eneo/icons/lock-closed";
   import { IconQuestionMark } from "@eneo/icons/question-mark";

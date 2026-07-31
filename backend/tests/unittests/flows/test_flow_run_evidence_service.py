@@ -598,7 +598,7 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
                 size=256,
                 mimetype="application/pdf",
                 file_type=FileType.DOCUMENT,
-                text_length=12,
+                text_size_bytes=12,
                 has_text=True,
                 has_transcription=False,
             ),
@@ -632,7 +632,7 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
             "size": 256,
             "mimetype": "application/pdf",
             "file_type": "document",
-            "text_length": 12,
+            "text_size_bytes": 12,
             "has_text": True,
             "has_transcription": False,
         }
@@ -1404,8 +1404,7 @@ async def test_redacted_export_is_not_charged_for_withheld_text(
         "text_withheld_sensitive_flow"
     )
     monkeypatch.setattr(
-        "eneo.flows.application.flow_run_evidence_service.EVIDENCE_EXPORT_MAX_PASSAGE_BYTES",
-        150,
+        flow_run_evidence_service, "EVIDENCE_EXPORT_MAX_PASSAGE_BYTES", 150
     )
 
     payload = await service.export_evidence_json(run_id=run.id, export_reason="tillsyn")

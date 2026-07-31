@@ -8,7 +8,6 @@ import sqlalchemy as sa
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -17,6 +16,7 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
+from eneo.files.file_models import FileInfo, FileType
 from eneo.flows.api import (
     flow_run_lifecycle_router,
     flow_run_rerun_router,
@@ -26,6 +26,7 @@ from eneo.flows.domain.flow import FlowStepResult
 from eneo.flows.enums import FlowRunReviewCheckpointState, FlowStepResultStatus
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
+from eneo.flows.principal import FlowPrincipal
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 from eneo.roles.permissions import Permission
@@ -379,23 +380,17 @@ async def _mark_run_completed_with_artifact(
         session = container.session()
         run_row = await session.get(FlowRuns, UUID(run["id"]))
         assert run_row is not None
-        assert run_row.principal_user_id is not None
-        artifact = Files(
-            name="consumer-report.pdf",
-            text=None,
-            blob=b"representative-pdf",
-            checksum="consumer-artifact-checksum",
-            size=18,
-            mimetype="application/pdf",
-            file_type="document",
-            transcription=None,
-            owner_type="user",
-            owner_user_id=run_row.principal_user_id,
-            owner_service_id=None,
-            tenant_id=run_row.tenant_id,
+        principal = FlowPrincipal.from_run(run_row)
+        file_service = container.file_service(
+            user=None,
+            owner=principal.file_owner(tenant_id=run_row.tenant_id),
         )
-        session.add(artifact)
-        await session.flush()
+        artifact = await file_service.save_generated_file(
+            payload=b"representative-pdf",
+            name="consumer-report.pdf",
+            mimetype="application/pdf",
+            file_type=FileType.DOCUMENT,
+        )
 
         run_repo = container.flow_run_repo()
         await run_repo.create_or_get_attempt_started(
@@ -460,29 +455,27 @@ async def _mark_run_completed_with_file_backed_text(
         session = container.session()
         run_row = await session.get(FlowRuns, UUID(run["id"]))
         assert run_row is not None
-        assert run_row.principal_user_id is not None
+        principal = FlowPrincipal.from_run(run_row)
+        file_service = container.file_service(
+            user=None,
+            owner=principal.file_owner(tenant_id=run_row.tenant_id),
+        )
 
-        def output_file(name: str, text: str) -> Files:
-            return Files(
+        async def output_file(name: str, text: str) -> FileInfo:
+            return await file_service.save_generated_file(
+                payload=text.encode("utf-8"),
                 name=name,
-                text=text,
-                blob=None,
-                checksum=f"{name}-checksum",
-                size=len(text.encode("utf-8")),
                 mimetype="text/plain",
-                file_type="text",
-                transcription=None,
-                owner_type="user",
-                owner_user_id=run_row.principal_user_id,
-                owner_service_id=None,
-                tenant_id=run_row.tenant_id,
+                file_type=FileType.TEXT,
             )
 
-        historical = output_file("historical-output.txt", "historical complete text")
-        current = output_file("current-output.txt", "current complete terminal text")
-        declared = output_file("declared-artifact.txt", "declared artifact")
-        session.add_all((historical, current, declared))
-        await session.flush()
+        historical = await output_file(
+            "historical-output.txt", "historical complete text"
+        )
+        current = await output_file(
+            "current-output.txt", "current complete terminal text"
+        )
+        declared = await output_file("declared-artifact.txt", "declared artifact")
 
         run_repo = container.flow_run_repo()
         step_id = UUID(step["id"])
@@ -1310,6 +1303,19 @@ async def test_flow_run_public_projects_text_artifact_and_outbound_results(
         str(artifact_file_id)
     ]
     assert artifact_public["result"]["files"] == artifact_public["result_files"]
+    signed_url_response = await client.post(
+        (
+            f"/api/v1/flows/{artifact_flow['id']}/runs/{artifact_run['id']}"
+            f"/artifacts/{artifact_file_id}/signed-url/"
+        ),
+        json={"expires_in": 60, "content_disposition": "attachment"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert signed_url_response.status_code == 200, signed_url_response.text
+    download_response = await client.get(signed_url_response.json()["url"])
+    assert download_response.status_code == 200, download_response.text
+    assert download_response.content == b"representative-pdf"
+    assert download_response.headers["content-type"] == "application/pdf"
     assert outbound_public["result"] == {
         "kind": "outbound_http",
         "delivery_status": "delivered",

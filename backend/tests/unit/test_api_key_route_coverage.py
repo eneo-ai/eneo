@@ -22,6 +22,7 @@ from eneo.authentication.auth_dependencies import (
     KNOWLEDGE_READ_OVERRIDES,
 )
 from eneo.main.config import get_settings
+from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import (
     route_dependency_closures,
     route_has_dependency_named,
@@ -104,7 +105,7 @@ def _get_eneo_src_path() -> pathlib.Path:
 # Each entry has a rationale — no silent omissions.
 INTENTIONALLY_UNGUARDED = {
     "/settings": "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
-    "/users": "Admin mutation endpoints (POST /admin/invite/, PATCH /admin/{id}/, DELETE /admin/{id}/, /api-keys/) are on users_admin_router with admin scope + admin key guards. GET / carries route-level admin scope + admin key guards (no-op for bearer tokens) so scoped API keys cannot enumerate the tenant directory while space-admin bearer users still populate member pickers. /me/ and /tenant/ safe for any scoped key.",
+    "/users": "Admin mutation endpoints (POST /admin/invite/, PATCH /admin/{id}/, DELETE /admin/{id}/) are on users_admin_router with admin scope + admin key guards. GET / carries route-level admin scope + admin key guards (no-op for bearer tokens) so scoped API keys cannot enumerate the tenant directory while space-admin bearer users still populate member pickers. /me/ and /tenant/ safe for any scoped key.",
     "/admin": "Admin endpoints are mounted with admin scope + admin key guards",
     "/dashboard": "Read-only aggregation endpoint with scope guard",
     "/icons": "Public static assets",
@@ -113,7 +114,7 @@ INTENTIONALLY_UNGUARDED = {
     "/integrations": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/jobs": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer authorization",
     "/analysis": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer role checks",
-    "/logging": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); router-level auth",
+    "/logging": "Tenant-scope guard plus session-only authentication",
     "/completion-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/embedding-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/transcription-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
@@ -131,6 +132,7 @@ INTENTIONALLY_UNGUARDED = {
     "/ws": "WebSocket endpoint — separate auth",
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
+    "/skills": "Skill catalogue and organisation lifecycle endpoints require session authentication; service-layer actor and tenant checks authorize reads, bindings, and admin-only publication",
     "/auth": "Public federation/auth endpoints — no user auth required",
     "/api-docs": "Public API documentation endpoint",
     "/help-assistants": "HelperRunService enforces ResourcePermission.EDIT on the target "
@@ -158,6 +160,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
+    "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with require_session_auth; service-layer checks authorize the authenticated user",
 }
 
 
@@ -515,6 +518,30 @@ class TestHighRiskExactRouteGuards:
     from broad prefix exemptions on privileged routes.
     """
 
+    def test_organization_skill_adoption_rejects_api_keys(self):
+        route = _find_route_by_method_and_paths(
+            "GET",
+            "/skills/organization/{skill_id}/adoption/",
+            "/skills/organization/{skill_id}/adoption",
+        )
+        assert _route_has_dep_name(route, "require_session_auth"), (
+            "GET /skills/organization/{skill_id}/adoption/ must remain "
+            "session-only; OrganizationSkillService performs the tenant-admin check"
+        )
+
+    def test_chat_turn_diagnostics_is_session_only_and_permission_gated(self):
+        route = _find_route_by_method_and_paths(
+            "GET",
+            "/conversations/{session_id}/messages/{message_id}/diagnostics/",
+            "/conversations/{session_id}/messages/{message_id}/diagnostics",
+        )
+        assert _route_has_dep_name(route, "require_session_auth")
+        granted_permissions = {
+            closure.get("permission")
+            for closure in route_dependency_closures(route, "_dep")
+        }
+        assert Permission.ASSISTANT_DEBUG in granted_permissions
+
     def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths(
             "GET", "/integrations/", "/integrations"
@@ -599,6 +626,12 @@ class TestHighRiskExactRouteGuards:
         assert not _route_has_dep_name(route, "_api_key_permission_dep"), (
             f"{label} should not require _api_key_permission_dep"
         )
+
+    def test_logging_details_requires_bearer_session(self):
+        route = _find_route_by_method_and_paths(
+            "GET", "/logging/{message_id}/", "/logging/{message_id}"
+        )
+        assert _route_has_dep_name(route, "require_session_auth")
 
     def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
@@ -833,6 +866,7 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/users/provision/": "Public provisioning endpoint guarded by its own flow",
     "/integrations/auth/": "External OAuth callback endpoints — no API key context",
     "/integrations/sharepoint/": "External SharePoint webhook — verified by signature, not API key",
+    "/skills/organization/": "Requires session authentication; OrganizationSkillService enforces tenant-admin authorization for every mutation",
 }
 
 # Specific (method, path) pairs without resource_permission / api_key_permission
@@ -1040,7 +1074,8 @@ class TestScopeCheckPathParamSafety:
             "DELETE",
             "/files/{id}/",
         ): "Files are owner-scoped: file_service.delete_file() calls "
-        "repo.delete_by_owner(id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
+        "repo.delete_by_owner_for_lifecycle("
+        "id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
         "The file delete scope guard "
         "blocks service keys because files are user-owned.",
         (
@@ -1048,6 +1083,11 @@ class TestScopeCheckPathParamSafety:
             "/files/{id}/signed-url/",
         ): "file_service.get_file_infos() performs the access check against user context "
         "before a signed URL is minted.",
+        (
+            "POST",
+            "/files/{id}/original/signed-url/",
+        ): "file_service.ensure_original_available() performs the owner and exact-original "
+        "checks before a signed URL is minted.",
         (
             "POST",
             "/info-blobs/{id}/",
@@ -1162,6 +1202,7 @@ class TestReadOverrideSnapshot:
             "run_service",
         ],
         "FILES_READ_OVERRIDES": [
+            "generate_original_signed_url",
             "generate_signed_url",
         ],
         "KNOWLEDGE_READ_OVERRIDES": [

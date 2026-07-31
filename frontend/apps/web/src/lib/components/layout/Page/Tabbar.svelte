@@ -10,7 +10,7 @@
 <div
   {...$list}
   use:list
-  class="text-primary flex min-w-0 shrink flex-grow items-center justify-center gap-2 pr-3"
+  class="text-primary left-[50%] flex min-w-0 shrink flex-grow items-center justify-center gap-2 pr-3 @4xl:lg:absolute @4xl:lg:-translate-x-[50%]"
   aria-label={m.main_views_available_for_current_resource()}
 >
   <slot />

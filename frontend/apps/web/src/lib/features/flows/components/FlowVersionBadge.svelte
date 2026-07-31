@@ -1,7 +1,8 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import { CheckCircle2, FileEdit } from "lucide-svelte";
+  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import FileEdit from "lucide-svelte/icons/file-edit";
   import { untrack } from "svelte";
 
   let {

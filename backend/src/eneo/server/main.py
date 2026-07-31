@@ -39,6 +39,10 @@ from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
 from eneo.main.observability import init_observability, instrument_fastapi
+from eneo.object_content.runtime import (
+    ObjectContentReadinessCode,
+    object_content_runtime,
+)
 from eneo.scim.app import scim_app
 from eneo.server import api_documentation
 from eneo.server.dependencies.lifespan import lifespan as app_lifespan
@@ -575,6 +579,16 @@ def get_application():
         return response
 
     @app.get(
+        "/api/livez",
+        include_in_schema=False,
+        description="Report that the API process can serve requests.",
+        responses={200: {"description": "API process is alive"}},
+        response_model=None,
+    )
+    async def get_livez():
+        return {"detail": {"status": "HEALTHY"}}
+
+    @app.get(
         "/api/healthz",
         description="Report backend and worker health for deployment probes.",
         responses={
@@ -592,18 +606,39 @@ def get_application():
 
         # Get worker health status
         worker_health = await get_worker_health()
+        object_content = await object_content_runtime.readiness()
 
         # Backend is always healthy if we can respond
         backend_status = "HEALTHY"
         backend_timestamp = datetime.now(timezone.utc).isoformat()
 
         # Determine overall system health
-        if worker_health.status == "HEALTHY" and backend_status == "HEALTHY":
-            overall_status = "HEALTHY"
+        if (
+            worker_health.status == "HEALTHY"
+            and backend_status == "HEALTHY"
+            and object_content.ready
+        ):
+            overall_status = (
+                "DEGRADED"
+                if object_content.code is ObjectContentReadinessCode.STORE_DEGRADED
+                else "HEALTHY"
+            )
             status_code = 200
         else:
             overall_status = "UNHEALTHY"
             status_code = 503
+
+        if (
+            object_content.code
+            is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+        ):
+            object_content_status = "NOT_CONFIGURED"
+        elif object_content.code is ObjectContentReadinessCode.STORE_DEGRADED:
+            object_content_status = "DEGRADED"
+        elif object_content.ready:
+            object_content_status = "HEALTHY"
+        else:
+            object_content_status = "UNHEALTHY"
 
         # Assemble health response
         response_data = {
@@ -619,6 +654,10 @@ def get_application():
                     "status": worker_health.status,
                     "last_heartbeat": worker_health.last_heartbeat,
                     "details": worker_health.details,
+                },
+                "object_content": {
+                    "status": object_content_status,
+                    "code": object_content.code.value,
                 },
             }
         }
@@ -706,6 +745,19 @@ def get_application():
                 maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
             ),
         )
+
+    @app.get(
+        "/api/readyz",
+        include_in_schema=False,
+        description="Report readiness of the API and required dependencies.",
+        responses={
+            200: {"description": "API and required dependencies are ready"},
+            503: {"description": "A required dependency is unavailable"},
+        },
+        response_model=None,
+    )
+    async def get_readyz():
+        return await get_healthz()
 
     @app.get(
         "/api/healthz/crawler",
@@ -1010,8 +1062,10 @@ def get_application():
     _registered_endpoints = (
         http_exception_handler,
         _internal_server_error_response,
+        get_livez,
         get_healthz,
         flow_runtime_health,
+        get_readyz,
         crawler_health,
         get_version,
     )

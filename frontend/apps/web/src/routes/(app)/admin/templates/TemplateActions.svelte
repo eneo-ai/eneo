@@ -7,14 +7,12 @@
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
   import { Button, Dropdown } from "@eneo/ui";
-  import {
-    MoreVertical,
-    Edit,
-    Trash2,
-    RotateCcw,
-    ArrowUpToLine,
-    ArrowDownToLine
-  } from "lucide-svelte";
+  import MoreVertical from "lucide-svelte/icons/more-vertical";
+  import Edit from "lucide-svelte/icons/edit";
+  import Trash2 from "lucide-svelte/icons/trash-2";
+  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import ArrowUpToLine from "lucide-svelte/icons/arrow-up-to-line";
+  import ArrowDownToLine from "lucide-svelte/icons/arrow-down-to-line";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { writable } from "svelte/store";

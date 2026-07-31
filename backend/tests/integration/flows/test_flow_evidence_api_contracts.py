@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -19,7 +20,6 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
-from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunRerunInvalidatedSteps,
@@ -36,6 +36,9 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
+from eneo.files.file_service import FileService
 from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.api import flow_run_lifecycle_router
 from eneo.flows.application.flow_run_evidence_export_manifest import (
@@ -85,6 +88,39 @@ from eneo.roles.permissions import Permission
 from eneo.server.main import app
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.users.user import UserAdd, UserInDB, UserState
+
+_RUNTIME_INPUT_ORIGINAL = b"%PDF evidence".ljust(256, b"\x00")
+_RUNTIME_INPUT_EXTRACTED_TEXT = b"case file text"
+_RUNTIME_INPUT_CHECKSUM = hashlib.sha256(_RUNTIME_INPUT_ORIGINAL).hexdigest()
+
+
+async def _bytes_source(payload: bytes) -> AsyncGenerator[bytes]:
+    yield payload
+
+
+async def _save_runtime_input_file(*, file_service: FileService) -> UUID:
+    file = await file_service.save_prepared_file(
+        PreparedFileUpload(
+            name="underlag.pdf",
+            file_type=FileType.DOCUMENT,
+            display_media_type="application/pdf",
+            contents=(
+                PendingFileContent(
+                    variant=FileContentVariant.ORIGINAL,
+                    chunks=_bytes_source(_RUNTIME_INPUT_ORIGINAL),
+                    declared_media_type="application/pdf",
+                    verified_media_type="application/pdf",
+                ),
+                PendingFileContent(
+                    variant=FileContentVariant.EXTRACTED_TEXT,
+                    chunks=_bytes_source(_RUNTIME_INPUT_EXTRACTED_TEXT),
+                    declared_media_type="text/plain",
+                    verified_media_type="text/plain",
+                ),
+            ),
+        )
+    )
+    return file.id
 
 
 def test_evidence_export_413_context_has_typed_section_and_limit_unions() -> None:
@@ -324,26 +360,13 @@ async def _seed_flow_run_contract_data(
         flow = flow.model_copy(update={"published_version": 1})
         flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
-        runtime_input_file = Files(
-            name="underlag.pdf",
-            text="case file text",
-            blob=None,
-            checksum="input-checksum",
-            size=256,
-            mimetype="application/pdf",
-            file_type="document",
-            transcription=None,
-            owner_type="user",
-            owner_user_id=admin_user.id,
-            owner_service_id=None,
-            tenant_id=admin_user.tenant_id,
+        runtime_input_file_id = await _save_runtime_input_file(
+            file_service=container.file_service(user=admin_user)
         )
-        session.add(runtime_input_file)
-        await session.flush()
 
         session.add(
             FlowRuntimeUploadedFiles(
-                file_id=runtime_input_file.id,
+                file_id=runtime_input_file_id,
                 flow_id=flow.id,
                 tenant_id=admin_user.tenant_id,
                 uploaded_for_step_id=step.id,
@@ -387,11 +410,11 @@ async def _seed_flow_run_contract_data(
                 "token": "super-secret",
                 "diagnostics": [{"code": "ok"}],
                 "runtime_input": {
-                    "file_ids": [str(runtime_input_file.id)],
+                    "file_ids": [str(runtime_input_file_id)],
                     "files_count": 1,
                     "files": [
                         {
-                            "id": str(runtime_input_file.id),
+                            "id": str(runtime_input_file_id),
                             "name": "json-stale.pdf",
                             "checksum": "json-stale-checksum",
                             "size": 999,
@@ -577,7 +600,7 @@ async def _seed_flow_run_contract_data(
                 step_id=step.id,
                 step_order=step.step_order,
                 attempt_no=1,
-                file_id=runtime_input_file.id,
+                file_id=runtime_input_file_id,
                 ordinal=0,
             )
         )
@@ -723,7 +746,7 @@ async def _seed_flow_run_contract_data(
                     step_id=step.id,
                     step_order=step.step_order,
                     attempt_no=replacement_attempt.attempt_no,
-                    file_id=runtime_input_file.id,
+                    file_id=runtime_input_file_id,
                     ordinal=0,
                 )
             )
@@ -770,7 +793,7 @@ async def _seed_flow_run_contract_data(
             assert prior_input_hash is not None
             assert resulting_input_hash is not None
             seeded["rerun_operation_id"] = rerun_operation_id
-            seeded["rerun_runtime_input_file_id"] = str(runtime_input_file.id)
+            seeded["rerun_runtime_input_file_id"] = str(runtime_input_file_id)
             seeded["prior_input_hash"] = prior_input_hash
             seeded["resulting_input_hash"] = resulting_input_hash
         if rerun_invalidated_step_id is not None:
@@ -2189,7 +2212,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     ] == ["underlag.pdf"]
     assert payload["summary"]["step_overview"][0]["input_lineage"][
         "runtime_file_checksums"
-    ] == ["input-checksum"]
+    ] == [_RUNTIME_INPUT_CHECKSUM]
     runtime_input = payload["bundle"]["step_results"][0]["input_payload_json"][
         "runtime_input"
     ]
@@ -2199,11 +2222,11 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         {
             "id": str(runtime_input["file_ids"][0]),
             "name": "underlag.pdf",
-            "checksum": "input-checksum",
+            "checksum": _RUNTIME_INPUT_CHECKSUM,
             "size": 256,
             "mimetype": "application/pdf",
             "file_type": "document",
-            "text_length": len("case file text"),
+            "text_size_bytes": len(_RUNTIME_INPUT_EXTRACTED_TEXT),
             "has_text": True,
             "has_transcription": False,
         }

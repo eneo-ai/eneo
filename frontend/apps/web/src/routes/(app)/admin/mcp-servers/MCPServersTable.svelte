@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Button, Input } from "@eneo/ui";
-  import { ChevronRight } from "lucide-svelte";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import MCPServerPrimaryCell from "./MCPServerPrimaryCell.svelte";
   import MCPServerEnabledSwitch from "./MCPServerEnabledSwitch.svelte";

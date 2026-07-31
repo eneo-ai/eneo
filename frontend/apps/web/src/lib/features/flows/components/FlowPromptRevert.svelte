@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Eneo, FlowStep } from "@eneo/eneo-js";
+  import type { Eneo, FlowGraphNode, FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -28,7 +28,7 @@
     try {
       const graph = await eneo.flows.graph({ id: flowId });
       const matchingNode = graph.nodes?.find(
-        (n: any) => n.step_order === currentStep.step_order && n.type === "llm"
+        (node: FlowGraphNode) => node.step_order === currentStep.step_order && node.type === "llm"
       );
       previousPrompt = matchingNode ? "Previous version prompt not yet available" : null;
     } catch {

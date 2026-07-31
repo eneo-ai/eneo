@@ -2,6 +2,7 @@
   import type { WithElementRef } from "$lib/utils.js";
   import type { HTMLAttributes } from "svelte/elements";
   import { cn } from "$lib/utils.js";
+  import { m } from "$lib/paraglide/messages";
 
   let {
     ref = $bindable(null),
@@ -14,7 +15,7 @@
 <nav
   bind:this={ref}
   data-slot="breadcrumb"
-  aria-label="breadcrumb"
+  aria-label={m.breadcrumb()}
   class={cn("cn-breadcrumb", className)}
   {...restProps}
 >

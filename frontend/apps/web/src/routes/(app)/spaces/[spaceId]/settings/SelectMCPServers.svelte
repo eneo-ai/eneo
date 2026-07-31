@@ -10,7 +10,7 @@
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight } from "lucide-svelte";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import type { components } from "@eneo/eneo-js";
   import { SvelteSet } from "svelte/reactivity";
 

@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import Any, Callable, Protocol
 from uuid import UUID
 
-from eneo.files.file_models import FileCreate, FileType
+from eneo.files.file_models import FileInfo, FileType
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.output_processing import StructuredOutputValue
-from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
     DocumentRenderLimits,
@@ -24,9 +23,6 @@ from eneo.flows.runtime.output_formats.base import (
     RenderStructuredDocumentFn,
     ValidateAgainstContractFn,
 )
-
-if TYPE_CHECKING:
-    from eneo.files.file_models import File
 
 
 class RuntimeOutputStep(Protocol):
@@ -45,8 +41,15 @@ class RuntimeOutputRun(Protocol):
     def tenant_id(self) -> UUID: ...
 
 
-class RuntimeOutputFileRepository(Protocol):
-    async def add(self, file: FileCreate) -> "File": ...
+class RuntimeOutputFileService(Protocol):
+    async def save_generated_file(
+        self,
+        *,
+        payload: bytes,
+        name: str,
+        mimetype: str,
+        file_type: FileType,
+    ) -> FileInfo: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +61,7 @@ class TypedOutputProcessingResult:
 
 @dataclass(frozen=True)
 class OutputRuntimeDeps:
-    file_repo: RuntimeOutputFileRepository
-    principal: FlowPrincipal
+    file_service: RuntimeOutputFileService
     compile_validators: Callable[[list[Any]], dict[tuple[str, int], Any]]
     parse_json_output: ParseJsonOutputFn
     validate_against_contract: ValidateAgainstContractFn
@@ -116,19 +118,11 @@ async def _persist_rendered_artifact(
     deps: OutputRuntimeDeps,
 ) -> list[dict[str, str | int]]:
     checksum = hashlib.sha256(artifact.blob).hexdigest()
-    file_record = await deps.file_repo.add(
-        FileCreate.model_validate(
-            {
-                "file_type": FileType.DOCUMENT,
-                "blob": artifact.blob,
-                "name": artifact.filename,
-                "mimetype": artifact.mimetype,
-                "checksum": checksum,
-                "size": len(artifact.blob),
-                **deps.principal.file_owner_fields(),
-                "tenant_id": run.tenant_id,
-            }
-        )
+    file_record = await deps.file_service.save_generated_file(
+        payload=artifact.blob,
+        name=artifact.filename,
+        mimetype=artifact.mimetype,
+        file_type=FileType.DOCUMENT,
     )
     return [
         {

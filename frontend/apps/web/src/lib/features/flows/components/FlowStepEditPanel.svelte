@@ -10,7 +10,7 @@
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { writable } from "svelte/store";
   import { IconWorkflow } from "@eneo/icons/workflow";
-  import { MousePointerClick } from "lucide-svelte";
+  import MousePointerClick from "lucide-svelte/icons/mouse-pointer-click";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { Input } from "$lib/components/ui/input/index.js";

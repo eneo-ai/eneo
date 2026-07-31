@@ -244,6 +244,8 @@ function derivedCurrentSpace(space: Readable<Space>) {
             return (
               $space.knowledge.integration_knowledge_list.permissions?.includes(action) ?? false
             );
+          case "skill":
+            return $space.skill_permissions?.includes(action) ?? false;
           case "member":
             return $space.members.permissions?.includes(action) ?? false;
           case "group_member":
@@ -264,6 +266,7 @@ type Resource =
   | "service"
   | "website"
   | "integrationKnowledge"
+  | "skill"
   | "collection"
   | "member"
   | "group_member"

@@ -28,7 +28,7 @@
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
-  import { Info } from "lucide-svelte";
+  import Info from "lucide-svelte/icons/info";
   let {
     isPublished,
     onStatsChanged

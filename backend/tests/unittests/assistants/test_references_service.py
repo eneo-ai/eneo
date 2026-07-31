@@ -149,6 +149,8 @@ async def test_get_references_hydrates_info_blobs_by_default():
         "embedding_model_id": uuid4(),
         "text": "body",
         "sharepoint_item_id": None,
+        "source_id": chunk.info_blob_id,
+        "version_state": "active",
     }
     info_blobs_repo.get.return_value = info_blob
 

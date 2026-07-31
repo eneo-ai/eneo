@@ -55,14 +55,21 @@ def test_run_impact_preview_is_one_set_based_aggregate_with_lifecycle_blockers()
 
     assert "WITH flow_retention_preview_candidates AS" in sql
     assert "flow_retention_preview_file_refs AS" in sql
+    assert "flow_retention_preview_file_sizes AS" in sql
     assert "flow_retention_preview_file_bytes AS" in sql
+    assert "JOIN files" in sql
+    assert "FROM file_content_references JOIN object_contents" in sql
+    assert "sum(flow_retention_preview_file_sizes.file_bytes)" in sql
+    assert "flow_retention_preview_candidates.proposed_due" in sql
+    assert "missing_primary_content_count" in sql
+    assert "files.size" not in sql
     assert "count(*) FILTER" in sql
     assert "flow_run_audit_outbox" in sql
     assert "flow_run_webhook_deliveries" in sql
     assert "flow_run_rerun_operations" in sql
     assert "coalesce(flow_runs.finished_at, flow_runs.created_at)" in sql
     assert "flow_runs.tenant_id =" in sql
-    assert "LIMIT" not in sql
+    assert "LIMIT 1" in sql
 
 
 def test_upload_impact_preview_counts_only_never_attached_files_in_one_query() -> None:
@@ -79,12 +86,18 @@ def test_upload_impact_preview_counts_only_never_attached_files_in_one_query() -
         )
     )
 
-    assert "FROM flow_runtime_uploaded_files JOIN files" in sql
+    assert "flow_retention_preview_upload_candidates AS" in sql
+    assert "flow_retention_preview_upload_file_sizes AS" in sql
+    assert "FROM flow_retention_preview_upload_candidates JOIN files" in sql
+    assert "FROM file_content_references JOIN object_contents" in sql
+    assert "sum(flow_retention_preview_upload_file_sizes.file_bytes) FILTER" in sql
+    assert "flow_retention_preview_upload_candidates.proposed_due" in sql
+    assert "missing_primary_content_count" in sql
     assert "NOT (EXISTS (SELECT 1" in sql
     assert "flow_run_step_input_files.file_id" in sql
-    assert "sum(files.size) FILTER" in sql
+    assert "files.size" not in sql
     assert "flow_runtime_uploaded_files.created_at" in sql
-    assert "LIMIT" not in sql
+    assert "LIMIT 1" in sql
 
 
 def test_control_plane_version_covers_tenant_and_classification_inputs_only() -> None:

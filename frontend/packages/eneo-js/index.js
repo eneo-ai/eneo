@@ -13,3 +13,7 @@ export {
 } from "./src/flows/flow-run-status-capabilities.js";
 export { FLOW_API_ERROR_CODE, FLOW_API_ERROR_CODES } from "./src/flows/flow-api-error-codes.js";
 export { FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS } from "./src/flows/flow-run-reserved-input-payload-keys.js";
+export {
+  DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
+  OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE
+} from "./src/errorCodes.js";

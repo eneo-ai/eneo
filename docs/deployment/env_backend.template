@@ -127,6 +127,7 @@ OIDC_CLOCK_LEEWAY_SECONDS=120
 # ENCRYPTION_KEY is REQUIRED when enabling:
 #   - TENANT_CREDENTIALS_ENABLED=true (tenant-specific LLM API keys)
 #   - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+#   - Model provider management in Admin > Models
 #
 # Generate key:
 #   Development: uv run python -m eneo.cli.generate_encryption_key
@@ -200,6 +201,57 @@ VLLM_API_KEY=
 # Super API keys (system administration)
 ENEO_SUPER_API_KEY=
 ENEO_SUPER_DUPER_API_KEY=
+
+# ----------------------------------------------------------------------------
+# Durable Object Content (PostgreSQL-inline defaults)
+# ----------------------------------------------------------------------------
+# These settings are active whether or not an external object store is enabled.
+# The inline ceiling is a deployment safety/admission bound, not a user-facing
+# upload policy. Reads of existing inline content remain possible if it is
+# lowered. Product upload limits remain admin-configurable in Eneo.
+OBJECT_CONTENT_INLINE_MAXIMUM_BYTES=10485760
+OBJECT_CONTENT_INLINE_IO_CHUNK_BYTES=262144
+
+# Bounded lifecycle and reference reconciliation. Increase only after measuring
+# PostgreSQL capacity. Concurrency is used only when an object store is active.
+OBJECT_CONTENT_RECONCILIATION_BATCH_SIZE=100
+OBJECT_CONTENT_RECONCILIATION_CONCURRENCY=4
+OBJECT_CONTENT_RECONCILIATION_LEASE_SECONDS=300
+OBJECT_CONTENT_RECONCILIATION_RETRY_BASE_SECONDS=30
+OBJECT_CONTENT_RECONCILIATION_RETRY_MAX_SECONDS=3600
+OBJECT_CONTENT_PENDING_STALE_SECONDS=300
+
+# ----------------------------------------------------------------------------
+# Optional S3-compatible byte backend
+# ----------------------------------------------------------------------------
+# Endpoint, bucket, credentials, and the stable deployment UUID live in
+# docs/deployment/.env so backend, worker, and the optional bundled profile use
+# one source. Leave every remote setting absent for PostgreSQL-inline mode.
+# Uncomment transport tuning only when enabling an object-store endpoint;
+# setting even one remote-only value intentionally activates strict validation.
+
+# Use virtual only when the endpoint and DNS/TLS support bucket hosts.
+# OBJECT_CONTENT_ADDRESSING_STYLE=path
+
+# External private CA only. Mount the file read-only into backend and worker.
+# OBJECT_CONTENT_CA_BUNDLE=/etc/eneo/object-content/ca.pem
+
+# OBJECT_CONTENT_CONNECT_TIMEOUT_SECONDS=5
+# OBJECT_CONTENT_READ_TIMEOUT_SECONDS=60
+# OBJECT_CONTENT_SDK_MAX_ATTEMPTS=3
+# OBJECT_CONTENT_READINESS_TIMEOUT_SECONDS=2
+# OBJECT_CONTENT_READINESS_MAX_ATTEMPTS=1
+# Must cover one bounded readiness request window; raise for slower endpoints.
+# OBJECT_CONTENT_BINDING_CLAIM_SECONDS=30
+
+# Bounded streaming/spooling and portable multipart settings.
+# OBJECT_CONTENT_IO_CHUNK_BYTES=262144
+# OBJECT_CONTENT_SPOOL_MEMORY_BYTES=8388608
+# OBJECT_CONTENT_MULTIPART_PART_BYTES=8388608
+# OBJECT_CONTENT_MULTIPART_THRESHOLD_BYTES=16777216
+# OBJECT_CONTENT_DELETE_VISIBILITY_TIMEOUT_SECONDS=30
+# OBJECT_CONTENT_DELETE_POLL_INTERVAL_SECONDS=0.25
+# OBJECT_CONTENT_ORPHAN_GRACE_SECONDS=3600
 
 # ----------------------------------------------------------------------------
 # Database Connection Pool Configuration
@@ -342,7 +394,7 @@ CRAWL_MAX_LENGTH=14400
 # [OPTIONAL] Max items before stopping (default: 20000)
 CLOSESPIDER_ITEMCOUNT=20000
 # [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
-# Separate from UPLOAD_MAX_FILE_SIZE - controls crawler's DOWNLOAD_MAXSIZE
+# This controls crawler downloads, not the upload policy in Admin > Storage.
 DOWNLOAD_MAX_SIZE=10485760
 # [OPTIONAL] Respect robots.txt (default: True)
 OBEY_ROBOTS=True
@@ -379,12 +431,10 @@ TESTING=false
 DEV=false
 
 # ============================================================================
-# FILE UPLOAD LIMITS
+# OBJECT CONTENT SAFETY AND UPLOAD BEHAVIOR
 # ============================================================================
-UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760    # 10MB - max file size in chat session
-UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760   # 10MB - max image size in chat session
-UPLOAD_MAX_FILE_SIZE=10485760               # 10MB - global upload limit
-TRANSCRIPTION_MAX_FILE_SIZE=10485760        # 10MB - max audio file for transcription
+# Platform admins set upload limits and new-write placement in Admin > Storage.
+# Updates take effect without restarting backend or worker processes.
 MAX_IN_QUESTION=1                           # Max file attachments per chat message
 
 # ----------------------------------------------------------------------------
@@ -431,6 +481,10 @@ LOGLEVEL=INFO
 
 # Output format. true = NDJSON (recommended for production), false = plain text
 JSON_LOGS=true
+
+# Optional per-turn diagnostics for trusted Assistant configurators and owners.
+# Set the same value in the frontend environment; both sides default to false.
+SHOW_CHAT_DEBUG_PANEL=false
 
 # OTel resource attributes. These appear in the `resource` block of every log line.
 # OTEL_SERVICE_NAME is the primary low-cardinality label most aggregators index on.

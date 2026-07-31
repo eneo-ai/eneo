@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import io
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest
@@ -18,7 +18,8 @@ from eneo.database.tables.flow_tables import (
     FlowVersions,
 )
 from eneo.database.tables.spaces_table import Spaces
-from eneo.files.file_models import FileBaseWithContent, FileType
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
@@ -56,6 +57,28 @@ def _template_bytes(placeholder: str) -> bytes:
     payload = io.BytesIO()
     document.save(payload)
     return payload.getvalue()
+
+
+async def _bytes(payload: bytes) -> AsyncIterator[bytes]:
+    yield payload
+
+
+async def _save_template_file(container, *, name: str, content: bytes):
+    return await container.file_service().save_prepared_file(
+        PreparedFileUpload(
+            name=name,
+            file_type=FileType.DOCUMENT,
+            display_media_type=DOCX_MIME,
+            contents=(
+                PendingFileContent(
+                    variant=FileContentVariant.ORIGINAL,
+                    chunks=_bytes(content),
+                    declared_media_type=DOCX_MIME,
+                    verified_media_type=DOCX_MIME,
+                ),
+            ),
+        )
+    )
 
 
 def _template_changeset():
@@ -100,15 +123,10 @@ async def _create_flow_and_file(container, *, placeholder: str):
         steps=[],
     )
     content = _template_bytes(placeholder)
-    file = await container.file_service().save_file_content(
-        FileBaseWithContent(
-            name="template.docx",
-            checksum=hashlib.sha256(content).hexdigest(),
-            size=len(content),
-            mimetype=DOCX_MIME,
-            file_type=FileType.DOCUMENT,
-            blob=content,
-        )
+    file = await _save_template_file(
+        container,
+        name="template.docx",
+        content=content,
     )
     return user, space, flow, file
 
@@ -129,19 +147,19 @@ async def _delete_file(
 async def test_promoted_template_survives_builder_session_deletion_and_fences_file(
     db_container,
 ) -> None:
-    async with db_container() as container:
+    async with db_container() as setup_container:
         user, space, flow, file = await _create_flow_and_file(
-            container,
+            setup_container,
             placeholder="case_id",
         )
-        repo = AIBuilderRepository(container.session())
+        repo = AIBuilderRepository(setup_container.session())
         builder_session = await repo.create_session(
             tenant_id=user.tenant_id,
             space_id=space.id,
             actor_user_id=user.id,
             target_kind=TargetKind.CREATE,
         )
-        await container.session().execute(
+        await setup_container.session().execute(
             sa.insert(BuilderSessionFiles).values(
                 session_id=builder_session.id,
                 file_id=file.id,
@@ -149,6 +167,7 @@ async def test_promoted_template_survives_builder_session_deletion_and_fences_fi
             )
         )
 
+    async with db_container(user=user) as container:
         asset = await container.flow_template_asset_service().create_from_existing_attached_file(
             flow_id=flow.id,
             file_id=file.id,
@@ -203,15 +222,10 @@ async def test_template_promotion_lock_serializes_both_file_delete_race_orders(
 
     async with db_container(user=user) as setup_container:
         second_content = _template_bytes("reference_number")
-        second_file = await setup_container.file_service().save_file_content(
-            FileBaseWithContent(
-                name="second-template.docx",
-                checksum=hashlib.sha256(second_content).hexdigest(),
-                size=len(second_content),
-                mimetype=DOCX_MIME,
-                file_type=FileType.DOCUMENT,
-                blob=second_content,
-            )
+        second_file = await _save_template_file(
+            setup_container,
+            name="second-template.docx",
+            content=second_content,
         )
     await _delete_file(file_id=second_file.id, lock_timeout=False)
 
@@ -228,12 +242,13 @@ async def test_template_promotion_lock_serializes_both_file_delete_race_orders(
 async def test_changed_template_contract_rolls_back_promoted_asset(
     db_container,
 ) -> None:
-    async with db_container() as container:
-        _user, _space, flow, file = await _create_flow_and_file(
-            container,
+    async with db_container() as setup_container:
+        user, _space, flow, file = await _create_flow_and_file(
+            setup_container,
             placeholder="customer.name",
         )
 
+    async with db_container(user=user) as container:
         with pytest.raises(BadRequestException) as exc_info:
             async with container.session().begin_nested():
                 await materialize_template_attachment(
@@ -267,11 +282,13 @@ async def test_changed_template_contract_rolls_back_promoted_asset(
 async def test_materialized_template_attachment_publishes_with_pinned_identity(
     db_container,
 ) -> None:
-    async with db_container() as container:
+    async with db_container() as setup_container:
         user, _space, flow, file = await _create_flow_and_file(
-            container,
+            setup_container,
             placeholder="case_id",
         )
+
+    async with db_container(user=user) as container:
         changeset = FlowDraftChangeSet(
             flow_name=flow.name,
             flow_description="",

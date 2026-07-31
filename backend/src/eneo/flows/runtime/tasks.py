@@ -69,6 +69,8 @@ from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.main.request_context import clear_request_context, set_request_context
+from eneo.object_content.deployment_policy import load_upload_admission_snapshot
+from eneo.object_content.runtime import object_content_runtime
 from eneo.users.user_repo import UsersRepository
 
 logger = get_logger(__name__)
@@ -86,7 +88,7 @@ def _start_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     loop.run_forever()
 
 
-def _get_flow_task_loop() -> asyncio.AbstractEventLoop:
+def get_flow_task_loop() -> asyncio.AbstractEventLoop:
     global _FLOW_TASK_LOOP  # pyright: ignore[reportConstantRedefinition]
     global _FLOW_TASK_LOOP_THREAD  # pyright: ignore[reportConstantRedefinition]
 
@@ -332,7 +334,17 @@ async def _execute_flow_run_async_traced(
                 flow_span.set_result_from_mapping(result)
                 return result
 
-            flow_limits = resolve_flow_input_limits(tenant.flow_settings)
+            upload_admission = await load_upload_admission_snapshot(
+                session,
+                inline_maximum_bytes=object_content_runtime.inline_maximum_bytes,
+                object_store_maximum_bytes=(
+                    object_content_runtime.object_store_maximum_bytes
+                ),
+            )
+            flow_limits = resolve_flow_input_limits(
+                tenant.flow_settings,
+                defaults=upload_admission,
+            )
             document_render_limits = resolve_flow_document_render_limits(
                 tenant.flow_settings
             )
@@ -341,6 +353,10 @@ async def _execute_flow_run_async_traced(
                 tenant.flow_settings
             )
             rag_evidence_policy = resolve_flow_rag_evidence_policy(tenant.flow_settings)
+            runtime_file_service = runtime_container.file_service(
+                user=None,
+                owner=run_actor.principal.file_owner(tenant_id=tenant_id),
+            )
 
             executor = FlowRunExecutor(
                 runtime_actor=run_actor,
@@ -352,13 +368,19 @@ async def _execute_flow_run_async_traced(
                 flow_run_terminalizer=runtime_container.flow_run_terminalizer(),
                 flow_version_repo=runtime_container.flow_version_repo(),
                 space_repo=runtime_container.tenant_scoped_space_repo(),
-                completion_service=runtime_container.completion_service(),
+                completion_service=runtime_container.completion_service(
+                    user=run_actor.user
+                ),
                 file_repo=runtime_container.file_repo(),
+                file_content_loader=runtime_container.file_content_loader(),
+                file_service=runtime_file_service,
                 template_asset_repo=runtime_container.flow_template_asset_repo(),
                 encryption_service=runtime_container.encryption_service(),
                 audit_service=runtime_container.audit_service(),
                 references_service=runtime_container.references_service(),
-                transcriber=runtime_container.transcriber(),
+                transcriber=runtime_container.transcriber(
+                    file_service=runtime_file_service
+                ),
                 config=FlowRunExecutorConfig.from_settings(
                     max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
                     max_audio_files=flow_limits.audio_max_files_per_run
@@ -619,7 +641,7 @@ def _execute_flow_run_task(
         case _:
             assert_never(dispatch_request)
 
-    loop = _get_flow_task_loop()
+    loop = get_flow_task_loop()
     future: concurrent.futures.Future[dict[str, str]] | None = None
     flow_execution_task: asyncio.Task[object] | None = None
 
@@ -872,7 +894,7 @@ async def _deliver_flow_webhook_outbox(
     name="flows.reconcile_running",
 )
 def reconcile_stale_running_runs() -> dict[str, int | str]:
-    loop = _get_flow_task_loop()
+    loop = get_flow_task_loop()
     future = asyncio.run_coroutine_threadsafe(
         _reconcile_stale_running_runs_all_tenants(),
         loop,
@@ -888,7 +910,7 @@ def reconcile_stale_running_runs() -> dict[str, int | str]:
     name="flows.reconcile_review_expiry",
 )
 def reconcile_expired_review_checkpoints() -> dict[str, int | str]:
-    loop = _get_flow_task_loop()
+    loop = get_flow_task_loop()
     future = asyncio.run_coroutine_threadsafe(
         _reconcile_expired_review_checkpoints_all_tenants(),
         loop,
@@ -904,7 +926,7 @@ def reconcile_expired_review_checkpoints() -> dict[str, int | str]:
     name="flows.redispatch_stale_queued",
 )
 def redispatch_stale_queued_runs() -> dict[str, int | str]:
-    loop = _get_flow_task_loop()
+    loop = get_flow_task_loop()
     future = asyncio.run_coroutine_threadsafe(
         _redispatch_stale_queued_runs_all_tenants(),
         loop,
@@ -920,7 +942,7 @@ def redispatch_stale_queued_runs() -> dict[str, int | str]:
     name="flows.deliver_audit_outbox",
 )
 def deliver_flow_audit_outbox() -> dict[str, int | str]:
-    loop = _get_flow_task_loop()
+    loop = get_flow_task_loop()
     future = asyncio.run_coroutine_threadsafe(
         _deliver_flow_audit_outbox(),
         loop,
@@ -936,7 +958,7 @@ def deliver_flow_audit_outbox() -> dict[str, int | str]:
     name="flows.deliver_webhook_outbox",
 )
 def deliver_flow_webhook_outbox() -> dict[str, int | str]:
-    loop = _get_flow_task_loop()
+    loop = get_flow_task_loop()
     future = asyncio.run_coroutine_threadsafe(
         _deliver_flow_webhook_outbox(),
         loop,

@@ -9,7 +9,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight } from "lucide-svelte";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import {
     sanitizeMcpSelection,

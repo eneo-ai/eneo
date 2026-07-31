@@ -10,7 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo.js";
   import { invalidate } from "$app/navigation";
-  import { AlertTriangle } from "lucide-svelte";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import type { Writable } from "svelte/store";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];

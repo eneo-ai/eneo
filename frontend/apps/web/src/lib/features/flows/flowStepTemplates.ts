@@ -1,7 +1,13 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import type { FlowStepCreationSeed } from "./FlowEditor";
 import { m } from "$lib/paraglide/messages";
-import { AlignLeft, PencilLine, Table, Tags, WrapText, FileText, Plus } from "lucide-svelte";
+import AlignLeft from "lucide-svelte/icons/align-left";
+import PencilLine from "lucide-svelte/icons/pencil-line";
+import Table from "lucide-svelte/icons/table";
+import Tags from "lucide-svelte/icons/tags";
+import WrapText from "lucide-svelte/icons/wrap-text";
+import FileText from "lucide-svelte/icons/file-text";
+import Plus from "lucide-svelte/icons/plus";
 
 /** A lucide-svelte icon component; every icon shares this shape. */
 type LucideIcon = typeof AlignLeft;

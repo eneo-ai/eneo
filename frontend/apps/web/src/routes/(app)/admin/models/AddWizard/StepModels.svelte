@@ -11,7 +11,8 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
-  import { ArrowLeft, TriangleAlert } from "lucide-svelte";
+  import ArrowLeft from "lucide-svelte/icons/arrow-left";
+  import TriangleAlert from "lucide-svelte/icons/triangle-alert";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";

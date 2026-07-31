@@ -29,7 +29,8 @@
   import { getErrorMessage, toastError } from "$lib/core/errors";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Loader2, AlertTriangle } from "lucide-svelte";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
 
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
@@ -284,9 +285,8 @@
         if (!result.success && result.error) {
           warnings.push(`${model.name}: ${result.error}`);
         }
-      } catch {
-        // Validation endpoint failure is non-fatal — we'll let the create
-        // call surface a real error if there is one.
+      } catch (error: unknown) {
+        warnings.push(`${model.name}: ${getErrorMessage(error)}`);
       }
     }
     return warnings;

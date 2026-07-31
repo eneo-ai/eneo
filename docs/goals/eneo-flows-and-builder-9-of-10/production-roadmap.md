@@ -36,6 +36,8 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-31 | **Flows and platform convergence**: integrated the frozen develop platform foundations into Flow and Builder at their canonical owners; durable object content, Skills, typed identity, generated SDK contracts, and Flow runtime evidence now coexist behind one Alembic head without parallel compatibility paths; frontend builds now use bounded translation output, direct icon modules, and the Bun 1.3.14 workspace lock without unsafe heap overrides (`64fd7446e` integrated, Codex gate green 9/10, no blockers) |
+| 2026-07-31 | **Typed Builder stream boundary**: every known SSE event and nested payload is validated before entering frontend state; malformed and unknown events fail closed; one explicit `idle/streaming/failed` lifecycle owns transport and server failures without duplicate banners; structured request identity and backend error codes survive the boundary; DOM tests run in an isolated jsdom project while pure protocol tests stay in the default project (`a2642c1a1`, Codex and Claude gates green 8/10, no findings) |
 | 2026-07-31 | **Exact resolved-input evidence**: every admitted attempt now exposes one typed lineage state in evidence views and v16 exports; one tenant/run-scoped batch read stays inside the repeatable-read snapshot and existing attempt-evidence budgets; identity-scoped retention proof prevents foreign markers from creating false purge claims across lineage, manifests, retention, and RAG summaries; malformed data remains explicit corruption; the generated SDK and docs define all states and all four synchronous export safety guards without claiming retrieval proves influence (`4d13889a4`, gate green 8/10 after three same-session passes, no findings) |
 | 2026-07-30 | **Canonical Flow attempt input**: one strict immutable envelope now owns the activation start, resolved input, exact per-call question/effective prompt/context version, and one shared preferred/capability-safe model configuration; unsupported parameters are removed before the plan is frozen, mapped JSON capability learning preserves the admitted `N+1` provider-call bound, terminal projections cannot overwrite start truth, and attempt provenance retains only irreconstructible evidence (`2f1447446`, gate green 8/10 after four same-session passes, no findings) |
 | 2026-07-30 | **Model-aware Builder resource policy**: attachment text now shares the selected model's declared input window after output, safety, and conversation reserves instead of using fixed character quotas; admins own effective attachment, message, aggregate DOCX-inspection, placeholder, and token-reserve policy; fixed API, parser, and planning-state safety ceilings are returned through the typed settings contract and explained in Swedish/English; frontend/backend admission agrees, template failures are explicit before provider work, and shared settings writes are serialized with a lost-update regression proof (`478dfeb1c`, gate green 8/10 after three same-session passes, no findings) |
@@ -143,12 +145,28 @@ external release gate (item 10); BM0.2 is external (item 10).
    (including zero), no valid proof yields `not_tracked`, and malformed or
    foreign markers become explicit corruption without creating false purge
    summaries. The required typed union is generated into the SDK and export v16.
+7b. **Bound mapped and structured execution before expensive work** *(high)* —
+   `FlowMappedExecutionPolicy` is the current owner but accepts arbitrarily large
+   admin values and treats malformed persisted policy as absent; mapped
+   cardinality and structured JSON can therefore reach preparation and JSONB
+   persistence without a source-owned safety ceiling. Deepen this owner with
+   named deployment/storage invariants and admin-configurable effective values
+   below them; reject malformed stored policy explicitly; admit mapped
+   collection cardinality, aggregate packaged input, and serialized structured
+   output before provider preparation or persistence. Fix numeric ceilings from
+   the pre-release capacity evidence in item 10, not post-hoc observation.
+7c. **One authored HTTP timeout policy** *(medium)* — backend configuration,
+   authored-schema defaults, runtime fallbacks, and frontend validation currently
+   repeat 30/120-second values. Make one backend policy own the effective default
+   and maximum, validate positive/default-at-most-maximum deployment inputs at
+   startup, expose the effective contract to authoring, and delete duplicated
+   frontend/schema/runtime constants. Admins may lower operational values below
+   the named deployment safety ceiling; no generic constraints-discovery API.
 8. **Builder frontend/server contract closure** *(medium, four reviewed
    commits by owner)* — (a) stream/attachment/draft contract: attachment-limit
-   ownership is **LANDED** `478dfeb1c`; remaining work validates known SSE
-   payload shapes at runtime (parser currently casts parsed JSON), adds one
-   explicit stream-failure state, preserves fail-fast handling for unknown
-   events, and makes the draft lifecycle explicit. (b) vocabulary
+   ownership is **LANDED** `478dfeb1c`; runtime SSE validation, fail-closed
+   unknown-event handling, and explicit stream failure are **LANDED**
+   `a2642c1a1`; remaining work makes the draft lifecycle explicit. (b) vocabulary
    neutrality: directly correct `case_documents`, `basic_case_metadata`,
    `case_like_flow`, including the false use of generic `underlag` as a
    case-domain marker — no tolerant readers. (c) delete another heuristic

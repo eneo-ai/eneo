@@ -93,19 +93,11 @@ class AssistantFactory:
             managing_flow_id=managing_flow_id,
         )
 
-    @staticmethod
-    def _attachments_from_db(assistant_in_db: Assistants) -> list[File]:
-        # Reconstruction from persisted rows: attachment validation is a
-        # write-time rule, deliberately not re-applied here so an already-stored
-        # assistant always loads.
-        return [
-            File.model_validate(attachment.file)
-            for attachment in assistant_in_db.attachments
-        ]
-
     def create_assistant_from_db(
         self,
         assistant_in_db: Assistants,
+        *,
+        attachments: Sequence[File],
         completion_model: CompletionModel | None = None,
         completion_model_list: Sequence[CompletionModel] | None = None,
         prompt: Prompts | None = None,
@@ -126,8 +118,6 @@ class AssistantFactory:
             prompt_model = self.prompt_factory.create_prompt_from_db(
                 prompt_in_db=prompt, is_selected=True
             )
-
-        attachments = self._attachments_from_db(assistant_in_db)
 
         user = UserSparse.model_validate(assistant_in_db.user)
         # `is None` (not truthiness) so corrupt non-None JSONB still raises
@@ -158,7 +148,7 @@ class AssistantFactory:
             prompt=prompt_model,
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
-            attachments=attachments,
+            attachments=list(attachments),
             logging_enabled=assistant_in_db.logging_enabled,
             websites=[],
             collections=[],
@@ -183,6 +173,8 @@ class AssistantFactory:
         self,
         assistant_in_db: Assistants,
         user: UserInDB | None,
+        *,
+        attachments: Sequence[File],
         completion_models: Sequence[CompletionModel] | None = None,
         collections: Sequence["Collection"] | None = None,
         websites: Sequence["Website"] | None = None,
@@ -212,8 +204,6 @@ class AssistantFactory:
                 prompt_in_db=assistant_in_db.prompt,  # type: ignore[attr-defined]
                 is_selected=True,
             )
-
-        attachments = self._attachments_from_db(assistant_in_db)
 
         collections = [
             collection for collection in collections if collection.id in collection_ids
@@ -272,7 +262,7 @@ class AssistantFactory:
             prompt=prompt,
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
-            attachments=attachments,
+            attachments=list(attachments),
             logging_enabled=assistant_in_db.logging_enabled,
             websites=assistant_websites,
             collections=collections,

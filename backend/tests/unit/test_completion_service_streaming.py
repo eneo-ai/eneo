@@ -46,6 +46,9 @@ class _DummyAdapter:
         context: Context,
         model_kwargs: ModelKwargs | None,
         mcp_proxy: object | None,
+        skill_runtime: object | None = None,
+        provider_call_observer: object | None = None,
+        provider_call_reason: str = "initial",
     ) -> Completion:
         self.response_model_kwargs.append(model_kwargs)
         return Completion(response_type=ResponseType.TEXT, text=context.input)
@@ -56,6 +59,7 @@ class _DummyAdapter:
         context: Context,
         model_kwargs: ModelKwargs | None,
         mcp_proxy: object | None,
+        skill_runtime: object | None = None,
     ):
         self.streaming_model_kwargs.append(model_kwargs)
         return SimpleNamespace(_eneo_context={"has_tools": False})
@@ -372,3 +376,30 @@ async def test_preview_context_packages_and_counts_without_provider_or_mcp_io():
         "extra_tool_dicts": None,
         "reject_over_limit": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_uses_adapter_cumulative_input_estimate():
+    completion_model = _make_completion_model()
+    adapter = _DummyAdapter(model=completion_model)
+    adapter.get_response = AsyncMock(
+        return_value=Completion(
+            text="ok",
+            input_token_estimate=321,
+        )
+    )
+
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+        redis_client=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    response = await service.get_response(
+        model=completion_model,
+        text_input="hi",
+    )
+
+    assert response.total_token_count == 321

@@ -23,8 +23,17 @@ def _bearer_server() -> MagicMock:
 
 
 def _fake_transport() -> MagicMock:
+    class FakeTransport:
+        session_id = None
+
+        def get_session_id(self):
+            return self.session_id
+
+    transport = FakeTransport()
     streams = MagicMock()
-    streams.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock(), MagicMock()))
+    streams.__aenter__ = AsyncMock(
+        return_value=(MagicMock(), MagicMock(), transport.get_session_id)
+    )
     streams.__aexit__ = AsyncMock(return_value=None)
     return streams
 
@@ -46,7 +55,8 @@ async def test_connect_configures_auth_and_sse_timeout_on_owned_client():
         timeout=42,
     )
     http_client = MagicMock()
-    http_client.aclose = AsyncMock()
+    http_client.__aenter__ = AsyncMock(return_value=http_client)
+    http_client.__aexit__ = AsyncMock(return_value=None)
 
     with (
         patch(f"{_MODULE}.httpx.AsyncClient", return_value=http_client) as async_client,
@@ -56,9 +66,13 @@ async def test_connect_configures_auth_and_sse_timeout_on_owned_client():
         patch(f"{_MODULE}.ClientSession", return_value=_fake_session_ctx()),
     ):
         await client.connect()
+        await client.disconnect()
 
     kwargs = async_client.call_args.kwargs
-    assert kwargs["headers"] == {"Authorization": "Bearer secret-token"}
+    assert kwargs["headers"] == {
+        "Accept-Encoding": "identity",
+        "Authorization": "Bearer secret-token",
+    }
     assert kwargs["follow_redirects"] is True
     # Base timeout is the connect budget; read stays at the SDK's 300s SSE default.
     assert kwargs["timeout"].connect == 42
@@ -66,13 +80,15 @@ async def test_connect_configures_auth_and_sse_timeout_on_owned_client():
 
     # The transport receives the owned client, not raw headers/timeout.
     assert transport.call_args.kwargs["http_client"] is http_client
+    http_client.__aexit__.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_disconnect_closes_owned_client():
     client = MCPClient(_bearer_server(), auth_credentials={"token": "t"})
     http_client = MagicMock()
-    http_client.aclose = AsyncMock()
+    http_client.__aenter__ = AsyncMock(return_value=http_client)
+    http_client.__aexit__ = AsyncMock(return_value=None)
 
     with (
         patch(f"{_MODULE}.httpx.AsyncClient", return_value=http_client),
@@ -82,4 +98,4 @@ async def test_disconnect_closes_owned_client():
         await client.connect()
         await client.disconnect()
 
-    http_client.aclose.assert_awaited_once()
+    http_client.__aexit__.assert_awaited_once()

@@ -5,7 +5,8 @@ from uuid import UUID
 
 from fastapi import UploadFile
 
-from eneo.files.file_models import File
+from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_models import File, FileContentVariant
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.flows.domain.flow import FlowTemplateAsset
@@ -24,6 +25,10 @@ from eneo.main.exceptions import (
     ConflictException,
     NotFoundException,
 )
+from eneo.object_content.content import (
+    ObjectContentStateError,
+    ObjectContentUnavailableError,
+)
 from eneo.users.user import UserInDB
 
 
@@ -38,6 +43,7 @@ class FlowTemplateAssetService:
         user: UserInDB,
         flow_repo: FlowRepository,
         file_repo: FileRepository,
+        file_content_loader: FileContentLoader,
         file_service: FileService,
         template_asset_repo: FlowTemplateAssetRepository,
         flow_version_repo: FlowVersionRepository,
@@ -45,6 +51,7 @@ class FlowTemplateAssetService:
         self.user = user
         self.flow_repo = flow_repo
         self.file_repo = file_repo
+        self.file_content_loader = file_content_loader
         self.file_service = file_service
         self.template_asset_repo = template_asset_repo
         self.flow_version_repo = flow_version_repo
@@ -69,17 +76,18 @@ class FlowTemplateAssetService:
     ) -> FlowTemplateAsset:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         persisted_flow_id = flow.require_persisted_id()
-        document_file = await self.file_service.document_from_upload(upload_file)
-        if document_file.blob is None:
-            raise BadRequestException(
-                "The uploaded DOCX template could not be saved with file content.",
-                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
+        async with self.file_service.prepare_document_upload(upload_file) as prepared:
+            original = next(
+                content
+                for content in prepared.contents
+                if content.variant is FileContentVariant.ORIGINAL
             )
-        placeholders = docx_template_placeholder_names(
-            document_file.blob,
-            filename=document_file.name,
-        )
-        saved_file = await self.file_service.save_file_content(document_file)
+            document_bytes = b"".join([chunk async for chunk in original.chunks])
+            placeholders = docx_template_placeholder_names(
+                document_bytes,
+                filename=prepared.name,
+            )
+            saved_file = await self.file_service.save_prepared_file(prepared)
         asset = await self.template_asset_repo.create(
             flow_id=persisted_flow_id,
             space_id=flow.space_id,
@@ -115,7 +123,10 @@ class FlowTemplateAssetService:
         )
         persisted_flow_id = flow.require_persisted_id()
         try:
-            file = await self.file_service.get_owned_file_for_key_share(file_id)
+            file = await self.file_service.get_owned_file_for_key_share(
+                file_id,
+                include_text_original_bytes=True,
+            )
         except NotFoundException as exc:
             raise AttachedTemplateFileUnavailableError from exc
         if file.blob is None:
@@ -219,7 +230,24 @@ class FlowTemplateAssetService:
         )
         if asset.flow_id != persisted_flow_id:
             raise NotFoundException("Flow template asset not found.")
-        file = await self.file_repo.get_by_id(file_id=asset.file_id)
-        if file.tenant_id != self.user.tenant_id:
-            raise NotFoundException("Flow template asset file not found.")
+        try:
+            metadata = await self.file_repo.get_by_id(
+                file_id=asset.file_id,
+                tenant_id=self.user.tenant_id,
+            )
+            file = (
+                await self.file_content_loader.load(
+                    [metadata],
+                    include_text_original_bytes=True,
+                )
+            )[metadata.id]
+        except (
+            NotFoundException,
+            ObjectContentStateError,
+            ObjectContentUnavailableError,
+        ) as exc:
+            raise BadRequestException(
+                "The selected DOCX template could not be read because the file content is missing. Upload the template again or choose another DOCX file.",
+                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
+            ) from exc
         return asset, file

@@ -38,7 +38,9 @@ def _make_adapter() -> TenantModelAdapter:
     adapter._prepare_kwargs = lambda model_kwargs, **kwargs: {}
     adapter._create_messages_from_context = lambda context: []
     adapter._build_tools_from_context = lambda context: []
-    adapter._merge_mcp_tools = lambda eneo_tools, mcp_proxy: [{"type": "function"}]
+    adapter._merge_mcp_tools = lambda eneo_tools, mcp_proxy, skill_runtime=None: [
+        {"type": "function"}
+    ]
     adapter._get_dropped_params = lambda litellm_kwargs: set()
     adapter._get_effective_params = lambda litellm_kwargs, dropped: {}
     adapter._strip_thinking_content = lambda text: text

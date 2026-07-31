@@ -99,6 +99,12 @@ class TestMigratedModelCanAccess:
         model = _make_model()
         assert model.can_access is True
 
+    def test_model_route_uses_the_provider_qualified_name(self):
+        model = _make_model()
+        model.provider_type = "azure"
+
+        assert model.get_model_route() == "azure/test-model"
+
     def test_migrated_model_cannot_access(self):
         model = _make_model(migrated_to_model_id=uuid4())
         assert model.can_access is False

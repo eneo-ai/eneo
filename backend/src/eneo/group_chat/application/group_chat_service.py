@@ -453,13 +453,11 @@ class GroupChatService:
         if not group_chat.assistants:
             raise BadRequestException("No assistants in the group chat")
 
-        # get or create session first so we can use it for assistant selection
+        # Existing conversations contribute history to assistant selection. A
+        # new conversation is not persisted until its first question can be
+        # committed in the same transaction.
         if session_id is None:
-            session = await self.session_service.create_session(
-                name=question,
-                group_chat_id=group_chat_id,
-            )
-            session_id = session.id
+            session = None
         else:
             session = await self.session_service.get_session_by_uuid(id=session_id)
 
@@ -502,15 +500,28 @@ class GroupChatService:
             assert (
                 first_completion_model is not None
             )  # assistant must have a model to be usable
-            # Persist a placeholder Question row before the selector echo streams out, so
-            # the user's question survives even if the stream is aborted.
-            question_id = await self.session_service.create_question_placeholder(
-                question=question,
-                session=session,
-                files=[],
-                assistant_id=None,
-                completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
-            )
+            if session is None:
+                (
+                    session,
+                    question_id,
+                    _question_created_at,
+                ) = await self.session_service.create_session_with_question_placeholder(
+                    name=question,
+                    question=question,
+                    group_chat_id=group_chat_id,
+                    completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
+                )
+            else:
+                (
+                    question_id,
+                    _question_created_at,
+                ) = await self.session_service.create_question_placeholder(
+                    question=question,
+                    session=session,
+                    files=[],
+                    assistant_id=None,
+                    completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
+                )
             final_response = await self._handle_response(
                 response=response_from_selector,
                 question=question,

@@ -10,6 +10,10 @@ import sqlalchemy as sa
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
@@ -56,23 +60,7 @@ from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import TypedIOValidationException
 
-
-class _ModelKwargs:
-    def __init__(self, **values):
-        self._values = values
-        self.response_format = values.get("response_format")
-
-    def model_dump(self, *, exclude_none: bool = False, **_kwargs):
-        if exclude_none:
-            return {
-                key: value for key, value in self._values.items() if value is not None
-            }
-        return dict(self._values)
-
-    def model_copy(self, *, update):
-        values = dict(self._values)
-        values.update(update)
-        return _ModelKwargs(**values)
+pytestmark = pytest.mark.usefixtures("object_content_runtime_ready")
 
 
 class _RuntimeAssistant:
@@ -86,8 +74,9 @@ class _RuntimeAssistant:
             nickname=model_name,
             litellm_model_name=model_name,
             provider_type="openai",
+            supported_model_kwargs=SupportedModelKwargs(),
         )
-        self.completion_model_kwargs = _ModelKwargs(temperature=0.2)
+        self.completion_model_kwargs = ModelKwargs(temperature=0.2)
         self.collections = []
         self.websites = []
         self.integration_knowledge_list = []
@@ -323,6 +312,7 @@ async def _create_review_pause_runtime_context(
         session=providers.Object(session),
         tenant=providers.Object(test_tenant),
     )
+    file_service = worker_container.file_service(user=admin_user)
     executor = FlowRunExecutor(
         runtime_actor=FlowRunActor.from_user(user=admin_user),
         session=session,
@@ -335,11 +325,13 @@ async def _create_review_pause_runtime_context(
         space_repo=worker_container.tenant_scoped_space_repo(),
         completion_service=completion_service,
         file_repo=worker_container.file_repo(),
+        file_content_loader=worker_container.file_content_loader(),
+        file_service=file_service,
         template_asset_repo=worker_container.flow_template_asset_repo(),
         encryption_service=worker_container.encryption_service(),
         audit_service=audit_service,
         references_service=worker_container.references_service(),
-        transcriber=worker_container.transcriber(),
+        transcriber=worker_container.transcriber(file_service=file_service),
         config=FlowRunExecutorConfig(
             max_inline_text_bytes=1024 * 1024,
             http_request_timeout_seconds=2.0,

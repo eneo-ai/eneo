@@ -68,8 +68,11 @@ Flow runtime input routes are a separate, Flow-scoped exception. A service key w
 
 Two related guardrails come from the same principle:
 
-- **Cannot use user-identity endpoints** (`/me`, legacy "my keys", info-blob updates): `403` with `code: "user_identity_required"`.
+- **Cannot use user-identity endpoints** (`/me`, info-blob updates): `403` with `code: "user_identity_required"`.
 - **Cannot manage other API keys**: API-key mutations require a session login; any API key, including a tenant-admin service key, is rejected.
+- **Cannot read Admin Insights message details**: These endpoints require an
+  interactive session. Every API key receives `403` with
+  `code: "session_auth_required"`.
 
 **Why service keys exist**: In production environments, integrations should not break when an employee leaves the organization. With user keys, deactivating a departing employee's account would silently break every integration that used their key. Service keys solve this by decoupling key validity from any individual user's lifecycle.
 
@@ -94,7 +97,7 @@ The plain key is extracted from the header and hashed. The system supports two h
 - **HMAC-SHA256** (current standard) using a server-side secret
 - **SHA256** (legacy) as a fallback
 
-The key hash is looked up against the `api_keys_v2` table using the `idx_api_keys_v2_key_hash` index. Existing v2 keys found via the legacy SHA256 hash are upgraded to HMAC-SHA256 on use. Legacy v1 keys are first mirrored into v2 as SHA256-backed keys, then upgrade on the next v2 resolution.
+The key hash is looked up against the `api_keys_v2` table using the `idx_api_keys_v2_key_hash` index. Existing v2 keys found via the legacy SHA256 hash are upgraded to HMAC-SHA256 on use. Keys that were migrated from the retired v1 system keep their original `inp_`/`ina_` prefixes and resolve like any other v2 key.
 
 ### 2. State Validation
 
@@ -344,19 +347,14 @@ Create assistants, apps, spaces, group chats, prompts, collections, websites, or
 
 ### What happens to our old keys?
 
-Legacy keys still resolve through a compatibility path. When a legacy key is used, Eneo mirrors it into `api_keys_v2` where possible:
+The legacy v1 key system is retired. Keys that were used while the compatibility path existed were migrated into `api_keys_v2` and keep working unchanged, with their original `inp_`/`ina_` prefixes:
 
-- Legacy user keys become tenant-scoped `sk_` keys tied to the original owner. They become `admin` only if the owner currently has tenant admin permission; otherwise they become `write`.
-- Legacy assistant keys become assistant-scoped `sk_` keys with read permission.
-- Existing SHA256-backed v2 keys upgrade to HMAC-SHA256 when they resolve through the v2 lookup path.
+- Migrated user keys are tenant-scoped `sk_`-type keys tied to the original owner (`admin` if the owner had tenant admin permission at migration, otherwise `write`).
+- Migrated assistant keys are assistant-scoped `sk_`-type keys with read permission.
 
-This keeps existing integrations working while giving resolved keys the v2 lifecycle, audit, scope, and policy machinery. The original plain secret is not changed or shown again.
+Migrated keys have the full v2 lifecycle, audit, scope, and policy machinery, and appear in the API key management UI as "Legacy API key". v1 keys that were never used after the v2 system launched were never migrated and no longer authenticate — mint a new key via `/api/v1/api-keys` to replace them.
 
-### When do we need to migrate to the new keys?
-
-Legacy keys are supported through the compatibility path, so existing integrations do not need to stop on release day. Migrate when you want narrower scopes, service-key ownership, explicit resource permissions, rotation, better audit visibility, or browser-safe `pk_` origin restrictions.
-
-The safest migration path is to create a new v2 key with the narrowest practical scope and permission, deploy it to the integration, confirm traffic and audit logs show the new key being used, then revoke the legacy key. For production automations owned by a team rather than a person, prefer a service `sk_` key with an IP allowlist or expiration date.
+We still recommend replacing migrated keys with purpose-made v2 keys: create a new key with the narrowest practical scope and permission, deploy it, confirm traffic and audit logs show the new key being used, then revoke the migrated key. For production automations owned by a team rather than a person, prefer a service `sk_` key with an IP allowlist or expiration date.
 
 ### Can I retrieve a key secret later?
 

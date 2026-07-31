@@ -11,8 +11,10 @@
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, Info, Sparkles } from "lucide-svelte";
-  import PolicySection from "./PolicySection.svelte";
+  import AlertCircle from "lucide-svelte/icons/alert-circle";
+  import Info from "lucide-svelte/icons/info";
+  import Sparkles from "lucide-svelte/icons/sparkles";
+  import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type PromptOption = {
     id: string;

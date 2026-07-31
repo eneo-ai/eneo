@@ -3,7 +3,8 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { Plus, Layers } from "lucide-svelte";
+  import Plus from "lucide-svelte/icons/plus";
+  import Layers from "lucide-svelte/icons/layers";
   import { fade } from "svelte/transition";
 
   let { providerId, onAddModel }: { providerId: string; onAddModel: (providerId: string) => void } =

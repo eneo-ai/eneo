@@ -22,7 +22,13 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
 )
 from eneo.database.tables.tenant_table import Tenants
-from eneo.files.file_models import FileType
+from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
+from eneo.files.file_repo import (
+    FileContentReferenceRecord,
+    FileRepository,
+    project_file_info,
+    select_primary_file_reference,
+)
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
@@ -94,6 +100,7 @@ from eneo.flows.infrastructure.flow_step_attempt_numbering import (
     next_step_attempt_no,
 )
 from eneo.flows.principal import FlowPrincipal
+from eneo.object_content.content import ContentState
 
 
 class PreseedStep(TypedDict):
@@ -1683,26 +1690,11 @@ class FlowRunRepository:
         if not current_attempt_pairs:
             return {}
 
-        text_length = sa.func.length(Files.text).label("text_length")
-        has_text = (
-            sa.func.length(sa.func.btrim(sa.func.coalesce(Files.text, ""))) > 0
-        ).label("has_text")
-        has_transcription = (
-            sa.func.length(sa.func.btrim(sa.func.coalesce(Files.transcription, ""))) > 0
-        ).label("has_transcription")
         stmt = (
             sa.select(
                 FlowRunStepInputFiles.step_id,
                 FlowRunStepInputFiles.attempt_no,
                 FlowRunStepInputFiles.file_id,
-                Files.name,
-                Files.checksum,
-                Files.size,
-                Files.mimetype,
-                Files.file_type,
-                text_length,
-                has_text,
-                has_transcription,
             )
             .join(Files, Files.id == FlowRunStepInputFiles.file_id)
             .where(FlowRunStepInputFiles.flow_run_id == run_id)
@@ -1770,6 +1762,19 @@ class FlowRunRepository:
         if limit is not None:
             stmt = stmt.limit(limit)
         rows = (await self.session.execute(stmt)).all()
+        ordered_file_ids = list(dict.fromkeys(row.file_id for row in rows))
+        if not ordered_file_ids:
+            return {}
+
+        file_repo = FileRepository(self.session)
+        files = await file_repo.get_by_ids(ordered_file_ids)
+        file_by_id = {file.id: file for file in files}
+        references = await file_repo.get_content_references(ordered_file_ids)
+        references_by_file_id: dict[UUID, list[FileContentReferenceRecord]] = {
+            file_id: [] for file_id in ordered_file_ids
+        }
+        for reference in references:
+            references_by_file_id[reference.file_id].append(reference)
 
         metadata_by_step_result_id: dict[UUID, list[FlowRunStepInputFileMetadata]] = {}
         for row in rows:
@@ -1778,17 +1783,55 @@ class FlowRunRepository:
             )
             if step_result_id is None:
                 continue
+            file = file_by_id.get(row.file_id)
+            if file is None:
+                continue
+            file_references = references_by_file_id[row.file_id]
+            primary_reference = select_primary_file_reference(
+                file.file_type,
+                file_references,
+            )
+            if primary_reference is None:
+                continue
+            file_info = project_file_info(file, file_references)
+            text_reference = next(
+                (
+                    reference
+                    for reference in file_references
+                    if reference.variant is FileContentVariant.EXTRACTED_TEXT
+                ),
+                None,
+            )
+            if text_reference is None and file.file_type is FileType.TEXT:
+                text_reference = primary_reference
+            transcription_reference = next(
+                (
+                    reference
+                    for reference in file_references
+                    if reference.variant is FileContentVariant.TRANSCRIPTION
+                ),
+                None,
+            )
             metadata_by_step_result_id.setdefault(step_result_id, []).append(
                 FlowRunStepInputFileMetadata(
                     file_id=row.file_id,
-                    name=row.name,
-                    checksum=row.checksum,
-                    size=row.size,
-                    mimetype=row.mimetype,
-                    file_type=FileType(row.file_type),
-                    text_length=row.text_length,
-                    has_text=bool(row.has_text),
-                    has_transcription=bool(row.has_transcription),
+                    name=file_info.name,
+                    checksum=file_info.checksum,
+                    size=file_info.size,
+                    mimetype=file_info.mimetype,
+                    file_type=file_info.file_type,
+                    text_size_bytes=(
+                        text_reference.size_bytes
+                        if text_reference is not None
+                        else None
+                    ),
+                    has_text=(
+                        text_reference is not None and text_reference.size_bytes > 0
+                    ),
+                    has_transcription=(
+                        transcription_reference is not None
+                        and transcription_reference.size_bytes > 0
+                    ),
                 )
             )
 
@@ -1861,10 +1904,7 @@ class FlowRunRepository:
         if limit is not None:
             stmt = stmt.limit(limit)
         rows = (await self.session.execute(stmt)).all()
-        return [
-            _result_file_from_rows(result_file_row, file_row)
-            for result_file_row, file_row in rows
-        ]
+        return await self._project_result_file_rows(rows)
 
     async def list_result_files_for_runs(
         self,
@@ -1897,10 +1937,7 @@ class FlowRunRepository:
             )
         )
         rows = (await self.session.execute(stmt)).all()
-        return [
-            _result_file_from_rows(result_file_row, file_row)
-            for result_file_row, file_row in rows
-        ]
+        return await self._project_result_file_rows(rows)
 
     async def get_result_file(
         self,
@@ -1925,8 +1962,31 @@ class FlowRunRepository:
         row = (await self.session.execute(stmt)).first()
         if row is None:
             return None
-        result_file_row, file_row = row
-        return _result_file_from_rows(result_file_row, file_row)
+        projected = await self._project_result_file_rows([row])
+        return projected[0]
+
+    async def _project_result_file_rows(
+        self,
+        rows: Sequence[Any],
+    ) -> list[FlowRunStepResultFile]:
+        file_ids = list(dict.fromkeys(file_row.id for _, file_row in rows))
+        references = await FileRepository(self.session).get_content_references(file_ids)
+        references_by_file_id: dict[UUID, list[FileContentReferenceRecord]] = {
+            file_id: [] for file_id in file_ids
+        }
+        for reference in references:
+            references_by_file_id[reference.file_id].append(reference)
+
+        projected: list[FlowRunStepResultFile] = []
+        for result_file_row, file_row in rows:
+            projected.append(
+                _result_file_from_rows(
+                    result_file_row,
+                    FileMetadata.model_validate(file_row),
+                    references_by_file_id[file_row.id],
+                )
+            )
+        return projected
 
     async def mark_running_if_claimable(
         self,
@@ -2568,8 +2628,21 @@ class FlowRunRepository:
 
 def _result_file_from_rows(
     result_file_row: FlowRunStepResultFiles,
-    file_row: Files,
+    file: FileMetadata,
+    references: list[FileContentReferenceRecord],
 ) -> FlowRunStepResultFile:
+    primary = select_primary_file_reference(file.file_type, references)
+    if primary is None:
+        raise FlowRunPersistenceInvariantError(
+            operation="project_flow_result_file_content",
+            run_id=result_file_row.flow_run_id,
+            tenant_id=result_file_row.tenant_id,
+            flow_id=result_file_row.flow_id,
+        )
+    info = project_file_info(file, references)
+    availability: FlowRunStepResultFileAvailability = (
+        "available" if primary.state is ContentState.AVAILABLE else "content_purged"
+    )
     return FlowRunStepResultFile(
         flow_run_id=result_file_row.flow_run_id,
         flow_id=result_file_row.flow_id,
@@ -2581,16 +2654,10 @@ def _result_file_from_rows(
         file_id=result_file_row.file_id,
         ordinal=result_file_row.ordinal,
         source=cast(FlowRunStepResultFileSource, result_file_row.source),
-        name=file_row.name,
-        checksum=file_row.checksum,
-        size=file_row.size,
-        mimetype=file_row.mimetype,
-        file_type=FileType(file_row.file_type),
-        availability=_file_availability(file_row),
+        name=info.name,
+        checksum=info.checksum,
+        size=info.size,
+        mimetype=info.mimetype,
+        file_type=info.file_type,
+        availability=availability,
     )
-
-
-def _file_availability(file_row: Files) -> FlowRunStepResultFileAvailability:
-    if file_row.blob is not None or file_row.text is not None:
-        return "available"
-    return "content_purged"

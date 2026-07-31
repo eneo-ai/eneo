@@ -9,7 +9,7 @@
     "check": "bun x --package typescript@5.9.3 tsc --noEmit -p tsconfig.type-smoke.json",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
-    "test": "node --test update.test.js && bun test src/endpoints/flows.test.js src/endpoints/settings.test.js",
+    "test": "bun test update.test.js src/endpoints/*.test.js",
     "update": "node update.js"
   },
   "devDependencies": {

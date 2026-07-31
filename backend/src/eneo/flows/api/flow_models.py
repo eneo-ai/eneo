@@ -2467,7 +2467,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                         "size": 2048,
                                         "mimetype": "application/pdf",
                                         "file_type": "document",
-                                        "text_length": 1024,
+                                        "text_size_bytes": 1024,
                                         "has_text": True,
                                         "has_transcription": False,
                                     }

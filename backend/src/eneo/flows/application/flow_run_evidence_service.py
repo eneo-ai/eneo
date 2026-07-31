@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
-from eneo.files.file_models import File
+from eneo.files.file_models import FileMetadata
 from eneo.files.file_repo import FileRepository
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
@@ -198,7 +198,7 @@ class FlowRunEvidenceService:
         run_id: UUID,
         flow_id: UUID,
         file_id: UUID,
-    ) -> File:
+    ) -> FileMetadata:
         run = await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
@@ -224,8 +224,6 @@ class FlowRunEvidenceService:
                 code="forbidden_action",
                 context={"auth_layer": "domain_policy"},
             )
-        if file.blob is None and file.text is None:
-            self._raise_artifact_content_unavailable(run_id=run_id, file_id=file_id)
         return file
 
     async def get_redacted_evidence_bundle(

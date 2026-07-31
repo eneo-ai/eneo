@@ -10,7 +10,11 @@
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { Pencil, TriangleAlert, Clock, ArrowRight, ExternalLink } from "lucide-svelte";
+  import Pencil from "lucide-svelte/icons/pencil";
+  import TriangleAlert from "lucide-svelte/icons/triangle-alert";
+  import Clock from "lucide-svelte/icons/clock";
+  import ArrowRight from "lucide-svelte/icons/arrow-right";
+  import ExternalLink from "lucide-svelte/icons/external-link";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";

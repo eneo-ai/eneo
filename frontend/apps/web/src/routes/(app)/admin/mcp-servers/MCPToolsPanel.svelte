@@ -6,7 +6,12 @@
 
 <script lang="ts">
   import { Button, Input, Tooltip } from "@eneo/ui";
-  import { RefreshCw, AlertTriangle, Trash2, Check, X, ShieldAlert } from "lucide-svelte";
+  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import Trash2 from "lucide-svelte/icons/trash-2";
+  import Check from "lucide-svelte/icons/check";
+  import X from "lucide-svelte/icons/x";
+  import ShieldAlert from "lucide-svelte/icons/shield-alert";
   import { m } from "$lib/paraglide/messages";
   import { invalidate } from "$app/navigation";
   import { untrack } from "svelte";

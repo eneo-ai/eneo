@@ -36,6 +36,7 @@ import pytest
 from litellm.exceptions import BadRequestError, RateLimitError
 
 from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
+from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -335,7 +336,7 @@ def _make_file(
     *,
     file_id: UUID | None = None,
     tenant_id: UUID | None = None,
-    user_id: UUID | None = None,
+    owner_user_id: UUID | None = None,
     name: str = "reference.txt",
     text: str | None = "Reference material",
     mimetype: str = "text/plain",
@@ -343,7 +344,7 @@ def _make_file(
     transcription: str | None = None,
     blob: bytes | None = None,
 ) -> File:
-    resolved_user_id = user_id or uuid4()
+    resolved_owner_user_id = owner_user_id or uuid4()
     resolved_text = text or ""
     resolved_blob = blob or None
     return File(
@@ -361,10 +362,8 @@ def _make_file(
         text=text,
         blob=resolved_blob,
         transcription=transcription,
-        owner_type=None,
-        owner_user_id=resolved_user_id,
-        owner_api_key_id=None,
-        user_id=resolved_user_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=resolved_owner_user_id,
         tenant_id=tenant_id or uuid4(),
     )
 
@@ -1204,10 +1203,10 @@ class TestPlannerContextPreparation:
         space.get_default_completion_model.return_value = model
         session = _make_session(tenant_id=user.tenant_id)
         persisted_files = [
-            _make_file(tenant_id=user.tenant_id, user_id=user.id)
+            _make_file(tenant_id=user.tenant_id, owner_user_id=user.id)
             for _ in range(AI_BUILDER_MAX_ATTACHMENTS - 1)
         ]
-        current_file = _make_file(tenant_id=user.tenant_id, user_id=user.id)
+        current_file = _make_file(tenant_id=user.tenant_id, owner_user_id=user.id)
         files_by_id = {file.id: file for file in [*persisted_files, current_file]}
         repo.list_session_file_ids.return_value = [file.id for file in persisted_files]
         file_service.get_files_by_ids.side_effect = lambda file_ids: [
@@ -2616,7 +2615,7 @@ async def test_prepare_message_context_stages_new_files_and_builds_attachment_co
 
     file_id = uuid4()
     attached_file = _make_file(
-        file_id=file_id, tenant_id=user.tenant_id, user_id=user.id
+        file_id=file_id, tenant_id=user.tenant_id, owner_user_id=user.id
     )
     file_service.get_files_by_ids.return_value = [attached_file]
     completion_service.resolve_model_route.return_value = _route(
@@ -2669,7 +2668,7 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
 
     file_id = uuid4()
     attached_file = _make_file(
-        file_id=file_id, tenant_id=user.tenant_id, user_id=user.id
+        file_id=file_id, tenant_id=user.tenant_id, owner_user_id=user.id
     )
     file_service.get_files_by_ids.return_value = [attached_file]
     completion_service.resolve_model_route.return_value = _route(
@@ -2741,7 +2740,7 @@ async def test_get_session_attachment_snapshot_returns_warning_when_some_files_m
     repo = AsyncMock()
     file_service = AsyncMock()
     available_file = _make_file(
-        file_id=uuid4(), tenant_id=user.tenant_id, user_id=user.id
+        file_id=uuid4(), tenant_id=user.tenant_id, owner_user_id=user.id
     )
     repo.list_session_file_ids.return_value = [available_file.id, uuid4()]
     file_service.get_files_by_ids.return_value = [available_file]
@@ -2771,7 +2770,7 @@ async def test_get_session_attachment_snapshot_warns_when_attached_file_has_no_r
     unreadable_file = _make_file(
         file_id=uuid4(),
         tenant_id=user.tenant_id,
-        user_id=user.id,
+        owner_user_id=user.id,
         text=None,
         blob=b"%PDF-1.7 unreadable",
         mimetype="application/pdf",

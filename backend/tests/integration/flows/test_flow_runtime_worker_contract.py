@@ -13,6 +13,10 @@ import sqlalchemy as sa
 from dependency_injector import providers
 
 import eneo.flows.runtime.tasks as flow_runtime_tasks
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
@@ -33,6 +37,7 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
+from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
 from eneo.flows.enums import FlowRunLifecycleSource, FlowRunRerunOperationStatus
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
@@ -53,6 +58,8 @@ from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 
+pytestmark = pytest.mark.usefixtures("object_content_runtime_ready")
+
 
 @dataclass(frozen=True, slots=True)
 class _RuntimeWorkerContext:
@@ -61,24 +68,6 @@ class _RuntimeWorkerContext:
     flow_id: UUID
     tenant_id: UUID
     run_revision: int
-
-
-class _ModelKwargs:
-    def __init__(self, **values):
-        self._values = values
-        self.response_format = values.get("response_format")
-
-    def model_dump(self, *, exclude_none: bool = False, **_kwargs):
-        if exclude_none:
-            return {
-                key: value for key, value in self._values.items() if value is not None
-            }
-        return dict(self._values)
-
-    def model_copy(self, *, update):
-        values = dict(self._values)
-        values.update(update)
-        return _ModelKwargs(**values)
 
 
 class _RuntimeAssistant:
@@ -92,8 +81,9 @@ class _RuntimeAssistant:
             nickname=model_name,
             litellm_model_name=model_name,
             provider_type="openai",
+            supported_model_kwargs=SupportedModelKwargs(),
         )
-        self.completion_model_kwargs = _ModelKwargs(temperature=0.2)
+        self.completion_model_kwargs = ModelKwargs(temperature=0.2)
         self.collections = []
         self.websites = []
         self.integration_knowledge_list = []
@@ -258,6 +248,7 @@ async def _create_runtime_worker_context(
         session=providers.Object(session),
         tenant=providers.Object(test_tenant),
     )
+    file_service = worker_container.file_service(user=admin_user)
     executor = FlowRunExecutor(
         runtime_actor=FlowRunActor.from_user(user=admin_user),
         session=session,
@@ -270,11 +261,13 @@ async def _create_runtime_worker_context(
         space_repo=worker_container.tenant_scoped_space_repo(),
         completion_service=completion_service,
         file_repo=worker_container.file_repo(),
+        file_content_loader=worker_container.file_content_loader(),
+        file_service=file_service,
         template_asset_repo=worker_container.flow_template_asset_repo(),
         encryption_service=worker_container.encryption_service(),
         audit_service=audit_service,
         references_service=worker_container.references_service(),
-        transcriber=worker_container.transcriber(),
+        transcriber=worker_container.transcriber(file_service=file_service),
         config=FlowRunExecutorConfig(
             max_inline_text_bytes=1024 * 1024,
             http_request_timeout_seconds=2.0,
@@ -340,6 +333,7 @@ async def _failure_state_from_fresh_session(
 @pytest.mark.integration
 async def test_tenant_scoped_space_repo_does_not_load_cross_tenant_assistant(
     async_session,
+    db_container,
     tenant_factory,
     completion_model_factory,
     space_factory,
@@ -364,15 +358,11 @@ async def test_tenant_scoped_space_repo_does_not_load_cross_tenant_assistant(
     bootstrap_container = Container(session=providers.Object(async_session))
     other_tenant = await bootstrap_container.tenant_repo().get(other_tenant_row.id)
     assert other_tenant is not None
-    other_tenant_container = Container(
-        session=providers.Object(async_session),
-        tenant=providers.Object(other_tenant),
-    )
-
-    with pytest.raises(NotFoundException):
-        await other_tenant_container.tenant_scoped_space_repo().get_space_by_assistant(
-            assistant_id=assistant.id
-        )
+    async with db_container(tenant=other_tenant) as other_tenant_container:
+        with pytest.raises(NotFoundException):
+            await other_tenant_container.tenant_scoped_space_repo().get_space_by_assistant(
+                assistant_id=assistant.id
+            )
 
 
 @pytest.mark.asyncio
@@ -588,7 +578,7 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
             return _TimeoutAfterStartedFuture(future)
         return future
 
-    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: running_loop)
+    monkeypatch.setattr(tasks_module, "get_flow_task_loop", lambda: running_loop)
     monkeypatch.setattr(
         tasks_module.asyncio,
         "run_coroutine_threadsafe",
@@ -762,6 +752,8 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             space_repo=container.space_repo(),
             completion_service=completion_service,
             file_repo=container.file_repo(),
+            file_content_loader=container.file_content_loader(),
+            file_service=container.file_service(user=admin_user),
             template_asset_repo=container.flow_template_asset_repo(),
             encryption_service=container.encryption_service(),
             audit_service=audit_service,
@@ -825,8 +817,21 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert len(attempt_rows) == 1
         assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
         assert attempt_rows[0].finished_at is not None
-        assert attempt_rows[0].input_payload_json == (
-            step_result_rows[0].input_payload_json
+        parsed_attempt_input = parse_flow_step_attempt_input(
+            attempt_rows[0].input_payload_json
+        )
+        assert parsed_attempt_input.status == "tracked"
+        assert parsed_attempt_input.attempt_input is not None
+        assert parsed_attempt_input.attempt_input.resolved_input["text"] == (
+            "What happened?"
+        )
+        assert parsed_attempt_input.attempt_input.execution_inputs is not None
+        assert parsed_attempt_input.attempt_input.execution_inputs[0].question == (
+            "What happened?"
+        )
+        assert step_result_rows[0].input_payload_json["text"] == "What happened?"
+        assert step_result_rows[0].input_payload_json["rag"]["status"] == (
+            "skipped_no_knowledge"
         )
         assert attempt_rows[0].output_payload_json == {
             "text": "The run completed.",
@@ -920,8 +925,14 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert rerun_attempt_rows[0].output_payload_json == {
             "text": "The run completed.",
         }
-        assert rerun_attempt_rows[1].input_payload_json == (
-            rerun_step_result.input_payload_json
+        parsed_rerun_attempt_input = parse_flow_step_attempt_input(
+            rerun_attempt_rows[1].input_payload_json
+        )
+        assert parsed_rerun_attempt_input.status == "tracked"
+        assert parsed_rerun_attempt_input.attempt_input is not None
+        assert (
+            parsed_rerun_attempt_input.attempt_input.resolved_input["text"]
+            == (rerun_step_result.input_payload_json["text"])
         )
         assert rerun_attempt_rows[1].output_payload_json == {
             "text": "The rerun completed.",

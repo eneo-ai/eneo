@@ -231,6 +231,35 @@ LIMIT 5;
 
 ---
 
+### Durable Object Content
+
+Durable content has one PostgreSQL control plane and one explicit byte backend
+per record:
+
+| PostgreSQL control plane                                | Byte backend                                                       |
+| ------------------------------------------------------- | ------------------------------------------------------------------ |
+| Content identity and lifecycle state                    | Bounded `postgres_inline` payload or private `object_store` object |
+| Canonical SHA-256, exact size, and media type           | Payload bytes only                                                 |
+| Concrete authorization references, holds, and retention | Backend-specific transport/deletion state                          |
+| Audit and bounded reconciliation/query facts            | No authorization, routing, or product policy                       |
+
+Inline bytes, control state, and the first owner reference commit atomically.
+Object-store intent and the first reference commit before remote work. Eneo
+verifies the PostgreSQL-owned SHA-256 before returning full or range responses,
+and a bounded reconciler resolves process and network failures.
+
+Object storage is optional. The default reference deployment is inline-capable
+without another service. Administrators can enable an Eneo-built and attested
+SeaweedFS profile or use external endpoints such as MinIO through one
+vendor-neutral contract.
+
+Read [Object Content Architecture](/docs/object-content-architecture) for the
+complete lifecycle, integrity, reconciliation, binding, and image publication
+design. The [Object Content Storage guide](/guides/object-content-storage)
+covers deployment and operations.
+
+---
+
 ### Worker Services
 
 **Technology:**
@@ -247,6 +276,11 @@ LIMIT 5;
 - Embedding generation
 - Background tasks and scheduled jobs
 - Flow run execution, stale-run reconciliation, and Flow runtime delivery outboxes
+
+Object-content reconciliation is implemented as a queue-neutral async task.
+Only the current registration and schedule adapter depends on ARQ. A future
+worker change therefore does not alter the object store, lifecycle, or database
+contract, and Eneo avoids a speculative generic queue framework in the meantime.
 
 **Task Types:**
 
@@ -383,13 +417,18 @@ Save conversation to database
 
 </div>
 
-1. User uploads file via `POST /api/v1/files/`
-2. Backend saves metadata to `InfoBlobs` table and enqueues processing task
-3. ARQ worker picks up the task from Redis
-4. Processing pipeline: extract text → chunk (200 tokens) → generate embeddings
-5. Store chunks and vectors in `InfoBlobChunks` (pgvector)
-6. Update job status to `COMPLETE` or `FAILED`
-7. Frontend polls or receives WebSocket notification
+1. User uploads a File; its bytes follow the deployment's selected storage policy.
+2. Backend enqueues document processing.
+3. Worker extracts text, creates chunks, and generates embeddings.
+4. One short transaction publishes the new `InfoBlobs` version and every
+   `InfoBlobChunks` vector, then supersedes the previous version.
+5. Retrieval reads only the active version. Exact historical references remain
+   readable until the document is deleted.
+6. A failed replacement rolls back; the previous complete version remains active.
+7. The job records `COMPLETE` or `FAILED` for the frontend.
+
+PostgreSQL owns searchable text, version state, and pgvector data regardless of
+where Eneo stores the original File bytes. Object storage remains optional.
 
 ---
 
@@ -398,6 +437,7 @@ Save conversation to database
 ### Authentication Layers
 
 1. **Session-based** (default)
+
    - JWT tokens stored in httpOnly cookies
    - CSRF protection
    - Token refresh mechanism

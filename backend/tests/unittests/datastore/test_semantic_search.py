@@ -56,6 +56,8 @@ async def test_add_stamps_chunks_with_datastore_tenant_id():
         website_id=None,
         integration_knowledge_id=None,
         sharepoint_item_id=None,
+        source_id=uuid4(),
+        version_state="active",
         group=None,
         website=None,
         text="One paragraph.\n\nSecond paragraph.",

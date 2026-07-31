@@ -259,11 +259,7 @@ test("a visible review checkpoint can be approved and resumed", async ({ page, r
     ]
   );
 
-  const { runTable, evidenceToggle } = await startRunFromWizard(
-    page,
-    flow,
-    uniqueName("review run input")
-  );
+  const { evidenceToggle } = await startRunFromWizard(page, flow, uniqueName("review run input"));
   const reviewPanel = await expandedRunPanel(page, evidenceToggle);
   await expect(reviewPanel.getByRole("heading", { name: REVIEW_CHECKPOINT_LABEL })).toBeVisible({
     timeout: 60_000

@@ -208,7 +208,9 @@ principals can cancel only their own runs.
     },
 )
 async def get_flow_run_status_capabilities(
-    _container: Container = Depends(get_container(with_user=True)),
+    _container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ) -> FlowRunStatusCapabilitiesPublic:
     return flow_run_status_capabilities_public()
 
@@ -291,7 +293,10 @@ async def create_flow_run(
         ),
     ] = None,
     container: Container = Depends(
-        get_container_for_explicit_transaction(with_user=True)
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_upload_admission=True,
+        )
     ),
 ) -> FlowRunPublic | JSONResponse:
     assembler = FlowAssembler()
@@ -435,7 +440,9 @@ async def list_flow_runs(
             ),
         ),
     ] = None,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await flow_access_context.enforce_flow_scope(
         request,
@@ -496,7 +503,9 @@ async def get_flow_run(
     ],
     run_id: Annotated[UUID, Path(description="Identifier of the run to return.")],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
 ):
     await flow_access_context.enforce_flow_scope(
         request,
@@ -671,7 +680,9 @@ async def redispatch_flow_run(
         ),
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
     payload: FlowRunRedispatchRequest = Body(  # pyright: ignore[reportCallInDefaultInitializer]
         default_factory=FlowRunRedispatchRequest
     ),

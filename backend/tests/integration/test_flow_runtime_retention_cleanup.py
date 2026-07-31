@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from uuid import UUID, uuid4
 
 import pytest
@@ -41,9 +42,16 @@ from eneo.database.tables.flow_tables import (
     FlowTemplateAssets,
     FlowVersions,
 )
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    InlineContentPayloads,
+    ObjectContents,
+)
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_repo import FileRepository
 from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
 )
@@ -79,6 +87,7 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
+from eneo.object_content.content import ContentAccessClass, ContentState, StorageKind
 
 
 @dataclass(frozen=True)
@@ -106,6 +115,92 @@ class AbandonedRuntimeUploadFixture:
     flow: Flows
     file: Files
     upload: FlowRuntimeUploadedFiles
+
+
+async def _create_durable_content(
+    async_session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    mimetype: str,
+    payload: bytes,
+    created_at: datetime,
+) -> ObjectContents:
+    idempotency_key = f"flow-retention-test-{uuid4()}"
+    content = ObjectContents(
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        storage_kind=StorageKind.POSTGRES_INLINE.value,
+        state=ContentState.AVAILABLE.value,
+        access_class=ContentAccessClass.PRIVATE_RESOURCE.value,
+        sha256=sha256(payload).digest(),
+        size_bytes=len(payload),
+        declared_media_type=mimetype,
+        verified_media_type=mimetype,
+        idempotency_key=idempotency_key,
+        request_fingerprint=sha256(idempotency_key.encode() + payload).digest(),
+        available_at=created_at,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    async_session.add(content)
+    await async_session.flush()
+    async_session.add(
+        InlineContentPayloads(
+            content_id=content.id,
+            storage_kind=StorageKind.POSTGRES_INLINE.value,
+            payload=payload,
+        )
+    )
+    await async_session.flush()
+    return content
+
+
+async def _create_durable_file(
+    async_session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    name: str,
+    mimetype: str,
+    file_type: FileType,
+    payload: bytes,
+    variant: FileContentVariant,
+    created_at: datetime,
+    parent_file_id: UUID | None = None,
+) -> Files:
+    file = Files(
+        name=name,
+        mimetype=mimetype,
+        file_type=file_type.value,
+        owner_type="user",
+        owner_user_id=user_id,
+        owner_service_id=None,
+        tenant_id=tenant_id,
+        parent_file_id=parent_file_id,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    async_session.add(file)
+    await async_session.flush()
+    content = await _create_durable_content(
+        async_session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        mimetype=mimetype,
+        payload=payload,
+        created_at=created_at,
+    )
+    async_session.add(
+        FileContentReferences(
+            file_id=file.id,
+            content_id=content.id,
+            variant=variant.value,
+            ordinal=0,
+        )
+    )
+    await async_session.flush()
+    return file
 
 
 @pytest.fixture
@@ -172,7 +267,6 @@ async def _create_flow_runtime_fixture(
     days_old: int,
     flow_retention_days: int | None = None,
     flow_settings: dict | None = None,
-    generated_file_has_content: bool = True,
     flow_deleted: bool = False,
     run_id: UUID | None = None,
 ) -> FlowRuntimeRetentionFixture:
@@ -218,42 +312,29 @@ async def _create_flow_runtime_fixture(
     await async_session.flush()
     flow.published_version = 1
 
-    generated_file = Files(
+    generated_file = await _create_durable_file(
+        async_session,
+        tenant_id=tenant.id,
+        user_id=user.id,
         name="generated.docx",
-        text=None,
-        blob=b"docx-bytes" if generated_file_has_content else None,
-        checksum="generated-checksum",
-        size=1024,
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        file_type="document",
-        transcription=None if generated_file_has_content else "stale-transcript",
-        owner_type="user",
-        owner_user_id=user.id,
-        tenant_id=tenant.id,
+        file_type=FileType.DOCUMENT,
+        payload=b"g" * 1024,
+        variant=FileContentVariant.GENERATED_ARTIFACT,
         created_at=created_at,
-        updated_at=created_at,
     )
-    async_session.add(generated_file)
-    await async_session.flush()
 
-    runtime_input_file = Files(
-        name="runtime-input.txt",
-        text="runtime input file text",
-        blob=None,
-        checksum=f"runtime-input-{uuid4()}",
-        size=128,
-        mimetype="text/plain",
-        file_type="text",
-        transcription=None,
-        owner_type="user",
-        owner_user_id=user.id,
-        owner_service_id=None,
+    runtime_input_file = await _create_durable_file(
+        async_session,
         tenant_id=tenant.id,
+        user_id=user.id,
+        name="runtime-input.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        payload=b"r" * 128,
+        variant=FileContentVariant.EXTRACTED_TEXT,
         created_at=created_at,
-        updated_at=created_at,
     )
-    async_session.add(runtime_input_file)
-    await async_session.flush()
 
     async_session.add(
         FlowRuntimeUploadedFiles(
@@ -498,24 +579,18 @@ async def _create_flow_template_asset_fixture(
     async_session.add(flow)
     await async_session.flush()
 
-    template_file = Files(
-        name="template.docx",
-        text=None,
-        blob=b"docx-template-bytes",
-        checksum=f"template-{uuid4()}",
-        size=1024,
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        file_type="document",
-        transcription=None,
-        owner_type="user",
-        owner_user_id=user.id,
-        owner_service_id=None,
+    template_payload = b"t" * 1024
+    template_file = await _create_durable_file(
+        async_session,
         tenant_id=tenant.id,
+        user_id=user.id,
+        name="template.docx",
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_type=FileType.DOCUMENT,
+        payload=template_payload,
+        variant=FileContentVariant.ORIGINAL,
         created_at=now,
-        updated_at=now,
     )
-    async_session.add(template_file)
-    await async_session.flush()
 
     template_asset = FlowTemplateAssets(
         flow_id=flow.id,
@@ -523,7 +598,7 @@ async def _create_flow_template_asset_fixture(
         tenant_id=tenant.id,
         file_id=template_file.id,
         name=template_file.name,
-        checksum=template_file.checksum,
+        checksum=sha256(template_payload).hexdigest(),
         mimetype=template_file.mimetype,
         placeholders=["Body"],
         created_by_user_id=user.id,
@@ -562,24 +637,20 @@ async def _create_unbound_runtime_upload_fixture(
         metadata_json={},
         data_retention_days=None,
     )
-    file = Files(
-        name=f"abandoned-runtime-upload-{uuid4()}.txt",
-        text="confidential unbound runtime upload",
-        blob=None,
-        checksum=f"abandoned-runtime-upload-{uuid4()}",
-        size=size,
-        mimetype="text/plain",
-        file_type="text",
-        transcription=None,
-        owner_type="user",
-        owner_user_id=user.id,
-        owner_service_id=None,
-        tenant_id=tenant.id,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    async_session.add_all([flow, file])
+    async_session.add(flow)
     await async_session.flush()
+    file_created_at = datetime.now(timezone.utc)
+    file = await _create_durable_file(
+        async_session,
+        tenant_id=tenant.id,
+        user_id=user.id,
+        name=f"abandoned-runtime-upload-{uuid4()}.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        payload=b"u" * size,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        created_at=file_created_at,
+    )
 
     upload = FlowRuntimeUploadedFiles(
         file_id=file.id,
@@ -1352,6 +1423,80 @@ async def test_cleanup_old_flow_runtime_data_reclaims_only_past_horizon_unbound_
 
 
 @pytest.mark.asyncio
+async def test_abandoned_runtime_upload_purge_reports_primary_not_total_variant_bytes(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+) -> None:
+    now = datetime.now(timezone.utc)
+    fixture = await _create_unbound_runtime_upload_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        uploaded_at=now - timedelta(days=2),
+        size=321,
+    )
+    primary_content_id = await async_session.scalar(
+        select(FileContentReferences.content_id).where(
+            FileContentReferences.file_id == fixture.file.id
+        )
+    )
+    assert primary_content_id is not None
+    secondary_content = await _create_durable_content(
+        async_session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        mimetype="text/plain",
+        payload=b"s" * 1024,
+        created_at=fixture.file.created_at,
+    )
+    async_session.add(
+        FileContentReferences(
+            file_id=fixture.file.id,
+            content_id=secondary_content.id,
+            variant=FileContentVariant.ORIGINAL.value,
+            ordinal=0,
+        )
+    )
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(
+            flow_runtime_upload_abandonment_days=1,
+            flow_run_history_minimum_retention_days=None,
+            flow_run_history_no_purge=False,
+        )
+    )
+    await async_session.flush()
+    [file_info] = await FileRepository(async_session).get_infos_by_ids(
+        [fixture.file.id]
+    )
+    assert file_info.size == 321
+
+    counts = await FlowRunHistoryPurgeRepository(
+        async_session
+    ).purge_abandoned_runtime_uploads(now=now, limit=10)
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts.flow_runtime_source_candidates == 1
+    assert counts.flow_runtime_source_candidate_bytes == file_info.size
+    assert counts.flow_runtime_source_bindings_deleted == 1
+    assert counts.flow_runtime_source_files_deleted == 1
+    assert counts.flow_runtime_source_bytes_deleted == file_info.size
+    assert await async_session.get(Files, fixture.file.id) is None
+    primary_content = await async_session.get(ObjectContents, primary_content_id)
+    assert primary_content is not None
+    assert primary_content.state == ContentState.DELETE_PENDING.value
+    assert primary_content.reference_count == 0
+    secondary = await async_session.get(ObjectContents, secondary_content.id)
+    assert secondary is not None
+    assert secondary.state == ContentState.DELETE_PENDING.value
+    assert secondary.reference_count == 0
+
+
+@pytest.mark.asyncio
 async def test_flow_run_history_purge_reclaims_runtime_source_after_final_reference(
     async_session: AsyncSession,
     test_tenant,
@@ -1527,23 +1672,18 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_derived_child(
         flow_retention_days=1,
     )
     source_file_id = fixture.runtime_input_file.id
-    child_file = Files(
-        name="runtime-source-child.txt",
-        text="derived child",
-        blob=None,
-        checksum=f"runtime-source-child-{uuid4()}",
-        size=13,
-        mimetype="text/plain",
-        file_type="text",
-        transcription=None,
-        owner_type="user",
-        owner_user_id=admin_user.id,
-        owner_service_id=None,
+    child_file = await _create_durable_file(
+        async_session,
         tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        name="runtime-source-child.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        payload=b"c" * 13,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        created_at=datetime.now(timezone.utc),
         parent_file_id=source_file_id,
     )
-    async_session.add(child_file)
-    await async_session.flush()
     child_file_id = child_file.id
 
     result = await flow_retention_service.purge_old_flow_run_history_batch(
@@ -1587,6 +1727,12 @@ async def test_flow_run_history_purge_rollback_restores_run_binding_and_source(
     run_id = fixture.run.id
     flow_id = fixture.flow.id
     source_file_id = fixture.runtime_input_file.id
+    source_content_id = await async_session.scalar(
+        select(FileContentReferences.content_id).where(
+            FileContentReferences.file_id == source_file_id
+        )
+    )
+    assert source_content_id is not None
     savepoint = await async_session.begin_nested()
 
     result = await FlowRunHistoryPurgeRepository(async_session).purge_run_history(
@@ -1604,11 +1750,19 @@ async def test_flow_run_history_purge_rollback_restores_run_binding_and_source(
         await async_session.scalar(select(Files.id).where(Files.id == source_file_id))
         is None
     )
+    released_content = await async_session.get(ObjectContents, source_content_id)
+    assert released_content is not None
+    assert released_content.state == ContentState.DELETE_PENDING.value
+    assert released_content.reference_count == 0
     await savepoint.rollback()
     async_session.expunge_all()
 
     assert await async_session.get(FlowRuns, run_id) is not None
     assert await async_session.get(Files, source_file_id) is not None
+    restored_content = await async_session.get(ObjectContents, source_content_id)
+    assert restored_content is not None
+    assert restored_content.state == ContentState.AVAILABLE.value
+    assert restored_content.reference_count == 1
     assert await _flow_runtime_upload_exists(
         async_session,
         file_id=source_file_id,
@@ -1623,6 +1777,68 @@ async def test_flow_run_history_purge_rollback_restores_run_binding_and_source(
         )
         == 1
     )
+
+
+@pytest.mark.asyncio
+async def test_flow_run_history_purge_rejects_missing_primary_without_partial_delete(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+) -> None:
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    run_id = fixture.run.id
+    source_file_id = fixture.runtime_input_file.id
+    source_content_id = await async_session.scalar(
+        select(FileContentReferences.content_id).where(
+            FileContentReferences.file_id == source_file_id
+        )
+    )
+    assert source_content_id is not None
+    await async_session.execute(
+        delete(FileContentReferences).where(
+            FileContentReferences.file_id == source_file_id
+        )
+    )
+    savepoint = await async_session.begin_nested()
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"File row\(s\) without durable primary content",
+    ):
+        await FlowRunHistoryPurgeRepository(async_session).purge_run_history([run_id])
+
+    await savepoint.rollback()
+    async_session.expunge_all()
+    assert await async_session.get(FlowRuns, run_id) is not None
+    assert await async_session.get(Files, source_file_id) is not None
+    assert await _flow_runtime_upload_exists(
+        async_session,
+        file_id=source_file_id,
+        flow_id=fixture.flow.id,
+        tenant_id=test_tenant.id,
+    )
+    assert (
+        await _count_for_run(
+            async_session,
+            FlowRunStepInputFiles,
+            run_id=run_id,
+        )
+        == 1
+    )
+    content = await async_session.get(ObjectContents, source_content_id)
+    assert content is not None
+    assert content.state == ContentState.DELETE_PENDING.value
+    assert content.reference_count == 0
 
 
 @pytest.mark.parametrize(
@@ -1784,23 +2000,18 @@ async def test_cleanup_old_flow_runtime_data_keeps_generated_file_with_derived_c
         days_old=3,
         flow_retention_days=1,
     )
-    child_file = Files(
-        name="generated-child.txt",
-        text="derived child",
-        blob=None,
-        checksum=f"generated-child-{uuid4()}",
-        size=13,
-        mimetype="text/plain",
-        file_type="text",
-        transcription=None,
-        owner_type="user",
-        owner_user_id=admin_user.id,
-        owner_service_id=None,
+    child_file = await _create_durable_file(
+        async_session,
         tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        name="generated-child.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        payload=b"c" * 13,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        created_at=datetime.now(timezone.utc),
         parent_file_id=fixture.generated_file.id,
     )
-    async_session.add(child_file)
-    await async_session.flush()
 
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()
     await _flush_and_clear_identity_map(async_session)
@@ -2963,7 +3174,6 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_follows_audit_log_lif
             space=flow_retention_space,
             assistant=flow_retention_assistant,
             days_old=3,
-            generated_file_has_content=False,
         )
         return await _add_flow_audit_outbox_row(
             async_session,
@@ -3041,7 +3251,6 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_uses_retention_batche
             space=flow_retention_space,
             assistant=flow_retention_assistant,
             days_old=3,
-            generated_file_has_content=False,
         )
         outbox_ids.append(
             await _add_flow_audit_outbox_row(

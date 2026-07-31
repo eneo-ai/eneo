@@ -66,8 +66,8 @@ class CreateEmbeddingsService:
             model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
                    Both satisfy the EmbeddingModelLike protocol.
         """
+        from eneo.model_providers.domain.model_route import resolve_model_route
         from eneo.model_providers.infrastructure.litellm_provider import (
-            build_litellm_model_name,
             load_active_litellm_provider,
         )
         from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
@@ -99,7 +99,10 @@ class CreateEmbeddingsService:
                 config=provider_config or {},
                 encryption_service=self.encryption_service,
             )
-            litellm_model_name = build_litellm_model_name(provider_type, model.name)
+            litellm_model_name = resolve_model_route(
+                provider_type=provider_type,
+                model_name=model.name,
+            )
         else:
             # DB lookup path: requires active session
             if not self.session:
@@ -133,8 +136,9 @@ class CreateEmbeddingsService:
             credential_resolver = provider.create_credential_resolver(
                 self.encryption_service
             )
-            litellm_model_name = build_litellm_model_name(
-                provider.provider_type, model.name
+            litellm_model_name = resolve_model_route(
+                provider_type=provider.provider_type,
+                model_name=model.name,
             )
             provider_type = provider.provider_type
 

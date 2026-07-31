@@ -161,7 +161,9 @@
 
             {#if hasStructuredOutput && step.outputPayload?.structured !== undefined}
               <div class="mt-1">
-                <Badge class="bg-accent-dimmer text-accent-stronger mb-1">JSON</Badge>
+                <Badge class="bg-accent-dimmer text-accent-stronger mb-1">
+                  {m.flow_run_structured_json_badge()}
+                </Badge>
                 <pre
                   class="bg-hover-dimmer max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
                     step.outputPayload.structured,

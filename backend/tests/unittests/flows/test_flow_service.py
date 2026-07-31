@@ -19,6 +19,7 @@ from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPersistedIdMissingError,
     FlowPublishedDefinitionInvalidError,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -156,14 +157,14 @@ def _stub_template_asset_lookup(
         name=name,
         checksum=checksum,
     )
-    service.template_asset_repo.get.return_value = asset
-    service.file_repo.get_by_id.return_value = SimpleNamespace(
+    file = SimpleNamespace(
         id=file_id,
         checksum=checksum,
         name=name,
         tenant_id=service.user.tenant_id,
         blob=blob,
     )
+    service.template_asset_service.get_asset_with_file.return_value = (asset, file)
     return asset
 
 
@@ -181,8 +182,7 @@ def _service(
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
+        template_asset_service=AsyncMock(),
         encryption_service=encryption_service,
         space_service=space_service,
     )
@@ -221,7 +221,7 @@ async def test_template_file_reference_requires_persisted_flow_id(user) -> None:
     with pytest.raises(FlowPersistedIdMissingError):
         await service._resolve_template_asset_reference(step=step, flow=flow)
 
-    service.template_asset_repo.get.assert_not_awaited()
+    service.template_asset_service.get_asset_with_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1136,13 +1136,10 @@ async def test_get_owned_docx_template_file_reports_missing_blob_clearly(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
-    file_id = uuid4()
-    asset = _stub_template_asset_lookup(
-        service,
-        flow_id=uuid4(),
-        file_id=file_id,
-        name="template.docx",
-        blob=None,
+    asset = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+    service.template_asset_service.get_asset_with_file.side_effect = BadRequestException(
+        "The selected DOCX template could not be read because the file content is missing.",
+        code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
     )
 
     with pytest.raises(
@@ -1827,8 +1824,6 @@ async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     with pytest.raises(
@@ -1867,8 +1862,6 @@ async def test_create_flow_allows_scoped_assistant_references_before_flow_exists
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
     step = _step(step_order=1).model_copy(update={"assistant_id": assistant_id})
 
@@ -1896,8 +1889,6 @@ async def test_create_flow_allows_empty_steps_with_strict_flow_managed_enforceme
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     created = await service.create_flow(
@@ -1947,8 +1938,6 @@ async def test_update_flow_rejects_flow_managed_assistants_not_owned_by_flow(use
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     with pytest.raises(
@@ -1994,8 +1983,6 @@ async def test_publish_flow_rejects_flow_managed_assistants_not_owned_by_flow(us
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     with pytest.raises(
@@ -2041,8 +2028,6 @@ async def test_publish_flow_rejects_assistant_model_below_required_security_leve
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
         space_service=AsyncMock(),
     )
     service.space_service.get_space.return_value = SimpleNamespace(
@@ -2121,8 +2106,6 @@ async def test_publish_flow_rejects_output_override_write_down(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
         space_service=AsyncMock(),
     )
     service.space_service.get_space.return_value = SimpleNamespace(
@@ -2197,8 +2180,6 @@ async def test_update_flow_assistant_rejects_when_flow_published(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -2239,8 +2220,6 @@ async def test_create_flow_assistant_sets_flow_managed_origin(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -2285,8 +2264,6 @@ async def test_get_flow_assistant_rejects_wrong_owner(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -2330,8 +2307,6 @@ async def test_get_flow_assistant_rejects_non_flow_managed(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -2376,8 +2351,6 @@ async def test_update_flow_assistant_passes_include_hidden(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -2430,8 +2403,6 @@ async def test_update_flow_assistant_explicit_none_forwards_completion_model_cle
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -2487,8 +2458,6 @@ async def test_update_flow_assistant_forwards_every_command_field(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -2565,8 +2534,6 @@ async def test_update_flow_assistant_skips_security_validation_without_security_
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
         space_service=space_service,
     )
 
@@ -2615,8 +2582,6 @@ async def test_update_flow_assistant_validates_explicit_security_field_set_to_no
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
         space_service=space_service,
     )
 
@@ -2668,8 +2633,6 @@ async def test_update_flow_assistant_security_validation_accepts_model_clear(use
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
         space_service=space_service,
     )
 
@@ -2717,8 +2680,6 @@ async def test_update_flow_assistant_rejects_mcp_configuration(user):
         flow_repo=AsyncMock(),
         flow_version_repo=AsyncMock(),
         assistant_service=AsyncMock(),
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
     )
 
     with pytest.raises(BadRequestException, match="Flow MCP is unsupported"):

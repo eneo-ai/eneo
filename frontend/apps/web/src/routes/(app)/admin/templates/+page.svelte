@@ -12,7 +12,7 @@
   import AssistantTemplatesTable from "./AssistantTemplatesTable.svelte";
   import AppTemplatesTable from "./AppTemplatesTable.svelte";
   import DeletedTemplatesTable from "./DeletedTemplatesTable.svelte";
-  import { LayoutTemplate } from "lucide-svelte";
+  import LayoutTemplate from "lucide-svelte/icons/layout-template";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";

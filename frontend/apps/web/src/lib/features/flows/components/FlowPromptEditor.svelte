@@ -18,7 +18,7 @@
   } from "./flowPromptVariables";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { CircleAlert } from "lucide-svelte";
+  import CircleAlert from "lucide-svelte/icons/circle-alert";
 
   let {
     value,
