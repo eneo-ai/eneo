@@ -25,13 +25,15 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 from eneo.main.models import Status
-from eneo.object_content.content import StorageKind
+from eneo.object_content.content import (
+    ObjectContentBusyError,
+    ObjectContentUnavailableError,
+    StorageKind,
+)
 from eneo.worker.redis import redis_lease
 from eneo.worker.task_manager import TaskManager
 
 if TYPE_CHECKING:
-    import redis.asyncio as aioredis
-
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 
 KNOWLEDGE_HEARTBEAT_INTERVAL_SECONDS = 30
@@ -134,45 +136,6 @@ async def _precheck_knowledge_upload_capacity(
 
 
 @asynccontextmanager
-async def _try_knowledge_original_publication_claim(
-    redis_client: "aioredis.Redis",
-    claim_key: str,
-) -> AsyncGenerator[bool]:
-    acquired_result = asyncio.get_running_loop().create_future()
-    release = asyncio.Event()
-
-    async def hold_claim() -> None:
-        try:
-            async with redis_lease(redis_client, claim_key) as acquired:
-                acquired_result.set_result(acquired)
-                if acquired:
-                    await release.wait()
-        except BaseException as exc:
-            if not acquired_result.done():
-                acquired_result.set_exception(exc)
-            raise
-
-    holder = asyncio.create_task(hold_claim())
-    try:
-        acquired = await acquired_result
-    except BaseException:
-        holder.cancel()
-        await asyncio.gather(holder, return_exceptions=True)
-        raise
-
-    try:
-        yield acquired
-    finally:
-        release.set()
-        (holder_result,) = await asyncio.gather(holder, return_exceptions=True)
-        if isinstance(holder_result, Exception):
-            logger.warning(
-                "Knowledge publication claim ended unexpectedly",
-                extra={"lock_key": claim_key, "error": str(holder_result)},
-            )
-
-
-@asynccontextmanager
 async def _knowledge_original_publication_claim(
     *,
     container: Container,
@@ -189,38 +152,32 @@ async def _knowledge_original_publication_claim(
 
     while True:
         try:
-            async with _try_knowledge_original_publication_claim(
-                container.redis_client(), claim_key
+            async with redis_lease(
+                container.redis_client(),
+                claim_key,
+                log_lock_key=False,
             ) as acquired:
                 if acquired:
-                    # This claim only avoids duplicate paid remote work. The
-                    # database publication lock and orphan inventory remain the
-                    # correctness owners, so losing Redis must not cancel the job.
                     yield
                     return
         except (OSError, RedisError) as exc:
             logger.warning(
-                "Unable to coordinate knowledge publication; using database fences",
-                extra={"lock_key": claim_key, "error": str(exc)},
+                "Unable to coordinate knowledge publication",
             )
-            yield
-            return
-
-        remaining_seconds = deadline - loop.time()
-        if remaining_seconds <= 0:
-            logger.warning(
-                "Knowledge publication claim wait expired; using database fences",
-                extra={"lock_key": claim_key},
-            )
-            yield
-            return
+            raise ObjectContentUnavailableError(
+                "Knowledge publication coordination is unavailable"
+            ) from exc
 
         if not waiting_logged:
-            logger.info(
-                "Waiting for matching knowledge publication",
-                extra={"lock_key": claim_key},
-            )
+            logger.info("Waiting for matching knowledge publication")
             waiting_logged = True
+        remaining_seconds = deadline - loop.time()
+        if remaining_seconds <= 0:
+            logger.warning("Knowledge publication claim wait expired")
+            raise ObjectContentBusyError(
+                "Matching knowledge publication is still in progress"
+            )
+
         jittered_retry = retry_seconds * random.uniform(0.8, 1.2)
         await asyncio.sleep(min(jittered_retry, remaining_seconds))
         retry_seconds = min(
@@ -255,6 +212,42 @@ async def _publish_prepared_knowledge_upload(
             return info_blob
 
 
+async def _publish_claimed_knowledge_upload(
+    *,
+    container: Container,
+    lifecycle: "_KnowledgeJobLifecycle",
+    params: UploadInfoBlob | Transcription,
+    text: str,
+    embedding_model: EmbeddingModel,
+    captured_original: CapturedKnowledgeOriginal,
+) -> InfoBlobInDB:
+    async with _knowledge_original_publication_claim(
+        container=container,
+        group_id=params.group_id,
+        original_sha256=captured_original.captured.sha256,
+    ):
+        async with Container.session_scope():
+            uploader = container.text_processor()
+            info_blob = await uploader.try_refresh_healthy_reupload(
+                text=text,
+                embedding_model=embedding_model,
+                title=params.filename,
+                group_id=params.group_id,
+                original=captured_original,
+            )
+            if info_blob is not None:
+                await lifecycle.finalize(f"/api/v1/info-blobs/{info_blob.id}/")
+                return info_blob
+        return await _publish_prepared_knowledge_upload(
+            container=container,
+            lifecycle=lifecycle,
+            params=params,
+            text=text,
+            embedding_model=embedding_model,
+            captured_original=captured_original,
+        )
+
+
 async def _publish_knowledge_upload(
     *,
     container: Container,
@@ -274,24 +267,8 @@ async def _publish_knowledge_upload(
         )
 
     if captured_original.storage_kind is StorageKind.OBJECT_STORE:
-        async with _knowledge_original_publication_claim(
-            container=container,
-            group_id=params.group_id,
-            original_sha256=captured_original.captured.sha256,
-        ):
-            async with Container.session_scope():
-                uploader = container.text_processor()
-                info_blob = await uploader.try_refresh_healthy_reupload(
-                    text=text,
-                    embedding_model=embedding_model,
-                    title=params.filename,
-                    group_id=params.group_id,
-                    original=captured_original,
-                )
-                if info_blob is not None:
-                    await lifecycle.finalize(f"/api/v1/info-blobs/{info_blob.id}/")
-                    return info_blob
-            return await _publish_prepared_knowledge_upload(
+        claimed_publication = asyncio.create_task(
+            _publish_claimed_knowledge_upload(
                 container=container,
                 lifecycle=lifecycle,
                 params=params,
@@ -299,6 +276,16 @@ async def _publish_knowledge_upload(
                 embedding_model=embedding_model,
                 captured_original=captured_original,
             )
+        )
+        try:
+            return await claimed_publication
+        except asyncio.CancelledError as exc:
+            owner_task = asyncio.current_task()
+            if owner_task is not None and owner_task.cancelling():
+                raise
+            raise ObjectContentUnavailableError(
+                "Knowledge publication coordination was lost"
+            ) from exc
 
     return await _publish_prepared_knowledge_upload(
         container=container,
