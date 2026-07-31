@@ -33,11 +33,12 @@
     chunkSize ?? policy.default_chunk_size
   );
 
-  /** A stored overlap set through the API need not land on one of our steps. Keep the
-   * exact token count in that case instead of snapping the slider, so the value shown
-   * never disagrees with the value indexed. */
+  /** An overlap that does not land on one of our steps — a value set through the API,
+   * or a deployment default whose ratio is not a whole step — keeps its exact token
+   * count instead of snapping, so the value shown never disagrees with the value
+   * indexed. Cleared only when the user moves the slider. */
   let exactOverlapTokens: number | null = offStepTokens(
-    chunkOverlap,
+    chunkOverlap ?? policy.default_chunk_overlap,
     chunkSize ?? policy.default_chunk_size
   );
 
@@ -63,7 +64,9 @@
     if (on && !wasCustomizing) {
       sizeValue = policy.default_chunk_size;
       overlapPercent = toPercent(policy.default_chunk_overlap, policy.default_chunk_size);
-      exactOverlapTokens = null;
+      // Keep the deployment's exact default rather than a value rebuilt from a
+      // rounded percentage — enabling the switch must not move the other control.
+      exactOverlapTokens = offStepTokens(policy.default_chunk_overlap, policy.default_chunk_size);
     }
     wasCustomizing = on;
   }
@@ -75,6 +78,11 @@
 
   // Tokens are what the API and the index actually use.
   $: overlapTokens = exactOverlapTokens ?? Math.round((sizeValue * overlapPercent) / 100);
+
+  // Report the share the tokens really represent, which can differ from the slider
+  // position while an exact value is being preserved.
+  $: displayPercent =
+    sizeValue > 0 ? Math.round((overlapTokens / sizeValue) * 100) : overlapPercent;
 
   // Derive the nullable props: null when off (use defaults), the value when on.
   $: chunkSize = customize ? sizeValue : null;
@@ -118,7 +126,7 @@
           }}
         />
         <span class="text-secondary w-28 shrink-0 text-right text-xs">
-          {m.chunk_overlap_value({ percent: overlapPercent, tokens: overlapTokens })}
+          {m.chunk_overlap_value({ percent: displayPercent, tokens: overlapTokens })}
         </span>
       </div>
       <p class="text-secondary mt-1 pl-3 text-xs">{m.chunk_overlap_description()}</p>

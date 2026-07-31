@@ -4228,7 +4228,7 @@
   "chunk_size_description": "Ungefärlig storlek på varje textbit. Större bitar behåller mer sammanhang; mindre bitar ger mer precisa träffar.",
   "chunk_overlap_label": "Chunk-överlapp (tokens)",
   "chunk_overlap_description": "Hur mycket intilliggande bitar överlappar, så att sammanhang inte tappas vid gränserna. Högre överlapp ger fler bitar att embedda och lagra.",
-  "chunk_settings_reembed_note": "Ändringar gäller endast nytt eller ominläst innehåll. Redan indexerat material behåller sin nuvarande chunkning tills det laddas upp igen.",
+  "chunk_settings_reembed_note": "Ändringar slår igenom när källan bearbetas nästa gång: webbplatser vid nästa crawl, uppladdat material när det laddas upp igen. Innehåll som inte bearbetas om behåller sin nuvarande chunkning.",
   "chunk_size_ceiling_note": "Begränsas till {ceiling} tokens för den valda embedding-modellen.",
   "chunk_overlap_value": "{percent} % · {tokens} tokens"
 }

@@ -40,6 +40,16 @@ def max_overlap_for(chunk_size: int) -> int:
     return int(chunk_size * MAX_OVERLAP_FRACTION)
 
 
+def default_overlap_ratio() -> float:
+    """The platform default overlap expressed as a share of the default size.
+
+    This is what a defaulted overlap means for a source that chose its own size.
+    """
+    if settings.chunk_size <= 0:
+        return 0.0
+    return settings.chunk_overlap / settings.chunk_size
+
+
 def validate_overlap_within_policy(chunk_size: int, chunk_overlap: int) -> None:
     """Raise when an explicitly requested pair exceeds the overlap ceiling.
 
@@ -77,13 +87,25 @@ def resolve_chunk_config(
     material was chunked with the configuration that is in force now. Comparing
     raw config instead would report a difference between ``None`` and an explicit
     200 even though both split the text identically.
+
+    A defaulted overlap follows the platform's default *ratio* rather than its
+    absolute token count. The ceiling is a share of the size, so an absolute default
+    cannot honour it: a source that sets only ``chunk_size=50`` would otherwise take
+    the platform's 40 tokens and land on 80% overlap, well past a limit the API
+    refuses for an explicit pair. Taking the ratio keeps every combination inside the
+    policy and scales with the size the caller actually chose. A source on full
+    defaults is unaffected — the ratio of the default pair reproduces it exactly.
     """
     size = chunk_size if chunk_size is not None else settings.chunk_size
-    overlap = chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
-    # RecursiveCharacterTextSplitter raises only when overlap > size, so cap at the
-    # size itself. Capping lower would silently index a different overlap than the
-    # one the source stores and shows. The cap still covers a small chunk_size
-    # combined with a larger platform-default overlap, which is what would crash.
+    if chunk_overlap is not None:
+        overlap = chunk_overlap
+    elif size == settings.chunk_size:
+        overlap = settings.chunk_overlap
+    else:
+        overlap = round(size * default_overlap_ratio())
+    # Last guard for values that never passed the API — an env-configured pair, or a
+    # row written before the ceiling existed. RecursiveCharacterTextSplitter raises
+    # only when overlap > size, so that is where this caps.
     return size, min(overlap, size)
 
 

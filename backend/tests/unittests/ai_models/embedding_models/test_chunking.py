@@ -29,8 +29,30 @@ def test_resolve_uses_explicit_values(platform_defaults: ChunkSettings):
 
 
 def test_resolve_fills_only_the_missing_value(platform_defaults: ChunkSettings):
-    assert resolve_chunk_config(500, None) == (500, 40)
+    # A defaulted overlap follows the default ratio (20%), not its token count.
+    assert resolve_chunk_config(500, None) == (500, 100)
     assert resolve_chunk_config(None, 10) == (200, 10)
+
+
+@pytest.mark.parametrize("chunk_size", [1, 50, 100, 128, 200, 1000, 5000])
+def test_a_defaulted_overlap_always_stays_inside_the_ceiling(
+    platform_defaults: ChunkSettings, chunk_size: int
+):
+    # The ceiling is a share of the size, so an absolute default cannot honour it:
+    # a source setting only chunk_size=50 would take the platform's 40 tokens and
+    # land on 80% overlap, which the API refuses for an explicit pair.
+    _, overlap = resolve_chunk_config(chunk_size, None)
+
+    assert overlap <= max_overlap_for(chunk_size)
+
+
+def test_a_source_on_full_defaults_is_unaffected_by_the_ratio(
+    platform_defaults: ChunkSettings,
+):
+    assert resolve_chunk_config(None, None) == (
+        platform_defaults.chunk_size,
+        platform_defaults.chunk_overlap,
+    )
 
 
 @pytest.mark.parametrize(
@@ -39,7 +61,7 @@ def test_resolve_fills_only_the_missing_value(platform_defaults: ChunkSettings):
         (50, 40, 40),  # a valid overlap is honoured, never quietly reduced
         (50, 60, 50),  # above the splitter's limit it is capped, not crashed
         (200, 40, 40),  # the platform default pair passes through
-        (1, 40, 1),  # a size of 1 caps the platform default overlap to 1
+        (1, 40, 1),  # an explicit overlap larger than the size caps to the size
     ],
 )
 def test_resolve_caps_overlap_below_chunk_size(
