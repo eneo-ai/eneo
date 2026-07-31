@@ -1099,8 +1099,9 @@ Every admitted item in `step_attempts` has a required
 `resolved_input_lineage` union. Branch on its `status`:
 
 - `tracked` contains the exact persisted source edges used by that attempt,
-  including source attempt identity, selected JSON path, and a hash and byte
-  size of the selected value; it does not copy the raw selected value
+  including source attempt identity, selected JSON path, and either the
+  selected value's hash and byte size or the bound runtime file identity; it
+  does not copy the raw selected value
 - `not_tracked` means no lineage row and no valid identity-matching
   attempt-retention marker establishes retention
 - `retention_purged` means a valid identity-matching attempt-retention marker

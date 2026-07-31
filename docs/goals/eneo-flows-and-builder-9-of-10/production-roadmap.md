@@ -23,9 +23,11 @@ plan against current source, not carried over blind).
 - Working model: the lead agent owns scope, source verification, validation,
   final judgment, roadmap, and git. Workers implement only substantial frozen,
   independently testable slices in separate worktrees; the lead handles small
-  or context-heavy corrections directly. One skeptical gate reviews a stable
-  candidate (green ≥8 to land); resume it only for a verified material finding,
-  never for routine polish or landing mechanics.
+  or context-heavy corrections directly. One skeptical Codex gate reviews a
+  stable candidate (green ≥8 to commit); the committed candidate then receives
+  one read-only Claude Opus/high gate before push, with one final resume only
+  for a verified material finding. Never review routine landing mechanics or
+  duplicate a gate that already covers the exact commit range.
 - Evidence vocabulary: retrieved ≠ included-in-prompt ≠ material influence.
   Exports are complete-or-refuse; views narrow honestly and say what they
   left out.

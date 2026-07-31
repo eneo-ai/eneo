@@ -3803,6 +3803,7 @@ def test_flow_api_guide_documents_exact_attempt_input_lineage_states() -> None:
     ):
         assert lineage_state in evidence_view
     assert "source attempt identity" in evidence_view
+    assert "bound runtime file identity" in evidence_view
     assert "does not copy the raw selected value" in evidence_view
     assert (
         "no lineage row and no valid identity-matching attempt-retention marker "

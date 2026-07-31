@@ -21,6 +21,7 @@ from eneo.flows.flow_run_provenance import (
     FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES,
     FLOW_RESOLVED_INPUT_MAX_EDGES,
     FlowAttemptProvenanceParseResult,
+    FlowAttemptScopedProvenance,
     FlowResolvedInputEdges,
     group_resolved_input_edges,
     parse_attempt_provenance_for_attempt,
@@ -117,7 +118,9 @@ def test_tracked_projection_preserves_exact_canonical_byte_limit() -> None:
 
     lineage = project_resolved_input_lineage(
         resolved_inputs=parse_resolved_input_edges(aggregate.model_dump(mode="json")),
-        scoped_attempt_provenance=FlowAttemptProvenanceParseResult.not_tracked(),
+        scoped_attempt_provenance=FlowAttemptScopedProvenance(
+            parse_result=FlowAttemptProvenanceParseResult.not_tracked()
+        ),
     )
 
     assert lineage.status == "tracked"
@@ -273,15 +276,17 @@ def test_missing_resolved_input_lineage_uses_attempt_retention_marker() -> None:
         )
     )
 
-    parse_result = parse_attempt_provenance_for_attempt(
+    scoped_provenance = parse_attempt_provenance_for_attempt(
         marker.to_payload(),
         tenant_id=tenant_id,
         run_id=run_id,
         attempt_id=attempt_id,
     )
+    assert scoped_provenance.retention_counts == marker.tombstone.counts
+
     lineage = project_resolved_input_lineage(
         resolved_inputs=parse_resolved_input_edges(None),
-        scoped_attempt_provenance=parse_result,
+        scoped_attempt_provenance=scoped_provenance,
     )
 
     assert lineage.model_dump(mode="json") == {
@@ -326,7 +331,7 @@ def test_missing_lineage_does_not_trust_another_attempts_retention_marker(
         )
     )
 
-    parse_result = parse_attempt_provenance_for_attempt(
+    scoped_provenance = parse_attempt_provenance_for_attempt(
         marker.to_payload(),
         tenant_id=tenant_id,
         run_id=run_id,
@@ -334,9 +339,10 @@ def test_missing_lineage_does_not_trust_another_attempts_retention_marker(
     )
     lineage = project_resolved_input_lineage(
         resolved_inputs=parse_resolved_input_edges(None),
-        scoped_attempt_provenance=parse_result,
+        scoped_attempt_provenance=scoped_provenance,
     )
 
+    parse_result = scoped_provenance.parse_result
     assert parse_result.status == "corrupt"
     assert parse_result.marker is not None
     assert (
@@ -388,7 +394,7 @@ def test_negative_attempt_retention_counts_are_corrupt(
     assert isinstance(counts, dict)
     counts[count_field] = -1
 
-    parse_result = parse_attempt_provenance_for_attempt(
+    scoped_provenance = parse_attempt_provenance_for_attempt(
         raw_marker,
         tenant_id=tenant_id,
         run_id=run_id,
@@ -396,9 +402,10 @@ def test_negative_attempt_retention_counts_are_corrupt(
     )
     lineage = project_resolved_input_lineage(
         resolved_inputs=parse_resolved_input_edges(None),
-        scoped_attempt_provenance=parse_result,
+        scoped_attempt_provenance=scoped_provenance,
     )
 
+    parse_result = scoped_provenance.parse_result
     assert parse_result.status == "corrupt"
     assert parse_result.marker is not None
     assert (

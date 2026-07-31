@@ -25,7 +25,7 @@ from eneo.flows.flow_retention_tombstone import (
     FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
     FlowAttemptRetentionMarker,
     RunDebugAttemptRetentionCounts,
-    parse_attempt_retention_counts,
+    match_attempt_retention_counts,
 )
 from eneo.flows.source_display import (
     format_source_container_display_name,
@@ -141,7 +141,7 @@ class FlowResolvedInputEdge(_FlowResolvedInputModel):
         return self
 
 
-class FlowResolvedInputEdges(_FlowResolvedInputModel):
+class _FlowResolvedInputEdgesFields(_FlowResolvedInputModel):
     schema_version: Literal[1]
     edges: tuple[FlowResolvedInputEdge, ...] = Field(
         max_length=FLOW_RESOLVED_INPUT_MAX_EDGES
@@ -154,16 +154,11 @@ class FlowResolvedInputEdges(_FlowResolvedInputModel):
             raise ValueError("schema_version must be the integer 1.")
         return value
 
+
+class FlowResolvedInputEdges(_FlowResolvedInputEdgesFields):
     @model_validator(mode="after")
     def _canonical_size_is_bounded(self) -> "FlowResolvedInputEdges":
-        canonical_size = len(
-            canonical_json_bytes(
-                {
-                    "schema_version": self.schema_version,
-                    "edges": [edge.model_dump(mode="json") for edge in self.edges],
-                }
-            )
-        )
+        canonical_size = len(canonical_json_bytes(self.model_dump(mode="json")))
         if canonical_size > FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES:
             raise ValueError(
                 "Resolved input edges canonical JSON exceeds "
@@ -331,7 +326,7 @@ class FlowResolvedInputLineageNotTracked(_FlowResolvedInputModel):
     status: Literal["not_tracked"]
 
 
-class FlowResolvedInputLineageTracked(FlowResolvedInputEdges):
+class FlowResolvedInputLineageTracked(_FlowResolvedInputEdgesFields):
     status: Literal["tracked"]
 
 
@@ -598,10 +593,24 @@ class FlowAttemptProvenanceParseResult:
         return None
 
 
+@dataclass(frozen=True)
+class FlowAttemptScopedProvenance:
+    parse_result: FlowAttemptProvenanceParseResult
+    retention_counts: RunDebugAttemptRetentionCounts | None = None
+
+    def __post_init__(self) -> None:
+        if (self.parse_result.status == "retention_purged") != (
+            self.retention_counts is not None
+        ):
+            raise ValueError(
+                "Scoped retention-purged provenance requires validated counts."
+            )
+
+
 def project_resolved_input_lineage(
     *,
     resolved_inputs: FlowResolvedInputEdgesParseResult,
-    scoped_attempt_provenance: FlowAttemptProvenanceParseResult,
+    scoped_attempt_provenance: FlowAttemptScopedProvenance,
 ) -> FlowResolvedInputLineage:
     """Project exact lineage and explain a missing row after retention."""
     if resolved_inputs.status == "tracked":
@@ -614,14 +623,8 @@ def project_resolved_input_lineage(
     if resolved_inputs.status == "corrupt":
         assert resolved_inputs.marker is not None
         return resolved_inputs.marker
-    if (
-        scoped_attempt_provenance.status == "retention_purged"
-        and scoped_attempt_provenance.retention_marker is not None
-    ):
-        counts = cast(
-            RunDebugAttemptRetentionCounts,
-            scoped_attempt_provenance.retention_marker.tombstone.counts,
-        )
+    counts = scoped_attempt_provenance.retention_counts
+    if counts is not None:
         return FlowResolvedInputLineageRetentionPurged(
             status="retention_purged",
             resolved_input_aggregate_count=counts.resolved_input_aggregate_count,
@@ -858,30 +861,32 @@ def parse_attempt_provenance_for_attempt(
     tenant_id: UUID,
     run_id: UUID,
     attempt_id: UUID,
-) -> FlowAttemptProvenanceParseResult:
+) -> FlowAttemptScopedProvenance:
     """Parse provenance and reject a retention marker for another attempt."""
     parse_result = parse_attempt_provenance(raw)
-    if (
-        parse_result.status != "retention_purged"
-        or parse_result.retention_marker is None
-    ):
-        return parse_result
-    if (
-        parse_attempt_retention_counts(
-            parse_result.retention_marker.to_payload(),
-            tenant_id=tenant_id,
-            run_id=run_id,
-            attempt_id=attempt_id,
+    if parse_result.status != "retention_purged":
+        return FlowAttemptScopedProvenance(parse_result=parse_result)
+    assert parse_result.retention_marker is not None
+
+    retention_counts = match_attempt_retention_counts(
+        parse_result.retention_marker,
+        tenant_id=tenant_id,
+        run_id=run_id,
+        attempt_id=attempt_id,
+    )
+    if retention_counts is not None:
+        return FlowAttemptScopedProvenance(
+            parse_result=parse_result,
+            retention_counts=retention_counts,
         )
-        is not None
-    ):
-        return parse_result
-    return FlowAttemptProvenanceParseResult.corrupt(
-        _corruption_marker(
-            error_code="flow_attempt_provenance_invalid_retention_marker",
-            message="Attempt retention marker identity does not match its attempt.",
-            raw=raw,
-            persisted_schema_version=FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
+    return FlowAttemptScopedProvenance(
+        parse_result=FlowAttemptProvenanceParseResult.corrupt(
+            _corruption_marker(
+                error_code="flow_attempt_provenance_invalid_retention_marker",
+                message="Attempt retention marker identity does not match its attempt.",
+                raw=raw,
+                persisted_schema_version=FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
+            )
         )
     )
 

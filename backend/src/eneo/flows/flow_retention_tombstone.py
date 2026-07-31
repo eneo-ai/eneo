@@ -145,6 +145,22 @@ def parse_attempt_retention_counts(
         )
     except ValueError:
         return None
+    return match_attempt_retention_counts(
+        marker,
+        tenant_id=tenant_id,
+        run_id=run_id,
+        attempt_id=attempt_id,
+    )
+
+
+def match_attempt_retention_counts(
+    marker: FlowAttemptRetentionMarker,
+    *,
+    tenant_id: UUID,
+    run_id: UUID,
+    attempt_id: UUID,
+) -> RunDebugAttemptRetentionCounts | None:
+    """Return typed counts only when this marker belongs to the attempt row."""
     tombstone = marker.tombstone
     if (
         tombstone.tenant_id != str(tenant_id)

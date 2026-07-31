@@ -195,8 +195,9 @@ def build_evidence_bundle(
     version: FlowVersion,
     step_results: Sequence[FlowStepResult],
     step_attempts: Sequence[FlowStepAttempt],
-    resolved_input_edges_by_attempt_id: Mapping[UUID, FlowResolvedInputEdgesParseResult]
-    | None = None,
+    resolved_input_edges_by_attempt_id: Mapping[
+        UUID, FlowResolvedInputEdgesParseResult
+    ],
     result_files: Sequence[FlowRunStepResultFile] = (),
     rerun_operations: Sequence[FlowRunRerunOperation] = (),
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep] = (),
@@ -213,7 +214,7 @@ def build_evidence_bundle(
     knowledge_evidence_view: RunViewPassageOmission | None = None,
     omissions: Sequence[RunViewEvidenceOmission] = (),
 ) -> EvidenceBundle:
-    resolved_input_lineages = resolved_input_edges_by_attempt_id or {}
+    resolved_input_lineages = resolved_input_edges_by_attempt_id
     admitted_attempt_ids = {attempt.id for attempt in step_attempts}
     projected_attempt_ids = set(resolved_input_lineages)
     if projected_attempt_ids != admitted_attempt_ids:
@@ -574,17 +575,18 @@ def _dump_attempt_record(
     resolved_inputs: FlowResolvedInputEdgesParseResult,
 ) -> tuple[dict[str, Any], FlowAttemptProvenanceParseResult]:
     dumped = item.model_dump(mode="json")
-    parse_result = parse_attempt_provenance_for_attempt(
+    scoped_provenance = parse_attempt_provenance_for_attempt(
         item.provenance_json,
         tenant_id=item.tenant_id,
         run_id=item.flow_run_id,
         attempt_id=item.id,
     )
+    parse_result = scoped_provenance.parse_result
     dumped["provenance_json"] = parse_result.to_export_payload()
     input_parse_result = parse_flow_step_attempt_input(item.input_payload_json)
     dumped["input_payload_json"] = input_parse_result.to_export_payload()
     dumped["resolved_input_lineage"] = project_resolved_input_lineage(
         resolved_inputs=resolved_inputs,
-        scoped_attempt_provenance=parse_result,
+        scoped_attempt_provenance=scoped_provenance,
     ).model_dump(mode="json")
     return dumped, parse_result

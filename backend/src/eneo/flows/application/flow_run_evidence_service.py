@@ -904,7 +904,7 @@ class FlowRunEvidenceService:
         Raw and redacted exports both enforce the exact retained passage total
         before load. After disclosure and redaction, the carried-text guard
         independently checks what the export will contain. Both export kinds
-        also enforce the stored size of all attempt evidence because loading it
+        also enforce the stored size of all attempt provenance because loading it
         is a cost the passage limit cannot see; stored jsonb is a compressed
         floor, so exceeding that guard understates the real cost.
         """
