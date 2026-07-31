@@ -6,7 +6,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,12 +18,13 @@ from eneo.database.tables.job_table import Jobs
 from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import InfoBlobInDB
-from eneo.jobs.job_models import Task
+from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.models import ChannelType, RedisMessage, Status
+from eneo.worker import routes as worker_routes
 from eneo.worker import task_manager as task_manager_module
 from eneo.worker import upload_tasks
 from eneo.worker.task_manager import TaskManager
@@ -639,10 +640,16 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_bytes(b"replacement")
     redis_publish = AsyncMock()
+    failure_log = MagicMock()
     monkeypatch.setattr(
         task_manager_module,
         "r",
         SimpleNamespace(publish=redis_publish),
+    )
+    monkeypatch.setattr(
+        upload_tasks,
+        "logger",
+        SimpleNamespace(warning=failure_log),
     )
     compute_started = asyncio.Event()
     compute_cancelled = asyncio.Event()
@@ -719,7 +726,8 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
                 .where(Jobs.id == job_id)
                 .values(
                     status=Status.FAILED.value,
-                    result_location="Reaped before cancellation",
+                    result_location=None,
+                    failure_code=JobFailureCode.PROCESSING_INTERRUPTED.value,
                     finished_at=reaped_finished_at,
                     updated_at=reaped_finished_at,
                 )
@@ -735,11 +743,12 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
     assert compute_cancelled.is_set()
 
     async with sessionmanager.session() as session, session.begin():
-        status, reason, finished_at = (
+        status, result_location, failure_code, finished_at = (
             await session.execute(
                 sa.select(
                     Jobs.status,
                     Jobs.result_location,
+                    Jobs.failure_code,
                     Jobs.finished_at,
                 ).where(Jobs.id == job_id)
             )
@@ -749,17 +758,28 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
         for call in redis_publish.await_args_list
     ]
     if reaped_before_cancel:
-        assert (status, reason, finished_at) == (
+        assert (status, result_location, failure_code, finished_at) == (
             Status.FAILED.value,
-            "Reaped before cancellation",
+            None,
+            JobFailureCode.PROCESSING_INTERRUPTED.value,
             reaped_finished_at,
         )
         assert published_statuses == [Status.IN_PROGRESS]
+        failure_log.assert_not_called()
     else:
         assert status == Status.FAILED.value
-        assert reason == "Job cancelled"
+        assert result_location is None
+        assert failure_code == JobFailureCode.CANCELLED.value
         assert finished_at is not None
         assert published_statuses == [Status.IN_PROGRESS, Status.FAILED]
+        failure_log.assert_called_once_with(
+            "Knowledge job failed",
+            extra={
+                "job_id": str(job_id),
+                "task": Task.UPLOAD_FILE.value,
+                "failure_code": JobFailureCode.CANCELLED.value,
+            },
+        )
 
 
 async def test_reaper_only_fails_a_bounded_page_of_stale_in_progress_jobs(
@@ -820,23 +840,69 @@ async def test_reaper_only_fails_a_bounded_page_of_stale_in_progress_jobs(
 
     assert len(first) == job_repo.KNOWLEDGE_REAPER_PAGE_SIZE
     assert len(second) == 2
-    assert set(first + second) == set(stale_ids)
+    assert {job_id for job_id, _task in first + second} == set(stale_ids)
+    assert {task for _job_id, task in first + second} == {
+        Task.UPLOAD_FILE.value,
+        Task.TRANSCRIPTION.value,
+    }
     async with sessionmanager.session() as session, session.begin():
         rows = {
-            row.id: (row.status, row.result_location)
+            row.id: (row.status, row.result_location, row.failure_code)
             for row in (
                 await session.execute(
-                    sa.select(Jobs.id, Jobs.status, Jobs.result_location).where(
-                        Jobs.id.in_([*stale_ids, fresh_id, queued_id])
-                    )
+                    sa.select(
+                        Jobs.id,
+                        Jobs.status,
+                        Jobs.result_location,
+                        Jobs.failure_code,
+                    ).where(Jobs.id.in_([*stale_ids, fresh_id, queued_id]))
                 )
             ).all()
         }
     assert rows[fresh_id][0] == Status.IN_PROGRESS.value
     assert rows[queued_id][0] == Status.QUEUED.value
     assert all(
-        rows[job_id] == (Status.FAILED.value, job_repo.KNOWLEDGE_REAPER_FAILURE_REASON)
+        rows[job_id]
+        == (
+            Status.FAILED.value,
+            None,
+            JobFailureCode.PROCESSING_INTERRUPTED.value,
+        )
         for job_id in stale_ids
+    )
+
+
+async def test_reaper_logs_stable_failure_identity(db_container, monkeypatch) -> None:
+    job_id = uuid4()
+    stale_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    async with db_container() as setup:
+        user = setup.user()
+        setup.session().add(
+            Jobs(
+                id=job_id,
+                user_id=user.id,
+                task=Task.TRANSCRIPTION.value,
+                status=Status.IN_PROGRESS.value,
+                updated_at=stale_at,
+            )
+        )
+
+    failure_log = MagicMock()
+    monkeypatch.setattr(
+        worker_routes,
+        "logger",
+        SimpleNamespace(warning=failure_log),
+    )
+
+    await worker_routes.reap_stale_knowledge_jobs({})
+
+    failure_log.assert_called_once_with(
+        "Stale knowledge job failed",
+        extra={
+            "job_id": str(job_id),
+            "task": Task.TRANSCRIPTION.value,
+            "failure_code": JobFailureCode.PROCESSING_INTERRUPTED.value,
+        },
     )
 
 

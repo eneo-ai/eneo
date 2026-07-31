@@ -8,16 +8,21 @@ from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.job_table import Jobs
 from eneo.jobs.job_manager import job_manager
-from eneo.jobs.job_models import Job, JobInDb, JobUpdate
+from eneo.jobs.job_models import (
+    KNOWLEDGE_TASKS,
+    Job,
+    JobFailureCode,
+    JobInDb,
+    JobUpdate,
+)
 from eneo.jobs.task_models import DispatchEnvelope
 
 KNOWLEDGE_REAPER_PAGE_SIZE = 50
 KNOWLEDGE_JOB_STALE_AFTER = timedelta(minutes=5)
-KNOWLEDGE_REAPER_FAILURE_REASON = "Knowledge processing heartbeat expired"
 _IN_PROGRESS_SQL = sa.literal_column("'in progress'", type_=sa.String())
-_KNOWLEDGE_TASKS_SQL = (
-    sa.literal_column("'upload_info_blob'", type_=sa.String()),
-    sa.literal_column("'transcription'", type_=sa.String()),
+_KNOWLEDGE_TASK_VALUES = tuple(task.value for task in KNOWLEDGE_TASKS)
+_KNOWLEDGE_TASKS_SQL = tuple(
+    sa.literal_column(f"'{task}'", type_=sa.String()) for task in _KNOWLEDGE_TASK_VALUES
 )
 
 
@@ -38,11 +43,12 @@ def stale_in_progress_jobs_statement(stale_before: datetime):
         .where(Jobs.status == _IN_PROGRESS_SQL)
         .values(
             status="failed",
-            result_location=KNOWLEDGE_REAPER_FAILURE_REASON,
+            result_location=sa.null(),
+            failure_code=JobFailureCode.PROCESSING_INTERRUPTED.value,
             finished_at=sa.func.now(),
             updated_at=sa.func.now(),
         )
-        .returning(Jobs.id)
+        .returning(Jobs.id, Jobs.task)
     )
 
 
@@ -188,6 +194,30 @@ class JobRepository:
         result = await self.delegate.session.execute(stmt)
         return affected_row_count(result)
 
+    async def mark_knowledge_job_failed_if_running(
+        self,
+        id: UUID,
+        failure_code: JobFailureCode,
+    ) -> int:
+        """Fail an active knowledge job without persisting exception prose."""
+        from eneo.main.models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .where(Jobs.task.in_(_KNOWLEDGE_TASK_VALUES))
+            .where(Jobs.status.in_([Status.IN_PROGRESS, Status.QUEUED]))
+            .values(
+                status=Status.FAILED,
+                result_location=None,
+                failure_code=failure_code.value,
+                finished_at=sa.func.now(),
+                updated_at=sa.func.now(),
+            )
+        )
+        result = await self.delegate.session.execute(stmt)
+        return affected_row_count(result)
+
     async def mark_stale_jobs_failed(
         self,
         tasks: list[str],
@@ -226,11 +256,11 @@ class JobRepository:
     async def mark_stale_in_progress_jobs_failed(
         self,
         stale_before: datetime,
-    ) -> list[UUID]:
+    ) -> list[tuple[UUID, str]]:
         result = await self.delegate.session.execute(
             stale_in_progress_jobs_statement(stale_before)
         )
-        return [row[0] for row in result.all()]
+        return [(row.id, row.task) for row in result.all()]
 
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
