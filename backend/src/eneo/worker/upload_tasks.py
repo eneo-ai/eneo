@@ -1,13 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.files.text import NoExtractableTextError
-from eneo.info_blobs.info_blob import PreparedKnowledgeOriginal
+from eneo.info_blobs.info_blob import (
+    CapturedKnowledgeOriginal,
+    InfoBlobInDB,
+    PreparedKnowledgeOriginal,
+)
 from eneo.jobs.job_models import Task, failure_code_for_exception
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
@@ -17,6 +24,9 @@ from eneo.main.logging import get_logger
 from eneo.main.models import Status
 from eneo.object_content.content import StorageKind
 from eneo.worker.task_manager import TaskManager
+
+if TYPE_CHECKING:
+    from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 
 KNOWLEDGE_HEARTBEAT_INTERVAL_SECONDS = 30
 _STAGED_FILE_CHUNK_BYTES = 256 * 1024
@@ -39,16 +49,19 @@ async def _staged_file_chunks(filepath: Path) -> AsyncGenerator[bytes]:
 
 
 @asynccontextmanager
-async def _prepared_knowledge_original(
+async def _captured_knowledge_original(
     *,
     container: Container,
     job_id: UUID,
     filepath: Path,
     params: UploadInfoBlob | Transcription,
-) -> AsyncGenerator[PreparedKnowledgeOriginal]:
+) -> AsyncGenerator[CapturedKnowledgeOriginal]:
     admission = params.original_storage
     object_content = container.object_content_service()
     media_type = params.mimetype or "application/octet-stream"
+    await object_content.ensure_target_ready(admission.storage_target)
+    # Keep this bounded spool alive so admission and publication use the same
+    # bytes; configured content limits bound its temporary-disk footprint.
     async with object_content.capture_for_target(
         _staged_file_chunks(filepath),
         storage_kind=admission.storage_target,
@@ -56,25 +69,99 @@ async def _prepared_knowledge_original(
         verified_media_type=media_type,
         business_maximum_bytes=admission.maximum_bytes,
     ) as captured:
-        if admission.storage_target is StorageKind.POSTGRES_INLINE:
-            yield PreparedKnowledgeOriginal(
-                job_id=job_id,
-                original_filename=params.filename,
-                policy_revision=admission.policy_revision,
-                storage_kind=admission.storage_target,
-                captured=captured,
-            )
-            return
+        yield CapturedKnowledgeOriginal(
+            job_id=job_id,
+            original_filename=params.filename,
+            policy_revision=admission.policy_revision,
+            storage_kind=admission.storage_target,
+            captured=captured,
+        )
 
-        async with object_content.upload_for_publication((captured,)) as publication:
-            yield PreparedKnowledgeOriginal(
-                job_id=job_id,
-                original_filename=params.filename,
-                policy_revision=admission.policy_revision,
-                storage_kind=admission.storage_target,
-                captured=captured,
-                publication=publication,
+
+@asynccontextmanager
+async def _prepared_knowledge_original(
+    *,
+    container: Container,
+    captured_original: CapturedKnowledgeOriginal,
+) -> AsyncGenerator[PreparedKnowledgeOriginal]:
+    if captured_original.storage_kind is StorageKind.POSTGRES_INLINE:
+        yield PreparedKnowledgeOriginal(
+            job_id=captured_original.job_id,
+            original_filename=captured_original.original_filename,
+            policy_revision=captured_original.policy_revision,
+            storage_kind=captured_original.storage_kind,
+            captured=captured_original.captured,
+        )
+        return
+
+    object_content = container.object_content_service()
+    async with object_content.upload_for_publication(
+        (captured_original.captured,)
+    ) as publication:
+        yield PreparedKnowledgeOriginal(
+            job_id=captured_original.job_id,
+            original_filename=captured_original.original_filename,
+            policy_revision=captured_original.policy_revision,
+            storage_kind=captured_original.storage_kind,
+            captured=captured_original.captured,
+            publication=publication,
+        )
+
+
+async def _precheck_knowledge_upload_capacity(
+    *,
+    container: Container,
+    params: UploadInfoBlob | Transcription,
+    embedding_model_id: UUID,
+    original: CapturedKnowledgeOriginal,
+) -> None:
+    async with Container.session_scope():
+        await container.info_blob_service().precheck_knowledge_upload_capacity(
+            group_id=params.group_id,
+            title=params.filename,
+            embedding_model_id=embedding_model_id,
+            original=original,
+        )
+
+
+async def _publish_knowledge_upload(
+    *,
+    container: Container,
+    lifecycle: "_KnowledgeJobLifecycle",
+    params: UploadInfoBlob | Transcription,
+    text: str,
+    embedding_model: EmbeddingModel,
+    captured_original: CapturedKnowledgeOriginal,
+) -> InfoBlobInDB:
+    if captured_original.storage_kind is StorageKind.OBJECT_STORE:
+        async with Container.session_scope():
+            uploader = container.text_processor()
+            info_blob = await uploader.try_refresh_healthy_reupload(
+                text=text,
+                embedding_model=embedding_model,
+                title=params.filename,
+                group_id=params.group_id,
+                original=captured_original,
             )
+            if info_blob is not None:
+                await lifecycle.finalize(f"/api/v1/info-blobs/{info_blob.id}/")
+                return info_blob
+
+    async with _prepared_knowledge_original(
+        container=container,
+        captured_original=captured_original,
+    ) as original:
+        async with Container.session_scope():
+            uploader = container.text_processor()
+            info_blob = await uploader.process_text(
+                text=text,
+                embedding_model=embedding_model,
+                title=params.filename,
+                group_id=params.group_id,
+                original=original,
+            )
+            await lifecycle.finalize(f"/api/v1/info-blobs/{info_blob.id}/")
+            return info_blob
 
 
 async def _run_knowledge_heartbeat(
@@ -221,39 +308,43 @@ async def transcription_task(
                     "No transcription model enabled in the space."
                 )
 
-            transcriber = container.transcriber()
             group_service = container.group_service()
             group = await group_service.get_group(params.group_id)
             embedding_model = group.embedding_model
+            embedding_model_id = embedding_model.id
 
-            prepared_transcription = await transcriber.prepare_transcription(
-                transcription_model
-            )
-        text = await transcriber.transcribe_prepared_from_filepath(
-            filepath=filepath,
-            adapter=prepared_transcription,
-        )
-        if not text.strip():
-            raise NoExtractableTextError(params.filename)
-
-        async with _prepared_knowledge_original(
+        async with _captured_knowledge_original(
             container=container,
             job_id=job_id,
             filepath=filepath,
             params=params,
-        ) as original:
+        ) as captured_original:
+            await _precheck_knowledge_upload_capacity(
+                container=container,
+                params=params,
+                embedding_model_id=embedding_model_id,
+                original=captured_original,
+            )
             async with Container.session_scope():
-                uploader = container.text_processor()
-                info_blob = await uploader.process_text(
-                    text=text,
-                    embedding_model=embedding_model,
-                    title=params.filename,
-                    group_id=params.group_id,
-                    original=original,
+                transcriber = container.transcriber()
+                prepared_transcription = await transcriber.prepare_transcription(
+                    transcription_model
                 )
-                result_location = f"/api/v1/info-blobs/{info_blob.id}/"
-                await lifecycle.finalize(result_location)
-        assert info_blob is not None
+            text = await transcriber.transcribe_prepared_from_filepath(
+                filepath=filepath,
+                adapter=prepared_transcription,
+            )
+            if not text.strip():
+                raise NoExtractableTextError(params.filename)
+
+            await _publish_knowledge_upload(
+                container=container,
+                lifecycle=lifecycle,
+                params=params,
+                text=text,
+                embedding_model=embedding_model,
+                captured_original=captured_original,
+            )
 
     return lifecycle.task_manager.successful()
 
@@ -280,32 +371,34 @@ async def upload_info_blob_task(
             group = await group_service.get_group(params.group_id)
             embedding_model = group.embedding_model
 
-        text = await asyncio.to_thread(
-            container.text_extractor().extract,
-            filepath,
-            params.mimetype,
-            params.filename,
-        )
-        if not text.strip():
-            raise NoExtractableTextError(params.filename)
-
-        async with _prepared_knowledge_original(
+        async with _captured_knowledge_original(
             container=container,
             job_id=job_id,
             filepath=filepath,
             params=params,
-        ) as original:
-            async with Container.session_scope():
-                uploader = container.text_processor()
-                info_blob = await uploader.process_text(
-                    text=text,
-                    embedding_model=embedding_model,
-                    title=params.filename,
-                    group_id=params.group_id,
-                    original=original,
-                )
-                result_location = f"/api/v1/info-blobs/{info_blob.id}/"
-                await lifecycle.finalize(result_location)
-        assert info_blob is not None
+        ) as captured_original:
+            await _precheck_knowledge_upload_capacity(
+                container=container,
+                params=params,
+                embedding_model_id=embedding_model.id,
+                original=captured_original,
+            )
+            text = await asyncio.to_thread(
+                container.text_extractor().extract,
+                filepath,
+                params.mimetype,
+                params.filename,
+            )
+            if not text.strip():
+                raise NoExtractableTextError(params.filename)
+
+            await _publish_knowledge_upload(
+                container=container,
+                lifecycle=lifecycle,
+                params=params,
+                text=text,
+                embedding_model=embedding_model,
+                captured_original=captured_original,
+            )
 
     return lifecycle.task_manager.successful()

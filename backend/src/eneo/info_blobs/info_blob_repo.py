@@ -182,6 +182,27 @@ class InfoBlobRepository:
             return None
         return f"group:{info_blob.group_id}:original:{original_sha256.hex()}"
 
+    @staticmethod
+    def _active_group_upload_identity(
+        *,
+        group_id: UUID,
+        title: str | None,
+        original_sha256: bytes | None,
+    ) -> ColumnElement[bool]:
+        title_identity = sa.and_(
+            InfoBlobs.group_id == group_id,
+            InfoBlobs.title == title,
+        )
+        if original_sha256 is None:
+            return title_identity
+        return sa.or_(
+            title_identity,
+            sa.and_(
+                InfoBlobs.group_id == group_id,
+                ObjectContents.sha256 == original_sha256,
+            ),
+        )
+
     async def get_active_for_publication(
         self,
         info_blob: InfoBlobAdd,
@@ -191,38 +212,38 @@ class InfoBlobRepository:
         if self._publication_identity(info_blob) is None:
             return None
 
-        source_conditions: list[ColumnElement[bool]] = []
         if info_blob.group_id is not None:
-            source_conditions.extend(
-                [
-                    InfoBlobs.group_id == info_blob.group_id,
-                    InfoBlobs.title == info_blob.title,
-                ]
+            candidate_identity = self._active_group_upload_identity(
+                group_id=info_blob.group_id,
+                title=info_blob.title,
+                original_sha256=original_sha256,
             )
-        elif info_blob.website_id is not None:
-            source_conditions.extend(
-                [
-                    InfoBlobs.website_id == info_blob.website_id,
-                    InfoBlobs.title == info_blob.title,
-                ]
-            )
-        elif info_blob.integration_knowledge_id is not None:
-            source_conditions.append(
-                InfoBlobs.integration_knowledge_id == info_blob.integration_knowledge_id
-            )
-            if (
-                info_blob.sharepoint_item_id is not None
-                and info_blob.sharepoint_item_id.strip()
-            ):
-                source_conditions.append(
-                    InfoBlobs.sharepoint_item_id == info_blob.sharepoint_item_id
-                )
-            else:
-                source_conditions.append(InfoBlobs.title == info_blob.title)
         else:
-            raise ValueError("InfoBlob publication requires a source owner")
-
-        candidate_identity = sa.and_(*source_conditions)
+            source_conditions: list[ColumnElement[bool]] = []
+            if info_blob.website_id is not None:
+                source_conditions.extend(
+                    [
+                        InfoBlobs.website_id == info_blob.website_id,
+                        InfoBlobs.title == info_blob.title,
+                    ]
+                )
+            elif info_blob.integration_knowledge_id is not None:
+                source_conditions.append(
+                    InfoBlobs.integration_knowledge_id
+                    == info_blob.integration_knowledge_id
+                )
+                if (
+                    info_blob.sharepoint_item_id is not None
+                    and info_blob.sharepoint_item_id.strip()
+                ):
+                    source_conditions.append(
+                        InfoBlobs.sharepoint_item_id == info_blob.sharepoint_item_id
+                    )
+                else:
+                    source_conditions.append(InfoBlobs.title == info_blob.title)
+            else:
+                raise ValueError("InfoBlob publication requires a source owner")
+            candidate_identity = sa.and_(*source_conditions)
         query = sa.select(InfoBlobs)
         if info_blob.group_id is not None and original_sha256 is not None:
             query = query.outerjoin(
@@ -231,13 +252,6 @@ class InfoBlobRepository:
             ).outerjoin(
                 ObjectContents,
                 ObjectContents.id == InfoBlobContentReferences.content_id,
-            )
-            candidate_identity = sa.or_(
-                candidate_identity,
-                sa.and_(
-                    InfoBlobs.group_id == info_blob.group_id,
-                    ObjectContents.sha256 == original_sha256,
-                ),
             )
 
         records = list(
@@ -263,6 +277,53 @@ class InfoBlobRepository:
         return InfoBlobPublication(
             info_blob=published,
             original=await self.get_original(published.id),
+        )
+
+    async def has_matching_active_upload_original(
+        self,
+        *,
+        group_id: UUID,
+        title: str,
+        embedding_model_id: UUID,
+        original_sha256: bytes,
+    ) -> bool:
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    InfoBlobs.embedding_model_id,
+                    ObjectContents.sha256,
+                )
+                .select_from(InfoBlobs)
+                .outerjoin(
+                    InfoBlobContentReferences,
+                    InfoBlobContentReferences.info_blob_id == InfoBlobs.id,
+                )
+                .outerjoin(
+                    ObjectContents,
+                    ObjectContents.id == InfoBlobContentReferences.content_id,
+                )
+                .where(
+                    active_info_blob_version(),
+                    self._active_group_upload_identity(
+                        group_id=group_id,
+                        title=title,
+                        original_sha256=original_sha256,
+                    ),
+                )
+                .order_by(InfoBlobs.id)
+                .limit(2)
+            )
+        ).all()
+        if len(rows) > 1:
+            raise InfoBlobPublicationConflictError(
+                "Knowledge publication identity is ambiguous"
+            )
+        if not rows:
+            return False
+        row = rows[0]
+        return (
+            row.embedding_model_id == embedding_model_id
+            and row.sha256 == original_sha256
         )
 
     async def get_original(self, info_blob_id: UUID) -> InfoBlobOriginal | None:

@@ -123,7 +123,9 @@ async def test_concurrent_deliveries_start_compute_at_most_once_and_preserve_sta
             providers.Object(
                 SimpleNamespace(
                     get_group=AsyncMock(
-                        return_value=SimpleNamespace(embedding_model=object())
+                        return_value=SimpleNamespace(
+                            embedding_model=SimpleNamespace(id=uuid4())
+                        )
                     )
                 )
             )
@@ -209,7 +211,9 @@ async def test_successful_upload_publishes_cas_statuses_without_generic_db_write
         providers.Object(
             SimpleNamespace(
                 get_group=AsyncMock(
-                    return_value=SimpleNamespace(embedding_model=object())
+                    return_value=SimpleNamespace(
+                        embedding_model=SimpleNamespace(id=uuid4())
+                    )
                 )
             )
         )
@@ -271,9 +275,12 @@ async def test_transcription_releases_its_session_before_remote_work(
     container = _worker_container(user=user, tenant=tenant)
 
     class ScopeObservingTranscriber:
+        preparation_had_session = False
         session_released = False
 
         async def prepare_transcription(self, _model: object) -> object:
+            assert await container.session().scalar(sa.select(1)) == 1
+            self.preparation_had_session = True
             return object()
 
         async def _remote_transcription(self) -> str:
@@ -308,7 +315,9 @@ async def test_transcription_releases_its_session_before_remote_work(
         providers.Object(
             SimpleNamespace(
                 get_group=AsyncMock(
-                    return_value=SimpleNamespace(embedding_model=object())
+                    return_value=SimpleNamespace(
+                        embedding_model=SimpleNamespace(id=uuid4())
+                    )
                 )
             )
         )
@@ -335,6 +344,7 @@ async def test_transcription_releases_its_session_before_remote_work(
     )
 
     assert result is True
+    assert transcriber.preparation_had_session is True
     assert transcriber.session_released is True
 
 
@@ -441,7 +451,9 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
         providers.Object(
             SimpleNamespace(
                 get_group=AsyncMock(
-                    return_value=SimpleNamespace(embedding_model=object())
+                    return_value=SimpleNamespace(
+                        embedding_model=SimpleNamespace(id=uuid4())
+                    )
                 )
             )
         )
@@ -529,7 +541,9 @@ async def test_heartbeat_recovers_after_one_failed_database_update(
         providers.Object(
             SimpleNamespace(
                 get_group=AsyncMock(
-                    return_value=SimpleNamespace(embedding_model=object())
+                    return_value=SimpleNamespace(
+                        embedding_model=SimpleNamespace(id=uuid4())
+                    )
                 )
             )
         )
@@ -670,7 +684,9 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
         providers.Object(
             SimpleNamespace(
                 get_group=AsyncMock(
-                    return_value=SimpleNamespace(embedding_model=object())
+                    return_value=SimpleNamespace(
+                        embedding_model=SimpleNamespace(id=uuid4())
+                    )
                 )
             )
         )

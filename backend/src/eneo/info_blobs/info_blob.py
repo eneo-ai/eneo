@@ -16,19 +16,26 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedKnowledgeOriginal:
+class CapturedKnowledgeOriginal:
     job_id: UUID
     original_filename: str
     policy_revision: int
     storage_kind: StorageKind
     captured: CapturedContent
-    publication: VerifiedObjectPublication | None = None
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.original_filename) <= 255:
             raise ValueError("original_filename must contain 1 to 255 characters")
         if self.policy_revision < 1:
             raise ValueError("policy_revision must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedKnowledgeOriginal(CapturedKnowledgeOriginal):
+    publication: VerifiedObjectPublication | None = None
+
+    def __post_init__(self) -> None:
+        CapturedKnowledgeOriginal.__post_init__(self)
         if self.storage_kind is StorageKind.OBJECT_STORE and self.publication is None:
             raise ValueError("object-store originals require verified publication")
         if (

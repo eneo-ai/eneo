@@ -362,6 +362,134 @@ async def test_knowledge_original_uses_generic_inventory_move_and_delete_lifecyc
 
 
 @pytest.mark.asyncio
+async def test_exact_object_store_reupload_skips_remote_upload_and_orphan(
+    db_container,
+    real_object_store: RealObjectStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    payload = b"exact object-store retry"
+    searchable_text = "Searchable text from the exact retry"
+
+    async with _configured_runtime(real_object_store) as store:
+        upload_spy = AsyncMock(wraps=store.upload)
+        monkeypatch.setattr(store, "upload", upload_spy)
+
+        async with db_container() as container:
+            user, tenant, group, first_job, _ = await _seed_job(
+                container,
+                with_prior=False,
+            )
+            first_job_id = first_job.id
+            group_id = group.id
+            space_id = group.space_id
+
+        first_path = _stage_job_file(tmp_path, first_job_id, payload)
+        first_container = _sessionless_container(user=user, tenant=tenant)
+        first_container.text_extractor.override(
+            providers.Object(_Extractor(searchable_text))
+        )
+        first_embeddings = AsyncMock()
+        first_embeddings.get_embeddings.side_effect = _embedding_result
+        first_container.create_embeddings_service.override(
+            providers.Object(first_embeddings)
+        )
+
+        async with db_container():
+            assert (
+                await upload_info_blob_task(
+                    job_id=first_job_id,
+                    params=_params(
+                        user_id=user.id,
+                        group_id=group_id,
+                        space_id=space_id,
+                    ),
+                    container=first_container,
+                )
+                is True
+            )
+        assert not first_path.exists()
+
+        async with db_container() as container:
+            first_publication_id = await container.session().scalar(
+                sa.select(InfoBlobs.id).where(
+                    InfoBlobs.group_id == group_id,
+                    active_info_blob_version(),
+                )
+            )
+            second_job = Jobs(
+                id=uuid4(),
+                user_id=user.id,
+                task=Task.UPLOAD_FILE.value,
+                name="knowledge.txt",
+                status=Status.QUEUED.value,
+            )
+            container.session().add(second_job)
+            await container.session().flush()
+            second_job_id = second_job.id
+
+        second_path = _stage_job_file(tmp_path, second_job_id, payload)
+        second_container = _sessionless_container(user=user, tenant=tenant)
+        second_container.text_extractor.override(
+            providers.Object(_Extractor(searchable_text))
+        )
+        second_embeddings = AsyncMock()
+        second_embeddings.get_embeddings.side_effect = _embedding_result
+        second_container.create_embeddings_service.override(
+            providers.Object(second_embeddings)
+        )
+
+        async with db_container():
+            assert (
+                await upload_info_blob_task(
+                    job_id=second_job_id,
+                    params=_params(
+                        user_id=user.id,
+                        group_id=group_id,
+                        space_id=space_id,
+                    ),
+                    container=second_container,
+                )
+                is True
+            )
+        assert not second_path.exists()
+
+        async with sessionmanager.session() as session, session.begin():
+            active_ids = set(
+                await session.scalars(
+                    sa.select(InfoBlobs.id).where(
+                        InfoBlobs.group_id == group_id,
+                        active_info_blob_version(),
+                    )
+                )
+            )
+            content_count = await session.scalar(
+                sa.select(sa.func.count()).select_from(ObjectContents)
+            )
+            object_count = await session.scalar(
+                sa.select(sa.func.count()).select_from(ObjectStoreObjects)
+            )
+            orphan_count = await session.scalar(
+                sa.select(sa.func.count()).select_from(ObjectContentOrphanCandidates)
+            )
+            second_status = await session.scalar(
+                sa.select(Jobs.status).where(Jobs.id == second_job_id)
+            )
+
+        assert active_ids == {first_publication_id}
+        assert content_count == 1
+        assert object_count == 1
+        assert orphan_count == 0
+        assert second_status == Status.COMPLETE.value
+        assert upload_spy.await_count == 1
+        second_embeddings.get_embeddings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_remote_upload_becomes_reconcilable_orphan_when_final_transaction_fails(
     db_container,
     real_object_store: RealObjectStore,

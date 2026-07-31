@@ -3,7 +3,12 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.files.text import TextExtractor
-from eneo.info_blobs.info_blob import InfoBlobAdd, PreparedKnowledgeOriginal
+from eneo.info_blobs.info_blob import (
+    CapturedKnowledgeOriginal,
+    InfoBlobAdd,
+    InfoBlobInDB,
+    PreparedKnowledgeOriginal,
+)
 from eneo.info_blobs.info_blob_service import InfoBlobService
 from eneo.users.user import UserInDB
 
@@ -47,6 +52,49 @@ class TextProcessor:
             original=original,
         )
 
+    def _info_blob_add(
+        self,
+        *,
+        text: str,
+        title: str,
+        group_id: UUID | None,
+        website_id: UUID | None,
+        url: str | None,
+        content_hash: bytes | None,
+    ) -> InfoBlobAdd:
+        return InfoBlobAdd(
+            title=title,
+            user_id=self.user.id,
+            text=text,
+            group_id=group_id,
+            url=url,
+            website_id=website_id,
+            tenant_id=self.user.tenant_id,
+            content_hash=content_hash,
+        )
+
+    async def try_refresh_healthy_reupload(
+        self,
+        *,
+        text: str,
+        title: str,
+        embedding_model: "EmbeddingModel",
+        group_id: UUID,
+        original: CapturedKnowledgeOriginal,
+    ) -> InfoBlobInDB | None:
+        return await self.info_blob_service.try_refresh_healthy_reupload(
+            self._info_blob_add(
+                text=text,
+                title=title,
+                group_id=group_id,
+                website_id=None,
+                url=None,
+                content_hash=None,
+            ),
+            embedding_model=embedding_model,
+            original=original,
+        )
+
     async def process_text(
         self,
         *,
@@ -59,15 +107,13 @@ class TextProcessor:
         content_hash: bytes | None = None,
         original: PreparedKnowledgeOriginal | None = None,
     ):
-        info_blob_add = InfoBlobAdd(
-            title=title,
-            user_id=self.user.id,
+        info_blob_add = self._info_blob_add(
             text=text,
+            title=title,
             group_id=group_id,
-            url=url,
             website_id=website_id,
-            tenant_id=self.user.tenant_id,
-            content_hash=content_hash,  # Used by files for hash checking
+            url=url,
+            content_hash=content_hash,
         )
 
         return await self.info_blob_service.publish_info_blob_without_validation(
