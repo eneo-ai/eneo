@@ -1,7 +1,11 @@
+import math
+
 import pytest
 
 from eneo.embedding_models.domain import chunking
 from eneo.embedding_models.domain.chunking import (
+    MAX_CHUNK_SIZE,
+    MAX_OVERLAP_FRACTION,
     MIN_CHUNK_SIZE,
     ChunkSettings,
     build_text_splitter,
@@ -32,21 +36,10 @@ def test_resolve_uses_explicit_values(platform_defaults: ChunkSettings):
 
 
 def test_resolve_fills_only_the_missing_value(platform_defaults: ChunkSettings):
-    # A defaulted overlap follows the default ratio (20%), not its token count.
-    assert resolve_chunk_config(500, None) == (500, 100)
+    # A defaulted overlap is the platform's absolute token default, which is the number
+    # the settings response publishes and the editor shows. One meaning everywhere.
+    assert resolve_chunk_config(500, None) == (500, 40)
     assert resolve_chunk_config(None, 10) == (200, 10)
-
-
-@pytest.mark.parametrize("chunk_size", [1, 50, 100, 128, 200, 1000, 5000])
-def test_a_defaulted_overlap_always_stays_inside_the_ceiling(
-    platform_defaults: ChunkSettings, chunk_size: int
-):
-    # The ceiling is a share of the size, so an absolute default cannot honour it:
-    # a source setting only chunk_size=50 would take the platform's 40 tokens and
-    # land on 80% overlap, which the API refuses for an explicit pair.
-    _, overlap = resolve_chunk_config(chunk_size, None)
-
-    assert overlap <= max_overlap_for(chunk_size)
 
 
 def test_a_source_on_full_defaults_is_unaffected_by_the_ratio(
@@ -292,7 +285,70 @@ class TestSourceChunkConfig:
                 chunk_size=chunk_size, chunk_overlap=None, max_input=None
             )
 
-    def test_the_floor_itself_is_allowed(self):
+    def test_the_floor_itself_is_allowed_with_an_overlap_that_fits(self):
+        # The floor bounds an explicit pair. A defaulted overlap needs a larger size,
+        # since the platform default has to fit the ceiling too — see
+        # TestBoundsAndDefaultedOverlap.
         assert resolve_source_chunk_config(
-            chunk_size=MIN_CHUNK_SIZE, chunk_overlap=None, max_input=None
-        ) == (MIN_CHUNK_SIZE, None)
+            chunk_size=MIN_CHUNK_SIZE,
+            chunk_overlap=max_overlap_for(MIN_CHUNK_SIZE),
+            max_input=None,
+        ) == (MIN_CHUNK_SIZE, max_overlap_for(MIN_CHUNK_SIZE))
+
+
+class TestBoundsAndDefaultedOverlap:
+    """One meaning for a defaulted overlap, and bounds the database can store."""
+
+    def test_a_defaulted_overlap_matches_what_the_policy_publishes(
+        self, platform_defaults: ChunkSettings
+    ):
+        _, overlap = resolve_chunk_config(500, None)
+
+        assert overlap == platform_defaults.chunk_overlap
+
+    def test_a_size_too_small_for_the_defaulted_overlap_is_refused(
+        self, platform_defaults: ChunkSettings
+    ):
+        # 40 tokens is 40% of 100, past the ceiling. Refusing beats indexing an overlap
+        # that neither the settings response nor the editor can describe.
+        with pytest.raises(
+            BadRequestException, match="needs an explicit chunk_overlap"
+        ):
+            resolve_source_chunk_config(
+                chunk_size=100, chunk_overlap=None, max_input=None
+            )
+
+    def test_the_same_size_is_accepted_with_an_explicit_overlap(
+        self, platform_defaults: ChunkSettings
+    ):
+        assert resolve_source_chunk_config(
+            chunk_size=100, chunk_overlap=25, max_input=None
+        ) == (100, 25)
+
+    def test_the_smallest_size_that_fits_the_defaulted_overlap_is_accepted(
+        self, platform_defaults: ChunkSettings
+    ):
+        smallest = math.ceil(platform_defaults.chunk_overlap / MAX_OVERLAP_FRACTION)
+
+        assert resolve_source_chunk_config(
+            chunk_size=smallest, chunk_overlap=None, max_input=None
+        ) == (smallest, None)
+
+    def test_the_maximum_is_accepted(self):
+        assert resolve_source_chunk_config(
+            chunk_size=MAX_CHUNK_SIZE, chunk_overlap=None, max_input=None
+        ) == (MAX_CHUNK_SIZE, None)
+
+    @pytest.mark.parametrize("chunk_size", [MAX_CHUNK_SIZE + 1, 2147483648])
+    def test_above_the_maximum_is_refused_before_the_database_sees_it(
+        self, chunk_size: int
+    ):
+        # groups.chunk_size is a PostgreSQL INTEGER; without this the insert failed with
+        # a range error and rolled the transaction back instead of returning a 400.
+        with pytest.raises(BadRequestException, match="must not exceed"):
+            resolve_source_chunk_config(
+                chunk_size=chunk_size, chunk_overlap=None, max_input=None
+            )
+
+    def test_the_maximum_stays_inside_the_integer_column(self):
+        assert MAX_CHUNK_SIZE < 2**31 - 1

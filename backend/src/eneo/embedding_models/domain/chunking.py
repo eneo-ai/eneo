@@ -49,15 +49,12 @@ def max_overlap_for(chunk_size: int) -> int:
 # still allowing genuinely fine-grained chunking for short, dense material.
 MIN_CHUNK_SIZE = 50
 
-
-def default_overlap_ratio() -> float:
-    """The platform default overlap expressed as a share of the default size.
-
-    This is what a defaulted overlap means for a source that chose its own size.
-    """
-    if settings.chunk_size <= 0:
-        return 0.0
-    return settings.chunk_overlap / settings.chunk_size
+# Chunk size is a token count that has to fit an embedding model's input, and the
+# largest context any current model offers is a few hundred thousand tokens. This bound
+# is generous against that and still two orders of magnitude below the range of the
+# PostgreSQL INTEGER column the value is stored in — without it, an accepted request
+# reached the database and failed there with a range error instead of a 400.
+MAX_CHUNK_SIZE = 100_000
 
 
 def validate_overlap_within_policy(chunk_size: int, chunk_overlap: int) -> None:
@@ -98,17 +95,31 @@ def resolve_source_chunk_config(
                 f"chunk_size must be at least {MIN_CHUNK_SIZE} tokens; smaller chunks "
                 "multiply embedding calls, stored rows and index work per document"
             )
+        if chunk_size > MAX_CHUNK_SIZE:
+            raise BadRequestException(
+                f"chunk_size must not exceed {MAX_CHUNK_SIZE} tokens"
+            )
         chunk_size = clamp_chunk_size(chunk_size, max_input)
 
-    if chunk_overlap is not None:
-        effective_size, _ = resolve_chunk_config(chunk_size, chunk_overlap)
-        try:
-            validate_overlap_within_policy(effective_size, chunk_overlap)
-        except ValueError as error:
-            # The shared rule raises ValueError so pydantic can turn it into a 422 for
-            # request bodies. Reaching it from a domain entity instead, it has to be a
-            # BadRequestException or the caller gets a 500 for their own bad input.
-            raise BadRequestException(str(error)) from error
+    # Judge the pair the splitter will really use, including a defaulted side. A size
+    # small enough that the platform's default overlap breaks the ceiling has to be
+    # refused here: leaving it stored would index an overlap that neither the settings
+    # response nor the editor represents.
+    effective_size, effective_overlap = resolve_chunk_config(chunk_size, chunk_overlap)
+    try:
+        validate_overlap_within_policy(effective_size, effective_overlap)
+    except ValueError as error:
+        # The shared rule raises ValueError so pydantic can turn it into a 422 for
+        # request bodies. Reaching it from a domain entity instead, it has to be a
+        # BadRequestException or the caller gets a 500 for their own bad input.
+        if chunk_overlap is None:
+            raise BadRequestException(
+                f"a chunk_size of {effective_size} needs an explicit chunk_overlap of "
+                f"at most {max_overlap_for(effective_size)}; the platform default of "
+                f"{settings.chunk_overlap} would exceed "
+                f"{int(MAX_OVERLAP_FRACTION * 100)}% of it"
+            ) from error
+        raise BadRequestException(str(error)) from error
 
     return chunk_size, chunk_overlap
 
@@ -137,21 +148,16 @@ def resolve_chunk_config(
     raw config instead would report a difference between ``None`` and an explicit
     200 even though both split the text identically.
 
-    A defaulted overlap follows the platform's default *ratio* rather than its
-    absolute token count. The ceiling is a share of the size, so an absolute default
-    cannot honour it: a source that sets only ``chunk_size=50`` would otherwise take
-    the platform's 40 tokens and land on 80% overlap, well past a limit the API
-    refuses for an explicit pair. Taking the ratio keeps every combination inside the
-    policy and scales with the size the caller actually chose. A source on full
-    defaults is unaffected — the ratio of the default pair reproduces it exactly.
+    A defaulted overlap is the platform's absolute token default — the same number
+    ``ChunkingPolicyPublic`` publishes and the editor shows. Deriving it from the
+    chosen size instead would give ``None`` a size-dependent meaning that neither the
+    settings response nor a numeric input can express, so the same stored source would
+    be described by three different numbers. Sizes too small for that default are
+    refused when they are stored, by ``resolve_source_chunk_config``, rather than
+    quietly given a different overlap here.
     """
     size = chunk_size if chunk_size is not None else settings.chunk_size
-    if chunk_overlap is not None:
-        overlap = chunk_overlap
-    elif size == settings.chunk_size:
-        overlap = settings.chunk_overlap
-    else:
-        overlap = round(size * default_overlap_ratio())
+    overlap = chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
     # Last guard for values that never passed the API — an env-configured pair, or a
     # row written before the ceiling existed. RecursiveCharacterTextSplitter raises
     # only when overlap > size, so that is where this caps.

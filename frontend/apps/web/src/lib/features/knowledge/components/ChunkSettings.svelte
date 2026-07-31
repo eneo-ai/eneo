@@ -20,9 +20,6 @@
   // and how the practical guidance is stated, and it survives a change of chunk size:
   // an absolute overlap would quietly slide from 20% to 4% when the size grows.
   const OVERLAP_STEP_PERCENT = 5;
-  // Input.Number falls back to its own default when max is undefined, so "no limit"
-  // has to be an explicit bound rather than an omitted prop.
-  const NO_SIZE_LIMIT = Number.MAX_SAFE_INTEGER;
   const maxOverlapPercent =
     Math.floor((policy.max_overlap_fraction * 100) / OVERLAP_STEP_PERCENT) * OVERLAP_STEP_PERCENT;
 
@@ -44,6 +41,12 @@
     chunkOverlap ?? policy.default_chunk_overlap,
     chunkSize ?? policy.default_chunk_size
   );
+
+  /** Whether the overlap is still "use the platform default". A source may set only a
+   * size, and submitting a number for the other field would change a setting nobody
+   * edited — enough on its own to make the source's material stale. Cleared when the
+   * slider is moved. */
+  let overlapIsDefault = chunkOverlap === null;
 
   function toPercent(tokens: number, size: number): number {
     if (size <= 0) return 0;
@@ -79,6 +82,16 @@
   // of its own — doing so would rewrite a stored value the administrator never edited.
   $: ceiling = maxInput ? Math.floor(maxInput * policy.max_chunk_fraction) : null;
   $: if (ceiling !== null && sizeValue > ceiling) sizeValue = ceiling;
+  $: sizeMax = ceiling !== null ? Math.min(ceiling, policy.max_chunk_size) : policy.max_chunk_size;
+
+  // While the overlap is defaulted, the smallest usable size is the one where that
+  // default still fits the ceiling — offering less would be offering a rejection.
+  $: sizeMin = overlapIsDefault
+    ? Math.max(
+        policy.min_chunk_size,
+        Math.ceil(policy.default_chunk_overlap / policy.max_overlap_fraction)
+      )
+    : policy.min_chunk_size;
 
   // Tokens are what the API and the index actually use. Floor, and never above the
   // backend's own integer ceiling — rounding up would offer a pair the API refuses.
@@ -94,7 +107,7 @@
 
   // Derive the nullable props: null when off (use defaults), the value when on.
   $: chunkSize = customize ? sizeValue : null;
-  $: chunkOverlap = customize ? overlapTokens : null;
+  $: chunkOverlap = customize && !overlapIsDefault ? overlapTokens : null;
 </script>
 
 <Input.Switch bind:value={customize} class="border-default hover:bg-hover-dimmer p-4 px-6">
@@ -110,8 +123,8 @@
     <div class="flex-1">
       <Input.Number
         bind:value={sizeValue}
-        min={policy.min_chunk_size}
-        max={ceiling ?? NO_SIZE_LIMIT}
+        min={sizeMin}
+        max={sizeMax}
         step={10}
         labelClass="text-sm">{m.chunk_size_label()}</Input.Number
       >
@@ -135,6 +148,7 @@
             overlapPercent = next;
             // The slider is now the source of truth for this field.
             exactOverlapTokens = null;
+            overlapIsDefault = false;
           }}
         />
         <span class="text-secondary w-28 shrink-0 text-right text-xs">

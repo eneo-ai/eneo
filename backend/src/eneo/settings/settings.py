@@ -44,6 +44,7 @@ class ChunkingPolicyPublic(BaseModel):
     default_chunk_size: int
     default_chunk_overlap: int
     min_chunk_size: int
+    max_chunk_size: int
     max_chunk_fraction: float
     max_overlap_fraction: float
 
@@ -53,6 +54,7 @@ class ChunkingPolicyPublic(BaseModel):
             default_chunk_size=chunking.settings.chunk_size,
             default_chunk_overlap=chunking.settings.chunk_overlap,
             min_chunk_size=chunking.MIN_CHUNK_SIZE,
+            max_chunk_size=chunking.MAX_CHUNK_SIZE,
             max_chunk_fraction=chunking.MAX_CHUNK_FRACTION,
             max_overlap_fraction=chunking.MAX_OVERLAP_FRACTION,
         )
