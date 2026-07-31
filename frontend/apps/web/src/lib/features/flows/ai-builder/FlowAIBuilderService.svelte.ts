@@ -4,6 +4,7 @@ import type { StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswe
 import {
   FlowAIBuilderDriver,
   type AIBuilderClientTransport,
+  type AIBuilderStreamState,
   type CreateFailureOutcome,
   type FlowAIBuilderState,
   type ModelLoadStatus
@@ -43,7 +44,7 @@ export class FlowAIBuilderService {
   isCreating = $derived(this.#state.pendingOperation?.kind === "creating");
   canSendMessage = $derived(
     this.hasSession &&
-      !this.#state.isStreaming &&
+      this.#state.streamState !== "streaming" &&
       this.#state.pendingOperation === null &&
       this.#canStartNewTurn &&
       (this.#state.session?.status === "chatting" ||
@@ -110,7 +111,11 @@ export class FlowAIBuilderService {
   }
 
   get isStreaming(): boolean {
-    return this.#state.isStreaming;
+    return this.#state.streamState === "streaming";
+  }
+
+  get streamState(): AIBuilderStreamState {
+    return this.#state.streamState;
   }
 
   get isInitializing(): boolean {

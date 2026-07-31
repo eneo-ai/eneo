@@ -717,7 +717,7 @@ describe("FlowAIBuilderDriver", () => {
     driver.seedState({ session: makeSession() });
 
     const pending = driver.sendMessage("Build a flow");
-    expect(driver.state.isStreaming).toBe(true);
+    expect(driver.state).toMatchObject({ streamState: "streaming" });
 
     driver.abort();
     await pending;
@@ -725,8 +725,34 @@ describe("FlowAIBuilderDriver", () => {
     expect(stream).toHaveBeenCalledOnce();
     expect(capturedAbortController).toBeInstanceOf(AbortController);
     expect(capturedAbortController?.signal.aborted).toBe(true);
-    expect(driver.state.isStreaming).toBe(false);
+    expect(driver.state).toMatchObject({ streamState: "idle" });
     expect(driver.state.error).toBeNull();
+  });
+
+  it("records protocol validation failures and clears them only through a new clean stream", async () => {
+    const stream = vi
+      .fn()
+      .mockImplementationOnce(async (_path, _init, handlers) => {
+        handlers.onMessage({ event: "text", data: "{}" });
+      })
+      .mockImplementationOnce(async (_path, _init, handlers) => {
+        completeStream(handlers);
+      });
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue(makeSession()),
+      streamImpl: stream
+    });
+    driver.seedState({ session: makeSession() });
+
+    expect(await driver.sendMessage("Build a flow")).toBe("failed");
+    expect(driver.state).toMatchObject({ streamState: "failed" });
+    expect(driver.state.error).not.toBeNull();
+    expect(driver.state.messages).not.toContainEqual(
+      expect.objectContaining({ role: "assistant" })
+    );
+
+    expect(await driver.sendMessage("Try again")).toBe("delivered");
+    expect(driver.state).toMatchObject({ streamState: "idle" });
   });
 
   it("retries a pre-provider failure with the exact persisted turn request", async () => {
@@ -992,7 +1018,7 @@ describe("FlowAIBuilderDriver", () => {
       statusMessage: driver.state.statusMessage,
       errorCode: driver.state.error?.code ?? null,
       totalTokens: driver.state.session?.telemetry?.total_tokens_total ?? null,
-      isStreaming: driver.state.isStreaming,
+      isStreaming: driver.isStreaming,
       currentControllerAborted: currentStreamController.signal.aborted
     };
 
@@ -1135,10 +1161,11 @@ describe("FlowAIBuilderDriver", () => {
       status: 503,
       response: {
         schema_version: 2,
-        code: "resume_unavailable",
+        code: "planner_upstream_error",
         category: "upstream",
         message: "The saved draft could not be loaded.",
-        phase: "client",
+        phase: "planner",
+        eneo_error_code: 9024,
         request_id: "request-resume"
       }
     };
@@ -1151,7 +1178,7 @@ describe("FlowAIBuilderDriver", () => {
 
     expect(driver.state.session).toBeNull();
     expect(driver.state.draftSessions).toEqual([draft]);
-    expect(driver.state.error?.code).toBe("resume_unavailable");
+    expect(driver.state.error?.code).toBe("planner_upstream_error");
     expect(driver.state.error?.message).toBe("The saved draft could not be loaded.");
     expect(driver.state.error?.request_id).toBe("request-resume");
   });
@@ -1598,6 +1625,7 @@ describe("FlowAIBuilderDriver", () => {
     );
     expect(driver.latestTurnState).toBe("processing");
     expect(driver.canStartNewTurn).toBe(false);
+    expect(driver.state.streamState).toBe("failed");
   });
 
   it("blocks new sends until an incomplete stream can be authoritatively refreshed", async () => {
@@ -1696,6 +1724,7 @@ describe("FlowAIBuilderDriver", () => {
     await driver.sendMessage("Build a flow");
 
     expect(driver.state.error).toBeNull();
+    expect(driver.state.streamState).toBe("failed");
   });
 
   it("stores structured stream errors", async () => {
@@ -1728,6 +1757,7 @@ describe("FlowAIBuilderDriver", () => {
       phase: "router",
       request_id: "req-stream"
     });
+    expect(driver.state.streamState).toBe("failed");
   });
 
   it("hydrates the exact committed turn error when a session is resumed", async () => {
@@ -2749,11 +2779,12 @@ describe("FlowAIBuilderDriver send outcome contract", () => {
   // every branch of the outcome is pinned here.
   const publicError = JSON.stringify({
     schema_version: 2,
-    code: "internal_error",
+    code: "planner_stream_failed",
     category: "internal",
     message: "boom",
     phase: "planner",
-    request_id: null,
+    eneo_error_code: 9007,
+    request_id: "req-stream",
     diagnostic_context: null,
     details: {}
   });
@@ -2779,6 +2810,7 @@ describe("FlowAIBuilderDriver send outcome contract", () => {
       })
     );
     expect(await driver.sendMessage("Hej")).toBe("delivered");
+    expect(driver.state.streamState).toBe("idle");
   });
 
   it("returns 'failed' when an error event arrives even if done follows", async () => {
@@ -2789,6 +2821,11 @@ describe("FlowAIBuilderDriver send outcome contract", () => {
       })
     );
     expect(await driver.sendMessage("Hej")).toBe("failed");
+    expect(driver.state.streamState).toBe("failed");
+    expect(driver.state.error).toMatchObject({
+      code: "planner_stream_failed",
+      request_id: "req-stream"
+    });
   });
 
   it("returns 'failed' when the transport throws", async () => {
@@ -2798,6 +2835,7 @@ describe("FlowAIBuilderDriver send outcome contract", () => {
       })
     );
     expect(await driver.sendMessage("Hej")).toBe("failed");
+    expect(driver.state.streamState).toBe("failed");
   });
 
   it("returns 'failed' when stream ownership is lost mid-flight", async () => {

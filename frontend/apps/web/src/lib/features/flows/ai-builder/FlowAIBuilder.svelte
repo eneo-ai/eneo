@@ -44,13 +44,15 @@
     }
   });
 
-  // Error ownership is decided WITHOUT the streaming flag so the chat banner
-  // never flashes during the stream's final frames; the pane shows the wait
-  // state until the stream closes, then E1.
+  // The plan pane claims generation errors before the stream settles so the
+  // chat cannot briefly render the same error. Idle errors remain chat-owned.
   const planPaneOwnsError = $derived(
     hadGenerationStatus && service.error !== null && service.currentPlan === null
   );
-  const generationFailedWithoutPlan = $derived(planPaneOwnsError && !service.isStreaming);
+  const planPaneOwnsStreamError = $derived(planPaneOwnsError && service.streamState !== "idle");
+  const generationFailedWithoutPlan = $derived(
+    planPaneOwnsStreamError && service.streamState === "failed"
+  );
 
   const hasPlanContent = $derived(
     service.currentPlan !== null ||
@@ -413,7 +415,7 @@
           <FlowAIBuilderChat
             bind:this={chatRef}
             {targetKind}
-            suppressStreamError={planPaneOwnsError || failedResumeDraft !== null}
+            suppressStreamError={planPaneOwnsStreamError || failedResumeDraft !== null}
           />
         </div>
 

@@ -48,6 +48,7 @@
         "html-to-image": "1.11.11",
         "lucide-svelte": "^0.544.0",
         "marked": "^15.0.8",
+        "zod": "^4.3.6",
       },
       "devDependencies": {
         "@eneo/eneo-js": "workspace:*",

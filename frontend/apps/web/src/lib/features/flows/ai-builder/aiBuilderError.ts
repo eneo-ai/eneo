@@ -1,54 +1,17 @@
 import type {
   AIBuilderError,
   AIBuilderErrorCategory,
-  AIBuilderDiagnosticContext,
   AIBuilderErrorDetails,
   AIBuilderErrorDetailValue,
-  AIBuilderErrorPhase
+  AIBuilderPublicErrorPayload
 } from "./protocol";
+import { parseAIBuilderPublicErrorPayload } from "./protocol";
 
 interface ParseAIBuilderErrorInput {
   transport: "apply" | "sse";
   payload: unknown;
   fallbackMessage?: string;
 }
-
-const VALID_CATEGORIES = new Set<AIBuilderErrorCategory>([
-  "bad_request",
-  "conflict",
-  "internal",
-  "network",
-  "not_found",
-  "soft_block",
-  "unauthorized",
-  "upstream"
-]);
-
-const VALID_PHASES = new Set<AIBuilderErrorPhase>([
-  "client",
-  "planner",
-  "proposal",
-  "question",
-  "question_recovery",
-  "requirements",
-  "router",
-  "self_correction"
-]);
-
-const DIAGNOSTIC_CONTEXT_FIELDS = new Set<keyof AIBuilderDiagnosticContext>([
-  "session_id",
-  "plan_id",
-  "request_id",
-  "flow_id",
-  "space_id",
-  "target_kind",
-  "plan_step_ref",
-  "error_code",
-  "error_category",
-  "error_phase",
-  "model",
-  "outcome_kind"
-]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -107,18 +70,6 @@ function normalizeDetails(value: unknown): AIBuilderErrorDetails {
   return details;
 }
 
-function normalizeDiagnosticContext(value: unknown): AIBuilderDiagnosticContext | null {
-  if (!isRecord(value)) return null;
-  const context: Record<string, string> = {};
-  for (const [key, contextValue] of Object.entries(value)) {
-    if (!DIAGNOSTIC_CONTEXT_FIELDS.has(key as keyof AIBuilderDiagnosticContext)) continue;
-    if (typeof contextValue === "string" && contextValue.length > 0) {
-      context[key] = contextValue;
-    }
-  }
-  return Object.keys(context).length > 0 ? (context as AIBuilderDiagnosticContext) : null;
-}
-
 function isDetailValue(value: unknown): value is AIBuilderErrorDetailValue {
   return (
     value === null ||
@@ -129,32 +80,16 @@ function isDetailValue(value: unknown): value is AIBuilderErrorDetailValue {
 }
 
 function publicErrorFromRecord(record: Record<string, unknown>): AIBuilderError | null {
-  if (record.schema_version !== 2) return null;
-  const code = stringField(record, "code");
-  const category = stringField(record, "category");
-  const message = stringField(record, "message");
-  const phase = stringField(record, "phase");
-  if (
-    code === null ||
-    category === null ||
-    message === null ||
-    phase === null ||
-    !VALID_CATEGORIES.has(category as AIBuilderErrorCategory) ||
-    !VALID_PHASES.has(phase as AIBuilderErrorPhase)
-  ) {
-    return null;
-  }
+  const publicError = parseAIBuilderPublicErrorPayload(record);
+  return publicError ? toAIBuilderError(publicError) : null;
+}
 
+export function toAIBuilderError(publicError: AIBuilderPublicErrorPayload): AIBuilderError {
   return {
+    ...publicError,
     schema_version: 2,
-    code,
-    category: category as AIBuilderErrorCategory,
-    message,
-    phase: phase as AIBuilderErrorPhase,
-    request_id: stringField(record, "request_id"),
-    eneo_error_code: numberField(record, "eneo_error_code") ?? null,
-    diagnostic_context: normalizeDiagnosticContext(record.diagnostic_context),
-    details: normalizeDetails(record.details)
+    diagnostic_context: publicError.diagnostic_context ?? null,
+    details: publicError.details ?? {}
   };
 }
 

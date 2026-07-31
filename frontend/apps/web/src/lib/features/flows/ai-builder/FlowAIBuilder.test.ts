@@ -157,10 +157,11 @@ function resumeFailureHarness(options: { multipleDrafts?: boolean } = {}): {
               status: 503,
               response: {
                 schema_version: 2,
-                code: "resume_unavailable",
+                code: "planner_upstream_error",
                 category: "upstream",
                 message: "The saved draft could not be loaded.",
-                phase: "client",
+                phase: "planner",
+                eneo_error_code: 9024,
                 request_id: "request-resume"
               }
             };
@@ -941,11 +942,12 @@ describe("FlowAIBuilder generation failure (E1)", () => {
     }) as unknown as AIBuilderClientTransport["fetch"];
     const publicError = JSON.stringify({
       schema_version: 2,
-      code: "internal_error",
+      code: "planner_stream_failed",
       category: "internal",
       message: "planner exploded mid-generation",
       phase: "planner",
-      request_id: null,
+      eneo_error_code: 9007,
+      request_id: "req-stream",
       diagnostic_context: null,
       details: {}
     });
@@ -974,6 +976,38 @@ describe("FlowAIBuilder generation failure (E1)", () => {
     expect(screen.getAllByText(m.ai_builder_generation_failed_title())).toHaveLength(1);
     expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
     expect(screen.queryByText("planner exploded mid-generation")).toBeNull();
+  });
+
+  it("shows an idle non-stream error once after a plan was seen", async () => {
+    let service: FlowAIBuilderService | undefined;
+
+    render(FlowAIBuilderHarness, {
+      transport: planSessionHarness(),
+      onservice: (instance: FlowAIBuilderService) => (service = instance)
+    });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    service!.seedState({
+      currentPlan: null,
+      streamState: "idle",
+      error: {
+        schema_version: 2,
+        code: "planner_upstream_error",
+        category: "upstream",
+        message: "The saved Builder state could not be refreshed.",
+        phase: "planner",
+        eneo_error_code: 9024,
+        request_id: "request-refresh",
+        diagnostic_context: null,
+        details: {}
+      }
+    });
+
+    expect(service!.hasSeenPlanInSession).toBe(true);
+    expect(service!.streamState).toBe("idle");
+    expect(await screen.findByText("The saved Builder state could not be refreshed.")).toBeTruthy();
+    expect(screen.getAllByText("The saved Builder state could not be refreshed.")).toHaveLength(1);
+    expect(screen.queryByText(m.ai_builder_generation_failed_title())).toBeNull();
   });
 });
 

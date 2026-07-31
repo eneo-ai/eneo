@@ -140,7 +140,7 @@ export default defineConfig(({ mode }) => ({
   // externalized, and the chat page (which renders messages via @eneo/ui's
   // Markdown, also using marked) would 500 on hard refresh.
   ssr: {
-    noExternal: ["@xyflow/svelte", "@xyflow/system", "marked", "dompurify"],
+    noExternal: ["@xyflow/svelte", "@xyflow/system", "marked", "dompurify", "zod"],
     resolve: process.env.VITEST
       ? {
           conditions: ["browser"]

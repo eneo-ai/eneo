@@ -10,7 +10,8 @@ import {
   buildUnpublishedApplyFailureError,
   isSoftBlockAIBuilderError,
   isStaleApplyError,
-  parseAIBuilderError
+  parseAIBuilderError,
+  toAIBuilderError
 } from "./aiBuilderError";
 import { isRecoverableCreateDraft, parseAIBuilderStreamEvent } from "./protocol";
 import type {
@@ -75,12 +76,13 @@ export interface PendingPlanOperation {
 export type CreateFailureOutcome = "confirmed_not_applied" | "unknown";
 
 export type ModelLoadStatus = "idle" | "loading" | "loaded" | "failed";
+export type AIBuilderStreamState = "idle" | "streaming" | "failed";
 
 export interface FlowAIBuilderState {
   session: AIBuilderSession | null;
   messages: ChatMessage[];
   currentPlan: ProposedPlan | null;
-  isStreaming: boolean;
+  streamState: AIBuilderStreamState;
   isInitializing: boolean;
   error: AIBuilderError | null;
   applyError: ApplyError | null;
@@ -100,7 +102,7 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     session: null,
     messages: [],
     currentPlan: null,
-    isStreaming: false,
+    streamState: "idle",
     isInitializing: false,
     error: null,
     applyError: null,
@@ -216,6 +218,10 @@ export class FlowAIBuilderDriver {
 
   get isRecoveringLatestTurn(): boolean {
     return this.#isRecoveringLatestTurn;
+  }
+
+  get isStreaming(): boolean {
+    return this.#state.streamState === "streaming";
   }
 
   seedState(partial: Partial<FlowAIBuilderState>): void {
@@ -497,7 +503,7 @@ export class FlowAIBuilderDriver {
   ): Promise<AIBuilderSendOutcome> {
     if (
       !this.#state.session ||
-      this.#state.isStreaming ||
+      this.isStreaming ||
       this.#state.pendingOperation !== null ||
       !this.canStartNewTurn
     ) {
@@ -560,7 +566,7 @@ export class FlowAIBuilderDriver {
     expectedState: AIBuilderTurnRecoveryState,
     acknowledgeDuplicateProviderSpend: boolean
   ): Promise<void> {
-    if (this.#state.isStreaming || this.#isRecoveringLatestTurn) return;
+    if (this.isStreaming || this.#isRecoveringLatestTurn) return;
     const sessionGeneration = this.#sessionGeneration;
     this.#isRecoveringLatestTurn = true;
     this.#notify();
@@ -591,7 +597,7 @@ export class FlowAIBuilderDriver {
     optimisticUserMessage: ChatMessage | null
   ): Promise<AIBuilderSendOutcome> {
     const session = this.#state.session;
-    if (!session || this.#state.isStreaming) return "not_started";
+    if (!session || this.isStreaming) return "not_started";
     const isRetry = optimisticUserMessage === null;
     if (isRetry) {
       this.#requiresAuthoritativeRefresh = true;
@@ -600,7 +606,7 @@ export class FlowAIBuilderDriver {
     this.#state.error = null;
     this.#authoritativeRefreshError = false;
     this.#state.isConflict = false;
-    this.#state.isStreaming = true;
+    this.#state.streamState = "streaming";
     this.#abortController = new AbortController();
     const abortController = this.#abortController;
     const owner: SessionOperationOwner = {
@@ -625,6 +631,7 @@ export class FlowAIBuilderDriver {
     let receivedStaleQuestionEvent = false;
     let receivedStreamError = false;
     let receivedDone = false;
+    let settledStreamState: AIBuilderStreamState = "failed";
 
     try {
       await this.#transport.stream(
@@ -690,11 +697,7 @@ export class FlowAIBuilderDriver {
               }
               case "error": {
                 receivedStreamError = true;
-                const data = parseAIBuilderError({
-                  transport: "sse",
-                  payload: event.data,
-                  fallbackMessage: "The AI Builder stream failed. Please try again."
-                });
+                const data = toAIBuilderError(event.data);
                 const isSoftBlock = isSoftBlockAIBuilderError(data);
                 this.#state.error = isSoftBlock ? null : data;
                 if (!isSoftBlock) {
@@ -738,6 +741,9 @@ export class FlowAIBuilderDriver {
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
         await this.#refreshSession(owner);
       }
+      if (receivedDone && !receivedStreamError) {
+        settledStreamState = "idle";
+      }
       return receivedDone && !receivedStreamError ? "delivered" : "failed";
     } catch (e) {
       if (!abortController.signal.aborted && ownsCurrentStream()) {
@@ -753,7 +759,7 @@ export class FlowAIBuilderDriver {
       return "failed";
     } finally {
       if (ownsCurrentStream()) {
-        this.#state.isStreaming = false;
+        this.#state.streamState = settledStreamState;
         this.#abortController = null;
         this.#notify();
       }
@@ -1093,7 +1099,7 @@ export class FlowAIBuilderDriver {
 
   derivePhase(): AIBuilderPhase {
     if (this.#state.currentPlan) return "reviewing";
-    if (this.#state.isStreaming && this.#state.statusMessage) return "building";
+    if (this.isStreaming && this.#state.statusMessage) return "building";
 
     const latestSummary = this.#getLatestRequirementsSummary();
     if (latestSummary) {
@@ -1165,7 +1171,7 @@ export class FlowAIBuilderDriver {
   abort(): void {
     this.#abortController?.abort();
     this.#abortController = null;
-    this.#state.isStreaming = false;
+    this.#state.streamState = "idle";
     this.#notify();
   }
 

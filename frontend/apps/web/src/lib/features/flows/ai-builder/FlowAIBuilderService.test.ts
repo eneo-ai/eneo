@@ -133,7 +133,7 @@ describe("FlowAIBuilderService", () => {
       session,
       messages,
       currentPlan,
-      isStreaming: true,
+      streamState: "streaming",
       isInitializing: true,
       error,
       applyError,
@@ -177,13 +177,13 @@ describe("FlowAIBuilderService", () => {
 
     service.seedState({
       session: makeSession({ status: "chatting" }),
-      isStreaming: false
+      streamState: "idle"
     });
 
     expect(service.session?.session_id).toBe("session-1");
     expect(service.canSendMessage).toBe(true);
 
-    service.seedState({ isStreaming: true });
+    service.seedState({ streamState: "streaming" });
 
     expect(service.isStreaming).toBe(true);
     expect(service.canSendMessage).toBe(false);
@@ -251,7 +251,7 @@ describe("FlowAIBuilderService", () => {
 
     service.seedState({
       currentPlan: null,
-      isStreaming: true
+      streamState: "streaming"
     });
 
     expect(service.hasSeenPlanInSession).toBe(true);

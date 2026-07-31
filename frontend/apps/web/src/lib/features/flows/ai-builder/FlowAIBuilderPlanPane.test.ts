@@ -30,7 +30,7 @@ describe("FlowAIBuilderPlanPane", () => {
       render(FlowAIBuilderPlanPaneHarness, {
         currentSpace: makeSpace({ transcriptionModels: [] }),
         state: {
-          isStreaming: true,
+          streamState: "streaming",
           statusMessage
         }
       });
@@ -364,7 +364,7 @@ describe("FlowAIBuilderPlanPane", () => {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state: {
         session: makeSession({ status: "chatting", target_kind: "create", flow_id: null }),
-        isStreaming: true,
+        streamState: "streaming",
         statusMessage: "architecture_committed"
       }
     });
