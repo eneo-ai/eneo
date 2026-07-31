@@ -2,14 +2,17 @@ import pytest
 
 from eneo.embedding_models.domain import chunking
 from eneo.embedding_models.domain.chunking import (
+    MIN_CHUNK_SIZE,
     ChunkSettings,
     build_text_splitter,
     chunking_is_unchanged,
     clamp_chunk_size,
     max_overlap_for,
     resolve_chunk_config,
+    resolve_source_chunk_config,
     validate_overlap_within_policy,
 )
+from eneo.main.exceptions import BadRequestException
 
 
 @pytest.fixture
@@ -233,3 +236,63 @@ class TestOverlapPolicy:
         # one overlap while indexing another.
         with pytest.raises(ValueError, match="must not exceed"):
             validate_overlap_within_policy(chunk_size, chunk_overlap)
+
+
+class TestSourceChunkConfig:
+    """The one owner of the pair a knowledge source stores."""
+
+    def test_a_merged_pair_that_cannot_be_honoured_is_refused(self):
+        # The bug this exists for: a size-only update landing next to a retained
+        # overlap of 40 was stored as 100/40 while the splitter used 100/25, so the
+        # source reported a setting its own chunks did not follow.
+        with pytest.raises(BadRequestException, match="chunk_overlap must not exceed"):
+            resolve_source_chunk_config(
+                chunk_size=100, chunk_overlap=40, max_input=None
+            )
+
+    def test_a_pair_that_can_be_honoured_passes_through(self):
+        assert resolve_source_chunk_config(
+            chunk_size=200, chunk_overlap=40, max_input=None
+        ) == (200, 40)
+
+    def test_none_is_preserved_as_use_the_platform_default(self):
+        assert resolve_source_chunk_config(
+            chunk_size=None, chunk_overlap=None, max_input=8191
+        ) == (None, None)
+
+    def test_an_explicit_overlap_is_judged_against_the_default_size(
+        self, platform_defaults: ChunkSettings
+    ):
+        # With no size of its own the source will split at the platform size, so the
+        # overlap has to fit that, not some size the caller never mentioned.
+        assert resolve_source_chunk_config(
+            chunk_size=None, chunk_overlap=50, max_input=None
+        ) == (None, 50)
+        with pytest.raises(BadRequestException, match="chunk_overlap must not exceed"):
+            resolve_source_chunk_config(
+                chunk_size=None, chunk_overlap=60, max_input=None
+            )
+
+    def test_the_model_ceiling_is_applied_before_the_overlap_is_judged(self):
+        # max_input 1000 caps the size at 600, so the overlap ceiling is 150, not 250.
+        assert resolve_source_chunk_config(
+            chunk_size=1000, chunk_overlap=150, max_input=1000
+        ) == (600, 150)
+        with pytest.raises(BadRequestException, match="chunk_overlap must not exceed"):
+            resolve_source_chunk_config(
+                chunk_size=1000, chunk_overlap=200, max_input=1000
+            )
+
+    @pytest.mark.parametrize("chunk_size", [1, 10, MIN_CHUNK_SIZE - 1])
+    def test_a_size_below_the_floor_is_refused(self, chunk_size: int):
+        # One chunk per token turns a single upload into thousands of embedding calls,
+        # rows and index entries.
+        with pytest.raises(BadRequestException, match="chunk_size must be at least"):
+            resolve_source_chunk_config(
+                chunk_size=chunk_size, chunk_overlap=None, max_input=None
+            )
+
+    def test_the_floor_itself_is_allowed(self):
+        assert resolve_source_chunk_config(
+            chunk_size=MIN_CHUNK_SIZE, chunk_overlap=None, max_input=None
+        ) == (MIN_CHUNK_SIZE, None)

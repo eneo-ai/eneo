@@ -10,6 +10,8 @@ preserving the previous behaviour); a knowledge source may pass its own values.
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic_settings import BaseSettings
 
+from eneo.main.exceptions import BadRequestException
+
 
 class ChunkSettings(BaseSettings):
     chunk_size: int = 200
@@ -40,6 +42,14 @@ def max_overlap_for(chunk_size: int) -> int:
     return int(chunk_size * MAX_OVERLAP_FRACTION)
 
 
+# A chunk is split by token count, so a small size multiplies everything downstream:
+# one embedding call, one row and one index entry per chunk. At the 200-token default a
+# 1000-token document yields about 5 chunks; at 50 it yields about 25, and at 1 it
+# yields 1000. This floor keeps the fan-out within roughly 5x of the default while
+# still allowing genuinely fine-grained chunking for short, dense material.
+MIN_CHUNK_SIZE = 50
+
+
 def default_overlap_ratio() -> float:
     """The platform default overlap expressed as a share of the default size.
 
@@ -62,6 +72,45 @@ def validate_overlap_within_policy(chunk_size: int, chunk_overlap: int) -> None:
             f"chunk_overlap must not exceed {int(MAX_OVERLAP_FRACTION * 100)}% of "
             f"chunk_size (at most {ceiling} for a chunk_size of {chunk_size})"
         )
+
+
+def resolve_source_chunk_config(
+    *,
+    chunk_size: int | None,
+    chunk_overlap: int | None,
+    max_input: int | None,
+) -> tuple[int | None, int | None]:
+    """Validate the pair a knowledge source is about to store.
+
+    Callers pass the pair *after* merging a partial update with what the source
+    already had, because the two fields only make sense together. Validating one
+    field at a time is what let a size-only update land next to a retained overlap
+    that the splitter then had to reduce, leaving the source reporting a setting its
+    own chunks did not follow.
+
+    The model's size ceiling is applied first, so an overlap is judged against the
+    size that will really be used. Anything that cannot be honoured raises instead of
+    being adjusted later, and ``None`` is preserved as "use the platform default".
+    """
+    if chunk_size is not None:
+        if chunk_size < MIN_CHUNK_SIZE:
+            raise BadRequestException(
+                f"chunk_size must be at least {MIN_CHUNK_SIZE} tokens; smaller chunks "
+                "multiply embedding calls, stored rows and index work per document"
+            )
+        chunk_size = clamp_chunk_size(chunk_size, max_input)
+
+    if chunk_overlap is not None:
+        effective_size, _ = resolve_chunk_config(chunk_size, chunk_overlap)
+        try:
+            validate_overlap_within_policy(effective_size, chunk_overlap)
+        except ValueError as error:
+            # The shared rule raises ValueError so pydantic can turn it into a 422 for
+            # request bodies. Reaching it from a domain entity instead, it has to be a
+            # BadRequestException or the caller gets a 500 for their own bad input.
+            raise BadRequestException(str(error)) from error
+
+    return chunk_size, chunk_overlap
 
 
 def clamp_chunk_size(chunk_size: int, max_input: int | None) -> int:

@@ -20,6 +20,9 @@
   // and how the practical guidance is stated, and it survives a change of chunk size:
   // an absolute overlap would quietly slide from 20% to 4% when the size grows.
   const OVERLAP_STEP_PERCENT = 5;
+  // Input.Number falls back to its own default when max is undefined, so "no limit"
+  // has to be an explicit bound rather than an omitted prop.
+  const NO_SIZE_LIMIT = Number.MAX_SAFE_INTEGER;
   const maxOverlapPercent =
     Math.floor((policy.max_overlap_fraction * 100) / OVERLAP_STEP_PERCENT) * OVERLAP_STEP_PERCENT;
 
@@ -71,13 +74,18 @@
     wasCustomizing = on;
   }
 
-  // The backend caps a chunk at a fraction of the embedding model's input limit.
+  // The backend caps a chunk at a fraction of the embedding model's input limit. When
+  // that limit is unknown the backend accepts any size, so this must not invent a cap
+  // of its own — doing so would rewrite a stored value the administrator never edited.
   $: ceiling = maxInput ? Math.floor(maxInput * policy.max_chunk_fraction) : null;
-  $: sizeMax = ceiling ?? 4000;
-  $: if (sizeValue > sizeMax) sizeValue = sizeMax;
+  $: if (ceiling !== null && sizeValue > ceiling) sizeValue = ceiling;
 
-  // Tokens are what the API and the index actually use.
-  $: overlapTokens = exactOverlapTokens ?? Math.round((sizeValue * overlapPercent) / 100);
+  // Tokens are what the API and the index actually use. Floor, and never above the
+  // backend's own integer ceiling — rounding up would offer a pair the API refuses.
+  $: overlapTokens = Math.min(
+    exactOverlapTokens ?? Math.floor((sizeValue * overlapPercent) / 100),
+    Math.floor(sizeValue * policy.max_overlap_fraction)
+  );
 
   // Report the share the tokens really represent, which can differ from the slider
   // position while an exact value is being preserved.
@@ -100,8 +108,12 @@
 
   <div class="border-default flex gap-4 border-b p-4">
     <div class="flex-1">
-      <Input.Number bind:value={sizeValue} min={1} max={sizeMax} step={10} labelClass="text-sm"
-        >{m.chunk_size_label()}</Input.Number
+      <Input.Number
+        bind:value={sizeValue}
+        min={policy.min_chunk_size}
+        max={ceiling ?? NO_SIZE_LIMIT}
+        step={10}
+        labelClass="text-sm">{m.chunk_size_label()}</Input.Number
       >
       <p class="text-secondary mt-1 pl-3 text-xs">
         {m.chunk_size_description()}

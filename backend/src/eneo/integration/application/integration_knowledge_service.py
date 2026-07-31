@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from typing_extensions import TypedDict
 
-from eneo.embedding_models.domain.chunking import clamp_chunk_size
+from eneo.embedding_models.domain.chunking import resolve_source_chunk_config
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
@@ -225,8 +225,11 @@ class IntegrationKnowledgeService:
             site_id_value = None
             drive_id_value = None
 
-        if chunk_size is not None:
-            chunk_size = clamp_chunk_size(chunk_size, embedding_model.max_input)
+        chunk_size, chunk_overlap = resolve_source_chunk_config(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            max_input=embedding_model.max_input,
+        )
 
         obj = IntegrationKnowledge(
             name=name,

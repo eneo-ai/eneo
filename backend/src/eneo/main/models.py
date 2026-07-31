@@ -27,7 +27,10 @@ from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
 from typing_extensions import TypeIs, override
 
-from eneo.embedding_models.domain.chunking import validate_overlap_within_policy
+from eneo.embedding_models.domain.chunking import (
+    MIN_CHUNK_SIZE,
+    validate_overlap_within_policy,
+)
 from eneo.main.exceptions import ErrorCodes
 
 T = TypeVar("T")
@@ -147,7 +150,7 @@ class ChunkConfigRequestMixin(BaseModel):
     is given and the other comes from the platform default.
     """
 
-    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
+    chunk_size: Optional[Annotated[int, Field(ge=MIN_CHUNK_SIZE)]] = None
     chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
 
     @model_validator(mode="after")

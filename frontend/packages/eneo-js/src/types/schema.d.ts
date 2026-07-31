@@ -10243,6 +10243,8 @@ export interface components {
       default_chunk_size: number;
       /** Default Chunk Overlap */
       default_chunk_overlap: number;
+      /** Min Chunk Size */
+      min_chunk_size: number;
       /** Max Chunk Fraction */
       max_chunk_fraction: number;
       /** Max Overlap Fraction */

@@ -12,7 +12,10 @@ from pydantic import (
 )
 from pydantic.networks import HttpUrl
 
-from eneo.embedding_models.domain.chunking import validate_overlap_within_policy
+from eneo.embedding_models.domain.chunking import (
+    MIN_CHUNK_SIZE,
+    validate_overlap_within_policy,
+)
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
@@ -210,7 +213,9 @@ class WebsiteUpdate(BaseModel):
     update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED
     # Same rule as ChunkConfigRequestMixin, restated because the tri-state sentinel
     # makes the field types incompatible with it.
-    chunk_size: Union[Annotated[int, Field(ge=1)], None, NotProvided] = NOT_PROVIDED
+    chunk_size: Union[Annotated[int, Field(ge=MIN_CHUNK_SIZE)], None, NotProvided] = (
+        NOT_PROVIDED
+    )
     chunk_overlap: Union[Annotated[int, Field(ge=0)], None, NotProvided] = NOT_PROVIDED
 
     http_auth_username: Union[str, None, NotProvided] = Field(
