@@ -67,7 +67,10 @@ from eneo.flows.flow_evidence_policy import (
     flow_metadata_marks_sensitive_or_unreadable,
 )
 from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
-from eneo.flows.flow_run_provenance import FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
+from eneo.flows.flow_run_provenance import (
+    FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+    parse_resolved_input_edges,
+)
 from eneo.flows.flow_run_step_inputs import (
     FlowRunStepInputFiles,
     normalize_step_inputs_payload,
@@ -80,8 +83,8 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunEvidenceMeasurements,
     FlowRunEvidenceRowCounts,
+    StepAttemptEvidenceSize,
     StepAttemptPage,
-    StepAttemptProvenanceSize,
 )
 from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunCommandResult,
@@ -115,7 +118,7 @@ from eneo.roles.permissions import Permission
 
 # Preflight sizing double: zero everywhere means the evidence view never
 # narrows its load and an export preflight never refuses in these tests.
-EMPTY_PROVENANCE_SIZE = StepAttemptProvenanceSize(
+EMPTY_PROVENANCE_SIZE = StepAttemptEvidenceSize(
     attempt_count=0,
     stored_provenance_bytes=0,
     recorded_passage_bytes=0,
@@ -142,9 +145,14 @@ def flow_run_repo_mock() -> AsyncMock:
     default keeps the answer out of every individual test.
     """
     repo = AsyncMock()
-    repo.measure_step_attempt_provenance.return_value = EMPTY_PROVENANCE_SIZE
+    repo.measure_step_attempt_evidence.return_value = EMPTY_PROVENANCE_SIZE
     repo.measure_evidence_sections.return_value = FlowRunEvidenceMeasurements.empty()
     repo.measure_evidence_row_counts.return_value = FlowRunEvidenceRowCounts(0, 0, 0, 0)
+    repo.list_resolved_input_edges_by_attempt_id.side_effect = (
+        lambda *, attempt_ids, **_: {
+            attempt_id: parse_resolved_input_edges(None) for attempt_id in attempt_ids
+        }
+    )
     return repo
 
 
@@ -4449,7 +4457,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v15"
+        assert export["schema_version"] == "flow-evidence-export.v16"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert isinstance(export["manifest"]["app_version"], str)
         assert export["manifest"]["app_version"]

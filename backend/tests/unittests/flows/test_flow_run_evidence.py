@@ -17,7 +17,9 @@ from eneo.flows.application.flow_run_evidence import (
     parse_step_order,
 )
 from eneo.flows.application.flow_run_evidence_bundle import (
-    build_evidence_bundle,
+    build_evidence_bundle as _build_evidence_bundle,
+)
+from eneo.flows.application.flow_run_evidence_bundle import (
     redact_evidence_bundle,
 )
 from eneo.flows.application.flow_run_evidence_export_manifest import (
@@ -67,9 +69,11 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+    FlowResolvedInputEdges,
     normalize_attempt_provenance,
     normalize_rag_payload,
     parse_attempt_provenance,
+    parse_resolved_input_edges,
     sum_complete_token_counts,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
@@ -79,6 +83,15 @@ from eneo.flows.published_definition import (
     published_definition_checksum,
 )
 from eneo.main.config import get_settings
+
+
+def build_evidence_bundle(**kwargs: Any):
+    attempts = kwargs["step_attempts"]
+    kwargs.setdefault(
+        "resolved_input_edges_by_attempt_id",
+        {attempt.id: parse_resolved_input_edges(None) for attempt in attempts},
+    )
+    return _build_evidence_bundle(**kwargs)
 
 
 def _redacted_export_context() -> EvidenceExportContext:
@@ -325,10 +338,128 @@ def _attempt_with_rag(
     return attempt.model_copy(update={"step_order": step_order})
 
 
+def test_evidence_bundle_projects_exact_resolved_input_lineage_per_attempt() -> None:
+    run, version = _evidence_run_and_version()
+    attempt = _attempt_with_provenance(run, None)
+    aggregate = FlowResolvedInputEdges.model_validate(
+        {
+            "schema_version": 1,
+            "edges": [
+                {
+                    "binding_ref": "question",
+                    "source": {
+                        "kind": "flow_input",
+                        "selector": {"kind": "json_path", "path": ["subject"]},
+                    },
+                    "selection": {
+                        "encoding": "utf8",
+                        "sha256": "a" * 64,
+                        "byte_size": 7,
+                    },
+                }
+            ],
+        }
+    )
+
+    evidence = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[attempt],
+        resolved_input_edges_by_attempt_id={
+            attempt.id: parse_resolved_input_edges(aggregate.model_dump(mode="json"))
+        },
+    ).to_dict()
+
+    assert evidence["step_attempts"][0]["resolved_input_lineage"] == {
+        "status": "tracked",
+        "schema_version": 1,
+        "edges": [aggregate.edges[0].model_dump(mode="json")],
+    }
+
+
+def test_evidence_bundle_explains_retention_purged_resolved_input_lineage() -> None:
+    run, version = _evidence_run_and_version()
+    attempt = _attempt_with_provenance(run, None)
+    attempt = attempt.model_copy(
+        update={
+            "provenance_json": _attempt_retention_marker_payload(
+                run,
+                object_id=str(attempt.id),
+                resolved_input_aggregate_count=1,
+                resolved_input_edge_count=7,
+            )
+        }
+    )
+
+    evidence = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[attempt],
+        resolved_input_edges_by_attempt_id={
+            attempt.id: parse_resolved_input_edges(None)
+        },
+    ).to_dict()
+
+    assert evidence["step_attempts"][0]["resolved_input_lineage"] == {
+        "status": "retention_purged",
+        "resolved_input_aggregate_count": 1,
+        "resolved_input_edge_count": 7,
+    }
+
+
+def test_evidence_export_rejects_a_retention_marker_for_another_attempt() -> None:
+    run, version = _evidence_run_and_version()
+    attempt = _attempt_with_provenance(
+        run,
+        _attempt_retention_marker_payload(run),
+    )
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[attempt],
+    )
+
+    exported_attempt = export["bundle"]["step_attempts"][0]
+    assert exported_attempt["provenance_json"]["status"] == "corrupt"
+    assert (
+        exported_attempt["provenance_json"]["error_code"]
+        == "flow_attempt_provenance_invalid_retention_marker"
+    )
+    assert exported_attempt["resolved_input_lineage"] == {"status": "not_tracked"}
+    assert export["manifest"]["provenance_persisted_version_status"] == "corrupt"
+    assert export["manifest"]["retention_state_summary"]["tombstone_count"] == 0
+    assert export["manifest"]["retention_state_summary"]["retention_purged_count"] == 0
+    rag_tracking = export["summary"]["rag_usage_tracking"]
+    assert rag_tracking["tracking_state"] == "unknown_corrupt"
+    assert "retention_purged_attempt_count" not in rag_tracking
+
+
+def test_evidence_bundle_requires_lineage_for_exactly_admitted_attempts() -> None:
+    run, version = _evidence_run_and_version()
+    attempt = _attempt_with_provenance(run, None)
+
+    with pytest.raises(
+        ValueError,
+        match="Resolved input lineage must cover exactly the admitted attempts",
+    ):
+        _build_evidence_bundle(
+            run=run,
+            version=version,
+            step_results=[],
+            step_attempts=[attempt],
+            resolved_input_edges_by_attempt_id={},
+        )
+
+
 def _attempt_retention_marker_payload(
     run: FlowRun,
     *,
     object_id: str | None = None,
+    resolved_input_aggregate_count: int = 0,
+    resolved_input_edge_count: int = 0,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     return FlowAttemptRetentionMarker(
@@ -345,13 +476,32 @@ def _attempt_retention_marker_payload(
             counts=RunDebugAttemptRetentionCounts(
                 cleared_field_count=1,
                 provider_call_count=0,
-                resolved_input_aggregate_count=0,
-                resolved_input_edge_count=0,
+                resolved_input_aggregate_count=resolved_input_aggregate_count,
+                resolved_input_edge_count=resolved_input_edge_count,
             ),
             timestamp=now,
             retention_state="retention_purged",
         )
     ).to_payload()
+
+
+def _attempt_with_retention_marker(
+    run: FlowRun,
+    *,
+    resolved_input_aggregate_count: int = 0,
+    resolved_input_edge_count: int = 0,
+) -> FlowStepAttempt:
+    attempt = _attempt_with_provenance(run, None)
+    return attempt.model_copy(
+        update={
+            "provenance_json": _attempt_retention_marker_payload(
+                run,
+                object_id=str(attempt.id),
+                resolved_input_aggregate_count=resolved_input_aggregate_count,
+                resolved_input_edge_count=resolved_input_edge_count,
+            )
+        }
+    )
 
 
 def _step_result_retention_tombstone_payload(run: FlowRun) -> dict[str, Any]:
@@ -1519,10 +1669,7 @@ def test_attempt_retention_marker_parses_as_retention_purged() -> None:
 def test_evidence_export_manifest_corrupt_precedes_retention_purged() -> None:
     run, version = _evidence_run_and_version()
     corrupt_attempt = _attempt_with_provenance(run, {"rag": {"status": "success"}})
-    purged_attempt = _attempt_with_provenance(
-        run,
-        _attempt_retention_marker_payload(run),
-    )
+    purged_attempt = _attempt_with_retention_marker(run)
 
     export = _render_raw_export(
         run,
@@ -1547,10 +1694,7 @@ def test_evidence_export_manifest_retention_purged_precedes_tracked() -> None:
             "llm": {"tool_calls": [{"name": "lookup"}]},
         },
     )
-    purged_attempt = _attempt_with_provenance(
-        run,
-        _attempt_retention_marker_payload(run),
-    )
+    purged_attempt = _attempt_with_retention_marker(run)
 
     export = _render_raw_export(
         run,
@@ -1596,7 +1740,7 @@ def test_evidence_export_retention_summary_counts_payload_tombstones() -> None:
 
 def test_evidence_export_redacted_preserves_retention_marker_fields() -> None:
     run, version = _evidence_run_and_version()
-    attempt = _attempt_with_provenance(run, _attempt_retention_marker_payload(run))
+    attempt = _attempt_with_retention_marker(run)
     raw_bundle = build_evidence_bundle(
         run=run,
         version=version,
@@ -1788,9 +1932,7 @@ def test_evidence_export_rag_tracking_reports_retention_purged_attempts() -> Non
     export = _render_raw_export(
         run,
         version,
-        step_attempts=[
-            _attempt_with_provenance(run, _attempt_retention_marker_payload(run))
-        ],
+        step_attempts=[_attempt_with_retention_marker(run)],
     )
 
     tracking = export["summary"]["rag_usage_tracking"]
@@ -1820,7 +1962,7 @@ def test_evidence_export_rag_tracking_keeps_tracked_state_with_retention_purged(
             },
         },
     )
-    purged = _attempt_with_provenance(run, _attempt_retention_marker_payload(run))
+    purged = _attempt_with_retention_marker(run)
 
     export = _render_raw_export(run, version, step_attempts=[tracked, purged])
 
@@ -1832,7 +1974,7 @@ def test_evidence_export_rag_tracking_keeps_tracked_state_with_retention_purged(
 def test_evidence_export_rag_tracking_corrupt_and_retention_purged_precedence() -> None:
     run, version = _evidence_run_and_version()
     corrupt = _attempt_with_provenance(run, {"rag": {"status": "success"}})
-    purged = _attempt_with_provenance(run, _attempt_retention_marker_payload(run))
+    purged = _attempt_with_retention_marker(run)
 
     unknown_export = _render_raw_export(
         run,

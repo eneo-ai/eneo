@@ -65,6 +65,12 @@ from eneo.flows.api.flow_runtime_paths import (
     build_flow_endpoint_template,
     build_flow_runtime_public_example,
 )
+from eneo.flows.application.flow_run_evidence_service import (
+    EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES,
+    EVIDENCE_EXPORT_MAX_AGGREGATE_STORED_JSON_BYTES,
+    EVIDENCE_EXPORT_MAX_PASSAGE_BYTES,
+    EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES,
+)
 from eneo.flows.application.flow_run_lifecycle_events import (
     FLOW_RUN_LIFECYCLE_EVENT_NAME,
     FLOW_RUN_LIFECYCLE_LOG_MESSAGE,
@@ -3714,20 +3720,99 @@ def test_flow_api_guide_documents_closed_final_result_without_raw_run_payload() 
     assert "URLs, headers, credentials, or the sent" in guide
 
 
-def test_flow_api_guide_documents_evidence_export_actor_contract() -> None:
+def test_flow_api_guide_documents_evidence_export_actor_and_lineage_contract() -> None:
     guide = _read(FLOW_API_GUIDE)
     evidence_export = guide.split("#### Evidence export", maxsplit=1)[1].split(
         "#### Service keys and evidence",
         maxsplit=1,
     )[0]
 
-    assert "`flow-evidence-export.v15`" in evidence_export
+    assert "`flow-evidence-export.v16`" in evidence_export
     assert "`actor.type`" in evidence_export
     assert "`user_id`" in evidence_export
     assert "`key_id`" in evidence_export
     assert "caller that performed the export" in evidence_export
     assert "run owner" in evidence_export
     assert "exported_by_user_id" not in evidence_export
+    assert "exact per-attempt resolved-input lineage" in evidence_export
+    for lineage_state in (
+        "`tracked`",
+        "`not_tracked`",
+        "`retention_purged`",
+        "`corrupt`",
+    ):
+        assert lineage_state in evidence_export
+    assert "same attempt-evidence limits" in evidence_export
+
+
+def test_flow_api_guide_documents_all_four_evidence_export_size_guards() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    evidence_export = guide.split("#### Evidence export", maxsplit=1)[1].split(
+        "#### Service keys and evidence",
+        maxsplit=1,
+    )[0]
+
+    expected_guards = {
+        "Recorded passage content": EVIDENCE_EXPORT_MAX_PASSAGE_BYTES,
+        "Stored attempt provenance": EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES,
+        "Aggregate stored JSON": EVIDENCE_EXPORT_MAX_AGGREGATE_STORED_JSON_BYTES,
+        "Aggregate logical JSON projection": (
+            EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES
+        ),
+    }
+    for label, byte_limit in expected_guards.items():
+        assert f"{label}: `{byte_limit:,}` bytes" in evidence_export
+
+    normalized_export = " ".join(evidence_export.split())
+    assert "fixed service-safety invariants" in normalized_export
+    assert "not organization policy" in normalized_export
+    assert "complete-or-refuse" in normalized_export
+    assert (
+        "Both raw and redacted exports first check the exact retained passage "
+        "total before loading it"
+    ) in normalized_export
+    assert (
+        "a second check enforces the passage text the export will actually carry"
+    ) in normalized_export
+
+
+def test_flow_api_guide_does_not_claim_retrieval_proves_material_influence() -> None:
+    guide = _read(FLOW_API_GUIDE).lower()
+
+    for false_claim in (
+        "influenced the answer",
+        "materially influenced the answer",
+        "materially influenced the output",
+    ):
+        assert false_claim not in guide
+
+
+def test_flow_api_guide_documents_exact_attempt_input_lineage_states() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    evidence_view = guide.split("#### Evidence view", maxsplit=1)[1].split(
+        "#### Evidence export",
+        maxsplit=1,
+    )[0]
+
+    assert "`resolved_input_lineage`" in evidence_view
+    for lineage_state in (
+        "`tracked`",
+        "`not_tracked`",
+        "`retention_purged`",
+        "`corrupt`",
+    ):
+        assert lineage_state in evidence_view
+    assert "source attempt identity" in evidence_view
+    assert "does not copy the raw selected value" in evidence_view
+    assert (
+        "no lineage row and no valid identity-matching attempt-retention marker "
+        "establishes retention"
+    ) in " ".join(evidence_view.split())
+    assert (
+        "its counts report how many lineage aggregates and edges were removed, "
+        "including zero"
+    ) in " ".join(evidence_view.split())
+    assert "complete-or-refuse" in evidence_view
 
 
 def test_flow_api_guide_documents_rerun_input_revision_evidence() -> None:

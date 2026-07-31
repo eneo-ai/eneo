@@ -24,6 +24,8 @@ from eneo.flows.domain.rag_evidence import SourceUsageState
 from eneo.flows.flow_retention_tombstone import (
     FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
     FlowAttemptRetentionMarker,
+    RunDebugAttemptRetentionCounts,
+    parse_attempt_retention_counts,
 )
 from eneo.flows.source_display import (
     format_source_container_display_name,
@@ -154,7 +156,14 @@ class FlowResolvedInputEdges(_FlowResolvedInputModel):
 
     @model_validator(mode="after")
     def _canonical_size_is_bounded(self) -> "FlowResolvedInputEdges":
-        canonical_size = len(canonical_json_bytes(self.model_dump(mode="json")))
+        canonical_size = len(
+            canonical_json_bytes(
+                {
+                    "schema_version": self.schema_version,
+                    "edges": [edge.model_dump(mode="json") for edge in self.edges],
+                }
+            )
+        )
         if canonical_size > FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES:
             raise ValueError(
                 "Resolved input edges canonical JSON exceeds "
@@ -290,7 +299,7 @@ FlowResolvedInputEdgesCorruptionCode: TypeAlias = Literal[
 
 
 class FlowResolvedInputEdgesCorruptionMarker(_FlowResolvedInputModel):
-    status: Literal["corrupt"] = "corrupt"
+    status: Literal["corrupt"]
     error_code: FlowResolvedInputEdgesCorruptionCode
     message: str
     raw_value_type: str | None = None
@@ -316,6 +325,29 @@ class FlowResolvedInputEdgesParseResult:
             self.aggregate is not None or self.marker is not None
         ):
             raise ValueError("Untracked resolved input edges cannot carry evidence.")
+
+
+class FlowResolvedInputLineageNotTracked(_FlowResolvedInputModel):
+    status: Literal["not_tracked"]
+
+
+class FlowResolvedInputLineageTracked(FlowResolvedInputEdges):
+    status: Literal["tracked"]
+
+
+class FlowResolvedInputLineageRetentionPurged(_FlowResolvedInputModel):
+    status: Literal["retention_purged"]
+    resolved_input_aggregate_count: int = Field(strict=True, ge=0)
+    resolved_input_edge_count: int = Field(strict=True, ge=0)
+
+
+FlowResolvedInputLineage: TypeAlias = Annotated[
+    FlowResolvedInputLineageNotTracked
+    | FlowResolvedInputLineageTracked
+    | FlowResolvedInputEdgesCorruptionMarker
+    | FlowResolvedInputLineageRetentionPurged,
+    Field(discriminator="status"),
+]
 
 
 class FlowResolvedInputEdgesConflictError(RuntimeError):
@@ -353,6 +385,7 @@ def parse_resolved_input_edges(raw: Any) -> FlowResolvedInputEdgesParseResult:
         return FlowResolvedInputEdgesParseResult(
             status="corrupt",
             marker=FlowResolvedInputEdgesCorruptionMarker(
+                status="corrupt",
                 error_code="flow_resolved_input_edges_invalid_type",
                 message="Resolved input edges must be a JSON object.",
                 raw_value_type=type(raw).__name__,
@@ -365,6 +398,7 @@ def parse_resolved_input_edges(raw: Any) -> FlowResolvedInputEdgesParseResult:
         return FlowResolvedInputEdgesParseResult(
             status="corrupt",
             marker=FlowResolvedInputEdgesCorruptionMarker(
+                status="corrupt",
                 error_code="flow_resolved_input_edges_schema_version_missing",
                 message="Resolved input edges are missing schema_version.",
             ),
@@ -373,6 +407,7 @@ def parse_resolved_input_edges(raw: Any) -> FlowResolvedInputEdgesParseResult:
         return FlowResolvedInputEdgesParseResult(
             status="corrupt",
             marker=FlowResolvedInputEdgesCorruptionMarker(
+                status="corrupt",
                 error_code="flow_resolved_input_edges_schema_version_unsupported",
                 message="Resolved input edges schema_version is not supported.",
                 persisted_schema_version=schema_version,
@@ -385,6 +420,7 @@ def parse_resolved_input_edges(raw: Any) -> FlowResolvedInputEdgesParseResult:
         return FlowResolvedInputEdgesParseResult(
             status="corrupt",
             marker=FlowResolvedInputEdgesCorruptionMarker(
+                status="corrupt",
                 error_code="flow_resolved_input_edges_invalid_payload",
                 message="Resolved input edges failed current schema validation.",
                 persisted_schema_version=schema_version,
@@ -560,6 +596,38 @@ class FlowAttemptProvenanceParseResult:
         if self.status == "retention_purged" and self.retention_marker is not None:
             return self.retention_marker.to_payload()
         return None
+
+
+def project_resolved_input_lineage(
+    *,
+    resolved_inputs: FlowResolvedInputEdgesParseResult,
+    scoped_attempt_provenance: FlowAttemptProvenanceParseResult,
+) -> FlowResolvedInputLineage:
+    """Project exact lineage and explain a missing row after retention."""
+    if resolved_inputs.status == "tracked":
+        assert resolved_inputs.aggregate is not None
+        return FlowResolvedInputLineageTracked(
+            status="tracked",
+            schema_version=resolved_inputs.aggregate.schema_version,
+            edges=resolved_inputs.aggregate.edges,
+        )
+    if resolved_inputs.status == "corrupt":
+        assert resolved_inputs.marker is not None
+        return resolved_inputs.marker
+    if (
+        scoped_attempt_provenance.status == "retention_purged"
+        and scoped_attempt_provenance.retention_marker is not None
+    ):
+        counts = cast(
+            RunDebugAttemptRetentionCounts,
+            scoped_attempt_provenance.retention_marker.tombstone.counts,
+        )
+        return FlowResolvedInputLineageRetentionPurged(
+            status="retention_purged",
+            resolved_input_aggregate_count=counts.resolved_input_aggregate_count,
+            resolved_input_edge_count=counts.resolved_input_edge_count,
+        )
+    return FlowResolvedInputLineageNotTracked(status="not_tracked")
 
 
 class FlowAttemptRuntimeEvidencePurgedError(RuntimeError):
@@ -782,6 +850,40 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
                 persisted_schema_version=schema_version,
             )
         )
+
+
+def parse_attempt_provenance_for_attempt(
+    raw: Any,
+    *,
+    tenant_id: UUID,
+    run_id: UUID,
+    attempt_id: UUID,
+) -> FlowAttemptProvenanceParseResult:
+    """Parse provenance and reject a retention marker for another attempt."""
+    parse_result = parse_attempt_provenance(raw)
+    if (
+        parse_result.status != "retention_purged"
+        or parse_result.retention_marker is None
+    ):
+        return parse_result
+    if (
+        parse_attempt_retention_counts(
+            parse_result.retention_marker.to_payload(),
+            tenant_id=tenant_id,
+            run_id=run_id,
+            attempt_id=attempt_id,
+        )
+        is not None
+    ):
+        return parse_result
+    return FlowAttemptProvenanceParseResult.corrupt(
+        _corruption_marker(
+            error_code="flow_attempt_provenance_invalid_retention_marker",
+            message="Attempt retention marker identity does not match its attempt.",
+            raw=raw,
+            persisted_schema_version=FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
+        )
+    )
 
 
 def _normalize_attempt_provenance_v3(raw: dict[str, Any]) -> FlowAttemptProvenance:

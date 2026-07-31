@@ -107,6 +107,7 @@ from eneo.flows.flow_run_error import (
     FlowRunError,
     NullablePublicTerminalErrorCode,
 )
+from eneo.flows.flow_run_provenance import FlowResolvedInputLineage
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -2034,6 +2035,7 @@ class FlowStepAttemptPublic(BaseModel):
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
     provenance_json: dict[str, Any] | None = None
+    resolved_input_lineage: FlowResolvedInputLineage
     started_at: datetime
     finished_at: datetime | None = None
     created_at: datetime
@@ -2157,11 +2159,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v15",
+                "schema_version": "flow-evidence-export.v16",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "5ff9c2925588426dc669df439fd12a7aeaa1d3a5f977c6cc29b43fcca747bb73",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v15",
+                    "schema_version": "flow-evidence-export.v16",
                     "app_version": "DEV",
                     "provenance_schema_version_min": "flow-attempt-provenance.v3",
                     "provenance_schema_version_current": "flow-attempt-provenance.v3",
@@ -2547,7 +2549,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v15"]
+    schema_version: Literal["flow-evidence-export.v16"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

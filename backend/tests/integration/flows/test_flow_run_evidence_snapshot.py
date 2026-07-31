@@ -38,6 +38,11 @@ from eneo.flows.application.flow_run_evidence_service import (
 )
 from eneo.flows.domain.flow import Flow
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
+from eneo.flows.flow_retention_tombstone import (
+    FlowAttemptRetentionMarker,
+    FlowRetentionTombstone,
+    RunDebugAttemptRetentionCounts,
+)
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
@@ -46,7 +51,7 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
 )
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
-    StepAttemptProvenanceSize,
+    StepAttemptEvidenceSize,
     _bounded_step_result_evidence_count_statement,
     _bounded_step_result_evidence_size_statement,
 )
@@ -334,7 +339,7 @@ async def test_evidence_view_route_uses_one_repeatable_read_snapshot(
 
     preflight_attempt_counts: list[int] = []
     observed_isolation: list[str] = []
-    original_measure = FlowRunRepository.measure_step_attempt_provenance
+    original_measure = FlowRunRepository.measure_step_attempt_evidence
 
     async def measure_then_mutate(
         repository: FlowRunRepository,
@@ -342,7 +347,7 @@ async def test_evidence_view_route_uses_one_repeatable_read_snapshot(
         run_id: UUID,
         tenant_id: UUID,
         candidate_limit: int | None = None,
-    ) -> StepAttemptProvenanceSize:
+    ) -> StepAttemptEvidenceSize:
         measurement = await original_measure(
             repository,
             run_id=run_id,
@@ -365,7 +370,7 @@ async def test_evidence_view_route_uses_one_repeatable_read_snapshot(
 
     monkeypatch.setattr(
         FlowRunRepository,
-        "measure_step_attempt_provenance",
+        "measure_step_attempt_evidence",
         measure_then_mutate,
     )
 
@@ -385,6 +390,127 @@ async def test_evidence_view_route_uses_one_repeatable_read_snapshot(
         2,
     ]
     assert _summary_attempt_count(after_payload) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_evidence_view_lineage_does_not_mix_pre_purge_and_purged_state(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    setup_database,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ = setup_database
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        seed = await _seed_snapshot_run(
+            session=seed_session,
+            space_factory=space_factory,
+            admin_user=admin_user,
+        )
+        attempt_id = await seed_session.scalar(
+            sa.select(FlowStepAttempts.id).where(
+                FlowStepAttempts.flow_run_id == seed.run_id
+            )
+        )
+        trace_id = await seed_session.scalar(
+            sa.select(FlowRuns.trace_id).where(FlowRuns.id == seed.run_id)
+        )
+        assert attempt_id is not None
+        assert trace_id is not None
+        seed_session.add(
+            FlowStepAttemptResolvedInputs(
+                flow_step_attempt_id=attempt_id,
+                resolved_input_edges_jsonb={"schema_version": 1, "edges": []},
+            )
+        )
+    token = await _admin_token(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        admin_user=admin_user,
+    )
+    endpoint = f"/api/v1/flows/{seed.flow_id}/runs/{seed.run_id}/evidence/"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    original_measure = FlowRunRepository.measure_step_attempt_evidence
+    measurement_count = 0
+
+    async def measure_then_purge(
+        repository: FlowRunRepository,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> StepAttemptEvidenceSize:
+        nonlocal measurement_count
+        measurement = await original_measure(
+            repository,
+            run_id=run_id,
+            tenant_id=tenant_id,
+            candidate_limit=candidate_limit,
+        )
+        measurement_count += 1
+        if measurement_count == 1:
+            now = datetime.now(timezone.utc)
+            marker = FlowAttemptRetentionMarker(
+                tombstone=FlowRetentionTombstone(
+                    tenant_id=str(seed.tenant_id),
+                    run_id=str(seed.run_id),
+                    trace_id=str(trace_id),
+                    data_class="run_debug_evidence",
+                    object_type="flow_step_attempt",
+                    object_id=str(attempt_id),
+                    policy_source="tenant_policy",
+                    cutoff=now,
+                    counts=RunDebugAttemptRetentionCounts(
+                        cleared_field_count=1,
+                        provider_call_count=0,
+                        resolved_input_aggregate_count=1,
+                        resolved_input_edge_count=0,
+                    ),
+                    timestamp=now,
+                    retention_state="retention_purged",
+                )
+            )
+            async with (
+                sessionmanager.session() as mutation_session,
+                mutation_session.begin(),
+            ):
+                await mutation_session.execute(
+                    sa.delete(FlowStepAttemptResolvedInputs).where(
+                        FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt_id
+                    )
+                )
+                await mutation_session.execute(
+                    sa.update(FlowStepAttempts)
+                    .where(FlowStepAttempts.id == attempt_id)
+                    .values(provenance_json=marker.to_payload())
+                )
+        return measurement
+
+    monkeypatch.setattr(
+        FlowRunRepository,
+        "measure_step_attempt_evidence",
+        measure_then_purge,
+    )
+
+    before_response = await client.get(endpoint, headers=headers)
+    after_response = await client.get(endpoint, headers=headers)
+
+    assert before_response.status_code == 200, before_response.text
+    assert after_response.status_code == 200, after_response.text
+    before_lineage = before_response.json()["step_attempts"][0][
+        "resolved_input_lineage"
+    ]
+    after_lineage = after_response.json()["step_attempts"][0]["resolved_input_lineage"]
+    assert before_lineage == {"status": "tracked", "schema_version": 1, "edges": []}
+    assert after_lineage == {
+        "status": "retention_purged",
+        "resolved_input_aggregate_count": 1,
+        "resolved_input_edge_count": 0,
+    }
 
 
 @pytest.mark.asyncio
@@ -413,7 +539,7 @@ async def test_provider_call_and_export_routes_enter_repeatable_read_before_serv
     headers = {"Authorization": f"Bearer {token}"}
     active_route = ""
     observed_isolation: dict[str, str] = {}
-    original_measure = FlowRunRepository.measure_step_attempt_provenance
+    original_measure = FlowRunRepository.measure_step_attempt_evidence
     original_provider_page = FlowProviderCallRepository.list_evidence_page
 
     async def capture_export_isolation(
@@ -422,7 +548,7 @@ async def test_provider_call_and_export_routes_enter_repeatable_read_before_serv
         run_id: UUID,
         tenant_id: UUID,
         candidate_limit: int | None = None,
-    ) -> StepAttemptProvenanceSize:
+    ) -> StepAttemptEvidenceSize:
         isolation = await repository.session.scalar(
             sa.text("SHOW transaction_isolation")
         )
@@ -460,7 +586,7 @@ async def test_provider_call_and_export_routes_enter_repeatable_read_before_serv
 
     monkeypatch.setattr(
         FlowRunRepository,
-        "measure_step_attempt_provenance",
+        "measure_step_attempt_evidence",
         capture_export_isolation,
     )
     monkeypatch.setattr(
@@ -608,7 +734,7 @@ async def test_export_logical_ceiling_catches_toast_compressible_json(
         )
         measurement = await FlowRunRepository(
             session=seed_session
-        ).measure_step_attempt_provenance(
+        ).measure_step_attempt_evidence(
             run_id=seed.run_id,
             tenant_id=seed.tenant_id,
         )
@@ -938,7 +1064,7 @@ async def test_measurements_cover_every_variable_width_evidence_projection(
             tenant_id=seed.tenant_id,
             candidate_limit=10_001,
         )
-        attempt_measurement = await run_repo.measure_step_attempt_provenance(
+        attempt_measurement = await run_repo.measure_step_attempt_evidence(
             run_id=seed.run_id,
             tenant_id=seed.tenant_id,
             candidate_limit=10_001,

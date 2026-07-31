@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal, Self, TypeAlias, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.flows.domain.flow import FlowRunTokenUsage
 
@@ -27,17 +27,17 @@ FlowRetentionState: TypeAlias = Literal[
 class RunDebugStepResultRetentionCounts(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cleared_field_count: int
-    pruned_output_key_count: int
+    cleared_field_count: int = Field(strict=True, ge=0)
+    pruned_output_key_count: int = Field(strict=True, ge=0)
 
 
 class RunDebugAttemptRetentionCounts(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cleared_field_count: int
-    provider_call_count: int
-    resolved_input_aggregate_count: int
-    resolved_input_edge_count: int
+    cleared_field_count: int = Field(strict=True, ge=0)
+    provider_call_count: int = Field(strict=True, ge=0)
+    resolved_input_aggregate_count: int = Field(strict=True, ge=0)
+    resolved_input_edge_count: int = Field(strict=True, ge=0)
     token_usage_state: Literal["recorded", "not_recorded", "unknown"] = "unknown"
     token_usage: FlowRunTokenUsage | None = None
 
@@ -53,7 +53,7 @@ class RunDebugAttemptRetentionCounts(BaseModel):
 class GeneratedArtifactRetentionCounts(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    referenced_file_count: int
+    referenced_file_count: int = Field(strict=True, ge=0)
 
 
 FlowRetentionTombstoneCounts: TypeAlias = (

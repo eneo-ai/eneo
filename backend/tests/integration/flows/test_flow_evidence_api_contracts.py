@@ -1192,6 +1192,16 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
         ["structured_output"],
         ["structured_output"],
     ]
+    attempt_lineage = next(
+        item["resolved_input_lineage"]
+        for item in evidence_response.json()["step_attempts"]
+        if item["id"] == str(attempt_id)
+    )
+    assert attempt_lineage == {
+        "status": "tracked",
+        "schema_version": 1,
+        "edges": [],
+    }
 
     export_response = await client.get(
         f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export",
@@ -1199,7 +1209,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     )
     assert export_response.status_code == 200, export_response.text
     evidence_export = export_response.json()
-    assert evidence_export["schema_version"] == "flow-evidence-export.v15"
+    assert evidence_export["schema_version"] == "flow-evidence-export.v16"
     assert (
         evidence_export["manifest"]["schema_version"]
         == evidence_export["schema_version"]
@@ -1208,6 +1218,14 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
         item["requested_capabilities"]
         for item in evidence_export["bundle"]["provider_calls"]["items"]
     ] == [["structured_output"], ["structured_output"]]
+    assert (
+        next(
+            item["resolved_input_lineage"]
+            for item in evidence_export["bundle"]["step_attempts"]
+            if item["id"] == str(attempt_id)
+        )
+        == attempt_lineage
+    )
 
 
 @pytest.mark.asyncio

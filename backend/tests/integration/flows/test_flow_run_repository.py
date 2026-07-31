@@ -76,6 +76,7 @@ from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgesConflictError,
     FlowResolvedInputEdgesUnavailableError,
     parse_attempt_provenance,
+    parse_resolved_input_edges,
 )
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunDispatchRedriveGenerationConflict,
@@ -2922,6 +2923,108 @@ async def test_resolved_input_edges_reader_marks_corruption_without_repair(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_resolved_input_edges_batch_reader_projects_every_admitted_attempt(
+    attempt_provenance_context,
+) -> None:
+    context = attempt_provenance_context
+    aggregate = _resolved_input_aggregate(binding_ref="question")
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        tracked_attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="resolved-input-batch-tracked",
+        )
+        untracked_attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=2,
+            celery_task_id="resolved-input-batch-untracked",
+        )
+        await session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=tracked_attempt.id,
+                resolved_input_edges_jsonb=aggregate.model_dump(mode="json"),
+            )
+        )
+
+        lineages = await repo.list_resolved_input_edges_by_attempt_id(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            attempt_ids=(tracked_attempt.id, untracked_attempt.id),
+        )
+
+        assert set(lineages) == {tracked_attempt.id, untracked_attempt.id}
+        assert lineages[tracked_attempt.id].status == "tracked"
+        assert lineages[tracked_attempt.id].aggregate == aggregate
+        assert lineages[untracked_attempt.id].status == "not_tracked"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_resolved_input_lineage_participates_in_attempt_evidence_budget(
+    attempt_provenance_context,
+) -> None:
+    context = attempt_provenance_context
+    aggregate = _resolved_input_aggregate(binding_ref="x" * 6000)
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        attempt = await repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="resolved-input-budget",
+        )
+        payload = aggregate.model_dump(mode="json")
+        await session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=attempt.id,
+                resolved_input_edges_jsonb=payload,
+            )
+        )
+        lineage_logical_bytes = int(
+            await session.scalar(
+                sa.select(
+                    sa.func.octet_length(
+                        sa.cast(
+                            FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                            sa.Text,
+                        )
+                    )
+                ).where(
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt.id
+                )
+            )
+            or 0
+        )
+
+        measurement = await repo.measure_step_attempt_evidence(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+        )
+        admitted = await repo.list_step_attempts(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            limit=1,
+            logical_byte_budget=lineage_logical_bytes - 1,
+        )
+
+        assert measurement.logical_json_bytes >= lineage_logical_bytes
+        assert admitted.attempts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_resolved_input_edges_reject_initial_write_after_attempt_terminal(
     attempt_provenance_context,
 ) -> None:
@@ -4225,7 +4328,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         await set_rag_bytes(step_one, 3, 3000)
         # step 2 attempt 1 keeps no RAG: absent aggregates count as zero.
 
-        size = await run_repo.measure_step_attempt_provenance(
+        size = await run_repo.measure_step_attempt_evidence(
             run_id=run.id, tenant_id=tenant_id
         )
         assert size.attempt_count == 4
@@ -4329,7 +4432,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
                 }
             )
         )
-        corrupt_size = await run_repo.measure_step_attempt_provenance(
+        corrupt_size = await run_repo.measure_step_attempt_evidence(
             run_id=run.id, tenant_id=tenant_id
         )
         assert corrupt_size.attempt_count == 4
@@ -4381,7 +4484,8 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         session.add(minimal_attempt_row)
         await session.flush()
         dumped_minimal, _ = _dump_attempt_record(
-            FlowStepAttempt.model_validate(minimal_attempt_row)
+            FlowStepAttempt.model_validate(minimal_attempt_row),
+            resolved_inputs=parse_resolved_input_edges(None),
         )
         serialized_minimal_bytes = len(
             json.dumps(
@@ -4392,8 +4496,15 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         )
         assert serialized_minimal_bytes < EVIDENCE_EXPORT_SERIALIZED_ROW_FLOOR_BYTES
 
-        logical_byte_query = sa.select(_attempt_evidence_logical_bytes()).where(
-            FlowStepAttempts.id == minimal_attempt_row.id
+        logical_byte_query = (
+            sa.select(_attempt_evidence_logical_bytes())
+            .select_from(FlowStepAttempts)
+            .outerjoin(
+                FlowStepAttemptResolvedInputs,
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                == FlowStepAttempts.id,
+            )
+            .where(FlowStepAttempts.id == minimal_attempt_row.id)
         )
         baseline_logical_bytes = int((await session.scalar(logical_byte_query)) or 0)
         charged_fields = (

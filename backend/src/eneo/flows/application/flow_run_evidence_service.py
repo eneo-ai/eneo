@@ -53,7 +53,7 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
-    StepAttemptProvenanceSize,
+    StepAttemptEvidenceSize,
 )
 from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunEvidenceAdmissionReason,
@@ -378,7 +378,7 @@ class FlowRunEvidenceService:
             version=resolved_run.flow_version,
             tenant_id=self.user.tenant_id,
         )
-        provenance_size = await self.flow_run_repo.measure_step_attempt_provenance(
+        attempt_evidence_size = await self.flow_run_repo.measure_step_attempt_evidence(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
             candidate_limit=measurement_candidate_limit,
@@ -430,9 +430,9 @@ class FlowRunEvidenceService:
             ),
             _EvidenceSectionUsage(
                 section="step_attempts",
-                row_count=provenance_size.attempt_count,
-                stored_json_bytes=provenance_size.stored_json_bytes,
-                logical_json_bytes=provenance_size.logical_json_bytes,
+                row_count=attempt_evidence_size.attempt_count,
+                stored_json_bytes=attempt_evidence_size.stored_json_bytes,
+                logical_json_bytes=attempt_evidence_size.logical_json_bytes,
             ),
             _EvidenceSectionUsage(
                 section="result_files",
@@ -489,21 +489,21 @@ class FlowRunEvidenceService:
         view_omissions: list[RunViewEvidenceOmission] = []
         if access_kind == "evidence_view":
             if (
-                provenance_size.attempt_count > RUN_VIEW_MAX_LOADED_ATTEMPTS
-                or provenance_size.stored_provenance_bytes
+                attempt_evidence_size.attempt_count > RUN_VIEW_MAX_LOADED_ATTEMPTS
+                or attempt_evidence_size.stored_provenance_bytes
                 > RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
-                or provenance_size.logical_json_bytes
+                or attempt_evidence_size.logical_json_bytes
                 > RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
-                or provenance_size.recorded_passage_bytes
+                or attempt_evidence_size.recorded_passage_bytes
                 > RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
-                or provenance_size.corrupt_passage_aggregates > 0
+                or attempt_evidence_size.corrupt_passage_aggregates > 0
             ):
                 attempt_limit = RUN_VIEW_MAX_LOADED_ATTEMPTS
                 logical_byte_budget = RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
                 passage_byte_budget = RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
         else:
             self._refuse_export_beyond_preflight(
-                provenance_size,
+                attempt_evidence_size,
                 section_usages=section_usages,
                 detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
             )
@@ -589,6 +589,13 @@ class FlowRunEvidenceService:
                 step_attempts,
                 detail=("raw" if access_kind == "evidence_export_raw" else "redacted"),
             )
+        resolved_input_edges_by_attempt_id = (
+            await self.flow_run_repo.list_resolved_input_edges_by_attempt_id(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                attempt_ids=tuple(attempt.id for attempt in step_attempts),
+            )
+        )
         rerun_admission_reason: FlowRunRerunEvidenceAdmissionReason | None = None
         if is_view:
             rerun_admission = (
@@ -728,6 +735,7 @@ class FlowRunEvidenceService:
             version=version,
             step_results=step_results,
             step_attempts=step_attempts,
+            resolved_input_edges_by_attempt_id=resolved_input_edges_by_attempt_id,
             result_files=result_files,
             rerun_operations=rerun_operations,
             rerun_invalidated_steps=rerun_invalidated_steps,
@@ -886,22 +894,21 @@ class FlowRunEvidenceService:
 
     @staticmethod
     def _refuse_export_beyond_preflight(
-        provenance_size: StepAttemptProvenanceSize,
+        attempt_evidence_size: StepAttemptEvidenceSize,
         *,
         section_usages: Sequence[_EvidenceSectionUsage],
         detail: EvidenceExportDetail,
     ) -> None:
-        """Refuse an export that cannot fit, before loading any provenance.
+        """Refuse an export that cannot fit before loading attempt evidence.
 
-        Two independent guards, each reported as what it actually measured. A
-        raw export refuses on the exact recorded passage total, which every
-        RAG payload stores about itself — a redacted export withholds text and
-        is judged only after load, by what it will actually carry. Both kinds
-        refuse on the stored size of all provenance, because loading it is a
-        cost the passage limit cannot see; stored jsonb is a compressed floor,
-        so exceeding that guard understates the real cost, never overstates it.
+        Raw and redacted exports both enforce the exact retained passage total
+        before load. After disclosure and redaction, the carried-text guard
+        independently checks what the export will contain. Both export kinds
+        also enforce the stored size of all attempt evidence because loading it
+        is a cost the passage limit cannot see; stored jsonb is a compressed
+        floor, so exceeding that guard understates the real cost.
         """
-        if provenance_size.corrupt_passage_aggregates > 0:
+        if attempt_evidence_size.corrupt_passage_aggregates > 0:
             # An export is the exact record. A corrupt size aggregate means the
             # load cannot be bounded or the content proven, so the export
             # refuses rather than guessing — for either export kind.
@@ -913,13 +920,16 @@ class FlowRunEvidenceService:
                     "section": "step_attempts",
                     "limit": "corrupt_passage_evidence",
                     "corrupt_passage_aggregates": (
-                        provenance_size.corrupt_passage_aggregates
+                        attempt_evidence_size.corrupt_passage_aggregates
                     ),
                     "detail": detail,
                     "hint": _EVIDENCE_EXPORT_TOO_LARGE_HINT,
                 },
             )
-        if provenance_size.recorded_passage_bytes > EVIDENCE_EXPORT_MAX_PASSAGE_BYTES:
+        if (
+            attempt_evidence_size.recorded_passage_bytes
+            > EVIDENCE_EXPORT_MAX_PASSAGE_BYTES
+        ):
             # Applies to redacted exports too: withholding happens after the
             # load, so retained passage bytes are the load cost either way.
             raise FileTooLargeException(
@@ -929,14 +939,16 @@ class FlowRunEvidenceService:
                 context={
                     "section": "step_attempts",
                     "limit": "recorded_passage_bytes",
-                    "recorded_passage_bytes": (provenance_size.recorded_passage_bytes),
+                    "recorded_passage_bytes": (
+                        attempt_evidence_size.recorded_passage_bytes
+                    ),
                     "max_passage_bytes": EVIDENCE_EXPORT_MAX_PASSAGE_BYTES,
                     "detail": detail,
                     "hint": _EVIDENCE_EXPORT_TOO_LARGE_HINT,
                 },
             )
         if (
-            provenance_size.stored_provenance_bytes
+            attempt_evidence_size.stored_provenance_bytes
             > EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES
         ):
             raise FileTooLargeException(
@@ -947,7 +959,7 @@ class FlowRunEvidenceService:
                     "section": "step_attempts",
                     "limit": "stored_provenance_bytes",
                     "stored_provenance_bytes": (
-                        provenance_size.stored_provenance_bytes
+                        attempt_evidence_size.stored_provenance_bytes
                     ),
                     "max_stored_provenance_bytes": (
                         EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES

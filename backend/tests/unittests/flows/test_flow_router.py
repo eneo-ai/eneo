@@ -205,11 +205,11 @@ def _evidence_export_payload(
         mode="json"
     )
     return {
-        "schema_version": "flow-evidence-export.v15",
+        "schema_version": "flow-evidence-export.v16",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
-            "schema_version": "flow-evidence-export.v15",
+            "schema_version": "flow-evidence-export.v16",
             "app_version": "DEV",
             "provenance_schema_version_min": "flow-attempt-provenance.v3",
             "provenance_schema_version_current": "flow-attempt-provenance.v3",

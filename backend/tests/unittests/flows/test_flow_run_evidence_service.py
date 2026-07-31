@@ -52,7 +52,11 @@ from eneo.flows.flow_evidence_policy import (
     FlowEvidenceAccessContext,
     flow_metadata_marks_sensitive_or_unreadable,
 )
-from eneo.flows.flow_run_provenance import FlowAttemptProvenance, RagProvenance
+from eneo.flows.flow_run_provenance import (
+    FlowAttemptProvenance,
+    RagProvenance,
+    parse_resolved_input_edges,
+)
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallEvidenceMeasurement,
@@ -60,8 +64,8 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunEvidenceMeasurements,
     FlowRunEvidenceRowCounts,
+    StepAttemptEvidenceSize,
     StepAttemptPage,
-    StepAttemptProvenanceSize,
 )
 from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunEvidenceAdmission,
@@ -185,6 +189,11 @@ def _seed_empty_evidence_measurements(service: FlowRunEvidenceService) -> None:
         FlowRunWebhookDeliveryEvidenceMeasurement.empty()
     )
     service.webhook_delivery_repo.measure_evidence_row_count.return_value = 0
+    service.flow_run_repo.list_resolved_input_edges_by_attempt_id.side_effect = (
+        lambda *, attempt_ids, **_: {
+            attempt_id: parse_resolved_input_edges(None) for attempt_id in attempt_ids
+        }
+    )
 
 
 def _service_for_empty_run(
@@ -292,7 +301,7 @@ async def test_list_provider_calls_authorizes_run_and_forwards_page_cursor(user)
 
 
 @pytest.mark.asyncio
-async def test_export_v15_hash_covers_all_provider_call_events(user):
+async def test_export_v16_hash_covers_all_provider_call_events(user):
     user = _trace_user(user)
     provider_call_repo = _provider_call_repo()
     event = _provider_call_evidence()
@@ -326,7 +335,7 @@ async def test_export_v15_hash_covers_all_provider_call_events(user):
     )
     export_without_event = await service.export_evidence_json(run_id=run.id)
 
-    assert export_with_event["schema_version"] == "flow-evidence-export.v15"
+    assert export_with_event["schema_version"] == "flow-evidence-export.v16"
     assert export_with_event["bundle"]["provider_calls"]["items"][0]["event_id"] == str(
         event.event_id
     )
@@ -884,8 +893,8 @@ async def test_raw_export_preflight_refuses_on_exact_passage_bytes(user) -> None
     """
     user = _trace_user(user)
     service, run = _service_with_attempts(user=user, attempts_bytes=[100])
-    service.flow_run_repo.measure_step_attempt_provenance.return_value = (
-        StepAttemptProvenanceSize(
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
             attempt_count=12,
             stored_provenance_bytes=1024,
             recorded_passage_bytes=EVIDENCE_EXPORT_MAX_PASSAGE_BYTES + 1,
@@ -1257,8 +1266,8 @@ async def test_redacted_export_also_refuses_on_the_passage_load_guard(user) -> N
     """
     user = _trace_user(user)
     service, run = _service_with_attempts(user=user, attempts_bytes=[100])
-    service.flow_run_repo.measure_step_attempt_provenance.return_value = (
-        StepAttemptProvenanceSize(
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
             attempt_count=12,
             stored_provenance_bytes=1024,
             recorded_passage_bytes=EVIDENCE_EXPORT_MAX_PASSAGE_BYTES + 1,
@@ -1280,8 +1289,8 @@ async def test_export_preflight_refuses_oversized_materialization(user) -> None:
     """
     user = _trace_user(user)
     service, run = _service_with_attempts(user=user, attempts_bytes=[100])
-    service.flow_run_repo.measure_step_attempt_provenance.return_value = (
-        StepAttemptProvenanceSize(
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
             attempt_count=12,
             stored_provenance_bytes=EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES + 1,
             recorded_passage_bytes=0,
@@ -1313,8 +1322,8 @@ async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> N
     """
     user = _trace_user(user)
     service, run = _service_with_attempts(user=user, attempts_bytes=[100])
-    service.flow_run_repo.measure_step_attempt_provenance.return_value = (
-        StepAttemptProvenanceSize(
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
             attempt_count=501,
             stored_provenance_bytes=RUN_VIEW_MAX_LOADED_LOGICAL_BYTES + 1,
             recorded_passage_bytes=0,
@@ -1351,8 +1360,8 @@ async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> N
 async def test_view_reports_corrupt_passage_aggregates(user) -> None:
     user = _trace_user(user)
     service, run = _service_with_attempts(user=user, attempts_bytes=[])
-    service.flow_run_repo.measure_step_attempt_provenance.return_value = (
-        StepAttemptProvenanceSize(
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
             attempt_count=2,
             stored_provenance_bytes=1024,
             recorded_passage_bytes=0,

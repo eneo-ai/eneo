@@ -1095,6 +1095,23 @@ Use this when you want the rich evidence payload for one run, including:
 - rerun operations, input revisions, and invalidated-step lineage
 - the debug export payload
 
+Every admitted item in `step_attempts` has a required
+`resolved_input_lineage` union. Branch on its `status`:
+
+- `tracked` contains the exact persisted source edges used by that attempt,
+  including source attempt identity, selected JSON path, and a hash and byte
+  size of the selected value; it does not copy the raw selected value
+- `not_tracked` means no lineage row and no valid identity-matching
+  attempt-retention marker establishes retention
+- `retention_purged` means a valid identity-matching attempt-retention marker
+  exists; its counts report how many lineage aggregates and edges were removed,
+  including zero
+- `corrupt` isolates malformed stored lineage behind a machine-readable marker
+
+The interactive evidence view applies the same admitted-attempt count and byte
+budgets to lineage, so a lineage cannot bypass evidence narrowing. Exports
+remain complete-or-refuse under their documented limits.
+
 When `definition_integrity.status = "verified"`, the evidence run uses the same
 redacted, typed `FlowRunPublic.result` projection as the canonical run endpoint.
 A completed run therefore exposes the same closed result kind here.
@@ -1251,14 +1268,36 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
-The JSON response uses manifest schema `flow-evidence-export.v15`. Version 15
-moves the exact resolved input, per-call questions and prompts, shared initial and
-capability-fallback model configuration, mapped admission, and attempt-start facts
-into the strict immutable attempt-input envelope before provider work. Attempt
-provenance now retains only exact retrieval plus bounded completion, tool-call, and
-citation observations that cannot be reconstructed elsewhere. Invalid envelopes
-are exported as explicit corruption markers. The version and payload change
-intentionally produce different content hashes from version 14.
+The JSON response uses manifest schema `flow-evidence-export.v16`. Version 16
+adds exact per-attempt resolved-input lineage. Each attempt reports one typed
+state: `tracked` with the persisted source edges, `not_tracked`,
+`retention_purged` with the retained aggregate and edge counts, or `corrupt`
+with a machine-readable integrity marker. The projection is admitted under the
+same attempt-evidence limits as the rest of the bundle. Version 15 introduced
+the strict immutable attempt-input envelope and remains intentionally
+incompatible because both versions change the content-hashed bundle.
+
+Exports are synchronous and complete-or-refuse. Four size guards are fixed
+service-safety invariants, not organization policy, because they bound the
+memory and materialization cost of one server request:
+
+- Recorded passage content: `67,108,864` bytes (64 MiB). Both raw and redacted
+  exports first check the exact retained passage total before loading it. After
+  disclosure and redaction, a second check enforces the passage text the export
+  will actually carry.
+- Stored attempt provenance: `268,435,456` bytes (256 MiB). This stored JSONB
+  measurement is a compressed floor, so the materialized representation can be
+  larger.
+- Aggregate stored JSON: `268,435,456` bytes (256 MiB) across the emitted
+  bundle.
+- Aggregate logical JSON projection: `22,369,621` bytes (about 21.33 MiB).
+  This is derived from a 256 MiB per-request memory budget divided by the
+  measured peak-copy multiplier of 12.
+
+Exceeding any guard returns `413` with code
+`flow_evidence_export_too_large`; the error context identifies the guard that
+refused the export.
+
 A synchronous export includes all provider-call lifecycle rows and supports at
 most `10,000` such rows. Larger runs
 return `413` with code `flow_evidence_export_too_large`; consume the

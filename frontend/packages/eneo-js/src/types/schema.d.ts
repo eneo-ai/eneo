@@ -13133,7 +13133,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v15";
+      schema_version: "flow-evidence-export.v16";
       /** App Version */
       app_version: string;
       /** Provenance Schema Version Min */
@@ -15496,6 +15496,184 @@ export interface components {
        */
       max_recorded_passage_bytes_per_run_view?: number | null;
     };
+    /** FlowResolvedInputBoundFileSelection */
+    FlowResolvedInputBoundFileSelection: {
+      /**
+       * Encoding
+       * @constant
+       */
+      encoding: "bound_file";
+    };
+    /** FlowResolvedInputEdge */
+    FlowResolvedInputEdge: {
+      /** Binding Ref */
+      binding_ref: string;
+      /** Source */
+      source:
+        | components["schemas"]["FlowResolvedInputFlowInputSource"]
+        | components["schemas"]["FlowResolvedInputStepResultSource"]
+        | components["schemas"]["FlowResolvedInputSystemValueSource"]
+        | components["schemas"]["FlowResolvedInputRuntimeSource"]
+        | components["schemas"]["FlowResolvedInputRuntimeFileSource"]
+        | components["schemas"]["FlowResolvedInputHttpResponseSource"];
+      /** Selection */
+      selection:
+        | components["schemas"]["FlowResolvedInputHashedSelection"]
+        | components["schemas"]["FlowResolvedInputBoundFileSelection"];
+    };
+    /** FlowResolvedInputEdgesCorruptionMarker */
+    FlowResolvedInputEdgesCorruptionMarker: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "corrupt";
+      /**
+       * Error Code
+       * @enum {string}
+       */
+      error_code:
+        | "flow_resolved_input_edges_invalid_type"
+        | "flow_resolved_input_edges_schema_version_missing"
+        | "flow_resolved_input_edges_schema_version_unsupported"
+        | "flow_resolved_input_edges_invalid_payload";
+      /** Message */
+      message: string;
+      /** Raw Value Type */
+      raw_value_type?: string | null;
+      /** Persisted Schema Version */
+      persisted_schema_version?: number | string | null;
+    };
+    /** FlowResolvedInputFlowInputSource */
+    FlowResolvedInputFlowInputSource: {
+      selector: components["schemas"]["FlowResolvedInputJsonPath"];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "flow_input";
+    };
+    /** FlowResolvedInputHashedSelection */
+    FlowResolvedInputHashedSelection: {
+      /**
+       * Encoding
+       * @enum {string}
+       */
+      encoding: "utf8" | "canonical_json";
+      /** Sha256 */
+      sha256: string;
+      /** Byte Size */
+      byte_size: number;
+    };
+    /** FlowResolvedInputHttpResponseSource */
+    FlowResolvedInputHttpResponseSource: {
+      selector: components["schemas"]["FlowResolvedInputJsonPath"];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "http_response";
+    };
+    /** FlowResolvedInputJsonPath */
+    FlowResolvedInputJsonPath: {
+      /**
+       * Kind
+       * @constant
+       */
+      kind: "json_path";
+      /** Path */
+      path: (string | number)[];
+    };
+    /** FlowResolvedInputLineageNotTracked */
+    FlowResolvedInputLineageNotTracked: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "not_tracked";
+    };
+    /** FlowResolvedInputLineageRetentionPurged */
+    FlowResolvedInputLineageRetentionPurged: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "retention_purged";
+      /** Resolved Input Aggregate Count */
+      resolved_input_aggregate_count: number;
+      /** Resolved Input Edge Count */
+      resolved_input_edge_count: number;
+    };
+    /** FlowResolvedInputLineageTracked */
+    FlowResolvedInputLineageTracked: {
+      /**
+       * Schema Version
+       * @constant
+       */
+      schema_version: 1;
+      /** Edges */
+      edges: components["schemas"]["FlowResolvedInputEdge"][];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "tracked";
+    };
+    /** FlowResolvedInputRuntimeFileSource */
+    FlowResolvedInputRuntimeFileSource: {
+      selector: components["schemas"]["FlowResolvedInputJsonPath"];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "runtime_file";
+      /** Input File Ordinal */
+      input_file_ordinal: number;
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      /** Checksum */
+      checksum: string;
+      /** Byte Size */
+      byte_size: number;
+    };
+    /** FlowResolvedInputRuntimeSource */
+    FlowResolvedInputRuntimeSource: {
+      selector: components["schemas"]["FlowResolvedInputJsonPath"];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "runtime_input";
+    };
+    /** FlowResolvedInputStepResultSource */
+    FlowResolvedInputStepResultSource: {
+      selector: components["schemas"]["FlowResolvedInputJsonPath"];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "step_result";
+      /**
+       * Source Step Id
+       * Format: uuid
+       */
+      source_step_id: string;
+      /** Source Attempt No */
+      source_attempt_no: number;
+    };
+    /** FlowResolvedInputSystemValueSource */
+    FlowResolvedInputSystemValueSource: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "system_value";
+      /** Name */
+      name: string;
+    };
     /** FlowRetentionChangeConfirmationPublic */
     FlowRetentionChangeConfirmationPublic: {
       /** Expected Control Plane Version */
@@ -17274,7 +17452,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v15",
+     *         "schema_version": "flow-evidence-export.v16",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -17294,7 +17472,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v15",
+     *       "schema_version": "flow-evidence-export.v16",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -17620,7 +17798,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v15";
+      schema_version: "flow-evidence-export.v16";
       /**
        * Generated At
        * Format: date-time
@@ -20280,6 +20458,12 @@ export interface components {
       provenance_json?: {
         [key: string]: unknown;
       } | null;
+      /** Resolved Input Lineage */
+      resolved_input_lineage:
+        | components["schemas"]["FlowResolvedInputLineageNotTracked"]
+        | components["schemas"]["FlowResolvedInputLineageTracked"]
+        | components["schemas"]["FlowResolvedInputEdgesCorruptionMarker"]
+        | components["schemas"]["FlowResolvedInputLineageRetentionPurged"];
       /**
        * Started At
        * Format: date-time

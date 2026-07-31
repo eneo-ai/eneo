@@ -90,6 +90,7 @@ from eneo.flows.published_definition import (
     build_published_definition_json,
     parse_published_runtime_steps,
 )
+from eneo.flows.runtime.step_result_builder import build_terminal_attempt_input
 
 _DEFAULT_RERUN_FILE_IDS = object()
 _EXPECTED_RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
@@ -432,10 +433,13 @@ async def _mark_run_completed(
             attempt_no=1,
             tenant_id=tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
-            input_payload_json={
-                "input": f"step-{step.step_order}",
-                "api_key": "super-secret",
-            },
+            attempt_input=build_terminal_attempt_input(
+                start=None,
+                resolved_input={
+                    "input": f"step-{step.step_order}",
+                    "api_key": "super-secret",
+                },
+            ),
             output_payload_json={
                 "text": f"output-{step.step_order}",
                 "url": "https://example.org/hook?token=top-secret",
@@ -1769,7 +1773,10 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
             attempt_no=started_attempt.attempt_no,
             tenant_id=scenario.tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
-            input_payload_json=saved_result.input_payload_json,
+            attempt_input=build_terminal_attempt_input(
+                start=None,
+                resolved_input=saved_result.input_payload_json,
+            ),
             output_payload_json=saved_result.output_payload_json,
         )
         assert finished_attempt is not None
@@ -1803,6 +1810,15 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
             version=version,
             step_results=step_results,
             step_attempts=step_attempt_page.attempts,
+            resolved_input_edges_by_attempt_id=(
+                await run_repo.list_resolved_input_edges_by_attempt_id(
+                    run_id=scenario.flow_run_id,
+                    tenant_id=scenario.tenant_id,
+                    attempt_ids=tuple(
+                        attempt.id for attempt in step_attempt_page.attempts
+                    ),
+                )
+            ),
             rerun_operations=await rerun_repo.list_rerun_operations_for_run(
                 run_id=scenario.flow_run_id,
                 tenant_id=scenario.tenant_id,
@@ -1851,19 +1867,25 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
         if attempt["id"] == raw_prior_attempt["id"]
     )
     assert raw_prior_attempt["input_payload_json"] == {
-        "input": "step-1",
-        "api_key": "super-secret",
+        "schema_version": "flow-step-attempt-input.v1",
+        "resolved_input": {
+            "input": "step-1",
+            "api_key": "super-secret",
+        },
     }
     assert raw_prior_attempt["output_payload_json"] == {
         "text": "output-1",
         "url": "https://example.org/hook?token=top-secret",
     }
-    assert redacted_prior_attempt["input_payload_json"]["api_key"] == "[REDACTED]"
+    assert (
+        redacted_prior_attempt["input_payload_json"]["resolved_input"]["api_key"]
+        == "[REDACTED]"
+    )
     assert redacted_prior_attempt["output_payload_json"]["url"] == (
         "https://example.org/hook?token=%5BREDACTED%5D"
     )
     assert any(
-        path.endswith(".input_payload_json.api_key")
+        path.endswith(".input_payload_json.resolved_input.api_key")
         for path in redacted_export["redaction"]["masked_paths"]
     )
 

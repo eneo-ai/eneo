@@ -170,11 +170,13 @@ def _file_evidence_logical_bytes() -> Any:
 
 def _attempt_evidence_logical_bytes() -> Any:
     # Paired with `_dump_attempt_record`, including every emitted unbounded text
-    # scalar as serialized JSON so escaping expansion cannot bypass the budget.
+    # scalar and exact resolved-input lineage so escaping expansion cannot
+    # bypass the budget.
     return _jsonb_evidence_logical_bytes(
         FlowStepAttempts.provenance_json,
         FlowStepAttempts.input_payload_json,
         FlowStepAttempts.output_payload_json,
+        FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
     ) + _scalar_evidence_logical_bytes(
         FlowStepAttempts.celery_task_id,
         FlowStepAttempts.error_code,
@@ -211,8 +213,8 @@ class StepAttemptPage:
 
 
 @dataclass(frozen=True, slots=True)
-class StepAttemptProvenanceSize:
-    """How much attempt provenance a run holds, measured without loading it.
+class StepAttemptEvidenceSize:
+    """How much attempt evidence a run holds, measured without loading it.
 
     The two byte measures answer different questions and must not be
     conflated. `recorded_passage_bytes` sums the exact aggregate each RAG
@@ -1228,14 +1230,14 @@ class FlowRunRepository:
             ),
         )
 
-    async def measure_step_attempt_provenance(
+    async def measure_step_attempt_evidence(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
         candidate_limit: int | None = None,
-    ) -> StepAttemptProvenanceSize:
-        """Size a run's attempt provenance without materializing any of it.
+    ) -> StepAttemptEvidenceSize:
+        """Size a run's attempt evidence without materializing any of it.
 
         One aggregate over the run's attempts, so a caller can refuse or narrow
         the work before the JSON is fetched, decoded and copied. `pg_column_size`
@@ -1275,6 +1277,7 @@ class FlowRunRepository:
                                         FlowStepAttempts.provenance_json,
                                         FlowStepAttempts.input_payload_json,
                                         FlowStepAttempts.output_payload_json,
+                                        FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
                                     )
                                 ),
                                 start=sa.literal(0),
@@ -1293,12 +1296,18 @@ class FlowRunRepository:
                         sa.func.sum(sa.case((is_corrupt, 1), else_=0)), 0
                     ).label("corrupt_aggregates"),
                 )
+                .select_from(FlowStepAttempts)
+                .outerjoin(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
                 .where(FlowStepAttempts.flow_run_id == run_id)
                 .where(FlowStepAttempts.tenant_id == tenant_id)
                 .where(FlowStepAttempts.id.in_(sa.select(candidates.c.id)))
             )
         ).one()
-        return StepAttemptProvenanceSize(
+        return StepAttemptEvidenceSize(
             attempt_count=int(row.attempt_count),
             stored_provenance_bytes=int(row.provenance_bytes),
             recorded_passage_bytes=int(row.passage_bytes),
@@ -1383,6 +1392,11 @@ class FlowRunRepository:
                     FlowStepAttempts.attempt_no == FlowStepResults.current_attempt_no,
                 ),
             )
+            .outerjoin(
+                FlowStepAttemptResolvedInputs,
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                == FlowStepAttempts.id,
+            )
             .where(
                 FlowStepResults.flow_run_id == run_id,
                 FlowStepResults.tenant_id == tenant_id,
@@ -1405,6 +1419,12 @@ class FlowRunRepository:
                 logical_bytes.label("logical_bytes"),
                 passage_bytes.label("passage_bytes"),
                 is_corrupt.label("is_corrupt"),
+            )
+            .select_from(FlowStepAttempts)
+            .outerjoin(
+                FlowStepAttemptResolvedInputs,
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                == FlowStepAttempts.id,
             )
             .where(
                 FlowStepAttempts.flow_run_id == run_id,
@@ -2359,6 +2379,38 @@ class FlowRunRepository:
         if row is None:
             return None
         return parse_resolved_input_edges(row[0])
+
+    async def list_resolved_input_edges_by_attempt_id(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        attempt_ids: Sequence[UUID],
+    ) -> dict[UUID, FlowResolvedInputEdgesParseResult]:
+        """Read exact lineage for an admitted attempt set in one statement."""
+        if not attempt_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepAttempts.id,
+                    FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                )
+                .select_from(FlowStepAttempts)
+                .outerjoin(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepAttempts.flow_run_id == run_id)
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+                .where(FlowStepAttempts.id.in_(attempt_ids))
+            )
+        ).all()
+        return {
+            attempt_id: parse_resolved_input_edges(raw_resolved_inputs)
+            for attempt_id, raw_resolved_inputs in rows
+        }
 
     async def _record_resolved_input_edges_for_locked_attempt(
         self,

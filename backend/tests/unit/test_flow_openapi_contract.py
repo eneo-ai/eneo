@@ -3260,6 +3260,56 @@ def test_openapi_flow_runtime_step_identity_fields_are_required(
     _assert_required_uuid_property(step_attempt, "step_id")
 
 
+def test_openapi_flow_attempt_exposes_discriminated_resolved_input_lineage(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    step_attempt = schemas.get("FlowStepAttemptPublic", {})
+    lineage = step_attempt.get("properties", {}).get("resolved_input_lineage", {})
+
+    assert "resolved_input_lineage" in step_attempt.get("required", [])
+    assert lineage.get("discriminator", {}).get("propertyName") == "status"
+    variants = [
+        _resolve_component_ref(openapi_spec, variant)
+        for variant in lineage.get("oneOf", [])
+    ]
+    variants_by_status = {
+        next(
+            iter(
+                _extract_enum_values(
+                    openapi_spec,
+                    variant.get("properties", {}).get("status", {}),
+                )
+            )
+        ): variant
+        for variant in variants
+    }
+    assert set(variants_by_status) == {
+        "tracked",
+        "not_tracked",
+        "corrupt",
+        "retention_purged",
+    }
+    assert set(variants_by_status["tracked"].get("required", [])) == {
+        "status",
+        "schema_version",
+        "edges",
+    }
+    assert (
+        variants_by_status["tracked"]
+        .get("properties", {})
+        .get("edges", {})
+        .get("maxItems")
+        == 2048
+    )
+    assert set(variants_by_status["retention_purged"].get("required", [])) == {
+        "status",
+        "resolved_input_aggregate_count",
+        "resolved_input_edge_count",
+    }
+    assert "edges" not in variants_by_status["corrupt"].get("properties", {})
+
+
 def test_openapi_flow_run_step_public_database_id_stays_nullable(
     openapi_spec: dict,
 ) -> None:
@@ -3522,7 +3572,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v15"}
+    ) == {"flow-evidence-export.v16"}
     assert "actor" in manifest.get("required", [])
     assert "exported_by_user_id" not in manifest_properties
     actor_schema = cast(dict[str, Any], manifest_properties["actor"])

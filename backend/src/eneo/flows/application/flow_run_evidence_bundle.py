@@ -27,7 +27,9 @@ from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_provenance import (
     FlowAttemptProvenanceParseResult,
-    parse_attempt_provenance,
+    FlowResolvedInputEdgesParseResult,
+    parse_attempt_provenance_for_attempt,
+    project_resolved_input_lineage,
 )
 from eneo.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
@@ -77,6 +79,7 @@ class EvidenceBundle:
     review_checkpoints: Sequence[FlowRunReviewCheckpoint]
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead]
     provider_calls: ProviderCallEvidencePage
+    resolved_input_edges_by_attempt_id: Mapping[UUID, FlowResolvedInputEdgesParseResult]
     runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
     runtime_input_file_metadata_by_step_result_id: Mapping[
         UUID, Sequence[FlowRunStepInputFileMetadata]
@@ -87,7 +90,10 @@ class EvidenceBundle:
         step_attempts: list[dict[str, Any]] = []
         provenance_parse_results: list[FlowAttemptProvenanceParseResult] = []
         for item in self.step_attempts:
-            dumped, parse_result = _dump_attempt_record(item)
+            dumped, parse_result = _dump_attempt_record(
+                item,
+                resolved_inputs=self.resolved_input_edges_by_attempt_id[item.id],
+            )
             step_attempts.append(dumped)
             provenance_parse_results.append(parse_result)
         return EvidenceBundlePayload(
@@ -189,6 +195,8 @@ def build_evidence_bundle(
     version: FlowVersion,
     step_results: Sequence[FlowStepResult],
     step_attempts: Sequence[FlowStepAttempt],
+    resolved_input_edges_by_attempt_id: Mapping[UUID, FlowResolvedInputEdgesParseResult]
+    | None = None,
     result_files: Sequence[FlowRunStepResultFile] = (),
     rerun_operations: Sequence[FlowRunRerunOperation] = (),
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep] = (),
@@ -205,6 +213,13 @@ def build_evidence_bundle(
     knowledge_evidence_view: RunViewPassageOmission | None = None,
     omissions: Sequence[RunViewEvidenceOmission] = (),
 ) -> EvidenceBundle:
+    resolved_input_lineages = resolved_input_edges_by_attempt_id or {}
+    admitted_attempt_ids = {attempt.id for attempt in step_attempts}
+    projected_attempt_ids = set(resolved_input_lineages)
+    if projected_attempt_ids != admitted_attempt_ids:
+        raise ValueError(
+            "Resolved input lineage must cover exactly the admitted attempts."
+        )
     resolved_runtime_input_file_metadata_by_step_result_id = (
         runtime_input_file_metadata_by_step_result_id or {}
     )
@@ -250,6 +265,7 @@ def build_evidence_bundle(
             has_more=False,
             next_after_event_id=None,
         ),
+        resolved_input_edges_by_attempt_id=dict(resolved_input_lineages),
         runtime_input_file_ids_by_step_result_id=(
             resolved_runtime_input_file_ids_by_step_result_id
         ),
@@ -305,7 +321,10 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     dumped_attempt_payloads: list[dict[str, Any]] = []
     provenance_parse_results: list[FlowAttemptProvenanceParseResult] = []
     for step_attempt in bundle.step_attempts:
-        dumped_attempt, parse_result = _dump_attempt_record(step_attempt)
+        dumped_attempt, parse_result = _dump_attempt_record(
+            step_attempt,
+            resolved_inputs=bundle.resolved_input_edges_by_attempt_id[step_attempt.id],
+        )
         dumped_attempt_payloads.append(dumped_attempt)
         provenance_parse_results.append(parse_result)
     step_attempt_section = _redact_record_payloads(
@@ -551,10 +570,21 @@ def _review_checkpoint_decision(item: FlowRunReviewCheckpoint) -> str | None:
 
 def _dump_attempt_record(
     item: FlowStepAttempt,
+    *,
+    resolved_inputs: FlowResolvedInputEdgesParseResult,
 ) -> tuple[dict[str, Any], FlowAttemptProvenanceParseResult]:
     dumped = item.model_dump(mode="json")
-    parse_result = parse_attempt_provenance(item.provenance_json)
+    parse_result = parse_attempt_provenance_for_attempt(
+        item.provenance_json,
+        tenant_id=item.tenant_id,
+        run_id=item.flow_run_id,
+        attempt_id=item.id,
+    )
     dumped["provenance_json"] = parse_result.to_export_payload()
     input_parse_result = parse_flow_step_attempt_input(item.input_payload_json)
     dumped["input_payload_json"] = input_parse_result.to_export_payload()
+    dumped["resolved_input_lineage"] = project_resolved_input_lineage(
+        resolved_inputs=resolved_inputs,
+        scoped_attempt_provenance=parse_result,
+    ).model_dump(mode="json")
     return dumped, parse_result
