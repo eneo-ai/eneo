@@ -29,8 +29,7 @@ _FAKE_SETTINGS = SimpleNamespace(
 )
 _UPLOAD_ADMISSION = UploadAdmissionSnapshot(
     policy_revision=7,
-    session_storage_target=StorageKind.POSTGRES_INLINE,
-    session_operator_ceiling_bytes=250_000_000,
+    new_write_storage_target=StorageKind.POSTGRES_INLINE,
     session_file_maximum_bytes=TEXT_MAX,
     session_image_maximum_bytes=IMAGE_MAX,
     session_audio_maximum_bytes=AUDIO_MAX,
@@ -40,8 +39,7 @@ _UPLOAD_ADMISSION = UploadAdmissionSnapshot(
 _OBJECT_STORE_ENVELOPE = 10_000_000
 _OBJECT_STORE_ADMISSION = replace(
     _UPLOAD_ADMISSION,
-    session_storage_target=StorageKind.OBJECT_STORE,
-    session_operator_ceiling_bytes=_OBJECT_STORE_ENVELOPE,
+    new_write_storage_target=StorageKind.OBJECT_STORE,
     session_file_maximum_bytes=_OBJECT_STORE_ENVELOPE,
     session_image_maximum_bytes=_OBJECT_STORE_ENVELOPE,
     session_audio_maximum_bytes=_OBJECT_STORE_ENVELOPE,

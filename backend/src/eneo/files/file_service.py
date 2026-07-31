@@ -123,7 +123,7 @@ class FileService:
 
     async def save_file(self, upload_file: UploadFile) -> FileInfo:
         snapshot = self._require_upload_admission()
-        storage_target = snapshot.session_storage_target
+        storage_target = snapshot.new_write_storage_target
         if (
             storage_target is StorageKind.OBJECT_STORE
             and self.repo.session.in_transaction()

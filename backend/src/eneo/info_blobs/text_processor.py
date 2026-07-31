@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.files.text import TextExtractor
-from eneo.info_blobs.info_blob import InfoBlobAdd
+from eneo.info_blobs.info_blob import InfoBlobAdd, PreparedKnowledgeOriginal
 from eneo.info_blobs.info_blob_service import InfoBlobService
 from eneo.users.user import UserInDB
 
@@ -33,6 +33,7 @@ class TextProcessor:
         group_id: UUID | None = None,
         website_id: UUID | None = None,
         content_hash: bytes | None = None,
+        original: PreparedKnowledgeOriginal | None = None,
     ):
         text = self.extractor.extract(filepath, mimetype)
 
@@ -43,6 +44,7 @@ class TextProcessor:
             group_id=group_id,
             website_id=website_id,
             content_hash=content_hash,  # Pass hash for files too
+            original=original,
         )
 
     async def process_text(
@@ -55,6 +57,7 @@ class TextProcessor:
         website_id: UUID | None = None,
         url: str | None = None,
         content_hash: bytes | None = None,
+        original: PreparedKnowledgeOriginal | None = None,
     ):
         info_blob_add = InfoBlobAdd(
             title=title,
@@ -70,4 +73,5 @@ class TextProcessor:
         return await self.info_blob_service.publish_info_blob_without_validation(
             info_blob_add,
             embedding_model=embedding_model,
+            original=original,
         )

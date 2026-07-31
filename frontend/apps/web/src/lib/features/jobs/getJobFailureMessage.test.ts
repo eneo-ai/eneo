@@ -12,6 +12,11 @@ vi.mock("$lib/paraglide/messages", () => ({
     job_failure_cancelled: () => "cancelled",
     job_failure_processing_interrupted: () => "processing_interrupted",
     job_failure_invalid_job_payload: () => "invalid_job_payload",
+    job_failure_quota_exceeded: () => "quota_exceeded",
+    job_failure_storage_limit_exceeded: () => "storage_limit_exceeded",
+    job_failure_storage_unavailable: () => "storage_unavailable",
+    job_failure_storage_verification_failed: () => "storage_verification_failed",
+    job_failure_knowledge_source_conflict: () => "knowledge_source_conflict",
     job_failure_unknown: () => "unknown"
   }
 }));
@@ -28,7 +33,12 @@ describe("getJobFailureMessage", () => {
     "processing_failed",
     "cancelled",
     "processing_interrupted",
-    "invalid_job_payload"
+    "invalid_job_payload",
+    "quota_exceeded",
+    "storage_limit_exceeded",
+    "storage_unavailable",
+    "storage_verification_failed",
+    "knowledge_source_conflict"
   ] as const)("maps %s to its localized recovery instruction", (code) => {
     expect(getJobFailureMessage(code, "upload_info_blob")).toBe(code);
   });

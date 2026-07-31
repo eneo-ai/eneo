@@ -14,7 +14,7 @@
     lastRefreshed: string | null;
     onRetry: () => void | Promise<void>;
     onRefresh: () => void | Promise<void>;
-    storageTargetLabel: (target: StorageKind | null) => string;
+    storageTargetLabel: (target: StorageKind) => string;
     contentStateLabel: (state: ContentState) => string;
     storageDate: (value: string | null) => string;
     storageCount: (value: number) => string;

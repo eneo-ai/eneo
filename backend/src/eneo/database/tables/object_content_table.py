@@ -424,12 +424,10 @@ class FileContentReferences(BaseCrossReference):
 
 class InfoBlobContentReferences(BaseCrossReference):
     __table_args__ = (
-        PrimaryKeyConstraint(
-            "info_blob_id", "variant", name="pk_info_blob_content_references"
-        ),
+        PrimaryKeyConstraint("info_blob_id", name="pk_info_blob_content_references"),
         CheckConstraint(
-            "variant = 'extracted_text'",
-            name="ck_info_blob_content_references_variant",
+            "char_length(original_filename) BETWEEN 1 AND 255",
+            name="ck_info_blob_content_references_original_filename",
         ),
     )
 
@@ -439,7 +437,7 @@ class InfoBlobContentReferences(BaseCrossReference):
     content_id: Mapped[UUID] = mapped_column(
         ForeignKey(ObjectContents.id, ondelete="RESTRICT"), nullable=False
     )
-    variant: Mapped[str] = mapped_column(String(32), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
 
 
 class IconContentReferences(BaseCrossReference):

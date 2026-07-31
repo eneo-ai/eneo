@@ -10,13 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.job_table import Jobs
 from eneo.jobs.job_models import JobFailureCode, Task
-from eneo.jobs.job_staging import job_staging_path
-from eneo.jobs.task_models import (
-    TaskParams,
-    Transcription,
-    UploadInfoBlob,
-    validate_dispatch_envelope,
-)
+from eneo.jobs.task_models import TaskParams, validate_dispatch_envelope
 from eneo.main.logging import get_logger
 from eneo.main.models import Status
 
@@ -38,16 +32,6 @@ class RedispatchResult:
     claimed: int
     enqueued: int
     failed: int
-
-
-def build_knowledge_dispatch_params(
-    params: UploadInfoBlob | Transcription, job_id: UUID
-) -> UploadInfoBlob | Transcription:
-    payload = params.model_copy()
-    # Remove only when the minimum upgrade source includes this release, pre-bridge
-    # ARQ backlog has drained (TTL ~24h), and no rollback window remains.
-    object.__setattr__(payload, "filepath", str(job_staging_path(job_id)))
-    return payload
 
 
 def stale_dispatch_statement(
@@ -113,8 +97,7 @@ async def redispatch_stale_jobs(
             )
             continue
 
-        dispatch_params = build_knowledge_dispatch_params(envelope.params, job.id)
-        result = await enqueue(task, job.id, dispatch_params)
+        result = await enqueue(task, job.id, envelope.params)
         if result is not None:
             enqueued += 1
 

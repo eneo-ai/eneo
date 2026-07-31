@@ -1,8 +1,10 @@
+from dataclasses import dataclass
 from typing import Any, List
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.orm import defer, selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
@@ -15,6 +17,10 @@ from eneo.database.tables.info_blobs_table import (
     active_info_blob_version,
 )
 from eneo.database.tables.integration_table import IntegrationKnowledge
+from eneo.database.tables.object_content_table import (
+    InfoBlobContentReferences,
+    ObjectContents,
+)
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
 from eneo.info_blobs.info_blob import (
@@ -24,6 +30,24 @@ from eneo.info_blobs.info_blob import (
     InfoBlobInDBNoText,
     InfoBlobUpdate,
 )
+from eneo.main.exceptions import InfoBlobPublicationConflictError
+from eneo.object_content.content import ContentState
+
+
+@dataclass(frozen=True, slots=True)
+class InfoBlobOriginal:
+    sha256: bytes
+    state: ContentState
+
+    @property
+    def usable(self) -> bool:
+        return self.state is ContentState.AVAILABLE
+
+
+@dataclass(frozen=True, slots=True)
+class InfoBlobPublication:
+    info_blob: InfoBlobInDB
+    original: InfoBlobOriginal | None
 
 
 class InfoBlobRepository:
@@ -108,14 +132,25 @@ class InfoBlobRepository:
         record = await self.delegate.add(info_blob_to_db)
         return InfoBlobInDB.model_validate(record)
 
-    async def lock_publication_identity(self, info_blob: InfoBlobAdd) -> None:
-        identity = self._publication_identity(info_blob)
-        if identity is None:
-            return
-        await self.session.execute(
-            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
-            {"identity": identity},
-        )
+    async def lock_publication_identity(
+        self,
+        info_blob: InfoBlobAdd,
+        *,
+        original_sha256: bytes | None = None,
+    ) -> None:
+        identities = {
+            identity
+            for identity in (
+                self._publication_identity(info_blob),
+                self._original_identity(info_blob, original_sha256),
+            )
+            if identity is not None
+        }
+        for identity in sorted(identities):
+            await self.session.execute(
+                sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
+                {"identity": identity},
+            )
 
     @staticmethod
     def _publication_identity(info_blob: InfoBlobAdd) -> str | None:
@@ -138,62 +173,186 @@ class InfoBlobRepository:
             )
         raise ValueError("InfoBlob publication requires a source owner")
 
+    @staticmethod
+    def _original_identity(
+        info_blob: InfoBlobAdd,
+        original_sha256: bytes | None,
+    ) -> str | None:
+        if info_blob.group_id is None or original_sha256 is None:
+            return None
+        return f"group:{info_blob.group_id}:original:{original_sha256.hex()}"
+
     async def get_active_for_publication(
-        self, info_blob: InfoBlobAdd
-    ) -> InfoBlobInDB | None:
+        self,
+        info_blob: InfoBlobAdd,
+        *,
+        original_sha256: bytes | None = None,
+    ) -> InfoBlobPublication | None:
         if self._publication_identity(info_blob) is None:
             return None
 
-        conditions = [active_info_blob_version()]
+        source_conditions: list[ColumnElement[bool]] = []
         if info_blob.group_id is not None:
-            conditions.extend(
+            source_conditions.extend(
                 [
                     InfoBlobs.group_id == info_blob.group_id,
                     InfoBlobs.title == info_blob.title,
                 ]
             )
         elif info_blob.website_id is not None:
-            conditions.extend(
+            source_conditions.extend(
                 [
                     InfoBlobs.website_id == info_blob.website_id,
                     InfoBlobs.title == info_blob.title,
                 ]
             )
         elif info_blob.integration_knowledge_id is not None:
-            conditions.append(
+            source_conditions.append(
                 InfoBlobs.integration_knowledge_id == info_blob.integration_knowledge_id
             )
             if (
                 info_blob.sharepoint_item_id is not None
                 and info_blob.sharepoint_item_id.strip()
             ):
-                conditions.append(
+                source_conditions.append(
                     InfoBlobs.sharepoint_item_id == info_blob.sharepoint_item_id
                 )
             else:
-                conditions.append(InfoBlobs.title == info_blob.title)
+                source_conditions.append(InfoBlobs.title == info_blob.title)
         else:
             raise ValueError("InfoBlob publication requires a source owner")
 
-        record = await self.delegate.get_record_from_query(
-            sa.select(InfoBlobs).where(*conditions).with_for_update()
+        candidate_identity = sa.and_(*source_conditions)
+        query = sa.select(InfoBlobs)
+        if info_blob.group_id is not None and original_sha256 is not None:
+            query = query.outerjoin(
+                InfoBlobContentReferences,
+                InfoBlobContentReferences.info_blob_id == InfoBlobs.id,
+            ).outerjoin(
+                ObjectContents,
+                ObjectContents.id == InfoBlobContentReferences.content_id,
+            )
+            candidate_identity = sa.or_(
+                candidate_identity,
+                sa.and_(
+                    InfoBlobs.group_id == info_blob.group_id,
+                    ObjectContents.sha256 == original_sha256,
+                ),
+            )
+
+        records = list(
+            await self.delegate.get_records_from_query(
+                query.where(
+                    active_info_blob_version(),
+                    candidate_identity,
+                )
+                .order_by(InfoBlobs.id)
+                .limit(2)
+                .with_for_update(of=InfoBlobs)
+            )
         )
-        return InfoBlobInDB.model_validate(record) if record is not None else None
+        if len(records) > 1:
+            raise InfoBlobPublicationConflictError(
+                "Knowledge publication identity is ambiguous"
+            )
+
+        record = records[0] if records else None
+        if record is None:
+            return None
+        published = InfoBlobInDB.model_validate(record)
+        return InfoBlobPublication(
+            info_blob=published,
+            original=await self.get_original(published.id),
+        )
+
+    async def get_original(self, info_blob_id: UUID) -> InfoBlobOriginal | None:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    ObjectContents.sha256,
+                    ObjectContents.state,
+                )
+                .select_from(InfoBlobContentReferences)
+                .join(
+                    ObjectContents,
+                    ObjectContents.id == InfoBlobContentReferences.content_id,
+                )
+                .where(InfoBlobContentReferences.info_blob_id == info_blob_id)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return InfoBlobOriginal(
+            sha256=row.sha256,
+            state=ContentState(row.state),
+        )
+
+    async def add_original_reference(
+        self,
+        *,
+        info_blob_id: UUID,
+        content_id: UUID,
+        original_filename: str,
+    ) -> None:
+        await self.session.execute(
+            sa.insert(InfoBlobContentReferences).values(
+                info_blob_id=info_blob_id,
+                content_id=content_id,
+                original_filename=original_filename,
+            )
+        )
+
+    async def replace_original_reference(
+        self,
+        *,
+        info_blob_id: UUID,
+        content_id: UUID,
+        original_filename: str,
+    ) -> None:
+        deleted = await self.session.execute(
+            sa.delete(InfoBlobContentReferences).where(
+                InfoBlobContentReferences.info_blob_id == info_blob_id
+            )
+        )
+        if affected_row_count(deleted) != 1:
+            raise RuntimeError("Knowledge original reference changed during repair")
+        await self.add_original_reference(
+            info_blob_id=info_blob_id,
+            content_id=content_id,
+            original_filename=original_filename,
+        )
+
+    async def refresh_original_filename(
+        self,
+        *,
+        info_blob_id: UUID,
+        original_filename: str,
+    ) -> None:
+        updated = await self.session.execute(
+            sa.update(InfoBlobContentReferences)
+            .where(InfoBlobContentReferences.info_blob_id == info_blob_id)
+            .values(original_filename=original_filename)
+        )
+        if affected_row_count(updated) != 1:
+            raise RuntimeError("Knowledge original reference changed during refresh")
 
     async def refresh_publication_metadata(
         self,
         info_blob_id: UUID,
         info_blob: InfoBlobAdd,
     ) -> InfoBlobInDB:
-        record = await self.session.scalar(
+        updated_id = await self.session.scalar(
             sa.update(InfoBlobs)
             .where(InfoBlobs.id == info_blob_id, active_info_blob_version())
             .values(title=info_blob.title, url=info_blob.url)
-            .returning(InfoBlobs)
+            .returning(InfoBlobs.id)
         )
-        if record is None:
+        if updated_id is None:
             raise RuntimeError("The active knowledge version changed during publish")
-        return InfoBlobInDB.model_validate(record)
+        refreshed = await self.delegate.get(updated_id)
+        if refreshed is None:
+            raise RuntimeError("The refreshed knowledge version no longer exists")
+        return refreshed
 
     async def supersede(self, info_blob_id: UUID) -> bool:
         result = await self.session.execute(
@@ -217,16 +376,31 @@ class InfoBlobRepository:
             .scalar_subquery()
         )
 
-        current_size_subquery = (
-            sa.select(sa.func.coalesce(InfoBlobs.size, 0))
+        text_size_subquery = (
+            sa.select(sa.func.coalesce(sa.func.octet_length(InfoBlobs.text), 0))
             .where(InfoBlobs.id == info_blob_id)
+            .scalar_subquery()
+        )
+        original_size_subquery = (
+            sa.select(sa.func.coalesce(ObjectContents.size_bytes, 0))
+            .select_from(InfoBlobContentReferences)
+            .join(
+                ObjectContents,
+                ObjectContents.id == InfoBlobContentReferences.content_id,
+            )
+            .where(InfoBlobContentReferences.info_blob_id == info_blob_id)
             .scalar_subquery()
         )
 
         stmt = (
             sa.update(InfoBlobs)
             .values(
-                size=sa.func.coalesce(chunks_size_subquery + current_size_subquery, 0)
+                size=sa.func.coalesce(
+                    chunks_size_subquery
+                    + text_size_subquery
+                    + sa.func.coalesce(original_size_subquery, 0),
+                    0,
+                )
             )
             .where(InfoBlobs.id == info_blob_id)
             .returning(InfoBlobs)
@@ -477,7 +651,7 @@ class InfoBlobRepository:
         )
         if source_id is None:
             raise ValueError(f"InfoBlob {id} does not exist")
-        active = await self.session.scalar(
+        active = await self.delegate.get_record_from_query(
             sa.select(InfoBlobs).where(
                 InfoBlobs.source_id == source_id,
                 active_info_blob_version(),

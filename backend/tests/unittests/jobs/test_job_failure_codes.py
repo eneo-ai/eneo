@@ -11,7 +11,16 @@ from eneo.jobs.job_models import (
     Task,
     failure_code_for_exception,
 )
+from eneo.main.exceptions import (
+    InfoBlobPublicationConflictError,
+    QuotaExceededException,
+)
 from eneo.main.models import Status
+from eneo.object_content.content import (
+    ContentTooLargeError,
+    ObjectContentIntegrityError,
+    ObjectContentUnavailableError,
+)
 
 
 @pytest.mark.parametrize(
@@ -50,6 +59,38 @@ def test_unexpected_processing_failure_uses_one_generic_code() -> None:
         failure_code_for_exception(RuntimeError("database password leaked here"))
         is JobFailureCode.PROCESSING_FAILED
     )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            QuotaExceededException("quota detail"),
+            JobFailureCode.QUOTA_EXCEEDED,
+        ),
+        (
+            ContentTooLargeError(100),
+            JobFailureCode.STORAGE_LIMIT_EXCEEDED,
+        ),
+        (
+            ObjectContentUnavailableError("endpoint detail"),
+            JobFailureCode.STORAGE_UNAVAILABLE,
+        ),
+        (
+            ObjectContentIntegrityError("digest detail"),
+            JobFailureCode.STORAGE_VERIFICATION_FAILED,
+        ),
+        (
+            InfoBlobPublicationConflictError("identity detail"),
+            JobFailureCode.KNOWLEDGE_SOURCE_CONFLICT,
+        ),
+    ],
+)
+def test_storage_and_quota_failures_have_stable_operator_safe_codes(
+    error: BaseException,
+    expected: JobFailureCode,
+) -> None:
+    assert failure_code_for_exception(error) is expected
 
 
 def test_public_job_exposes_the_stable_failure_code() -> None:

@@ -15,7 +15,12 @@ const JOB_FAILURE_MESSAGES: Record<JobFailureCode, (task: JobTask) => string> = 
   processing_failed: () => m.job_failure_processing_failed(),
   cancelled: () => m.job_failure_cancelled(),
   processing_interrupted: () => m.job_failure_processing_interrupted(),
-  invalid_job_payload: () => m.job_failure_invalid_job_payload()
+  invalid_job_payload: () => m.job_failure_invalid_job_payload(),
+  quota_exceeded: () => m.job_failure_quota_exceeded(),
+  storage_limit_exceeded: () => m.job_failure_storage_limit_exceeded(),
+  storage_unavailable: () => m.job_failure_storage_unavailable(),
+  storage_verification_failed: () => m.job_failure_storage_verification_failed(),
+  knowledge_source_conflict: () => m.job_failure_knowledge_source_conflict()
 };
 
 export function getJobFailureMessage(

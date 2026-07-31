@@ -121,8 +121,7 @@ def _snapshot(storage_target: StorageKind) -> UploadAdmissionSnapshot:
     maximum = 20 * 1024 * 1024
     return UploadAdmissionSnapshot(
         policy_revision=41,
-        session_storage_target=storage_target,
-        session_operator_ceiling_bytes=maximum,
+        new_write_storage_target=storage_target,
         session_file_maximum_bytes=maximum,
         session_image_maximum_bytes=maximum,
         session_audio_maximum_bytes=maximum,
@@ -668,15 +667,9 @@ async def test_generated_file_family_content_uses_operator_not_source_business_l
             ("inline-generated", StorageKind.POSTGRES_INLINE, inline_content),
             ("remote-generated", StorageKind.OBJECT_STORE, remote_content),
         ):
-            operator_maximum = (
-                real_object_store.settings.inline_maximum_bytes
-                if target is StorageKind.POSTGRES_INLINE
-                else real_object_store.settings.maximum_multipart_bytes
-            )
             snapshot = UploadAdmissionSnapshot(
                 policy_revision=42,
-                session_storage_target=target,
-                session_operator_ceiling_bytes=operator_maximum,
+                new_write_storage_target=target,
                 session_file_maximum_bytes=source_business_maximum,
                 session_image_maximum_bytes=source_business_maximum,
                 session_audio_maximum_bytes=source_business_maximum,

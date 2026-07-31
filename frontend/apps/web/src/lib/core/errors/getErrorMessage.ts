@@ -57,6 +57,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9024: () => m.eneo_error_9024(), // INTERNAL_SERVER_ERROR
   9038: () => m.eneo_error_9038(), // RESOURCE_NOT_READY
 
+  // --- File uploads ---
+  9056: () => m.eneo_error_9056(), // INVALID_FILENAME
+
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
 

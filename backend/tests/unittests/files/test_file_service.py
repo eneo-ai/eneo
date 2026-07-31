@@ -70,8 +70,7 @@ async def test_object_store_save_rejects_ambient_transaction_before_external_wor
         object_content=object_content,
         upload_admission=UploadAdmissionSnapshot(
             policy_revision=7,
-            session_storage_target=StorageKind.OBJECT_STORE,
-            session_operator_ceiling_bytes=10_000,
+            new_write_storage_target=StorageKind.OBJECT_STORE,
             session_file_maximum_bytes=10_000,
             session_image_maximum_bytes=10_000,
             session_audio_maximum_bytes=10_000,

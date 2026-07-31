@@ -33,8 +33,7 @@ CUSTOM_AUDIO_LIMIT = 150_000_000  # 150 MB
 
 _UPLOAD_ADMISSION = UploadAdmissionSnapshot(
     policy_revision=4,
-    session_storage_target=StorageKind.POSTGRES_INLINE,
-    session_operator_ceiling_bytes=200_000_000,
+    new_write_storage_target=StorageKind.POSTGRES_INLINE,
     session_file_maximum_bytes=CUSTOM_TEXT_LIMIT,
     session_image_maximum_bytes=CUSTOM_IMAGE_LIMIT,
     session_audio_maximum_bytes=CUSTOM_AUDIO_LIMIT,

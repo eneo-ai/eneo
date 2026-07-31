@@ -7,8 +7,8 @@ import { Callout, Steps, Tabs } from "nextra/components";
 - PostgreSQL inline is the complete ready-to-use default. Compatible object
   storage is optional.
 - Operators configure storage infrastructure and safety bounds. Platform admins
-  choose one deployment-wide target for eligible new File and Icon writes in
-  **Admin > Storage** without restarting backend or worker.
+  choose one deployment-wide target for eligible new File, Icon, and knowledge
+  original writes in **Admin > Storage** without restarting backend or worker.
 - A policy change affects new writes only. Existing content never moves
   implicitly.
 - Each payload has one byte authority. Eneo does not fall back, dual-write, or
@@ -34,7 +34,7 @@ exact size and media type, placement, lifecycle, and physical deletion.
 
 ```mermaid
 flowchart LR
-  upload["File or Icon"] --> owner["Product owner\nname · use · access"]
+  upload["File, Icon, or knowledge upload"] --> owner["Product owner\nname · use · access"]
   owner --> control["PostgreSQL control\nidentity · digest · references · lifecycle"]
   control --> bytes{"One byte authority"}
   bytes --> inline["PostgreSQL inline\ndefault"]
@@ -56,18 +56,21 @@ Object storage and RAG solve different problems:
 
 ### What is adopted now?
 
-| Product content                  | Current behavior                                                                                        |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Eligible new File and Icon bytes | Use the deployment-wide target selected in **Admin > Storage**                                          |
-| Existing File and Icon bytes     | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
-| Searchable knowledge versions    | Live in PostgreSQL/pgvector; only a complete replacement becomes active                                 |
-| Flow artifacts                   | Remain separate follow-up work                                                                          |
-| Changing the selected target     | Affects eligible new writes without a restart; existing content stays where it is                       |
-| Moving existing content          | Requires a separate explicit, verified migration                                                        |
+| Product content                        | Current behavior                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Eligible new File and Icon bytes       | Use the deployment-wide target selected in **Admin > Storage**                                          |
+| Existing File and Icon bytes           | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
+| New knowledge file and audio originals | Keep the exact upload in the selected target after successful processing                                |
+| Existing knowledge versions            | Stay usable, but have no recoverable original because earlier releases did not retain it                |
+| Searchable knowledge text and vectors  | Remain in PostgreSQL/pgvector; only a complete replacement becomes active                               |
+| Flow artifacts                         | Remain separate follow-up work                                                                          |
+| Changing the selected target           | Affects eligible new writes without a restart; existing content stays where it is                       |
+| Moving existing content                | Requires a separate explicit, verified migration                                                        |
 
 Replacing searchable knowledge keeps the previous complete version as
 recovery history. Retained versions continue to count toward the configured
-knowledge-storage quota until the document family is deleted.
+knowledge-storage quota until the document family is deleted; that count
+includes each retained version's exact original.
 
 Enabling an endpoint makes the optional byte plane available; it does not move
 existing content or change producer placement by itself. A platform admin must
@@ -170,15 +173,32 @@ view it.
 
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
 safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
-upload limit. For PostgreSQL-inline session uploads, Eneo uses the smaller of
-the admin policy and this ceiling. **Admin > Storage** shows the configured
-limit, effective limit, and constraining source. Object-store session uploads
-use the same rule with the portable multipart envelope derived from deployment
-transport settings. FastAPI/Starlette multipart parsing happens before route
-admission and may use temporary disk. Eneo rejects an oversized File or Icon
-before its own capture/spool or any storage mutation. Operators must use
-ingress/request-body limits and configure and monitor temporary-disk capacity
-to protect that earlier parsing boundary.
+upload limit. For PostgreSQL-inline session uploads and knowledge originals,
+Eneo uses the smaller of the admin policy and this ceiling. **Admin > Storage**
+shows the configured limit, effective limit, and constraining source for
+knowledge files and transcription audio as well as File and Icon. Object-store
+uploads use the same rule with the portable multipart envelope derived from
+deployment transport settings.
+
+FastAPI/Starlette multipart parsing happens before route admission and may use
+temporary disk. Eneo then stages an accepted knowledge file or audio upload
+until its worker finishes. The worker streams it into bounded capture and
+removes the staging file on the terminal path; the staging reconciler removes
+old files left by a process crash. Operators must use ingress/request-body
+limits and configure and monitor temporary-disk capacity for both multipart
+parsing and this bounded staging lifecycle.
+
+The API stores the selected target and effective limit with each accepted
+knowledge job. A later admin change therefore affects new jobs only. The worker
+still applies its own live safety ceiling and fails the job clearly when its
+configuration is lower than the API replica that accepted the upload. Keep
+backend and worker safety settings aligned during normal operation.
+
+Knowledge quota is checked when a complete version is ready to replace the
+active version, not when the request is accepted. This lets an exact
+re-upload or a missing-original repair succeed without reserving more quota. A
+genuinely new version that would exceed the current quota ends as a failed job;
+the previous active version remains available and no original is retained.
 
 Business limits apply to the user's original upload. Generated text, model
 input, and page variants can be larger; Eneo bounds those internal variants by
@@ -215,7 +235,9 @@ source.
 
 In **Admin > Storage**, keep the new-write target set to **PostgreSQL inline**
 and set the four business limits. The update applies to backend and worker
-operations without restarting either process.
+operations without restarting either process. It also controls the original
+bytes of newly accepted knowledge file and audio jobs; searchable text and
+vectors remain in PostgreSQL.
 
   </Tabs.Tab>
   <Tabs.Tab>
@@ -382,6 +404,12 @@ delete former remote keys. Eneo keeps configuration required while remote
 content, staged moves, orphan candidates, or multipart cleanup still depend on
 the endpoint.
 
+Knowledge originals retained by this release appear in the same inventory and
+use the same bounded, verified move operation. Existing knowledge versions
+cannot be backfilled: earlier Eneo releases kept extracted or transcribed text,
+but removed the staged upload after processing. There are no original bytes to
+copy from PostgreSQL or reconstruct safely.
+
 ### Backup rule
 
 - **Only inline rows:** PostgreSQL backup contains control and bytes.
@@ -425,6 +453,55 @@ content, delete backlog, reconciliation lag, temporary spool space, and stale
 multipart uploads. Keep endpoint APIs and consoles private.
 
 ### Upgrade, restore, and rollback
+
+The release that first retains knowledge originals requires one coordinated
+maintenance window because its durable job envelope is not executable by an
+older worker:
+
+1. Stop all `backend` API replicas so no new writes or knowledge jobs can be
+   accepted. In the reference Compose deployment, `docker compose stop backend`
+   leaves `worker`, `db`, `redis`, and optional `object-content` running.
+2. Keep the old worker running until both queued and in-progress
+   `upload_info_blob` and `transcription` jobs are zero:
+
+   ```bash
+   docker compose exec -T db sh -lc \
+     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
+     -c "SELECT task, status, count(*) FROM jobs
+         WHERE task IN ('\''upload_info_blob'\'', '\''transcription'\'')
+           AND status IN ('\''queued'\'', '\''in progress'\'')
+         GROUP BY task, status;"'
+   ```
+
+   No rows is the required result.
+   An old worker marks an in-progress knowledge job failed after five minutes
+   without a heartbeat. If a worker process stopped mid-job, keep one old worker
+   running until that automatic recovery has completed; do not edit the job row
+   by hand.
+
+3. Stop every old worker. Verify the zero-job condition again.
+4. Take one recovery point containing PostgreSQL and, when configured, the
+   object store. Preserve Redis and the shared staging volume until the release
+   has been verified.
+5. Deploy the new image and run `docker compose run --rm db-init`. The migration
+   refuses to continue if an executable knowledge job remains.
+6. Start the new backend and worker from the same release. Verify readiness,
+   then process one knowledge file and one audio upload. Confirm exact-original
+   inventory and a deliberate storage-failure message before reopening Eneo.
+
+Do not start `db-init` through a normal `docker compose up` while the old worker
+is still draining: `backend` depends on `db-init`, but the existing `worker`
+depends on `backend`, so an ordinary rolling start does not express this
+maintenance sequence. Keep the API stopped and issue each step explicitly.
+
+To rehearse or recover, restore the paired PostgreSQL/object-store recovery
+point in isolation, preserve the same deployment ID and bucket marker, start
+Redis plus the restored storage services, run the old release, and confirm its
+worker can drain with its API stopped. Repeat the migration and verification
+before using the procedure in production. If verification fails after the
+migration, keep traffic closed and either recover forward or restore the whole
+pre-upgrade recovery point. Never combine a post-upgrade database with an old
+object-store backup or run old workers against the new schema.
 
 The policy migration creates revision 1 with **PostgreSQL inline** selected. It
 reads the four former upload-limit environment values once as migration seeds.

@@ -1,11 +1,13 @@
 import asyncio
 import contextlib
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 
 from eneo.files.text import NoExtractableTextError
+from eneo.info_blobs.info_blob import PreparedKnowledgeOriginal
 from eneo.jobs.job_models import Task, failure_code_for_exception
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import Transcription, UploadInfoBlob
@@ -13,9 +15,11 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 from eneo.main.models import Status
+from eneo.object_content.content import StorageKind
 from eneo.worker.task_manager import TaskManager
 
 KNOWLEDGE_HEARTBEAT_INTERVAL_SECONDS = 30
+_STAGED_FILE_CHUNK_BYTES = 256 * 1024
 
 logger = get_logger(__name__)
 
@@ -25,13 +29,52 @@ def _remove_file(filepath: Path):
         os.remove(filepath)
 
 
-def _job_file_path(job_id: UUID, params: UploadInfoBlob | Transcription) -> Path:
-    # Remove only when the minimum upgrade source includes this release, pre-bridge
-    # ARQ backlog has drained (TTL ~24h), and no rollback window remains.
-    legacy_path = getattr(params, "filepath", None)
-    if isinstance(legacy_path, str) and legacy_path.strip():
-        return Path(legacy_path)
-    return job_staging_path(job_id)
+async def _staged_file_chunks(filepath: Path) -> AsyncGenerator[bytes]:
+    with filepath.open("rb") as source:
+        while chunk := await asyncio.to_thread(
+            source.read,
+            _STAGED_FILE_CHUNK_BYTES,
+        ):
+            yield chunk
+
+
+@asynccontextmanager
+async def _prepared_knowledge_original(
+    *,
+    container: Container,
+    job_id: UUID,
+    filepath: Path,
+    params: UploadInfoBlob | Transcription,
+) -> AsyncGenerator[PreparedKnowledgeOriginal]:
+    admission = params.original_storage
+    object_content = container.object_content_service()
+    media_type = params.mimetype or "application/octet-stream"
+    async with object_content.capture_for_target(
+        _staged_file_chunks(filepath),
+        storage_kind=admission.storage_target,
+        declared_media_type=media_type,
+        verified_media_type=media_type,
+        business_maximum_bytes=admission.maximum_bytes,
+    ) as captured:
+        if admission.storage_target is StorageKind.POSTGRES_INLINE:
+            yield PreparedKnowledgeOriginal(
+                job_id=job_id,
+                original_filename=params.filename,
+                policy_revision=admission.policy_revision,
+                storage_kind=admission.storage_target,
+                captured=captured,
+            )
+            return
+
+        async with object_content.upload_for_publication((captured,)) as publication:
+            yield PreparedKnowledgeOriginal(
+                job_id=job_id,
+                original_filename=params.filename,
+                policy_revision=admission.policy_revision,
+                storage_kind=admission.storage_target,
+                captured=captured,
+                publication=publication,
+            )
 
 
 async def _run_knowledge_heartbeat(
@@ -164,7 +207,7 @@ async def transcription_task(
     if lifecycle is None:
         return None
 
-    filepath = _job_file_path(job_id, params)
+    filepath = job_staging_path(job_id)
     lifecycle.task_manager.cleanup_func = lambda: _remove_file(filepath)
     async with lifecycle.process():
         async with Container.session_scope():
@@ -193,16 +236,23 @@ async def transcription_task(
         if not text.strip():
             raise NoExtractableTextError(params.filename)
 
-        async with Container.session_scope():
-            uploader = container.text_processor()
-            info_blob = await uploader.process_text(
-                text=text,
-                embedding_model=embedding_model,
-                title=params.filename,
-                group_id=params.group_id,
-            )
-            result_location = f"/api/v1/info-blobs/{info_blob.id}/"
-            await lifecycle.finalize(result_location)
+        async with _prepared_knowledge_original(
+            container=container,
+            job_id=job_id,
+            filepath=filepath,
+            params=params,
+        ) as original:
+            async with Container.session_scope():
+                uploader = container.text_processor()
+                info_blob = await uploader.process_text(
+                    text=text,
+                    embedding_model=embedding_model,
+                    title=params.filename,
+                    group_id=params.group_id,
+                    original=original,
+                )
+                result_location = f"/api/v1/info-blobs/{info_blob.id}/"
+                await lifecycle.finalize(result_location)
         assert info_blob is not None
 
     return lifecycle.task_manager.successful()
@@ -222,7 +272,7 @@ async def upload_info_blob_task(
     if lifecycle is None:
         return None
 
-    filepath = _job_file_path(job_id, params)
+    filepath = job_staging_path(job_id)
     lifecycle.task_manager.cleanup_func = lambda: _remove_file(filepath)
     async with lifecycle.process():
         async with Container.session_scope():
@@ -239,16 +289,23 @@ async def upload_info_blob_task(
         if not text.strip():
             raise NoExtractableTextError(params.filename)
 
-        async with Container.session_scope():
-            uploader = container.text_processor()
-            info_blob = await uploader.process_text(
-                text=text,
-                embedding_model=embedding_model,
-                title=params.filename,
-                group_id=params.group_id,
-            )
-            result_location = f"/api/v1/info-blobs/{info_blob.id}/"
-            await lifecycle.finalize(result_location)
+        async with _prepared_knowledge_original(
+            container=container,
+            job_id=job_id,
+            filepath=filepath,
+            params=params,
+        ) as original:
+            async with Container.session_scope():
+                uploader = container.text_processor()
+                info_blob = await uploader.process_text(
+                    text=text,
+                    embedding_model=embedding_model,
+                    title=params.filename,
+                    group_id=params.group_id,
+                    original=original,
+                )
+                result_location = f"/api/v1/info-blobs/{info_blob.id}/"
+                await lifecycle.finalize(result_location)
         assert info_blob is not None
 
     return lifecycle.task_manager.successful()

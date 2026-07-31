@@ -12030,7 +12030,8 @@ export interface components {
       | 9052
       | 9053
       | 9054
-      | 9055;
+      | 9055
+      | 9056;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -13057,7 +13058,12 @@ export interface components {
       | "processing_failed"
       | "cancelled"
       | "processing_interrupted"
-      | "invalid_job_payload";
+      | "invalid_job_payload"
+      | "quota_exceeded"
+      | "storage_limit_exceeded"
+      | "storage_unavailable"
+      | "storage_verification_failed"
+      | "knowledge_source_conflict";
     /** JobPublic */
     JobPublic: {
       /** Created At */
@@ -19158,7 +19164,7 @@ export interface components {
       configured_bytes: number;
       /** Effective Bytes */
       effective_bytes: number;
-      storage_target: components["schemas"]["StorageKind"] | null;
+      storage_target: components["schemas"]["StorageKind"];
       /** Operator Ceiling Bytes */
       operator_ceiling_bytes: number | null;
       constraining_source: components["schemas"]["ConstrainingSource"];
@@ -23649,6 +23655,15 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -23683,6 +23698,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

@@ -21,9 +21,16 @@ from eneo.info_blobs.info_blob import InfoBlobInDB
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_staging import job_staging_path
-from eneo.jobs.task_models import Transcription, UploadInfoBlob
+from eneo.jobs.task_models import (
+    KnowledgeOriginalAdmission,
+    Transcription,
+    UploadInfoBlob,
+)
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.models import ChannelType, RedisMessage, Status
+from eneo.object_content.configuration import ObjectContentCoreSettings
+from eneo.object_content.content import StorageKind
+from eneo.object_content.content_service import ObjectContentService
 from eneo.worker import routes as worker_routes
 from eneo.worker import task_manager as task_manager_module
 from eneo.worker import upload_tasks
@@ -38,6 +45,31 @@ class StubExtractor:
         self, filepath: Path, mimetype: str, filename: str | None = None
     ) -> str:
         return "replacement knowledge"
+
+
+def _original_admission() -> KnowledgeOriginalAdmission:
+    return KnowledgeOriginalAdmission(
+        policy_revision=1,
+        storage_target=StorageKind.POSTGRES_INLINE,
+        maximum_bytes=1_000_000,
+    )
+
+
+def _worker_container(*, user, tenant) -> Container:
+    container = Container(
+        session=providers.Object(SessionProxy()),
+        user=providers.Object(user),
+        tenant=providers.Object(tenant),
+    )
+    container.object_content_service.override(
+        providers.Object(
+            ObjectContentService(
+                ObjectContentCoreSettings(_env_file=None),
+                sessionmanager,
+            )
+        )
+    )
+    return container
 
 
 async def _job_updated_at(job_id: UUID) -> datetime:
@@ -85,11 +117,7 @@ async def test_concurrent_deliveries_start_compute_at_most_once_and_preserve_sta
         return SimpleNamespace(id=uuid4())
 
     async def deliver() -> bool | None:
-        container = Container(
-            session=providers.Object(SessionProxy()),
-            user=providers.Object(user),
-            tenant=providers.Object(tenant),
-        )
+        container = _worker_container(user=user, tenant=tenant)
         container.text_extractor.override(providers.Object(StubExtractor()))
         container.group_service.override(
             providers.Object(
@@ -111,6 +139,7 @@ async def test_concurrent_deliveries_start_compute_at_most_once_and_preserve_sta
                 space_id=uuid4(),
                 filename="replacement.txt",
                 mimetype="text/plain",
+                original_storage=_original_admission(),
             ),
             container=container,
         )
@@ -161,11 +190,7 @@ async def test_successful_upload_publishes_cas_statuses_without_generic_db_write
         SimpleNamespace(publish=redis_publish),
     )
 
-    container = Container(
-        session=providers.Object(SessionProxy()),
-        user=providers.Object(user),
-        tenant=providers.Object(tenant),
-    )
+    container = _worker_container(user=user, tenant=tenant)
     job_service = container.job_service()
     set_status = AsyncMock()
     complete_job = AsyncMock()
@@ -205,6 +230,7 @@ async def test_successful_upload_publishes_cas_statuses_without_generic_db_write
             space_id=uuid4(),
             filename="replacement.txt",
             mimetype="text/plain",
+            original_storage=_original_admission(),
         ),
         container=container,
     )
@@ -242,11 +268,7 @@ async def test_transcription_releases_its_session_before_remote_work(
     filepath = job_staging_path(job_id)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_bytes(b"audio")
-    container = Container(
-        session=providers.Object(SessionProxy()),
-        user=providers.Object(user),
-        tenant=providers.Object(tenant),
-    )
+    container = _worker_container(user=user, tenant=tenant)
 
     class ScopeObservingTranscriber:
         session_released = False
@@ -307,6 +329,7 @@ async def test_transcription_releases_its_session_before_remote_work(
             space_id=uuid4(),
             filename="replacement.wav",
             mimetype="audio/wav",
+            original_storage=_original_admission(),
         ),
         container=container,
     )
@@ -412,11 +435,7 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
         await allow_task_to_finish.wait()
         return SimpleNamespace(id=uuid4())
 
-    container = Container(
-        session=providers.Object(SessionProxy()),
-        user=providers.Object(user),
-        tenant=providers.Object(tenant),
-    )
+    container = _worker_container(user=user, tenant=tenant)
     container.text_extractor.override(providers.Object(PhaseExtractor()))
     container.group_service.override(
         providers.Object(
@@ -440,6 +459,7 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
                 space_id=uuid4(),
                 filename="replacement.txt",
                 mimetype="text/plain",
+                original_storage=_original_admission(),
             ),
             container=container,
         )
@@ -503,11 +523,7 @@ async def test_heartbeat_recovers_after_one_failed_database_update(
         await allow_task_to_finish.wait()
         return SimpleNamespace(id=uuid4())
 
-    container = Container(
-        session=providers.Object(SessionProxy()),
-        user=providers.Object(user),
-        tenant=providers.Object(tenant),
-    )
+    container = _worker_container(user=user, tenant=tenant)
     container.text_extractor.override(providers.Object(StubExtractor()))
     container.group_service.override(
         providers.Object(
@@ -531,6 +547,7 @@ async def test_heartbeat_recovers_after_one_failed_database_update(
                 space_id=uuid4(),
                 filename="replacement.txt",
                 mimetype="text/plain",
+                original_storage=_original_admission(),
             ),
             container=container,
         )
@@ -638,11 +655,7 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
             raise
         raise AssertionError("unreachable")
 
-    container = Container(
-        session=providers.Object(SessionProxy()),
-        user=providers.Object(user),
-        tenant=providers.Object(tenant),
-    )
+    container = _worker_container(user=user, tenant=tenant)
 
     def create_task_manager(*, job_id: UUID) -> TaskManager:
         return TaskManager(
@@ -674,6 +687,7 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
                 space_id=uuid4(),
                 filename="replacement.txt",
                 mimetype="text/plain",
+                original_storage=_original_admission(),
             ),
             container=container,
         )

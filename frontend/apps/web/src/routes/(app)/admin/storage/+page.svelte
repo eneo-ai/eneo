@@ -404,10 +404,9 @@
     }
   }
 
-  function storageTargetLabel(target: StorageKind | null): string {
+  function storageTargetLabel(target: StorageKind): string {
     if (target === "postgres_inline") return m.storage_target_postgres_inline();
-    if (target === "object_store") return m.storage_target_object_store();
-    return m.storage_target_not_applicable();
+    return m.storage_target_object_store();
   }
 
   function readinessLabel(code: ObjectContentReadinessCode): string {

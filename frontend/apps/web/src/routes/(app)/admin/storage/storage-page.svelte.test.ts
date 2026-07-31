@@ -100,18 +100,18 @@ function policy(overrides: Record<string, unknown> = {}) {
       {
         use_case: "knowledge_file",
         configured_bytes: 50 * 1024 * 1024,
-        effective_bytes: 50 * 1024 * 1024,
-        storage_target: null,
-        operator_ceiling_bytes: null,
-        constraining_source: "admin_policy"
+        effective_bytes: 8 * 1024 * 1024,
+        storage_target: "postgres_inline",
+        operator_ceiling_bytes: 8 * 1024 * 1024,
+        constraining_source: "operator_ceiling"
       },
       {
         use_case: "knowledge_audio",
         configured_bytes: 100 * 1024 * 1024,
-        effective_bytes: 100 * 1024 * 1024,
-        storage_target: null,
-        operator_ceiling_bytes: null,
-        constraining_source: "admin_policy"
+        effective_bytes: 8 * 1024 * 1024,
+        storage_target: "postgres_inline",
+        operator_ceiling_bytes: 8 * 1024 * 1024,
+        constraining_source: "operator_ceiling"
       }
     ],
     capabilities: [
@@ -273,7 +273,7 @@ describe("admin storage settings page", () => {
       .toBeVisible();
   });
 
-  test("explains the knowledge-content exclusion shown by the effective limits", async () => {
+  test("explains knowledge-original routing and shows its effective limits", async () => {
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -281,7 +281,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(
         page.getByText(
-          "Applies to new file and icon content across this deployment. Knowledge content is always stored in the database and is not affected by this choice."
+          "Applies to new file and icon content and to originals from new knowledge file and audio uploads. Searchable knowledge stays in PostgreSQL. Existing content stays where it is; nothing moves automatically."
         )
       )
       .toBeVisible();
@@ -293,7 +293,12 @@ describe("admin storage settings page", () => {
       [...limitsTable.element().querySelectorAll("td")].filter(
         (cell) => cell.textContent === "storage_target_not_applicable"
       )
-    ).toHaveLength(2);
+    ).toHaveLength(0);
+    expect(
+      [...limitsTable.element().querySelectorAll("td")].filter(
+        (cell) => cell.textContent === "storage_target_postgres_inline"
+      )
+    ).toHaveLength(5);
   });
 
   test("shows localized policy governance metadata and links unavailable storage to its guide", async () => {
@@ -1351,7 +1356,21 @@ describe("admin storage settings page", () => {
 
   test("shows all five effective limits plus bounded capability and inventory facts", async () => {
     testUser.isPlatformAdmin = true;
-    getPolicy.mockResolvedValue(policy());
+    const currentPolicy = policy();
+    getPolicy.mockResolvedValue(
+      policy({
+        limits: currentPolicy.limits.map((limit) =>
+          limit.use_case === "session_image"
+            ? {
+                ...limit,
+                effective_bytes: limit.configured_bytes,
+                operator_ceiling_bytes: 20 * 1024 * 1024,
+                constraining_source: "admin_policy"
+              }
+            : limit
+        )
+      })
+    );
 
     render(StoragePage);
 

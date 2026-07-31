@@ -142,8 +142,7 @@ async def test_unready_object_store_rejects_without_inline_fallback_or_mutation(
         object_content=object_content,
         upload_admission=UploadAdmissionSnapshot(
             policy_revision=9,
-            session_storage_target=StorageKind.OBJECT_STORE,
-            session_operator_ceiling_bytes=100,
+            new_write_storage_target=StorageKind.OBJECT_STORE,
             session_file_maximum_bytes=100,
             session_image_maximum_bytes=100,
             session_audio_maximum_bytes=100,

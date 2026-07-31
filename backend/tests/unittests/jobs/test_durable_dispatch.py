@@ -1,5 +1,4 @@
 import asyncio
-import base64
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -7,39 +6,18 @@ from uuid import UUID, uuid4
 
 import pytest
 from arq.worker import Function
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from eneo.jobs.job_models import JobInDb, Task
-from eneo.jobs.job_serialization import deserialize_job
 from eneo.jobs.job_service import JobService
 from eneo.jobs.task_models import (
-    Transcription,
+    KnowledgeOriginalAdmission,
     UploadInfoBlob,
     build_dispatch_envelope,
 )
 from eneo.main.models import Status
+from eneo.object_content.content import StorageKind
 from tests.fixtures import TEST_USER
-
-_FROZEN_LEGACY_UPLOAD_JOB = base64.b64decode(
-    "gASVoQEAAAAAAAB9lCiMAXSUSwGMAWaUjBRlbmVvLmpvYnMuam9iX21vZGVsc5SMBFRhc2uU"
-    "k5SMEHVwbG9hZF9pbmZvX2Jsb2KUhZRSlIwBYZSMFWVuZW8uam9icy50YXNrX21vZGVsc5SM"
-    "DlVwbG9hZEluZm9CbG9ilJOUKYGUfZQojAhfX2RpY3RfX5R9lCiMB3VzZXJfaWSUjAR1dWlk"
-    "lIwEVVVJRJSTlCmBlH2UjANpbnSUSwFzYowIZ3JvdXBfaWSUaBQpgZR9lGgXSwJzYowIc3Bh"
-    "Y2VfaWSUaBQpgZR9lGgXSwNzYowIZmlsZW5hbWWUjApsZWdhY3kudHh0lIwIbWltZXR5cGWU"
-    "jAp0ZXh0L3BsYWlulIwIZmlsZXBhdGiUjBcvdG1wL2xlZ2FjeS11cGxvYWQtcGF0aJR1jBJf"
-    "X3B5ZGFudGljX2V4dHJhX1+UTowXX19weWRhbnRpY19maWVsZHNfc2V0X1+Uj5QoaBhoEWgb"
-    "aCJoIGgekIwUX19weWRhbnRpY19wcml2YXRlX1+UTnVihZSMAWuUfZSMAmV0lEsAdS4="
-)
-
-
-class _OldUploadTaskContract(BaseModel):
-    user_id: UUID
-    group_id: UUID
-    space_id: UUID
-    filepath: str
-    filename: str
-    mimetype: str
 
 
 def _params() -> UploadInfoBlob:
@@ -49,6 +27,11 @@ def _params() -> UploadInfoBlob:
         space_id=uuid4(),
         filename="document.txt",
         mimetype="text/plain",
+        original_storage=KnowledgeOriginalAdmission(
+            policy_revision=3,
+            storage_target=StorageKind.POSTGRES_INLINE,
+            maximum_bytes=10_000,
+        ),
     )
 
 
@@ -88,8 +71,6 @@ async def test_durable_dispatch_is_scheduled_only_after_commit(
 
     await asyncio.sleep(0)
     enqueue.assert_awaited_once_with(Task.UPLOAD_FILE, job_id, params)
-    dispatched_params = enqueue.await_args.args[2]
-    assert getattr(dispatched_params, "filepath").endswith(f"/job-staging/{job_id}")
 
 
 async def test_savepoint_commit_then_outer_rollback_never_dispatches(
@@ -286,40 +267,8 @@ async def test_durable_queue_rejects_mismatched_user_before_persisting() -> None
 def test_durable_envelope_has_no_filesystem_path() -> None:
     envelope = build_dispatch_envelope(Task.UPLOAD_FILE, _params())
 
+    assert envelope.version == 2
     assert "filepath" not in envelope.model_dump(mode="json")["params"]
-
-
-def test_new_worker_uses_path_from_frozen_legacy_payload() -> None:
-    from eneo.worker.upload_tasks import _job_file_path
-
-    decoded = deserialize_job(_FROZEN_LEGACY_UPLOAD_JOB)
-    args = decoded["a"]
-    assert isinstance(args, tuple)
-    params = args[0]
-    assert isinstance(params, UploadInfoBlob)
-
-    assert _job_file_path(uuid4(), params) == Path("/tmp/legacy-upload-path")
-
-
-@pytest.mark.parametrize(
-    ("task", "params_type"),
-    [
-        (Task.UPLOAD_FILE, UploadInfoBlob),
-        (Task.TRANSCRIPTION, Transcription),
-    ],
-)
-def test_new_dispatch_payload_satisfies_old_worker_contract(
-    task: Task,
-    params_type: type[UploadInfoBlob] | type[Transcription],
-) -> None:
-    from eneo.jobs.durable_dispatch import build_knowledge_dispatch_params
-
-    params = params_type(**_params().model_dump())
-    job_id = uuid4()
-    compatible = build_knowledge_dispatch_params(params, job_id)
-
-    old_payload = _OldUploadTaskContract.model_validate(compatible.__dict__)
-    assert old_payload.filepath.endswith(f"/job-staging/{job_id}")
 
 
 def test_durable_worker_functions_do_not_retain_arq_results() -> None:

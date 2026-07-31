@@ -63,8 +63,7 @@ def _inline_upload_admission() -> UploadAdmissionSnapshot:
     maximum_bytes = 20 * 1024 * 1024
     return UploadAdmissionSnapshot(
         policy_revision=1,
-        session_storage_target=StorageKind.POSTGRES_INLINE,
-        session_operator_ceiling_bytes=maximum_bytes,
+        new_write_storage_target=StorageKind.POSTGRES_INLINE,
         session_file_maximum_bytes=maximum_bytes,
         session_image_maximum_bytes=maximum_bytes,
         session_audio_maximum_bytes=maximum_bytes,
@@ -550,8 +549,7 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
             object_content=content_service,
             upload_admission=UploadAdmissionSnapshot(
                 policy_revision=1,
-                session_storage_target=StorageKind.POSTGRES_INLINE,
-                session_operator_ceiling_bytes=10 * 1024 * 1024,
+                new_write_storage_target=StorageKind.POSTGRES_INLINE,
                 session_file_maximum_bytes=10 * 1024 * 1024,
                 session_image_maximum_bytes=10 * 1024 * 1024,
                 session_audio_maximum_bytes=10 * 1024 * 1024,
