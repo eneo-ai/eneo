@@ -34,6 +34,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-07-31 | **Exact resolved-input evidence**: every admitted attempt now exposes one typed lineage state in evidence views and v16 exports; one tenant/run-scoped batch read stays inside the repeatable-read snapshot and existing attempt-evidence budgets; identity-scoped retention proof prevents foreign markers from creating false purge claims across lineage, manifests, retention, and RAG summaries; malformed data remains explicit corruption; the generated SDK and docs define all states and all four synchronous export safety guards without claiming retrieval proves influence (`4d13889a4`, gate green 8/10 after three same-session passes, no findings) |
 | 2026-07-30 | **Canonical Flow attempt input**: one strict immutable envelope now owns the activation start, resolved input, exact per-call question/effective prompt/context version, and one shared preferred/capability-safe model configuration; unsupported parameters are removed before the plan is frozen, mapped JSON capability learning preserves the admitted `N+1` provider-call bound, terminal projections cannot overwrite start truth, and attempt provenance retains only irreconstructible evidence (`2f1447446`, gate green 8/10 after four same-session passes, no findings) |
 | 2026-07-30 | **Model-aware Builder resource policy**: attachment text now shares the selected model's declared input window after output, safety, and conversation reserves instead of using fixed character quotas; admins own effective attachment, message, aggregate DOCX-inspection, placeholder, and token-reserve policy; fixed API, parser, and planning-state safety ceilings are returned through the typed settings contract and explained in Swedish/English; frontend/backend admission agrees, template failures are explicit before provider work, and shared settings writes are serialized with a lost-update regression proof (`478dfeb1c`, gate green 8/10 after three same-session passes, no findings) |
 | 2026-07-30 | **Atomic Builder template attachment binding**: exactly one confirmed DOCX is compiled into required, runtime-provable placeholder bindings before proposal hashing; transcription-dependent templates make audio input required; apply reuses the same uploaded File and atomically creates the Flow asset and normal resource binding; authorization, bounded inspection, rollback, retry, replay, deletion races, publish pinning, real DOCX rendering, and deterministic zero-token execution are proven, while reference/context/example attachments remain planning-only (`2d608b309`, gate green 9/10 after six same-session passes, no findings) |
@@ -131,13 +132,15 @@ external release gate (item 10); BM0.2 is external (item 10).
    terminal projection owner; the executor only orchestrates. The survivor
    matrix, evidence/export readers, retention markers, SDK, and generated
    developer schema all follow that ownership boundary.
-7. **Resolved-input lineage projection** *(medium)* — batch-project the
-   persisted exact lineage into the existing evidence bundle for admitted
-   attempts, under the item-1 snapshot, inside the item-2 aggregate
-   budget. A missing lineage row today parses as `not_tracked` even when
-   retention purged it; the projection must reuse the attempt retention
-   marker: missing + marker = `retention_purged`, missing without =
-   `not_tracked`, malformed = `corrupt`.
+7. ~~Resolved-input lineage projection~~ — **LANDED** `4d13889a4`.
+   The existing bounded persisted aggregate is batch-projected for exactly the
+   admitted attempts inside the repeatable-read snapshot and attempt-evidence
+   budgets. A shared attempt-scoped provenance result owns retention identity
+   for lineage, serialized provenance, manifests, retention, RAG, and redaction:
+   a valid matching marker yields `retention_purged` with exact counts
+   (including zero), no valid proof yields `not_tracked`, and malformed or
+   foreign markers become explicit corruption without creating false purge
+   summaries. The required typed union is generated into the SDK and export v16.
 8. **Builder frontend/server contract closure** *(medium, four reviewed
    commits by owner)* — (a) stream/attachment/draft contract: attachment-limit
    ownership is **LANDED** `478dfeb1c`; remaining work validates known SSE
@@ -151,12 +154,12 @@ external release gate (item 10); BM0.2 is external (item 10).
    behavior equivalence. (d) serve RAG policy ceilings through the existing
    settings response and delete the duplicated admin-page TS constants — no
    generic constraints-discovery API.
-9. **Docs-site contract correction** *(medium, per-slice from now on)* —
-   the false "influenced the answer" claim is CORRECTED (2026-07-29, with
-   this roadmap revision); the attachment-to-template lifecycle is CORRECTED
-   with item 5 (`2d608b309`). Remaining corrections land with their owning
-   slice: export limits and lineage writer with items 2/7. Add contract tests
-   covering all four export limits and prohibiting material-influence wording.
+9. ~~Docs-site contract correction~~ — **LANDED** `4d13889a4`.
+   The attachment-to-template lifecycle landed with item 5 (`2d608b309`).
+   The guide now documents the exact lineage reader/writer contract and all
+   four source-owned synchronous export guards, distinguishes retained-byte
+   preflight from the additional carried-text check, and prohibits
+   material-influence wording through executable contract tests.
 10. **Release proof** *(external gates, tracked not implemented here)* —
     BEFORE any live run, freeze in the tracked gate input: repetition
     count, required cases, non-municipal domain families, provider
