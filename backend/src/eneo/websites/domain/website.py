@@ -178,13 +178,23 @@ class Website(Entity):
                 crawl_type,
                 update_interval,
                 embedding_model,
-                *optional_auth,
+                *optional_tail,
             ) = args
+            # The positional overload declares the chunk settings after the auth pair,
+            # so they arrive here too. Reading them from kwargs instead would silently
+            # drop a positional caller's values and build the website on the platform
+            # defaults while the type contract promised otherwise.
             http_auth_username = cast(
-                Optional[str], optional_auth[0] if optional_auth else None
+                Optional[str], optional_tail[0] if optional_tail else None
             )
             http_auth_password = cast(
-                Optional[str], optional_auth[1] if len(optional_auth) > 1 else None
+                Optional[str], optional_tail[1] if len(optional_tail) > 1 else None
+            )
+            chunk_size = cast(
+                Optional[int], optional_tail[2] if len(optional_tail) > 2 else None
+            )
+            chunk_overlap = cast(
+                Optional[int], optional_tail[3] if len(optional_tail) > 3 else None
             )
         else:
             space_id = kwargs["space_id"]
@@ -197,9 +207,8 @@ class Website(Entity):
             embedding_model = kwargs["embedding_model"]
             http_auth_username = kwargs.get("http_auth_username")
             http_auth_password = kwargs.get("http_auth_password")
-
-        chunk_size = cast(Optional[int], kwargs.get("chunk_size"))
-        chunk_overlap = cast(Optional[int], kwargs.get("chunk_overlap"))
+            chunk_size = cast(Optional[int], kwargs.get("chunk_size"))
+            chunk_overlap = cast(Optional[int], kwargs.get("chunk_overlap"))
 
         space_id = cast("UUID", space_id)
         user = cast("UserInDB", user)
