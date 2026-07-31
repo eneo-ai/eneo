@@ -95,6 +95,28 @@ class TextProcessor:
             original=original,
         )
 
+    async def precheck_knowledge_publication_capacity(
+        self,
+        *,
+        text: str,
+        title: str,
+        embedding_model: "EmbeddingModel",
+        group_id: UUID,
+        original: CapturedKnowledgeOriginal,
+    ) -> None:
+        await self.info_blob_service.precheck_knowledge_publication_capacity(
+            self._info_blob_add(
+                text=text,
+                title=title,
+                group_id=group_id,
+                website_id=None,
+                url=None,
+                content_hash=None,
+            ),
+            embedding_model=embedding_model,
+            original=original,
+        )
+
     async def process_text(
         self,
         *,

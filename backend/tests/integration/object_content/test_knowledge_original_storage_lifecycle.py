@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -487,6 +488,226 @@ async def test_exact_object_store_reupload_skips_remote_upload_and_orphan(
         assert second_status == Status.COMPLETE.value
         assert upload_spy.await_count == 1
         second_embeddings.get_embeddings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_exact_object_store_uploads_share_one_remote_publication(
+    db_container,
+    real_object_store: RealObjectStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    payload = b"concurrent exact object-store upload"
+    searchable_text = "Searchable text from concurrent uploads"
+    first_upload_started = asyncio.Event()
+    release_first_upload = asyncio.Event()
+
+    async with _configured_runtime(real_object_store) as store:
+        original_upload = store.upload
+
+        async def controlled_upload(*args, **kwargs):
+            if not first_upload_started.is_set():
+                first_upload_started.set()
+                await release_first_upload.wait()
+            return await original_upload(*args, **kwargs)
+
+        upload_spy = AsyncMock(side_effect=controlled_upload)
+        monkeypatch.setattr(store, "upload", upload_spy)
+
+        async with db_container() as container:
+            user, tenant, group, first_job, _ = await _seed_job(
+                container,
+                with_prior=False,
+            )
+            second_job = Jobs(
+                id=uuid4(),
+                user_id=user.id,
+                task=Task.UPLOAD_FILE.value,
+                name="knowledge.txt",
+                status=Status.QUEUED.value,
+            )
+            container.session().add(second_job)
+            await container.session().flush()
+            first_job_id = first_job.id
+            second_job_id = second_job.id
+            group_id = group.id
+            space_id = group.space_id
+
+        _stage_job_file(tmp_path, first_job_id, payload)
+        _stage_job_file(tmp_path, second_job_id, payload)
+        first_container = _sessionless_container(user=user, tenant=tenant)
+        second_container = _sessionless_container(user=user, tenant=tenant)
+        first_container.text_extractor.override(
+            providers.Object(_Extractor(searchable_text))
+        )
+        second_container.text_extractor.override(
+            providers.Object(_Extractor(searchable_text))
+        )
+        first_embeddings = AsyncMock()
+        first_embeddings.get_embeddings.side_effect = _embedding_result
+        first_container.create_embeddings_service.override(
+            providers.Object(first_embeddings)
+        )
+        second_embeddings = AsyncMock()
+        second_embeddings.get_embeddings.side_effect = _embedding_result
+        second_container.create_embeddings_service.override(
+            providers.Object(second_embeddings)
+        )
+        claim_contended = asyncio.Event()
+        claim_redis = first_container.redis_client()
+        original_redis_set = claim_redis.set
+
+        async def observe_claim_contention(*args, **kwargs):
+            result = await original_redis_set(*args, **kwargs)
+            if kwargs.get("nx") and not result:
+                claim_contended.set()
+            return result
+
+        monkeypatch.setattr(claim_redis, "set", observe_claim_contention)
+        second_container.redis_client.override(providers.Object(claim_redis))
+
+        async def run_upload(job_id: UUID, container: Container) -> bool | None:
+            return await upload_info_blob_task(
+                job_id=job_id,
+                params=_params(
+                    user_id=user.id,
+                    group_id=group_id,
+                    space_id=space_id,
+                ),
+                container=container,
+            )
+
+        first_task = asyncio.create_task(run_upload(first_job_id, first_container))
+        await asyncio.wait_for(first_upload_started.wait(), timeout=10)
+        second_task = asyncio.create_task(run_upload(second_job_id, second_container))
+        try:
+            await asyncio.wait_for(claim_contended.wait(), timeout=10)
+            uploads_while_first_blocked = upload_spy.await_count
+        finally:
+            release_first_upload.set()
+            results = await asyncio.gather(first_task, second_task)
+        assert uploads_while_first_blocked == 1
+        assert results == [True, True]
+
+        async with sessionmanager.session() as session, session.begin():
+            active_count = await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(InfoBlobs)
+                .where(
+                    InfoBlobs.group_id == group_id,
+                    active_info_blob_version(),
+                )
+            )
+            content_count = await session.scalar(
+                sa.select(sa.func.count()).select_from(ObjectContents)
+            )
+            object_count = await session.scalar(
+                sa.select(sa.func.count()).select_from(ObjectStoreObjects)
+            )
+            orphan_count = await session.scalar(
+                sa.select(sa.func.count()).select_from(ObjectContentOrphanCandidates)
+            )
+
+        assert upload_spy.await_count == 1
+        assert active_count == 1
+        assert content_count == 1
+        assert object_count == 1
+        assert orphan_count == 0
+        first_embeddings.get_embeddings.assert_awaited_once()
+        second_embeddings.get_embeddings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_combined_original_and_text_quota_fails_before_remote_work(
+    db_container,
+    real_object_store: RealObjectStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    payload = b"original quota component"
+    searchable_text = "searchable quota component"
+
+    async with _configured_runtime(real_object_store) as store:
+        upload_spy = AsyncMock(wraps=store.upload)
+        monkeypatch.setattr(store, "upload", upload_spy)
+
+        async with db_container() as container:
+            user, tenant, group, job, prior_id = await _seed_job(
+                container,
+                with_prior=True,
+            )
+            retained_before = (
+                await container.info_blob_repo().get_retained_size_of_tenant(
+                    user.tenant_id
+                )
+            )
+            user.tenant.quota_limit = retained_before + max(
+                len(payload),
+                len(searchable_text.encode()),
+            )
+            job_id = job.id
+            group_id = group.id
+            space_id = group.space_id
+
+        _stage_job_file(tmp_path, job_id, payload)
+        task_container = _sessionless_container(user=user, tenant=tenant)
+        task_container.text_extractor.override(
+            providers.Object(_Extractor(searchable_text))
+        )
+        embeddings = AsyncMock()
+        embeddings.get_embeddings.side_effect = _embedding_result
+        task_container.create_embeddings_service.override(providers.Object(embeddings))
+
+        async with db_container():
+            assert (
+                await upload_info_blob_task(
+                    job_id=job_id,
+                    params=_params(
+                        user_id=user.id,
+                        group_id=group_id,
+                        space_id=space_id,
+                    ),
+                    container=task_container,
+                )
+                is False
+            )
+
+        async with sessionmanager.session() as session, session.begin():
+            active_ids = set(
+                await session.scalars(
+                    sa.select(InfoBlobs.id).where(
+                        InfoBlobs.group_id == group_id,
+                        active_info_blob_version(),
+                    )
+                )
+            )
+            content_count = await session.scalar(
+                sa.select(sa.func.count()).select_from(ObjectContents)
+            )
+            orphan_count = await session.scalar(
+                sa.select(sa.func.count()).select_from(ObjectContentOrphanCandidates)
+            )
+            job_state = (
+                await session.execute(
+                    sa.select(Jobs.status, Jobs.failure_code).where(Jobs.id == job_id)
+                )
+            ).one()
+
+        assert active_ids == {prior_id}
+        assert content_count == 0
+        assert orphan_count == 0
+        assert job_state.status == Status.FAILED.value
+        assert job_state.failure_code == JobFailureCode.QUOTA_EXCEEDED.value
+        upload_spy.assert_not_awaited()
+        embeddings.get_embeddings.assert_not_awaited()
 
 
 @pytest.mark.asyncio

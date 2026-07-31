@@ -131,7 +131,12 @@ async def test_concurrent_deliveries_start_compute_at_most_once_and_preserve_sta
             )
         )
         container.text_processor.override(
-            providers.Object(SimpleNamespace(process_text=process_text))
+            providers.Object(
+                SimpleNamespace(
+                    precheck_knowledge_publication_capacity=AsyncMock(),
+                    process_text=process_text,
+                )
+            )
         )
         return await upload_info_blob_task(
             job_id=job_id,
@@ -221,7 +226,8 @@ async def test_successful_upload_publishes_cas_statuses_without_generic_db_write
     container.text_processor.override(
         providers.Object(
             SimpleNamespace(
-                process_text=AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+                precheck_knowledge_publication_capacity=AsyncMock(),
+                process_text=AsyncMock(return_value=SimpleNamespace(id=uuid4())),
             )
         )
     )
@@ -325,7 +331,8 @@ async def test_transcription_releases_its_session_before_remote_work(
     container.text_processor.override(
         providers.Object(
             SimpleNamespace(
-                process_text=AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+                precheck_knowledge_publication_capacity=AsyncMock(),
+                process_text=AsyncMock(return_value=SimpleNamespace(id=uuid4())),
             )
         )
     )
@@ -459,7 +466,12 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
         )
     )
     container.text_processor.override(
-        providers.Object(SimpleNamespace(process_text=process_text))
+        providers.Object(
+            SimpleNamespace(
+                precheck_knowledge_publication_capacity=AsyncMock(),
+                process_text=process_text,
+            )
+        )
     )
 
     task = asyncio.create_task(
@@ -549,7 +561,12 @@ async def test_heartbeat_recovers_after_one_failed_database_update(
         )
     )
     container.text_processor.override(
-        providers.Object(SimpleNamespace(process_text=process_text))
+        providers.Object(
+            SimpleNamespace(
+                precheck_knowledge_publication_capacity=AsyncMock(),
+                process_text=process_text,
+            )
+        )
     )
 
     task = asyncio.create_task(
@@ -692,7 +709,12 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
         )
     )
     container.text_processor.override(
-        providers.Object(SimpleNamespace(process_text=process_text))
+        providers.Object(
+            SimpleNamespace(
+                precheck_knowledge_publication_capacity=AsyncMock(),
+                process_text=process_text,
+            )
+        )
     )
     task = asyncio.create_task(
         upload_info_blob_task(

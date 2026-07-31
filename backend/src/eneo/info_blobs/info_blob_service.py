@@ -133,6 +133,35 @@ class InfoBlobService:
         if not matching_original:
             await self.quota_service.ensure_capacity(original.captured.size_bytes)
 
+    async def precheck_knowledge_publication_capacity(
+        self,
+        info_blob: InfoBlobAdd,
+        *,
+        embedding_model: "EmbeddingModel",
+        original: CapturedKnowledgeOriginal,
+    ) -> None:
+        """Reject combined original and text growth before remote publication.
+
+        Chunks and concurrent quota changes remain protected by the final
+        transactional check. Exact refreshes and repairs add no retained size
+        and therefore bypass this preliminary check.
+        """
+        text_bytes = info_blob.text.encode("utf-8")
+        if info_blob.content_hash is None:
+            info_blob.content_hash = sha256(text_bytes).digest()
+
+        async with self.repo.session.begin_nested():
+            match = await self._lock_publication_match(
+                info_blob,
+                embedding_model=embedding_model,
+                original=original,
+            )
+            if match.same_searchable_content and match.same_original:
+                return
+            await self.quota_service.ensure_capacity(
+                original.captured.size_bytes + len(text_bytes)
+            )
+
     async def _lock_publication_match(
         self,
         info_blob: InfoBlobAdd,
