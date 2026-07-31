@@ -17,7 +17,6 @@ from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.embedding_models.domain.chunking import (
     chunking_is_unchanged,
-    resolve_chunk_config,
 )
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -1174,12 +1173,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         new_file_hash = hashlib.sha256(file_bytes).digest()
 
                         existing_file = existing_publications.get(filename)
-                        (
-                            file_effective_chunk_size,
-                            file_effective_chunk_overlap,
-                        ) = resolve_chunk_config(
-                            crawl_context.chunk_size, crawl_context.chunk_overlap
-                        )
 
                         if (
                             embedding_model_spec is not None
@@ -1189,8 +1182,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             and chunking_is_unchanged(
                                 stored_chunk_size=existing_file[2],
                                 stored_chunk_overlap=existing_file[3],
-                                effective_chunk_size=file_effective_chunk_size,
-                                effective_chunk_overlap=file_effective_chunk_overlap,
+                                requested_chunk_size=crawl_context.chunk_size,
+                                requested_chunk_overlap=crawl_context.chunk_overlap,
                             )
                         ):
                             # File unchanged - skip processing

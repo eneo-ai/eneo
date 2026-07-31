@@ -259,8 +259,8 @@ async def persist_batch(
                         and chunking_is_unchanged(
                             stored_chunk_size=stored_chunk_size,
                             stored_chunk_overlap=stored_chunk_overlap,
-                            effective_chunk_size=effective_chunk_size,
-                            effective_chunk_overlap=effective_chunk_overlap,
+                            requested_chunk_size=ctx.chunk_size,
+                            requested_chunk_overlap=ctx.chunk_overlap,
                         )
                     ):
                         success_count += 1
@@ -480,8 +480,8 @@ async def persist_batch(
                             and chunking_is_unchanged(
                                 stored_chunk_size=existing.chunk_size,
                                 stored_chunk_overlap=existing.chunk_overlap,
-                                effective_chunk_size=prepared.chunk_size,
-                                effective_chunk_overlap=prepared.chunk_overlap,
+                                requested_chunk_size=ctx.chunk_size,
+                                requested_chunk_overlap=ctx.chunk_overlap,
                             )
                         ):
                             await savepoint.commit()

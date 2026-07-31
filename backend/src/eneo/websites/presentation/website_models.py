@@ -2,15 +2,24 @@ from datetime import datetime
 from typing import Annotated, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 from pydantic.networks import HttpUrl
 
+from eneo.embedding_models.domain.chunking import validate_overlap_within_policy
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
 from eneo.main.models import (
     NOT_PROVIDED,
     BaseResponse,
+    ChunkConfigRequestMixin,
     IdAndName,
     InDB,
     ModelId,
@@ -155,7 +164,7 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
         )
 
 
-class WebsiteCreate(BaseModel):
+class WebsiteCreate(ChunkConfigRequestMixin):
     name: Optional[str] = None
     url: str
     download_files: bool = False
@@ -163,8 +172,6 @@ class WebsiteCreate(BaseModel):
     update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: Optional[ModelId] = None
     """Embedding model to use (defaults to space's default model if not specified)"""
-    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
-    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
 
     http_auth_username: Optional[str] = Field(
         None, description="Username for HTTP Basic Authentication (optional)"
@@ -201,6 +208,8 @@ class WebsiteUpdate(BaseModel):
     download_files: Union[bool, NotProvided] = NOT_PROVIDED
     crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED
     update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED
+    # Same rule as ChunkConfigRequestMixin, restated because the tri-state sentinel
+    # makes the field types incompatible with it.
     chunk_size: Union[Annotated[int, Field(ge=1)], None, NotProvided] = NOT_PROVIDED
     chunk_overlap: Union[Annotated[int, Field(ge=0)], None, NotProvided] = NOT_PROVIDED
 
@@ -236,6 +245,12 @@ class WebsiteUpdate(BaseModel):
             raise ValueError("To remove auth, both username and password must be null")
 
         return v
+
+    @model_validator(mode="after")
+    def _overlap_within_policy(self) -> "WebsiteUpdate":
+        if isinstance(self.chunk_size, int) and isinstance(self.chunk_overlap, int):
+            validate_overlap_within_policy(self.chunk_size, self.chunk_overlap)
+        return self
 
 
 class BulkCrawlRequest(BaseModel):

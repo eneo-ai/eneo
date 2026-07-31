@@ -10229,6 +10229,25 @@ export interface components {
       message_id: string;
       skill_activation: components["schemas"]["SkillActivationEvidenceV1"] | null;
     };
+    /**
+     * ChunkingPolicyPublic
+     * @description Platform chunking policy, so clients do not duplicate backend constants.
+     *
+     *     The defaults are env-overridable per deployment, and the fraction is the share
+     *     of an embedding model's ``max_input`` a single chunk may occupy. A client that
+     *     hardcodes either one will disagree with the server the moment a deployment
+     *     tunes it.
+     */
+    ChunkingPolicyPublic: {
+      /** Default Chunk Size */
+      default_chunk_size: number;
+      /** Default Chunk Overlap */
+      default_chunk_overlap: number;
+      /** Max Chunk Fraction */
+      max_chunk_fraction: number;
+      /** Max Overlap Fraction */
+      max_overlap_fraction: number;
+    };
     /** CollectionMetadata */
     CollectionMetadata: {
       /** Num Info Blobs */
@@ -10268,12 +10287,12 @@ export interface components {
     };
     /** CollectionUpdate */
     CollectionUpdate: {
-      /** Name */
-      name: string;
       /** Chunk Size */
       chunk_size?: number | null;
       /** Chunk Overlap */
       chunk_overlap?: number | null;
+      /** Name */
+      name: string;
     };
     /** CompletionModel */
     CompletionModel: {
@@ -11086,16 +11105,20 @@ export interface components {
     };
     /** CreateSpaceGroupsRequest */
     CreateSpaceGroupsRequest: {
-      /** Name */
-      name: string;
-      embedding_model?: components["schemas"]["ModelId"] | null;
       /** Chunk Size */
       chunk_size?: number | null;
       /** Chunk Overlap */
       chunk_overlap?: number | null;
+      /** Name */
+      name: string;
+      embedding_model?: components["schemas"]["ModelId"] | null;
     };
     /** CreateSpaceIntegrationKnowledge */
     CreateSpaceIntegrationKnowledge: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Name */
       name: string;
       embedding_model: components["schemas"]["ModelId"];
@@ -11114,10 +11137,6 @@ export interface components {
        * @default site
        */
       resource_type?: string | null;
-      /** Chunk Size */
-      chunk_size?: number | null;
-      /** Chunk Overlap */
-      chunk_overlap?: number | null;
     };
     /** CreateSpaceIntegrationKnowledgeBatchItem */
     CreateSpaceIntegrationKnowledgeBatchItem: {
@@ -11141,13 +11160,13 @@ export interface components {
     };
     /** CreateSpaceIntegrationKnowledgeBatchRequest */
     CreateSpaceIntegrationKnowledgeBatchRequest: {
-      embedding_model: components["schemas"]["ModelId"];
-      /** Wrapper Name */
-      wrapper_name?: string | null;
       /** Chunk Size */
       chunk_size?: number | null;
       /** Chunk Overlap */
       chunk_overlap?: number | null;
+      embedding_model: components["schemas"]["ModelId"];
+      /** Wrapper Name */
+      wrapper_name?: string | null;
       /** Items */
       items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchItem"][];
     };
@@ -16741,6 +16760,7 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
+      chunking: components["schemas"]["ChunkingPolicyPublic"];
     };
     /**
      * SharePointSubscriptionPublic
@@ -19971,6 +19991,10 @@ export interface components {
     };
     /** WebsiteCreate */
     WebsiteCreate: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Name */
       name?: string | null;
       /** Url */
@@ -19985,10 +20009,6 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model?: components["schemas"]["ModelId"] | null;
-      /** Chunk Size */
-      chunk_size?: number | null;
-      /** Chunk Overlap */
-      chunk_overlap?: number | null;
       /**
        * Http Auth Username
        * @description Username for HTTP Basic Authentication (optional)

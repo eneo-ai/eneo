@@ -17,6 +17,7 @@ from eneo.main.logging import get_logger
 from eneo.object_content.runtime import ObjectContentRuntime, object_content_runtime
 from eneo.roles.permissions import Permission, validate_permissions
 from eneo.settings.settings import (
+    ChunkingPolicyPublic,
     SettingsBase,
     SettingsInDB,
     SettingsPublic,
@@ -388,6 +389,7 @@ class SettingService:
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
             provisioning=provisioning,
             api_key_expiry_notifications=api_key_expiry_notifications,
+            chunking=ChunkingPolicyPublic.from_platform(),
         )
 
     async def get_settings(self) -> SettingsPublic:

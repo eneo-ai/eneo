@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 from eneo.object_content.runtime import ObjectContentRuntime
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings import (
+    ChunkingPolicyPublic,
     SettingsBase,
     SettingsInDB,
     SettingsPublic,
@@ -10,7 +11,7 @@ from eneo.settings.settings import (
 )
 from tests.fixtures import TEST_USER, TEST_UUID
 
-TEST_SETTINGS = SettingsPublic()
+TEST_SETTINGS = SettingsPublic(chunking=ChunkingPolicyPublic.from_platform())
 TEST_SETTINGS_EXPECTED = SettingsInDB(
     user_id=TEST_USER.id,
     id=TEST_UUID,
@@ -167,6 +168,7 @@ def test_settings_write_model_accepts_an_echoed_public_response() -> None:
     echoed_response = SettingsPublic(
         chatbot_widget={"colour": "blue"},
         object_content_enabled=True,
+        chunking=ChunkingPolicyPublic.from_platform(),
     )
 
     writable = SettingsBase.model_validate(echoed_response.model_dump())

@@ -39,6 +39,11 @@
   let isProcessing = false;
   let validUrl = false;
 
+  // The backend clamps chunk size against the source's embedding model.
+  $: chunkMaxInput = $currentSpace.embedding_models.find(
+    (model) => model.id === editableWebsite.embedding_model?.id
+  )?.max_input;
+
   // Chunk configuration (null = use platform defaults).
   let chunkSize: number | null = website.chunk_size ?? null;
   let chunkOverlap: number | null = website.chunk_overlap ?? null;
@@ -465,7 +470,7 @@
         ></SelectEmbeddingModel>
       {/if}
 
-      <ChunkSettings bind:chunkSize bind:chunkOverlap />
+      <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
     </Dialog.Section>
 
     <Dialog.Controls let:close>

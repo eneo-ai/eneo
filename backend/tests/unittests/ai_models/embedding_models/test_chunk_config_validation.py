@@ -81,6 +81,32 @@ def test_valid_values_are_accepted(model: type):
 
 
 @pytest.mark.parametrize("model", REQUEST_MODELS, ids=lambda m: m.__name__)
+def test_overlap_above_the_platform_ceiling_is_rejected(model: type):
+    # 40 of 50 is 80% overlap. Accepting it and indexing 10 instead would make the
+    # stored and displayed setting disagree with the splitter.
+    # The rule spans two fields, so pydantic reports it at model level rather than
+    # against one field; assert on the message the caller actually sees.
+    with pytest.raises(ValidationError, match="chunk_overlap must not exceed"):
+        _build(model, chunk_size=50, chunk_overlap=40)
+
+
+@pytest.mark.parametrize("model", REQUEST_MODELS, ids=lambda m: m.__name__)
+def test_overlap_exactly_on_the_ceiling_is_accepted(model: type):
+    instance = _build(model, chunk_size=50, chunk_overlap=10)
+
+    assert (instance.chunk_size, instance.chunk_overlap) == (50, 10)
+
+
+@pytest.mark.parametrize("model", REQUEST_MODELS, ids=lambda m: m.__name__)
+def test_the_platform_default_pair_is_accepted(model: type):
+    # The default 200/40 sits exactly on the ceiling; if this ever fails, the default
+    # and the policy have drifted apart.
+    instance = _build(model, chunk_size=200, chunk_overlap=40)
+
+    assert (instance.chunk_size, instance.chunk_overlap) == (200, 40)
+
+
+@pytest.mark.parametrize("model", REQUEST_MODELS, ids=lambda m: m.__name__)
 def test_zero_overlap_is_accepted(model: type):
     # Zero overlap is meaningful: adjacent chunks simply do not overlap.
     assert _build(model, chunk_overlap=0).chunk_overlap == 0

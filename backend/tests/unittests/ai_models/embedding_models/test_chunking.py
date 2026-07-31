@@ -6,7 +6,9 @@ from eneo.embedding_models.domain.chunking import (
     build_text_splitter,
     chunking_is_unchanged,
     clamp_chunk_size,
+    max_overlap_for,
     resolve_chunk_config,
+    validate_overlap_within_policy,
 )
 
 
@@ -34,10 +36,10 @@ def test_resolve_fills_only_the_missing_value(platform_defaults: ChunkSettings):
 @pytest.mark.parametrize(
     ["chunk_size", "chunk_overlap", "expected_overlap"],
     [
-        (50, 40, 25),  # overlap above the cap is halved down to size // 2
-        (80, 40, 40),  # exactly at the cap is left alone
-        (200, 40, 40),  # comfortably below the cap is left alone
-        (1, 40, 0),  # a size of 1 leaves no room for overlap at all
+        (50, 40, 40),  # a valid overlap is honoured, never quietly reduced
+        (50, 60, 50),  # above the splitter's limit it is capped, not crashed
+        (200, 40, 40),  # the platform default pair passes through
+        (1, 40, 1),  # a size of 1 caps the platform default overlap to 1
     ],
 )
 def test_resolve_caps_overlap_below_chunk_size(
@@ -46,12 +48,13 @@ def test_resolve_caps_overlap_below_chunk_size(
     chunk_overlap: int,
     expected_overlap: int,
 ):
-    # RecursiveCharacterTextSplitter raises if overlap >= size, which would break
-    # ingestion for any small chunk_size a user is allowed to set.
+    # RecursiveCharacterTextSplitter raises only when overlap > size. The resolver is
+    # the last guard for values that never went through the API, such as a platform
+    # default overlap larger than a small per-source size.
     size, overlap = resolve_chunk_config(chunk_size, chunk_overlap)
 
     assert (size, overlap) == (chunk_size, expected_overlap)
-    assert overlap < size or size == 1
+    assert overlap <= size
 
 
 def test_resolve_defaults_are_capped_too(monkeypatch: pytest.MonkeyPatch):
@@ -60,14 +63,14 @@ def test_resolve_defaults_are_capped_too(monkeypatch: pytest.MonkeyPatch):
         chunking, "settings", ChunkSettings(chunk_size=30, chunk_overlap=90)
     )
 
-    assert resolve_chunk_config(None, None) == (30, 15)
+    assert resolve_chunk_config(None, None) == (30, 30)
 
 
 def test_splitter_is_built_from_the_resolved_values(platform_defaults: ChunkSettings):
     splitter = build_text_splitter(50, 40)
 
     assert splitter._chunk_size == 50
-    assert splitter._chunk_overlap == 25
+    assert splitter._chunk_overlap == 40
 
 
 @pytest.mark.parametrize(
@@ -87,69 +90,120 @@ def test_clamp_chunk_size(chunk_size: int, max_input: int | None, expected: int)
 class TestChunkingIsUnchanged:
     """The stale check that decides whether stored material must be re-chunked."""
 
-    def test_identical_values_are_unchanged(self):
+    def test_stamp_matching_the_request_is_unchanged(self):
         assert chunking_is_unchanged(
-            stored_chunk_size=200,
-            stored_chunk_overlap=40,
-            effective_chunk_size=200,
-            effective_chunk_overlap=40,
+            stored_chunk_size=1000,
+            stored_chunk_overlap=100,
+            requested_chunk_size=1000,
+            requested_chunk_overlap=100,
         )
 
-    def test_different_size_is_a_change(self):
+    def test_source_on_defaults_matches_material_stamped_with_the_defaults(self):
+        # A source left on "use platform defaults" resolves to the same pair its blobs
+        # were stamped with. Comparing raw config would see None != 200 and re-index
+        # the whole source for nothing.
+        stored_size, stored_overlap = resolve_chunk_config(None, None)
+
+        assert chunking_is_unchanged(
+            stored_chunk_size=stored_size,
+            stored_chunk_overlap=stored_overlap,
+            requested_chunk_size=None,
+            requested_chunk_overlap=None,
+        )
+
+    @pytest.mark.parametrize(
+        ["requested_chunk_size", "requested_chunk_overlap"],
+        [(1000, 100), (1000, None), (None, 10)],
+    )
+    def test_a_different_request_is_a_change(
+        self, requested_chunk_size: int | None, requested_chunk_overlap: int | None
+    ):
         assert not chunking_is_unchanged(
             stored_chunk_size=200,
             stored_chunk_overlap=40,
-            effective_chunk_size=1000,
-            effective_chunk_overlap=40,
+            requested_chunk_size=requested_chunk_size,
+            requested_chunk_overlap=requested_chunk_overlap,
         )
 
-    def test_different_overlap_is_a_change(self):
-        assert not chunking_is_unchanged(
-            stored_chunk_size=200,
-            stored_chunk_overlap=40,
-            effective_chunk_size=200,
-            effective_chunk_overlap=10,
-        )
-
-    def test_unrecorded_chunking_never_counts_as_a_change(self):
+    def test_unrecorded_chunking_is_left_alone_while_the_source_uses_defaults(self):
         # Blobs ingested before these columns existed have unknowable chunking.
-        # Treating them as stale would re-chunk and re-embed every existing page
-        # on the first crawl after deploying this.
+        # Treating them as stale would re-chunk and re-embed every existing page of
+        # every website the first time this ships.
         assert chunking_is_unchanged(
             stored_chunk_size=None,
             stored_chunk_overlap=None,
-            effective_chunk_size=1000,
-            effective_chunk_overlap=100,
+            requested_chunk_size=None,
+            requested_chunk_overlap=None,
+        )
+
+    @pytest.mark.parametrize(
+        ["requested_chunk_size", "requested_chunk_overlap"],
+        [(1000, 100), (1000, None), (None, 10)],
+    )
+    def test_unrecorded_chunking_is_stale_once_the_source_is_explicit(
+        self, requested_chunk_size: int | None, requested_chunk_overlap: int | None
+    ):
+        # An explicit configuration is a deliberate choice. Material that predates it
+        # cannot be shown to satisfy it, so it must be re-chunked — otherwise a source
+        # reports a setting its own knowledge never follows.
+        assert not chunking_is_unchanged(
+            stored_chunk_size=None,
+            stored_chunk_overlap=None,
+            requested_chunk_size=requested_chunk_size,
+            requested_chunk_overlap=requested_chunk_overlap,
         )
 
     @pytest.mark.parametrize(
         ["stored_chunk_size", "stored_chunk_overlap"],
         [(200, None), (None, 40)],
     )
-    def test_a_recorded_field_that_differs_is_a_change_on_its_own(
+    def test_half_recorded_chunking_follows_the_same_rule(
         self, stored_chunk_size: int | None, stored_chunk_overlap: int | None
     ):
-        # Each field is judged independently: "unknown" excuses only itself, so a
-        # recorded value that differs still forces a re-index. Ingestion writes both
-        # fields together, so a half-recorded row should not occur in practice —
-        # this pins the behaviour in case one ever does.
+        # Ingestion writes both fields together, so this should not occur. Pinned so a
+        # partially stamped row is treated as unknown rather than as a lucky match.
+        assert chunking_is_unchanged(
+            stored_chunk_size=stored_chunk_size,
+            stored_chunk_overlap=stored_chunk_overlap,
+            requested_chunk_size=None,
+            requested_chunk_overlap=None,
+        )
         assert not chunking_is_unchanged(
             stored_chunk_size=stored_chunk_size,
             stored_chunk_overlap=stored_chunk_overlap,
-            effective_chunk_size=1000,
-            effective_chunk_overlap=100,
+            requested_chunk_size=1000,
+            requested_chunk_overlap=100,
         )
 
-    def test_default_config_matches_material_stamped_with_the_defaults(self):
-        # A source left on "use platform defaults" resolves to 200/40, which is what
-        # the blob was stamped with — comparing raw config would see None != 200
-        # and re-index the whole source for no reason.
-        stored_size, stored_overlap = resolve_chunk_config(None, None)
-        effective_size, effective_overlap = resolve_chunk_config(None, None)
 
-        assert chunking_is_unchanged(
-            stored_chunk_size=stored_size,
-            stored_chunk_overlap=stored_overlap,
-            effective_chunk_size=effective_size,
-            effective_chunk_overlap=effective_overlap,
+class TestOverlapPolicy:
+    """The ceiling that keeps requested overlap inside the useful range."""
+
+    @pytest.mark.parametrize(
+        ["chunk_size", "expected"],
+        [(200, 40), (50, 10), (1000, 200), (128, 25), (1, 0)],
+    )
+    def test_max_overlap_is_a_share_of_the_size(self, chunk_size: int, expected: int):
+        assert max_overlap_for(chunk_size) == expected
+
+    def test_the_platform_default_sits_exactly_on_the_ceiling(
+        self, platform_defaults: ChunkSettings
+    ):
+        assert max_overlap_for(platform_defaults.chunk_size) == (
+            platform_defaults.chunk_overlap
         )
+
+    @pytest.mark.parametrize(["chunk_size", "chunk_overlap"], [(200, 40), (50, 10)])
+    def test_overlap_on_or_below_the_ceiling_is_accepted(
+        self, chunk_size: int, chunk_overlap: int
+    ):
+        validate_overlap_within_policy(chunk_size, chunk_overlap)
+
+    @pytest.mark.parametrize(["chunk_size", "chunk_overlap"], [(200, 41), (50, 40)])
+    def test_overlap_above_the_ceiling_is_refused_not_adjusted(
+        self, chunk_size: int, chunk_overlap: int
+    ):
+        # Refusing rather than capping is the point: capping would store and display
+        # one overlap while indexing another.
+        with pytest.raises(ValueError, match="must not exceed"):
+            validate_overlap_within_policy(chunk_size, chunk_overlap)

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -25,6 +25,7 @@ from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.jobs.job_models import JobPublic
 from eneo.main.models import (
     NOT_PROVIDED,
+    ChunkConfigRequestMixin,
     InDB,
     MCPToolSetting,
     ModelId,
@@ -272,10 +273,8 @@ class CreateSpaceServiceResponse(InDB, ResourcePermissionsMixin):
 # Groups
 
 
-class CreateSpaceGroupsRequest(CreateRequest):
+class CreateSpaceGroupsRequest(CreateRequest, ChunkConfigRequestMixin):
     embedding_model: Optional[ModelId] = None
-    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
-    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
 
 
 class CreateSpaceGroupsResponse(InDB):
@@ -333,7 +332,7 @@ class UpdateSpaceGroupMemberRequest(BaseModel):
     role: SpaceRoleValue
 
 
-class CreateSpaceIntegrationKnowledge(BaseModel):
+class CreateSpaceIntegrationKnowledge(ChunkConfigRequestMixin):
     name: str
     embedding_model: ModelId
     url: str
@@ -344,8 +343,6 @@ class CreateSpaceIntegrationKnowledge(BaseModel):
     resource_type: Optional[str] = (
         "site"  # "site" for SharePoint, "onedrive" for OneDrive
     )
-    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
-    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
 
 
 class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
@@ -360,11 +357,9 @@ class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
     )
 
 
-class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):
+class CreateSpaceIntegrationKnowledgeBatchRequest(ChunkConfigRequestMixin):
     embedding_model: ModelId
     wrapper_name: Optional[str] = None
-    chunk_size: Optional[Annotated[int, Field(ge=1)]] = None
-    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
     items: list[CreateSpaceIntegrationKnowledgeBatchItem] = Field(
         min_length=1, max_length=50
     )

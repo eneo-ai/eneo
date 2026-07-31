@@ -40,6 +40,11 @@
   // Chunk configuration (null = use platform defaults).
   let chunkSize = $state<number | null>(null);
   let chunkOverlap = $state<number | null>(null);
+  // The backend clamps chunk size against the source's embedding model.
+  const chunkMaxInput = $derived(
+    $currentSpace.embedding_models.find((model) => model.id === selectedEmbeddingModel?.id)
+      ?.max_input
+  );
 
   const loadPreview = createAsyncState(async () => {
     const { id } = integration;
@@ -192,7 +197,7 @@
         selectableModels={$currentSpace.embedding_models}
       ></SelectEmbeddingModel>
 
-      <ChunkSettings bind:chunkSize bind:chunkOverlap />
+      <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
     </Dialog.Section>
 
     <Dialog.Controls>

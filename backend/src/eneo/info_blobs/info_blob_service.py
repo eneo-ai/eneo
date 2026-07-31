@@ -152,8 +152,8 @@ class InfoBlobService:
                 and chunking_is_unchanged(
                     stored_chunk_size=active.chunk_size,
                     stored_chunk_overlap=active.chunk_overlap,
-                    effective_chunk_size=effective_chunk_size,
-                    effective_chunk_overlap=effective_chunk_overlap,
+                    requested_chunk_size=chunk_size,
+                    requested_chunk_overlap=chunk_overlap,
                 )
             ):
                 return await self.repo.refresh_publication_metadata(

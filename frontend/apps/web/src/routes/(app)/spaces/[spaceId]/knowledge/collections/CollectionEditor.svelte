@@ -16,12 +16,25 @@
 
   export let mode: "update" | "create" = "create";
   export let collection:
-    | { id: string; name: string; chunk_size?: number | null; chunk_overlap?: number | null }
+    | {
+        id: string;
+        name: string;
+        chunk_size?: number | null;
+        chunk_overlap?: number | null;
+        embedding_model?: { id: string } | null;
+      }
     | undefined;
   let collectionName = collection?.name ?? "";
   let embeddingModel: { id: string } | undefined = undefined;
   let chunkSize: number | null = collection?.chunk_size ?? null;
   let chunkOverlap: number | null = collection?.chunk_overlap ?? null;
+
+  // The backend clamps chunk size against the source's embedding model, so the
+  // inputs need that model's limit to stop at the same value.
+  $: chunkMaxInput = $currentSpace.embedding_models.find(
+    (model) =>
+      model.id === (mode === "create" ? embeddingModel?.id : collection?.embedding_model?.id)
+  )?.max_input;
 
   let isProcessing = false;
   async function editCollection() {
@@ -108,7 +121,7 @@
           bind:value={embeddingModel}
           selectableModels={$currentSpace.embedding_models}
         ></SelectEmbeddingModel>
-        <ChunkSettings bind:chunkSize bind:chunkOverlap />
+        <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
       {:else}
         <Input.Text
           bind:value={collectionName}
@@ -116,7 +129,7 @@
           required
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         ></Input.Text>
-        <ChunkSettings bind:chunkSize bind:chunkOverlap />
+        <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
       {/if}
     </Dialog.Section>
 
