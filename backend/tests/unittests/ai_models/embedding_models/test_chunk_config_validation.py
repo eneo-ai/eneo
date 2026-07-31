@@ -82,8 +82,8 @@ def test_valid_values_are_accepted(model: type):
 
 @pytest.mark.parametrize("model", REQUEST_MODELS, ids=lambda m: m.__name__)
 def test_overlap_above_the_platform_ceiling_is_rejected(model: type):
-    # 40 of 50 is 80% overlap. Accepting it and indexing 10 instead would make the
-    # stored and displayed setting disagree with the splitter.
+    # 40 of 50 is 80% overlap, far past the ceiling. Accepting it and indexing less
+    # would make the stored and displayed setting disagree with the splitter.
     # The rule spans two fields, so pydantic reports it at model level rather than
     # against one field; assert on the message the caller actually sees.
     with pytest.raises(ValidationError, match="chunk_overlap must not exceed"):
@@ -92,9 +92,9 @@ def test_overlap_above_the_platform_ceiling_is_rejected(model: type):
 
 @pytest.mark.parametrize("model", REQUEST_MODELS, ids=lambda m: m.__name__)
 def test_overlap_exactly_on_the_ceiling_is_accepted(model: type):
-    instance = _build(model, chunk_size=50, chunk_overlap=10)
+    instance = _build(model, chunk_size=200, chunk_overlap=50)
 
-    assert (instance.chunk_size, instance.chunk_overlap) == (50, 10)
+    assert (instance.chunk_size, instance.chunk_overlap) == (200, 50)
 
 
 @pytest.mark.parametrize("model", REQUEST_MODELS, ids=lambda m: m.__name__)

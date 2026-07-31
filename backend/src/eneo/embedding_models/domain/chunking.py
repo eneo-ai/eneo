@@ -23,11 +23,16 @@ settings = ChunkSettings()
 MAX_CHUNK_FRACTION = 0.6
 
 # Practical RAG systems land at 10-20% overlap for small chunks and 5-10% for large
-# ones, and cost grows sharply as overlap approaches the chunk size — every extra
-# token of overlap is re-embedded and re-stored in the neighbouring chunk. 20% is the
-# top of the useful range, so it is a ceiling rather than a recommendation. The
-# platform default (200/40) sits exactly on it.
-MAX_OVERLAP_FRACTION = 0.2
+# ones. Every token of overlap is re-embedded and re-stored in the neighbouring chunk,
+# so the chunk count grows as size / (size - overlap): 1.11x at 10%, 1.25x at 20%,
+# 1.33x at 25%, 2x at 50%.
+#
+# This ceiling exists to stop the pathological end of that curve, not to enforce the
+# median — the UI's discrete steps guide towards the usual range. 25% leaves room for
+# the case that justifies it, a very small chunk where a single sentence spans the
+# boundary, and keeps the ceiling above every offered step so no valid choice can be
+# nudged over it by rounding.
+MAX_OVERLAP_FRACTION = 0.25
 
 
 def max_overlap_for(chunk_size: int) -> int:

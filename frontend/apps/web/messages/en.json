@@ -4216,7 +4216,8 @@
   "chunk_size_label": "Chunk size (tokens)",
   "chunk_size_description": "Approximate size of each text chunk. Larger chunks keep more context; smaller chunks give more precise matches.",
   "chunk_overlap_label": "Chunk overlap (tokens)",
-  "chunk_overlap_description": "How much neighbouring chunks overlap, so context isn't lost at chunk boundaries.",
+  "chunk_overlap_description": "How much neighbouring chunks overlap, so context isn't lost at chunk boundaries. Higher overlap means more chunks to embed and store.",
   "chunk_settings_reembed_note": "Changes only apply to newly added or re-indexed content. Already indexed material keeps its current chunking until it is re-uploaded.",
-  "chunk_size_ceiling_note": "Capped at {ceiling} tokens for the selected embedding model."
+  "chunk_size_ceiling_note": "Capped at {ceiling} tokens for the selected embedding model.",
+  "chunk_overlap_value": "{percent}% · {tokens} tokens"
 }

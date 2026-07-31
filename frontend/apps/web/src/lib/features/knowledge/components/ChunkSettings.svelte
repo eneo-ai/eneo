@@ -4,7 +4,7 @@
   import { getAppContext } from "$lib/core/AppContext";
 
   // The platform policy comes from the backend. Hardcoding it here would silently
-  // override a deployment that tunes CHUNK_SIZE, CHUNK_OVERLAP or the ceiling.
+  // override a deployment that tunes CHUNK_SIZE, CHUNK_OVERLAP or either ceiling.
   const policy = getAppContext().settings.chunking;
 
   // null = "use platform default". A number = explicit override.
@@ -12,43 +12,73 @@
   export let chunkOverlap: number | null = null;
 
   /** max_input of the embedding model this source will use, when known. Lets the
-   * inputs stop at the value the backend would clamp to instead of silently
-   * lowering it after the fact. */
+   * input stop at the value the backend would clamp to instead of silently lowering
+   * it after the fact. */
   export let maxInput: number | null | undefined = undefined;
+
+  // Overlap is chosen as a share of the chunk size, which is how the limit is defined
+  // and how the practical guidance is stated, and it survives a change of chunk size:
+  // an absolute overlap would quietly slide from 20% to 4% when the size grows.
+  const OVERLAP_STEP_PERCENT = 5;
+  const maxOverlapPercent =
+    Math.floor((policy.max_overlap_fraction * 100) / OVERLAP_STEP_PERCENT) * OVERLAP_STEP_PERCENT;
 
   // Start expanded only when the source already has an explicit override.
   let customize = chunkSize !== null || chunkOverlap !== null;
 
-  // Local, always-numeric values for the inputs (Input.Number requires a number).
+  // Local, always-numeric values for the inputs.
   let sizeValue = chunkSize ?? policy.default_chunk_size;
-  let overlapValue = chunkOverlap ?? policy.default_chunk_overlap;
+  let overlapPercent = toPercent(
+    chunkOverlap ?? policy.default_chunk_overlap,
+    chunkSize ?? policy.default_chunk_size
+  );
 
-  // Reset the inputs to the platform defaults each time the switch is turned on,
-  // so toggling off then on always starts fresh from the deployment's values.
-  // Initialised to the current state so opening an existing override doesn't reset.
+  /** A stored overlap set through the API need not land on one of our steps. Keep the
+   * exact token count in that case instead of snapping the slider, so the value shown
+   * never disagrees with the value indexed. */
+  let exactOverlapTokens: number | null = offStepTokens(
+    chunkOverlap,
+    chunkSize ?? policy.default_chunk_size
+  );
+
+  function toPercent(tokens: number, size: number): number {
+    if (size <= 0) return 0;
+    const percent = Math.round((tokens / size) * 100);
+    return Math.min(Math.max(percent, 0), maxOverlapPercent);
+  }
+
+  function offStepTokens(tokens: number | null, size: number): number | null {
+    if (tokens === null || size <= 0) return null;
+    const percent = (tokens / size) * 100;
+    const onStep = Number.isInteger(percent) && percent % OVERLAP_STEP_PERCENT === 0;
+    return onStep || percent > maxOverlapPercent ? null : tokens;
+  }
+
+  // Reset to the platform defaults each time the switch is turned on, so toggling off
+  // then on always starts from the deployment's values. Initialised to the current
+  // state so opening an existing override doesn't reset it.
   let wasCustomizing = customize;
   $: onCustomizeChange(customize);
   function onCustomizeChange(on: boolean) {
     if (on && !wasCustomizing) {
       sizeValue = policy.default_chunk_size;
-      overlapValue = policy.default_chunk_overlap;
+      overlapPercent = toPercent(policy.default_chunk_overlap, policy.default_chunk_size);
+      exactOverlapTokens = null;
     }
     wasCustomizing = on;
   }
-
-  // Derive the nullable props: null when off (use defaults), the input value when on.
-  $: chunkSize = customize ? sizeValue : null;
-  $: chunkOverlap = customize ? overlapValue : null;
 
   // The backend caps a chunk at a fraction of the embedding model's input limit.
   $: ceiling = maxInput ? Math.floor(maxInput * policy.max_chunk_fraction) : null;
   $: sizeMax = ceiling ?? 4000;
   $: if (sizeValue > sizeMax) sizeValue = sizeMax;
 
-  // The platform refuses an overlap above a share of the chunk size, so the input
-  // stops there instead of letting the request fail on submit.
-  $: overlapMax = Math.floor(sizeValue * policy.max_overlap_fraction);
-  $: if (overlapValue > overlapMax) overlapValue = overlapMax;
+  // Tokens are what the API and the index actually use.
+  $: overlapTokens = exactOverlapTokens ?? Math.round((sizeValue * overlapPercent) / 100);
+
+  // Derive the nullable props: null when off (use defaults), the value when on.
+  $: chunkSize = customize ? sizeValue : null;
+  $: chunkOverlap = customize ? overlapTokens : null;
 </script>
 
 <Input.Switch bind:value={customize} class="border-default hover:bg-hover-dimmer p-4 px-6">
@@ -74,9 +104,23 @@
     </div>
 
     <div class="flex-1">
-      <Input.Number bind:value={overlapValue} min={0} max={overlapMax} step={5} labelClass="text-sm"
-        >{m.chunk_overlap_label()}</Input.Number
-      >
+      <p class="text-sm">{m.chunk_overlap_label()}</p>
+      <div class="flex items-center gap-3 pt-3">
+        <Input.Slider
+          value={overlapPercent}
+          min={0}
+          max={maxOverlapPercent}
+          step={OVERLAP_STEP_PERCENT}
+          onInput={(next) => {
+            overlapPercent = next;
+            // The slider is now the source of truth for this field.
+            exactOverlapTokens = null;
+          }}
+        />
+        <span class="text-secondary w-28 shrink-0 text-right text-xs">
+          {m.chunk_overlap_value({ percent: overlapPercent, tokens: overlapTokens })}
+        </span>
+      </div>
       <p class="text-secondary mt-1 pl-3 text-xs">{m.chunk_overlap_description()}</p>
     </div>
   </div>

@@ -181,25 +181,29 @@ class TestOverlapPolicy:
 
     @pytest.mark.parametrize(
         ["chunk_size", "expected"],
-        [(200, 40), (50, 10), (1000, 200), (128, 25), (1, 0)],
+        [(200, 50), (50, 12), (1000, 250), (128, 32), (1, 0)],
     )
     def test_max_overlap_is_a_share_of_the_size(self, chunk_size: int, expected: int):
         assert max_overlap_for(chunk_size) == expected
 
-    def test_the_platform_default_sits_exactly_on_the_ceiling(
+    def test_the_platform_default_stays_below_the_ceiling(
         self, platform_defaults: ChunkSettings
     ):
-        assert max_overlap_for(platform_defaults.chunk_size) == (
-            platform_defaults.chunk_overlap
+        # The default should be a usable value, not the boundary — sitting on the
+        # ceiling means a later size change can push it over by rounding alone.
+        assert platform_defaults.chunk_overlap < max_overlap_for(
+            platform_defaults.chunk_size
         )
 
-    @pytest.mark.parametrize(["chunk_size", "chunk_overlap"], [(200, 40), (50, 10)])
+    @pytest.mark.parametrize(
+        ["chunk_size", "chunk_overlap"], [(200, 40), (200, 50), (50, 12), (50, 0)]
+    )
     def test_overlap_on_or_below_the_ceiling_is_accepted(
         self, chunk_size: int, chunk_overlap: int
     ):
         validate_overlap_within_policy(chunk_size, chunk_overlap)
 
-    @pytest.mark.parametrize(["chunk_size", "chunk_overlap"], [(200, 41), (50, 40)])
+    @pytest.mark.parametrize(["chunk_size", "chunk_overlap"], [(200, 51), (50, 40)])
     def test_overlap_above_the_ceiling_is_refused_not_adjusted(
         self, chunk_size: int, chunk_overlap: int
     ):
