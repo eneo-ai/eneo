@@ -36,7 +36,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
-| 2026-08-01 | **Explicit Builder question exhaustion**: architecture and source-specific commit-grade questions remain askable after the normal user-question budget; every current quality candidate now has an exhaustive terminal policy to ask, surface an explicit no-runtime-fields assumption, or reject an irrelevant refinement; rejected candidates no longer hide later architecture questions in the same family, and the assumption survives the public confirmation and persisted requirements contract (`dc4a3a943`, Codex gate green 8/10, no findings) |
+| 2026-08-01 | **Explicit Builder question exhaustion**: architecture candidates and quality questions with an explicit `ask` policy remain askable after the normal user-question budget; every registered quality question has a terminal policy if it reaches the budget decision—to ask, surface a no-runtime-fields assumption, or reject an irrelevant refinement; rejected candidates still do not consume a question family, now pinned by a behavior test, and the assumption survives the public confirmation and persisted requirements contract (`dc4a3a943`, Codex gate green 8/10, no findings) |
 | 2026-07-31 | **Flows and platform convergence**: integrated the frozen develop platform foundations into Flow and Builder at their canonical owners; durable object content, Skills, typed identity, generated SDK contracts, and Flow runtime evidence now coexist behind one Alembic head without parallel compatibility paths; frontend builds now use bounded translation output, direct icon modules, and the Bun 1.3.14 workspace lock without unsafe heap overrides (`64fd7446e` integrated, Codex gate green 9/10, no blockers) |
 | 2026-07-31 | **Typed Builder stream boundary**: every known SSE event and nested payload is validated before entering frontend state; malformed and unknown events fail closed; one explicit `idle/streaming/failed` lifecycle owns transport and server failures without duplicate banners; structured request identity and backend error codes survive the boundary; DOM tests run in an isolated jsdom project while pure protocol tests stay in the default project (`a2642c1a1`, Codex and Claude gates green 8/10, no findings) |
 | 2026-07-31 | **Exact resolved-input evidence**: every admitted attempt now exposes one typed lineage state in evidence views and v16 exports; one tenant/run-scoped batch read stays inside the repeatable-read snapshot and existing attempt-evidence budgets; identity-scoped retention proof prevents foreign markers from creating false purge claims across lineage, manifests, retention, and RAG summaries; malformed data remains explicit corruption; the generated SDK and docs define all states and all four synchronous export safety guards without claiming retrieval proves influence (`4d13889a4`, gate green 8/10 after three same-session passes, no findings) |
@@ -265,11 +265,11 @@ ranked plan above controls all other ordering.
   and keep reference/context/example attachments planning-only. Evidence,
   interpretation, then binding; no richer coverage state was invented. *(L)*
 - **B3**: **LANDED `dc4a3a943`**. No silent guessing after question-budget
-  exhaustion: every current quality candidate has an explicit terminal policy;
-  architecture and necessary source-specific questions remain askable; the only
-  default is surfaced at confirmation and persisted. The seven registered
-  quality candidates and seven policy keys are exhaustively equal; the earlier
-  claim of a current unknown-candidate crash was disproven. *(M)*
+  exhaustion: every registered quality question has an explicit terminal policy
+  if it enters the budget decision; architecture and explicit `ask` questions
+  remain askable; the only default is surfaced at confirmation and persisted.
+  The seven registered quality ids and seven policy keys are pinned equal; the
+  earlier claim of a current unknown-candidate crash was disproven. *(M)*
 - **B4** (two ordered slices): (a) the existing understanding pass records typed,
   cited checkpoint intents and confirmation exposes them; (b) compile/apply and
   the critic share one canonical requested-versus-compiled checkpoint predicate.

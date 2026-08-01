@@ -19,6 +19,7 @@ from typing import get_args
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
+    _BUDGET_EXHAUSTION_DISPOSITION,
     _QUESTION_IMPACT,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_families import QUESTION_FAMILY
@@ -477,6 +478,15 @@ class TestCatalogStaticDiscoveryMetadata:
         expected_issue_ids = _SLOT_DERIVED_ISSUE_IDS | _NON_SLOT_IMPACT_ISSUE_IDS
 
         assert frozenset(_QUESTION_IMPACT) == expected_issue_ids
+
+    def test_every_quality_question_has_a_budget_exhaustion_policy(self) -> None:
+        quality_question_ids = frozenset(
+            issue_id
+            for issue_id, impact in _QUESTION_IMPACT.items()
+            if impact == "quality"
+        )
+
+        assert frozenset(_BUDGET_EXHAUSTION_DISPOSITION) == quality_question_ids
 
 
 class TestBilingualContract:

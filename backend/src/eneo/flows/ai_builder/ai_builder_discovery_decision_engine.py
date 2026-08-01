@@ -96,6 +96,7 @@ _BUDGET_EXHAUSTION_DISPOSITION: Mapping[str, _BudgetExhaustionDisposition] = (
             "document_material_scope": "reject",
             "final_pdf_type": "reject",
             "post_processing_goal": "ask",
+            # Routed by action policy today; kept explicit for catalog-wide coverage.
             "report_disposition": "ask",
             "runtime_metadata_fields": "assume_no_runtime_metadata",
         }
@@ -443,10 +444,10 @@ def assumption_for_candidate(
 def compute_question_budget(text: str) -> int:
     """Return the non-architecture question budget for this discovery pass.
 
-    Architecture questions and source-specific commit-grade questions may be
-    asked outside this budget. Optional quality and polish refinements should
-    not keep advanced users in a loop once they have provided a detailed spec
-    or explicitly told the builder to proceed with the plan.
+    Architecture candidates, plus quality candidates whose exhaustion policy is
+    ``ask``, may be asked outside this budget. Optional quality and polish
+    refinements should not keep advanced users in a loop once they have provided
+    a detailed spec or explicitly told the builder to proceed with the plan.
     """
     normalized = text.casefold()
     if has_build_plan_intent(normalized) or is_detailed_flow_spec(normalized):

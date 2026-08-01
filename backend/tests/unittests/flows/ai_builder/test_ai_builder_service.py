@@ -2291,7 +2291,6 @@ class TestSendMessageStructuredQuestion:
             source="structured_answer",
             confidence="high",
         )
-        repo.load_planning_state.return_value = persisted_state
         repo.commit_turn.return_value = 2
         service = _make_service(user=user, repo=repo)
         repo.load_planning_state.return_value = persisted_state
