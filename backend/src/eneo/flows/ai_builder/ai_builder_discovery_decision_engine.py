@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
+from typing import Literal, TypeAlias
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
@@ -77,6 +78,30 @@ _QUESTION_IMPACT: Mapping[str, DiscoveryImpact] = MappingProxyType(
     }
 )
 
+_BudgetExhaustionDisposition: TypeAlias = Literal[
+    "ask",
+    "assume_no_runtime_metadata",
+    "reject",
+]
+
+# Question impact is not enough to decide what may disappear when the user has
+# spent the normal question budget. Each quality candidate therefore has an
+# explicit terminal policy. Architecture candidates are always asked and
+# polish candidates are rejected before this policy is consulted.
+_BUDGET_EXHAUSTION_DISPOSITION: Mapping[str, _BudgetExhaustionDisposition] = (
+    MappingProxyType(
+        {
+            "case_scope": "reject",
+            "document_kind": "reject",
+            "document_material_scope": "reject",
+            "final_pdf_type": "reject",
+            "post_processing_goal": "ask",
+            "report_disposition": "ask",
+            "runtime_metadata_fields": "assume_no_runtime_metadata",
+        }
+    )
+)
+
 
 def apply_discovery_decision_engine(
     *,
@@ -139,19 +164,18 @@ def apply_discovery_decision_engine(
             family_used.add(candidate.family)
             continue
 
-        if (
+        budget_exhausted = (
             spent_user_questions + len(selected_question_ids) >= max_questions
             and candidate.impact != "architecture"
-        ):
-            if candidate.issue_id == "runtime_metadata_fields":
-                assumptions.append(
-                    localized_text(
-                        profile.language,
-                        "Antar tills vidare att inga extra formulärfält behövs vid körning; du kan lägga till dem innan du bekräftar.",
-                        "Assuming no extra form fields are needed at runtime for now; you can add them before confirming.",
-                    )
-                )
-            continue
+        )
+        if budget_exhausted:
+            disposition = _budget_exhaustion_disposition_for_candidate(candidate)
+            if disposition == "reject":
+                continue
+            if disposition == "assume_no_runtime_metadata":
+                assumptions.append(_no_runtime_metadata_assumption(profile))
+                family_used.add(candidate.family)
+                continue
 
         selected.append(issue)
         if question_id is not None:
@@ -162,6 +186,29 @@ def apply_discovery_decision_engine(
         _rank_issues_for_profile(selected, profile),
         assumptions,
         selected_question_ids,
+    )
+
+
+def _budget_exhaustion_disposition_for_candidate(
+    candidate: DiscoveryCandidate,
+) -> _BudgetExhaustionDisposition:
+    for candidate_id in (candidate.issue_id, candidate.question_id):
+        if candidate_id is None:
+            continue
+        disposition = _BUDGET_EXHAUSTION_DISPOSITION.get(candidate_id)
+        if disposition is not None:
+            return disposition
+    raise ValueError(
+        "Missing question-budget exhaustion policy for quality candidate "
+        f"{candidate.issue_id!r}"
+    )
+
+
+def _no_runtime_metadata_assumption(profile: DiscoveryProfile) -> str:
+    return localized_text(
+        profile.language,
+        "Antar tills vidare att inga extra formulärfält behövs vid körning; du kan lägga till dem innan du bekräftar.",
+        "Assuming no extra form fields are needed at runtime for now; you can add them before confirming.",
     )
 
 
@@ -396,10 +443,10 @@ def assumption_for_candidate(
 def compute_question_budget(text: str) -> int:
     """Return the non-architecture question budget for this discovery pass.
 
-    Architecture questions are allowed outside this budget. Quality and
-    polish refinements should not keep advanced users in a loop once
-    they have provided a detailed spec or explicitly told the builder to
-    proceed with the plan.
+    Architecture questions and source-specific commit-grade questions may be
+    asked outside this budget. Optional quality and polish refinements should
+    not keep advanced users in a loop once they have provided a detailed spec
+    or explicitly told the builder to proceed with the plan.
     """
     normalized = text.casefold()
     if has_build_plan_intent(normalized) or is_detailed_flow_spec(normalized):

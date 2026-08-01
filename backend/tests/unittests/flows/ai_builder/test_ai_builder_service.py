@@ -73,6 +73,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    SSE_EVENT_REQUIREMENTS_SUMMARY,
     RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
@@ -447,6 +448,27 @@ def _make_confirmed_requirements_conversation() -> list[ConversationMessage]:
             },
         ),
     ]
+
+
+def _requirement_answer_message(
+    *,
+    question_id: str,
+    value: str,
+    content: str,
+    ui_language: str = "sv",
+) -> ConversationMessage:
+    return ConversationMessage(
+        role="user",
+        content=content,
+        metadata={
+            "question_answer": {
+                "question_id": question_id,
+                "selected_option_ids": [value],
+                "selected_values": [value],
+            },
+            "ui_language": ui_language,
+        },
+    )
 
 
 def _make_llm_response(
@@ -2153,6 +2175,161 @@ class TestRevisePlan:
 
 class TestSendMessageStructuredQuestion:
     @pytest.mark.anyio
+    async def test_spent_budget_emits_unresolved_processing_goal_question(self):
+        user = _make_user()
+        repo = AsyncMock()
+        session = _make_session(
+            status=SessionStatus.CHATTING,
+            tenant_id=user.tenant_id,
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Jag vill bygga ett flöde som analyserar dokument.",
+                    metadata={"ui_language": "sv"},
+                ),
+                _requirement_answer_message(
+                    question_id="processing_scope",
+                    value="single_case",
+                    content="Ett dokument åt gången",
+                ),
+                _requirement_answer_message(
+                    question_id="primary_runtime_input",
+                    value="documents",
+                    content="Dokument",
+                ),
+                _requirement_answer_message(
+                    question_id="document_material_scope",
+                    value="multiple_documents_case",
+                    content="Flera relaterade dokument för samma ärende",
+                ),
+                _requirement_answer_message(
+                    question_id="runtime_metadata_fields",
+                    value="basic_case_metadata",
+                    content="Grundläggande metadata",
+                ),
+            ],
+        )
+        repo.get_session.return_value = session
+        service = _make_service(user=user, repo=repo)
+
+        with patch(
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            new=AsyncMock(return_value=None),
+        ):
+            events = await _collect_events(
+                service.send_message(
+                    session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("DOCX utan mall"),
+                    message="DOCX utan mall",
+                    question_answer={
+                        "question_id": "final_output_format",
+                        "selected_option_ids": ["docx_generated"],
+                        "selected_values": ["docx_generated"],
+                        "answer": "docx_generated",
+                        "ui_language": "sv",
+                    },
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                )
+            )
+
+        question_events = [
+            event for event in events if event["event"] == SSE_EVENT_QUESTION
+        ]
+        assert len(question_events) == 1
+        assert json.loads(question_events[0]["data"])["question_id"] == (
+            "post_processing_goal"
+        )
+
+    @pytest.mark.anyio
+    async def test_spent_budget_runtime_default_reaches_requirements_confirmation(self):
+        user = _make_user()
+        repo = AsyncMock()
+        session = _make_session(
+            status=SessionStatus.CHATTING,
+            tenant_id=user.tenant_id,
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Jag vill bygga ett flöde som analyserar dokument.",
+                    metadata={"ui_language": "sv"},
+                ),
+                _requirement_answer_message(
+                    question_id="processing_scope",
+                    value="single_case",
+                    content="Ett dokument åt gången",
+                ),
+                _requirement_answer_message(
+                    question_id="primary_runtime_input",
+                    value="documents",
+                    content="Dokument",
+                ),
+                _requirement_answer_message(
+                    question_id="document_material_scope",
+                    value="single_document_case",
+                    content="Ett huvuddokument per ärende",
+                ),
+                _requirement_answer_message(
+                    question_id="terminal_output",
+                    value="structured_text",
+                    content="Strukturerat textresultat",
+                ),
+                _requirement_answer_message(
+                    question_id="post_processing_goal",
+                    value="summarize_or_overview",
+                    content="Sammanfatta och ge en överblick",
+                ),
+            ],
+        )
+        repo.get_session.return_value = session
+        persisted_state = _make_committed_planning_state()
+        persisted_state.resolved_slots.pop("runtime_metadata_fields")
+        persisted_state.resolved_slots["post_processing_goal"] = ResolvedSlot(
+            name="post_processing_goal",
+            value="summarize_or_overview",
+            source="structured_answer",
+            confidence="high",
+        )
+        repo.load_planning_state.return_value = persisted_state
+        repo.commit_turn.return_value = 2
+        service = _make_service(user=user, repo=repo)
+        repo.load_planning_state.return_value = persisted_state
+
+        with patch(
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            new=AsyncMock(return_value=None),
+        ):
+            events = await _collect_events(
+                service.send_message(
+                    session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Bygg planen"),
+                    message="Bygg planen",
+                    question_answer=None,
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                )
+            )
+
+        summary_events = [
+            event
+            for event in events
+            if event["event"] == SSE_EVENT_REQUIREMENTS_SUMMARY
+        ]
+        assert len(summary_events) == 1
+        summary = json.loads(summary_events[0]["data"])
+        expected_assumption = (
+            "Antar tills vidare att inga extra formulärfält behövs vid körning; "
+            "du kan lägga till dem innan du bekräftar."
+        )
+        assert expected_assumption in summary["assumptions"]
+
+        persisted_messages = repo.commit_turn.await_args.kwargs["new_messages"]
+        persisted_summary = persisted_messages[-1].metadata["requirements_summary"]
+        assert expected_assumption in persisted_summary["assumptions"]
+
+    @pytest.mark.anyio
     async def test_duplicate_output_question_alias_allows_report_disposition_followup(
         self,
     ):
@@ -2216,6 +2393,18 @@ class TestSendMessageStructuredQuestion:
                             "question_id": "runtime_metadata_fields",
                             "selected_option_ids": ["basic_case_metadata"],
                             "selected_values": ["basic_case_metadata"],
+                        },
+                        "ui_language": "sv",
+                    },
+                ),
+                ConversationMessage(
+                    role="user",
+                    content="Sammanfatta och ge en överblick",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "post_processing_goal",
+                            "selected_option_ids": ["summarize_or_overview"],
+                            "selected_values": ["summarize_or_overview"],
                         },
                         "ui_language": "sv",
                     },

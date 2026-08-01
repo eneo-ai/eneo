@@ -2100,11 +2100,11 @@ class TestExtendedClarificationHints:
         assert "pdf_generation_mode" in question_ids
         assert "post_processing_goal" not in question_ids
 
-    def test_spent_question_budget_suppresses_outcome_question(self) -> None:
+    def test_spent_question_budget_keeps_unresolved_outcome_question(self) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
-                content="Jag vill bygga ett flöde som analyserar dokument och sammanfattar dem",
+                content="Jag vill bygga ett flöde som analyserar dokument.",
                 metadata={"ui_language": "sv"},
             ),
             ConversationMessage(
@@ -2171,7 +2171,30 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "post_processing_goal" not in question_ids
+        assert question_ids == ["post_processing_goal"]
+
+    def test_rejected_scope_does_not_hide_comparison_architecture_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Build the plan for a flow that compares official material "
+                    "against an internal policy and creates a DOCX report."
+                ),
+                metadata={"ui_language": "en"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "comparison_scope" in question_ids
 
     @pytest.mark.parametrize(
         ("language", "selection", "selection_text", "field_label"),
@@ -3024,6 +3047,18 @@ class TestExtendedClarificationHints:
                         "question_id": "terminal_output",
                         "selected_option_id": "structured_text",
                         "answer": "structured_text",
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Sammanfatta och ge en överblick.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "post_processing_goal",
+                        "selected_option_id": "summarize_or_overview",
+                        "answer": "summarize_or_overview",
                     },
                     "ui_language": "sv",
                 },
