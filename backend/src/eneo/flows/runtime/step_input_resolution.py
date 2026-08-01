@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Final, Sequence, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Final, Sequence, cast
 from uuid import UUID
 
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING, TextExtractor
@@ -42,7 +42,6 @@ from eneo.flows.input_binding_contract_rules import (
     question_binding,
     source_ref_bindings,
 )
-from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.input_files import load_files_by_requested_ids
 from eneo.flows.runtime.transcription_runtime import (
@@ -55,7 +54,15 @@ from eneo.flows.template_reference_analyzer import (
     analyze_template,
     consumes_runtime_input,
 )
-from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    TypedIOValidationException,
+)
+
+if TYPE_CHECKING:
+    from eneo.files.file_models import File
+    from eneo.files.file_service import FileService
 
 RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE: Final = "[SOURCE {source_number}]"
 RUNTIME_INPUT_SOURCE_FILE_NAME_KEY: Final = "file_name"
@@ -69,8 +76,7 @@ RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE: Final = (
 class StepInputResolutionDeps:
     variable_resolver: Any
     resolve_http_input_source_text: Callable[..., Awaitable[FlowHttpInputResolution]]
-    file_repo: Any
-    principal: FlowPrincipal
+    file_service: FileService
     transcriber: Any | None
     space_repo: Any
     flow_run_repo: Any
@@ -162,8 +168,6 @@ async def resolve_step_input(
     if requested_ids:
         files = await _load_runtime_files(
             requested_ids=requested_ids,
-            step_order=step.step_order,
-            tenant_id=run.tenant_id,
             state=state,
             deps=deps,
         )
@@ -834,19 +838,27 @@ def _source_ref_value_to_text(value: Any) -> str:
 async def _load_runtime_files(
     *,
     requested_ids: list[UUID],
-    step_order: int,
-    tenant_id: Any,
     state: RunExecutionState | None,
     deps: StepInputResolutionDeps,
-) -> list[Any]:
+) -> list[File]:
     file_cache = state.file_cache if state else None
-    files = await load_files_by_requested_ids(
-        file_repo=deps.file_repo,
-        requested_ids=requested_ids,
-        principal=deps.principal,
-        tenant_id=tenant_id,
-        file_cache=file_cache,
-    )
+    try:
+        files = await load_files_by_requested_ids(
+            file_service=deps.file_service,
+            requested_ids=requested_ids,
+            file_cache=file_cache,
+        )
+    except NotFoundException as exc:
+        deps.logger.warning(
+            "flow_executor.runtime_input_file_content_unavailable "
+            "requested_file_ids=%s",
+            requested_ids,
+            exc_info=exc,
+        )
+        raise TypedIOValidationException(
+            f"File content is unavailable for: {requested_ids}",
+            code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
+        ) from exc
     returned_ids = {f.id for f in files}
     missing = [fid for fid in requested_ids if fid not in returned_ids]
     if missing:

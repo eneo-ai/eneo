@@ -2197,8 +2197,7 @@ class FlowRunExecutor:
         deps = StepInputResolutionDeps(
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
-            file_repo=self.file_repo,
-            principal=self.principal,
+            file_service=self.file_service,
             transcriber=self.transcriber,
             space_repo=self.space_repo,
             flow_run_repo=self.flow_run_repo,

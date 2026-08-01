@@ -10,7 +10,7 @@ import ipaddress
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import uuid4
 
 import httpx
@@ -29,6 +29,7 @@ from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
 )
 from eneo.files.file_models import FileType
+from eneo.files.file_service import FileService
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
@@ -62,9 +63,11 @@ from eneo.flows.runtime.step_input_resolution import (
 )
 from eneo.main.exceptions import (
     BadRequestException,
+    NotFoundException,
     ProviderCapabilityRejectedException,
     TypedIOValidationException,
 )
+from eneo.object_content.content import ObjectContentUnavailableError
 
 
 def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
@@ -113,7 +116,7 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     completion_service = AsyncMock()
     file_repo = AsyncMock()
     file_content_loader = AsyncMock()
-    file_service = AsyncMock()
+    file_service = create_autospec(FileService, instance=True)
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     flow_run_terminalizer = SimpleNamespace()
@@ -707,7 +710,7 @@ async def test_resolve_step_input_document_loads_files(user):
         file_type="document",
         transcription=None,
     )
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
 
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
@@ -793,9 +796,7 @@ async def test_resolve_step_input_document_labels_multiple_files_in_requested_or
         file_type="document",
         transcription=None,
     )
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[second_file, first_file]
-    )
+    executor.file_service.get_files_by_ids.return_value = [second_file, first_file]
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     resolved = await executor._resolve_step_input(
@@ -859,9 +860,7 @@ async def test_resolve_step_input_document_preserves_empty_source_slot(
         file_type="document",
         transcription=None,
     )
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[first_file, second_file]
-    )
+    executor.file_service.get_files_by_ids.return_value = [first_file, second_file]
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with caplog.at_level("WARNING"):
@@ -916,7 +915,7 @@ async def test_resolve_step_input_document_warns_when_pdf_text_looks_reversed(
         file_type="document",
         transcription=None,
     )
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with caplog.at_level("WARNING"):
@@ -959,7 +958,7 @@ async def test_resolve_step_input_document_rejects_extracted_text_over_inline_ca
         file_id=file_id,
         text="detta ar mycket langre an atta bytes",
     )
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
 
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
@@ -976,8 +975,7 @@ async def test_resolve_step_input_document_rejects_extracted_text_over_inline_ca
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_file_ids_full_match_enforcement(user):
-    """Missing file_id raises TypedIOValidationException."""
+async def test_resolve_step_input_reports_missing_or_inaccessible_file(user):
     executor, _, _, _ = _build_executor(user)
     file_id_1 = uuid4()
     file_id_2 = uuid4()
@@ -989,11 +987,13 @@ async def test_resolve_step_input_file_ids_full_match_enforcement(user):
     )
     # Only return one of the two requested files
     fake_file = SimpleNamespace(id=file_id_1, text="doc")
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
 
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    with pytest.raises(TypedIOValidationException, match="not found or not accessible"):
+    with pytest.raises(
+        TypedIOValidationException, match="not found or not accessible"
+    ) as exc:
         await executor._resolve_step_input(
             step=step,
             context=context,
@@ -1001,6 +1001,61 @@ async def test_resolve_step_input_file_ids_full_match_enforcement(user):
             prior_results=[],
             requested_file_ids=[file_id_1, file_id_2],
         )
+
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_sanitizes_and_logs_missing_hydrated_content(
+    user,
+    caplog,
+):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    missing_content_error = NotFoundException(f"File {file_id} has no durable content")
+    executor.file_service.get_files_by_ids.side_effect = missing_content_error
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(TypedIOValidationException) as exc:
+            await executor._resolve_step_input(
+                step=_runtime_step(input_type="document"),
+                context={},
+                run=_run(status=FlowRunStatus.RUNNING, user=user),
+                prior_results=[],
+                requested_file_ids=[file_id],
+            )
+
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value
+    assert str(missing_content_error) not in str(exc.value)
+    log_record = next(
+        record
+        for record in caplog.records
+        if "flow_executor.runtime_input_file_content_unavailable" in record.getMessage()
+    )
+    assert str(file_id) in log_record.getMessage()
+    assert log_record.exc_info is not None
+    assert log_record.exc_info[1] is missing_content_error
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_propagates_object_content_outage(user):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    outage = ObjectContentUnavailableError(
+        "Durable object content is temporarily unavailable"
+    )
+    executor.file_service.get_files_by_ids.side_effect = outage
+
+    with pytest.raises(ObjectContentUnavailableError) as exc:
+        await executor._resolve_step_input(
+            step=_runtime_step(input_type="document"),
+            context={},
+            run=_run(status=FlowRunStatus.RUNNING, user=user),
+            prior_results=[],
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value is outage
 
 
 @pytest.mark.asyncio
@@ -1024,7 +1079,7 @@ async def test_resolve_step_input_ignores_removed_top_level_file_ids(user):
 
     assert resolved.files is None
     assert resolved.text == "fallback"
-    executor.file_repo.get_list_by_id_for_owner.assert_not_awaited()
+    executor.file_service.get_files_by_ids.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1061,7 +1116,7 @@ async def test_resolve_step_input_uses_relational_selection_over_stale_payload(u
         file_type="document",
         transcription=None,
     )
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     resolved = await executor._resolve_step_input(
@@ -1603,7 +1658,7 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
 ):
     executor, _, _, _ = _build_executor(user)
     file = _runtime_file(file_id=uuid4(), text="transkriberat innehåll")
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
+    executor.file_service.get_files_by_ids.return_value = [file]
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
@@ -1633,7 +1688,7 @@ async def test_resolve_step_input_runtime_input_does_not_append_internal_orchest
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
     executor, _, _, _ = _build_executor(user)
     file = _runtime_file(file_id=uuid4(), text="runtime step upload test")
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
+    executor.file_service.get_files_by_ids.return_value = [file]
     step = _runtime_step(
         step_order=1,
         input_source="flow_input",
@@ -1663,7 +1718,7 @@ async def test_resolve_step_input_runtime_input_does_not_append_internal_orchest
 async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
     executor, _, _, _ = _build_executor(user)
     file = _runtime_file(file_id=uuid4(), text="transkriberat innehåll")
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
+    executor.file_service.get_files_by_ids.return_value = [file]
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
@@ -1968,7 +2023,7 @@ async def test_empty_document_extraction_uses_source_marker_not_payload_fallback
         input_payload={"text": "fallback payload text"},
     )
     fake_file = _runtime_file(file_id=file_id, text="", name="empty.pdf")
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
     executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
@@ -2000,7 +2055,7 @@ async def test_file_input_uses_extracted_file_text(user):
         input_payload={},
     )
     fake_file = _runtime_file(file_id=file_id, text="Extracted file text")
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
     executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
@@ -2044,10 +2099,10 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     )
     files_by_id = {first_file_id: first_file, second_file_id: second_file}
 
-    async def get_files_by_id(*, ids, **_kwargs):
-        return [files_by_id[file_id] for file_id in ids]
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
 
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(side_effect=get_files_by_id)
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
     flow_run_repo.list_step_input_file_ids = AsyncMock(
         return_value=[first_file_id, second_file_id]
     )
@@ -2130,7 +2185,7 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         if edge.source.kind == "runtime_file"
     }
     assert runtime_file_ids == {first_file_id, second_file_id}
-    assert executor.file_repo.get_list_by_id_for_owner.await_count == 2
+    assert executor.file_service.get_files_by_ids.await_count == 2
     assert state.mapped_admission_by_step[step.step_id].prospective_provider_calls == 2
     questions = [
         call.kwargs["question"] for call in assistant.get_response.await_args_list
@@ -2207,10 +2262,10 @@ async def test_per_source_reader_reuses_json_capability_rejection_across_calls(u
         ),
     }
 
-    async def get_files_by_id(*, ids, **_kwargs):
-        return [files_by_id[file_id] for file_id in ids]
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
 
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(side_effect=get_files_by_id)
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
     flow_run_repo.list_step_input_file_ids = AsyncMock(
         return_value=[first_file_id, second_file_id]
     )
@@ -2322,10 +2377,10 @@ async def test_per_source_reader_reserves_one_json_fallback_before_provider_disp
         ),
     }
 
-    async def get_files_by_id(*, ids, **_kwargs):
-        return [files_by_id[file_id] for file_id in ids]
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
 
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(side_effect=get_files_by_id)
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
     flow_run_repo.list_step_input_file_ids = AsyncMock(
         return_value=[first_file_id, second_file_id]
     )
@@ -2368,20 +2423,18 @@ async def test_per_source_reader_rejects_textless_file_before_provider_dispatch(
     executor, _, flow_run_repo, _ = _build_executor(user)
     file_id = uuid4()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[
-            SimpleNamespace(
-                id=file_id,
-                text=None,
-                name="scan.pdf",
-                checksum="checksum-scan",
-                size=100,
-                mimetype="application/pdf",
-                file_type="document",
-                transcription=None,
-            )
-        ]
-    )
+    executor.file_service.get_files_by_ids.return_value = [
+        SimpleNamespace(
+            id=file_id,
+            text=None,
+            name="scan.pdf",
+            checksum="checksum-scan",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        )
+    ]
     assistant = _mock_assistant_for_execute_step()
     executor._load_assistant = AsyncMock(return_value=assistant)
     step = _runtime_step(

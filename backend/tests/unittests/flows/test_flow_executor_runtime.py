@@ -5,7 +5,7 @@ import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import UUID, uuid4
 
 import pytest
@@ -26,6 +26,7 @@ from eneo.completion_models.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
 from eneo.files.file_models import FileType
+from eneo.files.file_service import FileService
 from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
@@ -444,7 +445,7 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     completion_service = AsyncMock()
     file_repo = AsyncMock()
     file_content_loader = AsyncMock()
-    file_service = AsyncMock()
+    file_service = create_autospec(FileService, instance=True)
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     flow_run_terminalizer = SimpleNamespace()
@@ -729,7 +730,7 @@ def test_executor_accepts_grouped_config(user):
     completion_service = AsyncMock()
     file_repo = AsyncMock()
     file_content_loader = AsyncMock()
-    file_service = AsyncMock()
+    file_service = create_autospec(FileService, instance=True)
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     config = FlowRunExecutorConfig(
@@ -3499,16 +3500,14 @@ async def test_resolve_step_input_runtime_question_binding_must_consume_runtime_
 ):
     executor, _, _, _ = _build_executor(user)
     file_id = uuid4()
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[
-            SimpleNamespace(
-                id=file_id,
-                text="runtime file text",
-                checksum=f"checksum-{file_id}",
-                size=17,
-            )
-        ]
-    )
+    executor.file_service.get_files_by_ids.return_value = [
+        SimpleNamespace(
+            id=file_id,
+            text="runtime file text",
+            checksum=f"checksum-{file_id}",
+            size=17,
+        )
+    ]
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = RuntimeStep(
         step_id=uuid4(),
@@ -5738,7 +5737,7 @@ async def test_file_cache_hit(user):
         checksum=f"checksum-{file_id}",
         size=8,
     )
-    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
 
     state = RunExecutionState(
         completed_by_order={},
@@ -5787,7 +5786,7 @@ async def test_file_cache_hit(user):
         requested_file_ids=[file_id],
     )
 
-    assert executor.file_repo.get_list_by_id_for_owner.call_count == 1
+    assert executor.file_service.get_files_by_ids.await_count == 1
 
 
 def _make_audit_service():

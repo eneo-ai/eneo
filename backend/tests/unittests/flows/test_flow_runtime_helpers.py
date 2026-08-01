@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
-from uuid import UUID, uuid4
+from unittest.mock import MagicMock, create_autospec
+from uuid import uuid4
 
 import pytest
 
-from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_service import FileService
 from eneo.flows.domain.runtime import RunExecutionState
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
-from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.input_files import load_files_by_requested_ids
 from eneo.flows.runtime.step_input_resolution import (
     enforce_inline_input_cap,
@@ -135,79 +134,57 @@ def test_resolve_input_source_text_strips_runtime_orchestration_metadata_from_se
 
 @pytest.mark.asyncio
 async def test_load_files_by_requested_ids_returns_requested_order() -> None:
-    tenant_id = uuid4()
-    principal = FlowPrincipal(
-        principal_type=PrincipalType.USER, principal_user_id=uuid4()
-    )
     first_file = SimpleNamespace(id=uuid4())
     second_file = SimpleNamespace(id=uuid4())
-    file_repo = _FileRepoReturning([second_file, first_file])
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = [second_file, first_file]
 
     files = await load_files_by_requested_ids(
-        file_repo=file_repo,
+        file_service=file_service,
         requested_ids=[first_file.id, second_file.id],
-        principal=principal,
-        tenant_id=tenant_id,
     )
 
     assert files == [first_file, second_file]
-    assert file_repo.calls == [
-        {
-            "ids": [first_file.id, second_file.id],
-            "owner_type": "user",
-            "owner_user_id": principal.principal_user_id,
-            "owner_service_id": None,
-            "tenant_id": tenant_id,
-        }
-    ]
+    file_service.get_files_by_ids.assert_awaited_once_with(
+        file_ids=[first_file.id, second_file.id],
+        include_transcription=True,
+    )
 
 
 @pytest.mark.asyncio
 async def test_load_files_by_requested_ids_cache_hit_reorders_per_request() -> None:
-    tenant_id = uuid4()
-    principal = FlowPrincipal(
-        principal_type=PrincipalType.USER, principal_user_id=uuid4()
-    )
     first_file = SimpleNamespace(id=uuid4())
     second_file = SimpleNamespace(id=uuid4())
-    file_repo = _FileRepoReturning([second_file, first_file])
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = [second_file, first_file]
     file_cache = {}
 
     first_result = await load_files_by_requested_ids(
-        file_repo=file_repo,
+        file_service=file_service,
         requested_ids=[first_file.id, second_file.id],
-        principal=principal,
-        tenant_id=tenant_id,
         file_cache=file_cache,
     )
     second_result = await load_files_by_requested_ids(
-        file_repo=file_repo,
+        file_service=file_service,
         requested_ids=[second_file.id, first_file.id],
-        principal=principal,
-        tenant_id=tenant_id,
         file_cache=file_cache,
     )
 
     assert first_result == [first_file, second_file]
     assert second_result == [second_file, first_file]
-    assert file_repo.call_count == 1
+    assert file_service.get_files_by_ids.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_load_files_by_requested_ids_collapses_duplicate_requested_ids() -> None:
-    tenant_id = uuid4()
-    principal = FlowPrincipal(
-        principal_type=PrincipalType.USER, principal_user_id=uuid4()
-    )
     first_file = SimpleNamespace(id=uuid4())
     second_file = SimpleNamespace(id=uuid4())
-    file_repo = _FileRepoReturning([second_file, first_file])
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = [second_file, first_file]
 
     files = await load_files_by_requested_ids(
-        file_repo=file_repo,
+        file_service=file_service,
         requested_ids=[first_file.id, second_file.id, first_file.id],
-        principal=principal,
-        tenant_id=tenant_id,
     )
 
     assert files == [first_file, second_file]
@@ -215,19 +192,14 @@ async def test_load_files_by_requested_ids_collapses_duplicate_requested_ids() -
 
 @pytest.mark.asyncio
 async def test_load_files_by_requested_ids_drops_unreturned_ids() -> None:
-    tenant_id = uuid4()
-    principal = FlowPrincipal(
-        principal_type=PrincipalType.USER, principal_user_id=uuid4()
-    )
     returned_file = SimpleNamespace(id=uuid4())
     missing_file_id = uuid4()
-    file_repo = _FileRepoReturning([returned_file])
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = [returned_file]
 
     files = await load_files_by_requested_ids(
-        file_repo=file_repo,
+        file_service=file_service,
         requested_ids=[missing_file_id, returned_file.id],
-        principal=principal,
-        tenant_id=tenant_id,
     )
 
     assert files == [returned_file]
@@ -288,33 +260,3 @@ def test_resolve_input_source_text_all_previous_state_excludes_current_and_futur
     assert "<step_1_output>\nONE\n</step_1_output>" in resolved
     assert "CURRENT" not in resolved
     assert "FUTURE" not in resolved
-
-
-class _FileRepoReturning:
-    def __init__(self, files: list[SimpleNamespace]) -> None:
-        self._files = files
-        self.calls: list[dict[str, object]] = []
-
-    @property
-    def call_count(self) -> int:
-        return len(self.calls)
-
-    async def get_list_by_id_for_owner(
-        self,
-        *,
-        ids: list[UUID],
-        owner_type: str,
-        owner_user_id: UUID | None = None,
-        owner_service_id: UUID | None = None,
-        tenant_id: UUID | None = None,
-    ) -> list[SimpleNamespace]:
-        self.calls.append(
-            {
-                "ids": ids,
-                "owner_type": owner_type,
-                "owner_user_id": owner_user_id,
-                "owner_service_id": owner_service_id,
-                "tenant_id": tenant_id,
-            }
-        )
-        return self._files

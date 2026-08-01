@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha256
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,6 +13,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
+from eneo.files.file_service import FileService
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -150,7 +151,7 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024):
     completion_service = AsyncMock()
     file_repo = AsyncMock()
     file_content_loader = AsyncMock()
-    file_service = AsyncMock()
+    file_service = create_autospec(FileService, instance=True)
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     transcriber = AsyncMock()
@@ -173,7 +174,7 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024):
         max_inline_text_bytes=max_inline_text_bytes,
         transcriber=transcriber,
     )
-    return executor, flow_run_repo, space_repo, file_repo, transcriber
+    return executor, flow_run_repo, space_repo, file_service, transcriber
 
 
 def _state() -> RunExecutionState:
@@ -188,7 +189,9 @@ def _state() -> RunExecutionState:
 
 @pytest.mark.asyncio
 async def test_audio_resolve_transcribes_in_request_order_and_persists_transcript(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(user)
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user
+    )
     file_id_1 = uuid4()
     file_id_2 = uuid4()
     step = _runtime_step()
@@ -198,7 +201,7 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
 
     file_1 = _audio_file(file_id=file_id_1, name="a.wav")
     file_2 = _audio_file(file_id=file_id_2, name="b.wav")
-    file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1, file_2])
+    file_service.get_files_by_ids.return_value = [file_1, file_2]
 
     model = SimpleNamespace(
         id=uuid4(),
@@ -257,7 +260,9 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
 
 @pytest.mark.asyncio
 async def test_audio_resolve_passes_no_language_for_auto(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(user)
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user
+    )
     file_id = uuid4()
     step = _runtime_step()
     run = _run(user=user, payload={})
@@ -265,7 +270,7 @@ async def test_audio_resolve_passes_no_language_for_auto(user):
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     file_1 = _audio_file(file_id=file_id, name="a.wav")
-    file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
+    file_service.get_files_by_ids.return_value = [file_1]
 
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
@@ -298,7 +303,9 @@ async def test_audio_resolve_passes_no_language_for_auto(user):
 
 @pytest.mark.asyncio
 async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(user)
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user
+    )
     file_id = uuid4()
     step = _runtime_step()
     run = _run(user=user, payload={})
@@ -308,7 +315,7 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
     file_1 = _audio_file(
         file_id=file_id, name="cached.wav", transcription="stale shared transcript"
     )
-    file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
+    file_service.get_files_by_ids.return_value = [file_1]
 
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
@@ -360,7 +367,9 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
 
 @pytest.mark.asyncio
 async def test_audio_resolve_missing_wizard_model_fails_strictly(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(user)
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user
+    )
     file_id = uuid4()
     step = _runtime_step()
     run = _run(user=user, payload={})
@@ -368,7 +377,7 @@ async def test_audio_resolve_missing_wizard_model_fails_strictly(user):
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     file_1 = _audio_file(file_id=file_id, name="default.wav")
-    file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
+    file_service.get_files_by_ids.return_value = [file_1]
 
     model = SimpleNamespace(
         id=uuid4(),
@@ -403,7 +412,9 @@ async def test_audio_resolve_missing_wizard_model_fails_strictly(user):
 
 @pytest.mark.asyncio
 async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(user)
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user
+    )
     file_id = uuid4()
     step = _runtime_step()
     run = _run(user=user, payload={})
@@ -411,7 +422,7 @@ async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(u
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     file_1 = _audio_file(file_id=file_id, name="default.wav")
-    file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
+    file_service.get_files_by_ids.return_value = [file_1]
 
     default_model = SimpleNamespace(
         id=uuid4(),
@@ -448,7 +459,7 @@ async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(u
 
 @pytest.mark.asyncio
 async def test_audio_resolve_overflow_raises_specific_typed_error(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
         user, max_inline_text_bytes=20
     )
     file_id = uuid4()
@@ -457,9 +468,9 @@ async def test_audio_resolve_overflow_raises_specific_typed_error(user):
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[_audio_file(file_id=file_id, name="big.wav")]
-    )
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="big.wav")
+    ]
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
@@ -490,7 +501,7 @@ async def test_audio_resolve_overflow_raises_specific_typed_error(user):
 
 @pytest.mark.asyncio
 async def test_audio_resolve_near_cap_adds_warning_diagnostic(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
         user, max_inline_text_bytes=100
     )
     file_id = uuid4()
@@ -499,9 +510,9 @@ async def test_audio_resolve_near_cap_adds_warning_diagnostic(user):
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[_audio_file(file_id=file_id, name="near.wav")]
-    )
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="near.wav")
+    ]
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
@@ -536,7 +547,7 @@ async def test_audio_resolve_near_cap_adds_warning_diagnostic(user):
 
 @pytest.mark.asyncio
 async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
         user, max_inline_text_bytes=100
     )
     file_id_1 = uuid4()
@@ -548,7 +559,7 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
 
     file_1 = _audio_file(file_id=file_id_1, name="a.wav")
     file_2 = _audio_file(file_id=file_id_2, name="b.wav")
-    file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1, file_2])
+    file_service.get_files_by_ids.return_value = [file_1, file_2]
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
@@ -602,7 +613,7 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
 
 @pytest.mark.asyncio
 async def test_audio_resolve_multifile_overflow_raises_typed_error(user):
-    executor, flow_run_repo, space_repo, file_repo, transcriber = _build_executor(
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
         user, max_inline_text_bytes=90
     )
     file_id_1 = uuid4()
@@ -614,7 +625,7 @@ async def test_audio_resolve_multifile_overflow_raises_typed_error(user):
 
     file_1 = _audio_file(file_id=file_id_1, name="a.wav")
     file_2 = _audio_file(file_id=file_id_2, name="b.wav")
-    file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1, file_2])
+    file_service.get_files_by_ids.return_value = [file_1, file_2]
     model = SimpleNamespace(
         id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
     )
@@ -649,16 +660,16 @@ async def test_audio_resolve_multifile_overflow_raises_typed_error(user):
 
 @pytest.mark.asyncio
 async def test_audio_resolve_requires_space_transcription_model(user):
-    executor, flow_run_repo, space_repo, file_repo, _ = _build_executor(user)
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(user)
     file_id = uuid4()
     step = _runtime_step()
     run = _run(user=user, payload={})
     _patch_run_input_payload(flow_run_repo, run)
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    file_repo.get_list_by_id_for_owner = AsyncMock(
-        return_value=[_audio_file(file_id=file_id, name="a.wav")]
-    )
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="a.wav")
+    ]
     space_repo.get_space_by_assistant = AsyncMock(
         return_value=_SpaceStub(models=[], default_model=None)
     )

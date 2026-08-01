@@ -142,7 +142,7 @@ class RunExecutionState:
     prior_results: list[FlowStepResult]
     assistant_cache: dict[UUID, Any]
     json_mode_supported: dict[str, bool]
-    file_cache: dict[frozenset[UUID], list[Any]]
+    file_cache: dict[frozenset[UUID], list[File]]
     space_cache: dict[UUID, Space] = field(default_factory=_empty_space_cache)
     attempt_start_by_step: dict[UUID, FlowStepAttemptStart] = field(
         default_factory=_empty_attempt_start_by_step

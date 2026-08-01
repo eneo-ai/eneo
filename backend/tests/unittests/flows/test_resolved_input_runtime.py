@@ -3,12 +3,13 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import uuid4
 
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_service import FileService
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import (
     FlowRun,
@@ -18,7 +19,6 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep, StepInputValue
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -104,9 +104,10 @@ def _step(
 
 def _resolution_deps(
     *,
-    run: FlowRun,
     files: list[object] | None = None,
 ) -> StepInputResolutionDeps:
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = files or []
     return StepInputResolutionDeps(
         variable_resolver=FlowVariableResolver(),
         resolve_http_input_source_text=AsyncMock(
@@ -116,10 +117,7 @@ def _resolution_deps(
                 resolved_input_edges=(),
             )
         ),
-        file_repo=SimpleNamespace(
-            get_list_by_id_for_owner=AsyncMock(return_value=files or [])
-        ),
-        principal=FlowPrincipal.from_run(run),
+        file_service=file_service,
         transcriber=None,
         space_repo=object(),
         flow_run_repo=object(),
@@ -265,7 +263,7 @@ async def test_explicit_question_discards_replaced_implicit_previous_step() -> N
         context={},
         run=run,
         prior_results=[prior],
-        deps=_resolution_deps(run=run),
+        deps=_resolution_deps(),
     )
 
     assert resolved.text == "Case A-17"
@@ -283,7 +281,7 @@ async def test_implicit_previous_step_records_exact_current_attempt() -> None:
         context={},
         run=run,
         prior_results=[prior],
-        deps=_resolution_deps(run=run),
+        deps=_resolution_deps(),
     )
 
     assert resolved.text == "actual rerun output"
@@ -308,7 +306,7 @@ async def test_parsed_json_text_keeps_the_actual_step_text_source() -> None:
         context={},
         run=run,
         prior_results=[prior],
-        deps=_resolution_deps(run=run),
+        deps=_resolution_deps(),
     )
 
     assert resolved.structured == {"decision": "Approve"}
@@ -344,7 +342,7 @@ async def test_compose_source_ref_records_the_selected_structured_field() -> Non
         context={},
         run=run,
         prior_results=[prior],
-        deps=_resolution_deps(run=run),
+        deps=_resolution_deps(),
     )
 
     assert resolved.text == "Approve"
@@ -388,7 +386,7 @@ async def test_runtime_file_edge_contains_opaque_identity_without_content() -> N
         run=run,
         prior_results=[],
         requested_file_ids=[file_id],
-        deps=_resolution_deps(run=run, files=[runtime_file]),
+        deps=_resolution_deps(files=[runtime_file]),
     )
 
     file_edges = [edge for edge in resolved.edges if edge.source.kind == "runtime_file"]
