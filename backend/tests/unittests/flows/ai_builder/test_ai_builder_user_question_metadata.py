@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
 )
@@ -67,6 +73,66 @@ def test_explicit_ui_answer_is_the_only_source_of_question_answer_metadata() -> 
         },
         "ui_language": "sv",
     }
+
+
+def test_invalid_schema_direction_selection_is_rejected_before_persistence() -> None:
+    first = "a" * 64
+    second = "b" * 64
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content="Assign the schemas.",
+            tool_calls=[
+                {
+                    "id": "schema-direction",
+                    "name": "ask_structured_question",
+                    "arguments": {
+                        "question_id": "schema_direction",
+                        "question": "How should the schemas be used?",
+                        "options": [
+                            {
+                                "id": f"input:{first}",
+                                "label": "First input",
+                                "value": f"input:{first}",
+                            },
+                            {
+                                "id": f"input:{second}",
+                                "label": "Second input",
+                                "value": f"input:{second}",
+                            },
+                            {
+                                "id": f"output:{first}",
+                                "label": "First output",
+                                "value": f"output:{first}",
+                            },
+                            {
+                                "id": "reference_only",
+                                "label": "Reference only",
+                                "value": "reference_only",
+                            },
+                        ],
+                        "selection_mode": "multi",
+                        "allow_custom": False,
+                        "requires_confirm": True,
+                    },
+                }
+            ],
+        )
+    ]
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        prepare_user_question_metadata(
+            conversation=conversation,
+            message="Use both as input.",
+            question_answer={
+                "kind": "structured_question_answer",
+                "question_id": "schema_direction",
+                "selected_values": [f"input:{first}", f"input:{second}"],
+            },
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+    assert exc_info.value.context == {"reason": "invalid_schema_direction"}
 
 
 def test_free_text_for_non_classifier_question_remains_response_only() -> None:

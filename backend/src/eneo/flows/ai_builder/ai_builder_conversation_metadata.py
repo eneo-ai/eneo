@@ -52,6 +52,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
+    ClassifiedSchemaDirection,
     ClassifiedSlot,
     SlotClassificationConfidence,
     SlotClassificationEvidenceLevel,
@@ -107,6 +108,7 @@ ClassifierRetentionClass: TypeAlias = Literal[
     "form_intake",
     "example_output_constraint",
     "secondary_obligation",
+    "schema_direction",
 ]
 ClassifierRetentionIdentity: TypeAlias = tuple[ClassifierRetentionClass, str]
 CLASSIFIER_RETENTION_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
@@ -116,6 +118,7 @@ CLASSIFIER_RETENTION_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
         "form_intake",
         "example_output_constraint",
         "secondary_obligation",
+        "schema_direction",
     }
 )
 
@@ -271,6 +274,63 @@ class SlotClassificationFormIntakeMetadata(BaseModel):
         )
 
 
+SchemaFingerprint: TypeAlias = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class SlotClassificationSchemaDirectionMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_fingerprints: list[SchemaFingerprint] = Field(
+        min_length=1,
+        max_length=100,
+    )
+    input_fingerprint: SchemaFingerprint | None = None
+    output_fingerprint: SchemaFingerprint | None = None
+    reference_only: bool
+    confidence: SlotClassificationConfidence
+    reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
+    evidence: list[SlotClassificationEvidence] = Field(
+        default_factory=_empty_slot_classification_evidence,
+        max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+    )
+
+    @model_validator(mode="after")
+    def validate_complete_direction(
+        self,
+    ) -> "SlotClassificationSchemaDirectionMetadata":
+        if self.candidate_fingerprints != sorted(set(self.candidate_fingerprints)):
+            raise ValueError("schema direction candidate set must be unique and sorted")
+        current = set(self.candidate_fingerprints)
+        if any(
+            fingerprint not in current
+            for fingerprint in (self.input_fingerprint, self.output_fingerprint)
+            if fingerprint is not None
+        ):
+            raise ValueError("schema direction must select a current candidate")
+        if self.reference_only:
+            if (
+                self.input_fingerprint is not None
+                or self.output_fingerprint is not None
+            ):
+                raise ValueError("reference-only direction cannot select a boundary")
+        elif self.input_fingerprint is None and self.output_fingerprint is None:
+            raise ValueError("schema direction must select a boundary")
+        if self.confidence != "low" and not self.evidence:
+            raise ValueError("supported schema direction requires cited evidence")
+        return self
+
+    def to_classified_schema_direction(self) -> ClassifiedSchemaDirection:
+        return ClassifiedSchemaDirection(
+            candidate_fingerprints=tuple(self.candidate_fingerprints),
+            input_fingerprint=self.input_fingerprint,
+            output_fingerprint=self.output_fingerprint,
+            reference_only=self.reference_only,
+            confidence=self.confidence,
+            reason=self.reason,
+            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
+        )
+
+
 SlotClassificationNote: TypeAlias = Annotated[
     str,
     Field(min_length=1, max_length=CLASSIFICATION_NOTE_MAX_LENGTH),
@@ -322,6 +382,7 @@ class SlotClassificationMetadata(BaseModel):
     )
     form_intake: SlotClassificationFormIntakeMetadata | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
+    schema_direction: SlotClassificationSchemaDirectionMetadata | None = None
     assumptions: list[SlotClassificationNote] = Field(
         default_factory=_empty_slot_classification_notes,
         max_length=CLASSIFICATION_NOTES_MAX_ITEMS,
@@ -383,6 +444,8 @@ class SlotClassificationMetadata(BaseModel):
         )
         if self.form_intake is not None:
             evidence_items.extend(self.form_intake.evidence)
+        if self.schema_direction is not None:
+            evidence_items.extend(self.schema_direction.evidence)
         if any(evidence.source_id not in source_ids for evidence in evidence_items):
             raise ValueError("classification evidence must cite inventoried sources")
         source_kinds_by_id: dict[str, SlotClassificationSourceKind] = {
@@ -399,6 +462,15 @@ class SlotClassificationMetadata(BaseModel):
             raise ValueError(
                 "terminal-output classification requires user-owned evidence"
             )
+        if (
+            self.schema_direction is not None
+            and self.schema_direction.confidence != "low"
+            and not classification_evidence_has_user_owned_source(
+                (evidence.source_id for evidence in self.schema_direction.evidence),
+                source_kinds_by_id=source_kinds_by_id,
+            )
+        ):
+            raise ValueError("schema direction requires user-owned evidence")
         file_ids = {
             source.file_id
             for source in self.source_inventory
@@ -460,6 +532,11 @@ class SlotClassificationMetadata(BaseModel):
             if self.form_intake is not None
             else None,
             example_output_constraints=self.example_output_constraints,
+            schema_direction=(
+                self.schema_direction.to_classified_schema_direction()
+                if self.schema_direction is not None
+                else None
+            ),
             secondary_obligations=tuple(self.secondary_obligations),
             assumptions=tuple(self.assumptions),
             contradictions=tuple(self.contradictions),
@@ -494,6 +571,8 @@ class SlotClassificationMetadata(BaseModel):
             ("secondary_obligation", obligation)
             for obligation in self.secondary_obligations
         )
+        if self.schema_direction is not None:
+            identities.add(("schema_direction", "complete"))
         return frozenset(identities)
 
     def retain_effective_semantics(
@@ -517,6 +596,11 @@ class SlotClassificationMetadata(BaseModel):
             if ("example_output_constraint", "current") in identities
             else None
         )
+        schema_direction = (
+            self.schema_direction
+            if ("schema_direction", "complete") in identities
+            else None
+        )
         secondary_obligations = [
             obligation
             for obligation in self.secondary_obligations
@@ -537,6 +621,7 @@ class SlotClassificationMetadata(BaseModel):
                     if example_output_constraints is None
                     else example_output_constraints.citations
                 ),
+                *([] if schema_direction is None else schema_direction.evidence),
             )
         }
         retained_file_ids = {
@@ -571,6 +656,7 @@ class SlotClassificationMetadata(BaseModel):
                 "secondary_obligations": secondary_obligations,
                 "form_intake": form_intake,
                 "example_output_constraints": example_output_constraints,
+                "schema_direction": schema_direction,
                 # Free-form model notes are diagnostics, not rebuild facts. Compaction
                 # keeps only its typed, consumer-visible degradation marker here.
                 "assumptions": [],
@@ -1001,6 +1087,9 @@ def slot_classification_metadata_from_result(
                     if result.example_output_constraints is not None
                     else None
                 ),
+                "schema_direction": _slot_classification_schema_direction_payload(
+                    result.schema_direction
+                ),
                 "assumptions": [
                     _bounded_metadata_text(value, fallback="assumption")
                     for value in result.assumptions
@@ -1055,6 +1144,25 @@ def _slot_classification_form_intake_payload(
         ),
         "evidence": _slot_classification_evidence_payloads(form_intake.evidence),
         "evidence_level": form_intake.evidence_level,
+    }
+
+
+def _slot_classification_schema_direction_payload(
+    direction: ClassifiedSchemaDirection | None,
+) -> dict[str, object] | None:
+    if direction is None:
+        return None
+    return {
+        "candidate_fingerprints": list(direction.candidate_fingerprints),
+        "input_fingerprint": direction.input_fingerprint,
+        "output_fingerprint": direction.output_fingerprint,
+        "reference_only": direction.reference_only,
+        "confidence": direction.confidence,
+        "reason": _bounded_metadata_text(
+            direction.reason,
+            fallback="schema direction classification",
+        ),
+        "evidence": _slot_classification_evidence_payloads(direction.evidence),
     }
 
 

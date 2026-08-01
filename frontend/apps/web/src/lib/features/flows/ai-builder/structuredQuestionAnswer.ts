@@ -36,6 +36,30 @@ export function getStructuredQuestionOptionKey(option: StructuredQuestionOption)
   return option.id ?? option.label;
 }
 
+export function toggleStructuredQuestionOption(
+  question: StructuredQuestion,
+  selectedKeys: ReadonlySet<string>,
+  option: StructuredQuestionOption
+): Set<string> {
+  const optionKey = getStructuredQuestionOptionKey(option);
+  const next = new Set(selectedKeys);
+  if (next.delete(optionKey)) return next;
+
+  if (question.question_id === "schema_direction") {
+    if (optionKey === "reference_only") return new Set([optionKey]);
+
+    next.delete("reference_only");
+    const boundary = optionKey.split(":", 1)[0];
+    if (boundary === "input" || boundary === "output") {
+      for (const selectedKey of next) {
+        if (selectedKey.startsWith(`${boundary}:`)) next.delete(selectedKey);
+      }
+    }
+  }
+  next.add(optionKey);
+  return next;
+}
+
 export function buildStructuredQuestionSelection(
   question: StructuredQuestion,
   selectedOptions: StructuredQuestionOption[]

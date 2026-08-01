@@ -461,7 +461,7 @@ const aiBuilderErrorCodes = [
   "model_not_available",
   "not_found",
   "no_planner_model_available",
-  "output_schema_limit_exceeded",
+  "schema_limit_exceeded",
   "plan_not_proposed",
   "plan_session_mismatch",
   "planning_state_payload_too_large",

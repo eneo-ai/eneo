@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     CLASSIFIER_RETENTION_CLASSES,
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
+    SlotClassificationSchemaDirectionMetadata,
     loose_tool_call_name,
     loose_tool_call_names_from_message,
     make_persisted_assistant_tool_call,
@@ -34,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    SLOT_CLASSIFICATION_SCHEMA_VERSION,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
@@ -79,7 +81,7 @@ def _classification_input(*quotes: str) -> SlotClassificationInput:
 
 def _persisted_classification_header() -> dict[str, object]:
     return {
-        "schema_version": 14,
+        "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
         "prompt_hash": "a" * 64,
         "model": "openai/gpt-test",
         "provider": "openai",
@@ -92,6 +94,24 @@ def _persisted_classification_header() -> dict[str, object]:
             }
         ],
     }
+
+
+@pytest.mark.parametrize("malformed", ["not-a-fingerprint", "A" * 64])
+def test_persisted_schema_direction_rejects_malformed_candidate_fingerprint(
+    malformed: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        SlotClassificationSchemaDirectionMetadata.model_validate(
+            {
+                "candidate_fingerprints": [malformed],
+                "input_fingerprint": malformed,
+                "output_fingerprint": None,
+                "reference_only": False,
+                "confidence": "low",
+                "reason": "malformed persisted test data",
+                "evidence": [],
+            }
+        )
 
 
 def _capture_metadata_warnings(monkeypatch) -> list[tuple[str, dict[str, object]]]:

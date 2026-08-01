@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Literal, NoReturn, cast
+from typing import NoReturn, cast
 from uuid import UUID
 
 from eneo.files.docx_template_validation import docx_template_archive_metrics
@@ -12,14 +12,14 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    OUTPUT_SCHEMA_MAX_JSON_BYTES,
-    AIBuilderAttachmentOutputSchemaCandidate,
-    OutputSchemaCandidateRefusal,
-    OutputSchemaLimitExceeded,
-    build_attachment_schema_candidate,
-    build_output_schema_evidence,
-    parse_output_schema_candidate,
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    SCHEMA_MAX_JSON_BYTES,
+    DeclaredSchemaCandidate,
+    SchemaCandidateRefusal,
+    SchemaLimitExceeded,
+    build_declared_schema_candidate,
+    build_schema_evidence,
+    parse_schema_candidate,
 )
 from eneo.flows.ai_builder.planning_state import (
     ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX,
@@ -28,10 +28,10 @@ from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
     FileRole,
     FileRoleEvidence,
-    OutputSchemaEvidence,
     PlanningState,
     PlanningStatePayloadTooLargeError,
     ResolvedSlot,
+    SchemaEvidence,
     SignalConfidence,
     enforce_planning_state_payload_cap,
 )
@@ -81,25 +81,14 @@ class AIBuilderAttachmentEvidence:
     template_placeholders: tuple[str, ...] | None = None
 
 
-AttachmentOutputSchemaDisposition = Literal["none", "single", "ambiguous"]
-
-
 def _empty_readable_text_by_file() -> Mapping[UUID, str]:
     return {}
 
 
 @dataclass(frozen=True, slots=True)
-class AIBuilderAttachmentOutputSchemaDiscovery:
-    candidates: tuple[AIBuilderAttachmentOutputSchemaCandidate, ...]
-    refusals: tuple[OutputSchemaCandidateRefusal, ...] = ()
-
-    @property
-    def disposition(self) -> AttachmentOutputSchemaDisposition:
-        if not self.candidates:
-            return "none"
-        if len(self.candidates) == 1:
-            return "single"
-        return "ambiguous"
+class AIBuilderAttachmentSchemaDiscovery:
+    candidates: tuple[DeclaredSchemaCandidate, ...]
+    refusals: tuple[SchemaCandidateRefusal, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,9 +98,9 @@ class AIBuilderAttachmentContext:
     included_file_ids: list[UUID]
     total_chars: int
     truncated: bool
-    output_schema_evidence: OutputSchemaEvidence | None = None
-    output_schema_discovery: AIBuilderAttachmentOutputSchemaDiscovery = field(
-        default_factory=lambda: AIBuilderAttachmentOutputSchemaDiscovery(candidates=())
+    output_schema_evidence: SchemaEvidence | None = None
+    schema_discovery: AIBuilderAttachmentSchemaDiscovery = field(
+        default_factory=lambda: AIBuilderAttachmentSchemaDiscovery(candidates=())
     )
     readable_text_by_file: Mapping[UUID, str] = field(
         default_factory=_empty_readable_text_by_file,
@@ -162,11 +151,6 @@ def apply_attachment_structural_evidence_to_planning_state(
 ) -> None:
     if attachment_context is None:
         return
-    if (
-        state.output_schema_evidence is None
-        and attachment_context.output_schema_evidence is not None
-    ):
-        state.output_schema_evidence = attachment_context.output_schema_evidence
     _apply_structural_template_docx_mode(state, attachment_context)
 
 
@@ -181,36 +165,36 @@ _FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
 _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = 8
 
 
-def _attachment_output_schema_discovery(
+def _attachment_schema_discovery(
     files: list[File],
     readable_text_by_file: Mapping[UUID, str | None],
-) -> AIBuilderAttachmentOutputSchemaDiscovery:
-    candidates_by_fingerprint: dict[str, AIBuilderAttachmentOutputSchemaCandidate] = {}
-    refusals: list[OutputSchemaCandidateRefusal] = []
+) -> AIBuilderAttachmentSchemaDiscovery:
+    candidates_by_fingerprint: dict[str, DeclaredSchemaCandidate] = {}
+    refusals: list[SchemaCandidateRefusal] = []
     for attachment in sorted(files, key=lambda item: str(item.id)):
         text = readable_text_by_file[attachment.id]
         if text is None:
             continue
         if (
             not _is_json_attachment(attachment)
-            and len(text.encode("utf-8")) > OUTPUT_SCHEMA_MAX_JSON_BYTES
+            and len(text.encode("utf-8")) > SCHEMA_MAX_JSON_BYTES
         ):
             if text.lstrip().startswith("{"):
                 refusals.append(
-                    OutputSchemaCandidateRefusal(
+                    SchemaCandidateRefusal(
                         file_id=attachment.id,
                         reason="raw_bytes",
-                        max_value=OUTPUT_SCHEMA_MAX_JSON_BYTES,
+                        max_value=SCHEMA_MAX_JSON_BYTES,
                         actual_value=len(text.encode("utf-8")),
                         blocks_provider_work=False,
                     )
                 )
             continue
         try:
-            schema = parse_output_schema_candidate(text)
-        except OutputSchemaLimitExceeded as error:
+            schema = parse_schema_candidate(text)
+        except SchemaLimitExceeded as error:
             refusals.append(
-                OutputSchemaCandidateRefusal(
+                SchemaCandidateRefusal(
                     file_id=attachment.id,
                     reason=error.reason,
                     max_value=error.max_value,
@@ -223,21 +207,25 @@ def _attachment_output_schema_discovery(
             )
             continue
         if schema is not None:
-            candidate = build_attachment_schema_candidate(
+            candidate = build_declared_schema_candidate(
                 schema,
                 source_file_ids=(attachment.id,),
+                provenance=(
+                    f"file:{attachment.id}{ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX}",
+                ),
             )
             existing = candidates_by_fingerprint.get(candidate.fingerprint)
             if existing is not None:
-                candidate = build_attachment_schema_candidate(
+                candidate = build_declared_schema_candidate(
                     existing.json_schema,
                     source_file_ids=(
                         *existing.source_file_ids,
                         *candidate.source_file_ids,
                     ),
+                    provenance=(*existing.provenance, *candidate.provenance),
                 )
             candidates_by_fingerprint[candidate.fingerprint] = candidate
-    return AIBuilderAttachmentOutputSchemaDiscovery(
+    return AIBuilderAttachmentSchemaDiscovery(
         candidates=tuple(
             candidates_by_fingerprint[fingerprint]
             for fingerprint in sorted(candidates_by_fingerprint)
@@ -246,25 +234,10 @@ def _attachment_output_schema_discovery(
     )
 
 
-def _selected_output_schema_evidence(
-    discovery: AIBuilderAttachmentOutputSchemaDiscovery,
+def _template_output_schema_evidence(
     files: list[File],
     template_placeholders_by_file: Mapping[UUID, tuple[str, ...] | None],
-) -> OutputSchemaEvidence | None:
-    if discovery.disposition == "ambiguous":
-        return None
-    if discovery.disposition == "single":
-        candidate = discovery.candidates[0]
-        return build_output_schema_evidence(
-            json_schema=candidate.json_schema,
-            source="attachment_json_schema",
-            source_file_ids=candidate.source_file_ids,
-            confidence="high",
-            evidence=tuple(
-                f"file:{file_id}{ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX}"
-                for file_id in candidate.source_file_ids
-            ),
-        )
+) -> SchemaEvidence | None:
     return _template_placeholder_output_schema_evidence(
         files, template_placeholders_by_file
     )
@@ -287,7 +260,7 @@ def _is_declared_schema_attachment(file: File) -> bool:
 def _template_placeholder_output_schema_evidence(
     files: list[File],
     template_placeholders_by_file: Mapping[UUID, tuple[str, ...] | None],
-) -> OutputSchemaEvidence | None:
+) -> SchemaEvidence | None:
     selected: list[str] = []
     all_placeholders: set[str] = set()
     source_markers: list[str] = []
@@ -319,7 +292,7 @@ def _template_placeholder_output_schema_evidence(
     total_count = len(all_placeholders)
     truncated = total_count > len(selected)
     try:
-        return build_output_schema_evidence(
+        return build_schema_evidence(
             json_schema=_template_placeholder_schema(tuple(selected)),
             source="template_placeholders",
             source_file_ids=tuple(sorted(set(source_file_ids), key=str)),
@@ -328,7 +301,7 @@ def _template_placeholder_output_schema_evidence(
             total_count=total_count,
             truncated=truncated,
         )
-    except OutputSchemaLimitExceeded as error:
+    except SchemaLimitExceeded as error:
         _template_inspection_limit_exceeded(
             "placeholder_schema_bytes",
             max_value=error.max_value,
@@ -479,12 +452,11 @@ def build_ai_builder_attachment_context(
         files,
         policy=resolved_policy,
     )
-    output_schema_discovery = _attachment_output_schema_discovery(
+    schema_discovery = _attachment_schema_discovery(
         files,
         readable_text_by_file,
     )
-    output_schema_evidence = _selected_output_schema_evidence(
-        output_schema_discovery,
+    output_schema_evidence = _template_output_schema_evidence(
         files,
         template_placeholders_by_file,
     )
@@ -520,7 +492,7 @@ def build_ai_builder_attachment_context(
         total_chars=0,
         truncated=any(text is not None for text in readable_text_by_file.values()),
         output_schema_evidence=output_schema_evidence,
-        output_schema_discovery=output_schema_discovery,
+        schema_discovery=schema_discovery,
         readable_text_by_file={
             file_id: text
             for file_id, text in readable_text_by_file.items()

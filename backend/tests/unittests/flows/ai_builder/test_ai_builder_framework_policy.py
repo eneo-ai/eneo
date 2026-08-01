@@ -2068,7 +2068,7 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
             "final_output_scope",
             "flow_input_architecture",
             "output_reader",
-            "output_schema_conflict",
+            "schema_direction",
             "processing_scope",
         }
     )
@@ -2092,7 +2092,7 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
         "document_kind",
         "comparison_scope",
         "output_reader",
-        "output_schema_conflict",
+        "schema_direction",
         "final_output_scope",
         "structured_io_contract",
     ],

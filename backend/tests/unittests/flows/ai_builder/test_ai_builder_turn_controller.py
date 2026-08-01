@@ -16,7 +16,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentEvidence,
-    AIBuilderAttachmentOutputSchemaDiscovery,
+    AIBuilderAttachmentSchemaDiscovery,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     MAX_SESSION_MESSAGE_BYTES,
@@ -26,21 +26,23 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
     metadata_for_assistant_question,
+    metadata_for_user_message,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    build_attachment_schema_candidate,
-    build_output_schema_evidence,
-)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    build_declared_schema_candidate,
+    build_schema_evidence,
+    resolve_structured_schema_direction,
+    schema_direction_option_values,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
-    AskOutputSchemaConflict,
     CommitArchitecture,
     ConfirmRequirements,
     ReviseArchitecture,
@@ -56,6 +58,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     PlanningState,
     ResolvedSlot,
+    SchemaResolution,
     SlotConfidence,
     SlotSource,
     StepTriple,
@@ -135,12 +138,12 @@ def test_server_builds_ask_question_for_allowed_target() -> None:
 
 @pytest.mark.parametrize("ui_language", ["en", "sv"])
 @pytest.mark.parametrize("field_fill", ["\0", '"', "\\", "😀"])
-def test_schema_conflict_maximum_question_fits_persisted_message_limit(
+def test_schema_direction_maximum_question_covers_complete_set_and_fits_limit(
     ui_language: str,
     field_fill: str,
 ) -> None:
     candidates = tuple(
-        build_attachment_schema_candidate(
+        build_declared_schema_candidate(
             {
                 "type": "object",
                 "properties": {
@@ -151,6 +154,9 @@ def test_schema_conflict_maximum_question_fits_persisted_message_limit(
                 },
             },
             source_file_ids=(UUID(int=candidate_index + 1),),
+            provenance=(
+                f"file:{UUID(int=candidate_index + 1)}:json_schema_attachment",
+            ),
         )
         for candidate_index in range(100)
     )
@@ -171,9 +177,7 @@ def test_schema_conflict_maximum_question_fits_persisted_message_limit(
         included_file_ids=[],
         total_chars=0,
         truncated=False,
-        output_schema_discovery=AIBuilderAttachmentOutputSchemaDiscovery(
-            candidates=candidates
-        ),
+        schema_discovery=AIBuilderAttachmentSchemaDiscovery(candidates=candidates),
     )
 
     decision = resolve_turn_control(
@@ -182,13 +186,16 @@ def test_schema_conflict_maximum_question_fits_persisted_message_limit(
         confirmed_attachment_evidence_fingerprint=None,
         ui_language=ui_language,
         attachment_context=attachment_context,
-        output_schema_conflict_pending=True,
+        schema_candidates=candidates,
+        schema_direction_pending=True,
     ).decision
 
-    assert isinstance(decision, AskOutputSchemaConflict)
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "schema_direction"
+    assert decision.question is not None
     question = decision.question
     tool_call = make_persisted_assistant_tool_call(
-        tool_call_id="schema_conflict",
+        tool_call_id="schema_direction",
         tool_name=ASK_STRUCTURED_QUESTION_TOOL_NAME,
         arguments=question.question_data.model_dump(
             mode="json",
@@ -202,19 +209,48 @@ def test_schema_conflict_maximum_question_fits_persisted_message_limit(
         metadata=metadata_for_assistant_question(question.question_data),
         tool_calls=[tool_call.model_dump(mode="json")],
     )
+    selected_fingerprint = candidates[-1].fingerprint
+    answer_message = ConversationMessage(
+        role="user",
+        content="Use this schema for the result.",
+        metadata=metadata_for_user_message(
+            question_answer={
+                "question_id": "schema_direction",
+                "selected_values": [f"output:{selected_fingerprint}"],
+            }
+        ),
+    )
+    persisted_conversation = [
+        message.model_dump(mode="json")
+        for message in (assistant_message, answer_message)
+    ]
+    restored_conversation = [
+        ConversationMessage.from_persisted(message)
+        for message in persisted_conversation
+    ]
+    selected_direction = resolve_structured_schema_direction(
+        conversation=restored_conversation,
+        candidates=candidates,
+    )
 
-    assert {option.id for option in question.question_data.options} == {
-        candidate.fingerprint for candidate in candidates
-    }
+    assert tuple(option.id for option in question.question_data.options) == (
+        schema_direction_option_values(candidates)
+    )
+    assert question.question_data.selection_mode == "multi"
+    assert question.question_data.requires_confirm is True
+    assert question.question_data.allow_custom is False
     assert all(
         option.description is not None and "…" in option.description
         for option in question.question_data.options
+        if option.id != "reference_only"
     )
     assert (
         conversation_serialized_size_bytes([assistant_message])
         < MAX_SESSION_MESSAGE_BYTES
     )
     assert compact_ai_builder_conversation([assistant_message]) == [assistant_message]
+    assert selected_direction is not None
+    assert selected_direction.output_fingerprint == selected_fingerprint
 
 
 def test_server_builds_commit_when_no_questions_remain() -> None:
@@ -281,7 +317,7 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_swedis
     None
 ):
     state = _state(primary_runtime_input="text", terminal_output="docx_document")
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {f"field_{index}": {"type": "string"} for index in range(8)},
@@ -308,7 +344,7 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_englis
     None
 ):
     state = _state(primary_runtime_input="text", terminal_output="docx_document")
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {f"field_{index}": {"type": "string"} for index in range(8)},
@@ -338,17 +374,17 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_englis
         ("sv", "styr JSON-resultatet"),
     ],
 )
-def test_confirmation_does_not_present_undirected_schema_as_docx_contract(
+def test_confirmation_presents_input_schema_without_calling_it_a_docx_contract(
     ui_language: str,
     misleading_fragment: str,
 ) -> None:
     state = _state(primary_runtime_input="text", terminal_output="docx_document")
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.input_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"case_id": {"type": "string"}},
         },
-        source="attachment_json_schema",
+        source="declared_schema",
         source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=("file:00000000-0000-0000-0000-000000000001:json_schema",),
@@ -359,6 +395,9 @@ def test_confirmation_does_not_present_undirected_schema_as_docx_contract(
 
     assert isinstance(decision, ConfirmRequirements)
     assert misleading_fragment not in decision.payload.summary
+    assert (
+        "indataschema" if ui_language == "sv" else "input schema"
+    ) in decision.payload.summary
 
 
 @pytest.mark.parametrize(
@@ -421,7 +460,7 @@ def test_server_confirmation_discloses_inferred_example_structure_and_style(
             )
         ],
     )
-    schema_evidence = build_output_schema_evidence(
+    schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {
@@ -438,7 +477,10 @@ def test_server_confirmation_discloses_inferred_example_structure_and_style(
         {
             **dict(state),
             "example_output_constraints": constraints,
-            "output_schema_evidence": schema_evidence,
+            "schema_resolution": SchemaResolution.from_evidence(
+                input_evidence=None,
+                output_evidence=schema_evidence,
+            ),
             "example_output_schema_inference": ExampleOutputSchemaInferenceOutcome(
                 status="inferred",
                 source_file_ids=[file_id],

@@ -42,7 +42,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
-| 2026-08-01 | **Directional Builder schema guard**: valid JSON-schema evidence remains available to planning without selecting, replacing, or reopening the terminal output; attachment-only classifier evidence cannot own that user choice, and non-JSON confirmation, proposal prompting, and compilation neither describe nor apply an undirected schema as an output contract; a runtime-input schema plus an explicit generated-DOCX request now survives discovery through compilation, while duplicate reconciliation and chronology paths are deleted (this change) |
+| 2026-08-01 | **Explicit Builder schema direction**: one neutral schema-evidence owner now retains bounded JSON Schema candidates with complete provenance, while `PlanningState` stores independently selected input and output evidence; explicit structured answers or citation-backed user intent can assign the same or different candidates to either boundary, a replay-safe bilingual multi-select question resolves genuine ambiguity, and reference-only schemas remain unassigned; attachment-only evidence cannot choose direction, schemas do not reopen the terminal output, and the public overflow error plus generated client use one direction-neutral contract (this change) |
 | 2026-08-01 | **Canonical Builder discovery evidence**: free-text replies now reach one cited classifier instead of deterministic option matching, and accepted typed planning slots replace conflicting raw signals in the discovery profile while raw text still fills genuinely missing input, output, and output-submode dimensions; a resolved primary input projects one coherent architecture and cannot reopen a stale mixed-input question (`cbc1132e2`, `65af265bb`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-01 | **Explicit Builder question exhaustion**: architecture candidates and quality questions with an explicit `ask` policy remain askable after the normal user-question budget; every registered quality question has a terminal policy if it reaches the budget decision—to ask, surface a no-runtime-fields assumption, or reject an irrelevant refinement; rejected candidates still do not consume a question family, now pinned by a behavior test, and the assumption survives the public confirmation and persisted requirements contract (`414177328..631f2504e`, Codex and Claude gates green 8/10, no blockers) |
 | 2026-07-31 | **Flows and platform convergence**: integrated the frozen develop platform foundations into Flow and Builder at their canonical owners; durable object content, Skills, typed identity, generated SDK contracts, and Flow runtime evidence now coexist behind one Alembic head without parallel compatibility paths; frontend builds now use bounded translation output, direct icon modules, and the Bun 1.3.14 workspace lock without unsafe heap overrides (`64fd7446e` integrated, Codex gate green 9/10, no blockers) |
@@ -209,12 +209,21 @@ external release gate (item 10); BM0.2 is external (item 10).
    preflight from the additional carried-text check, and prohibits
    material-influence wording through executable contract tests.
 10. **Release proof** *(external gates, tracked not implemented here)* —
-    BEFORE any live run, freeze in the tracked gate input: repetition
-    count, required cases, non-municipal domain families, provider
-    route/model identity, and numeric p50/p95 latency + token/call
-    ceilings (the harness today has none of these and only
-    municipal-domain cases; thresholds must never be chosen after
-    observing results). Benchmark and freeze the Builder platform ceilings
+    The durable live evaluation owner is
+    `backend/scripts/ai_builder_api_battle_cases.json`: currently 120 unique
+    prompts across 46 municipal domains, including vague first turns,
+    single-missing-dimension cases, seven required multi-turn dialogues,
+    complete JSON/PDF requests, detailed contracts, and human-reviewed applied
+    results. After each deployable Builder slice, compare a locked-model smoke
+    cohort with the preceding receipt; assess question choice, unsupported
+    assumptions, plan topology, schema use, and failure category rather than
+    optimizing for one example prompt. Promote a failure to a deterministic
+    product test only when it expresses a general rule. Before the release-gate
+    live run, freeze in the tracked gate input: three repetitions, required
+    cases, non-municipal domain families, provider route/model identity, and
+    numeric p50/p95 latency + token/call ceilings (the corpus still has only
+    municipal-domain cases and no frozen numeric thresholds; thresholds must
+    never be chosen after observing results). Benchmark and freeze the Builder platform ceilings
     for attachment count, message length, per-file and aggregate DOCX
     inspection, placeholder evidence, and synchronous parser capacity before
     production; the current safety values are conservative bounds, not
@@ -354,8 +363,8 @@ plan above controls all other ordering.
   normalized equality through the cited-evidence path, never explicit-answer
   metadata. Question policy asks only for unresolved information that can change
   the Flow's contract, topology, quality, or governance; the confirmation surface
-  exposes consequential assumptions instead of hiding them. (b) **LANDED in this
-  change** — typed resolved slots are canonical in the discovery profile and raw
+  exposes consequential assumptions instead of hiding them. (b) **LANDED
+  `65af265bb`** — typed resolved slots are canonical in the discovery profile and raw
   text resolves only missing dimensions. (c) correct the known neutral
   vocabulary defects and delete `case_like_flow` phrase ownership with pinned
   before/after question-topology behavior. (d) architecture-impact dimensions
@@ -364,22 +373,25 @@ plan above controls all other ordering.
   model-aware/admin budget owner while source-count and structured-value bounds
   remain named parser-shape invariants pending item 10. No classifier expansion
   for intentionally structured-only lanes. *(L)*
-- **B9** (directional JSON contracts, three ordered slices): (a) **LANDED in
-  this change** — schema presence no longer changes terminal output before
+- **B9** (directional JSON contracts, three ordered slices): (a) **LANDED
+  `0b7a450df`** — schema presence no longer changes terminal output before
   output direction is owned; a runtime-input schema plus requested generated
   DOCX remains DOCX through compilation, attachment-only classification cannot
   own the terminal choice, and schema evidence remains available for the
   directional owner without misleading confirmation or proposal instructions;
-  (b)
-  rename the already-neutral evidence value to `SchemaEvidence` and let
-  `PlanningState` carry two explicit optional fields—input and output—so both may
-  coexist without a list/set wrapper or compatibility reader; deterministic
+  (b) **LANDED in this change** — rename the already-neutral evidence value to
+  `SchemaEvidence` and let `PlanningState.schema_resolution` retain at most two
+  canonical shapes plus independent input and output assignment evidence, so the
+  same near-limit schema is persisted once when both boundaries use it and no
+  compatibility reader is required; deterministic
   parsing proves schema shape, while explicit or cited user evidence assigns a
   boundary direction and one typed question resolves genuine ambiguity; a schema
-  may remain validation/reference material; (c) compile input evidence onto the
+  may remain validation/reference material; provenance and candidate ceilings
+  refuse explicitly instead of truncating; (c) compile input evidence onto the
   first Flow-input JSON consumer and output evidence onto the terminal JSON
-  contract, then extend the real JSON golden to assert both contracts. One parser
-  and evidence type, no schema registry or second ledger. *(M)*
+  contract, then extend the real JSON golden to assert both contracts. One parser,
+  one evidence type, and one bounded in-state resolution aggregate—not a reusable
+  schema registry or second ledger. *(M)*
 - **B10** (precise semantic dataflow, three ordered slices): (a) project exact
   confirmed form-field names/types from `PlanningState` into proposal context,
   keep existing `uses_form_fields` as the semantic consumer contract, delete the

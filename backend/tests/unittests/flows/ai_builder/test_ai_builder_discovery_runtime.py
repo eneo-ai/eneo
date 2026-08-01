@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_MAX_ATTACHMENTS,
     AIBuilderAttachmentContext,
     AIBuilderAttachmentEvidence,
+    AIBuilderAttachmentSchemaDiscovery,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
@@ -44,13 +45,16 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    build_output_schema_evidence,
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    SchemaDirectionSelection,
+    build_declared_schema_candidate,
+    build_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
     ClassifiedFileRole,
+    ClassifiedSchemaDirection,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -121,6 +125,71 @@ def _resolved_state() -> PlanningState:
             ),
         },
     )
+
+
+def test_classifier_schema_direction_preserves_shape_and_assignment_evidence() -> None:
+    candidate = build_declared_schema_candidate(
+        {"type": "object", "properties": {"case_id": {"type": "string"}}},
+        provenance=("message:user-1:fenced_json_schema",),
+    )
+    state = PlanningState.empty()
+
+    runtime._apply_schema_direction(
+        state,
+        candidates=(candidate,),
+        direction=ClassifiedSchemaDirection(
+            candidate_fingerprints=(candidate.fingerprint,),
+            input_fingerprint=candidate.fingerprint,
+            output_fingerprint=None,
+            reference_only=False,
+            confidence="medium",
+            reason="The user identifies the schema as runtime input.",
+            evidence=(
+                ClassifiedEvidence(
+                    source_id="user_message:user-1",
+                    quote="schema in intake.json is input",
+                ),
+            ),
+        ),
+    )
+
+    assert state.input_schema_evidence is not None
+    assert state.input_schema_evidence.confidence == "medium"
+    assert state.input_schema_evidence.evidence == [
+        "message:user-1:fenced_json_schema",
+        "quote:user_message:user-1:schema in intake.json is input",
+    ]
+
+
+def test_structured_schema_direction_preserves_exact_answer_trace() -> None:
+    candidate = build_declared_schema_candidate(
+        {"type": "object", "properties": {"result": {"type": "string"}}},
+        provenance=(
+            "file:00000000-0000-0000-0000-000000000001:json_schema_attachment",
+        ),
+    )
+    state = PlanningState.empty()
+    selected_token = f"output:{candidate.fingerprint}"
+
+    runtime._apply_schema_direction(
+        state,
+        candidates=(candidate,),
+        direction=SchemaDirectionSelection(
+            candidate_fingerprints=(candidate.fingerprint,),
+            input_fingerprint=None,
+            output_fingerprint=candidate.fingerprint,
+            reference_only=False,
+            confidence="high",
+            evidence=(f"quote:structured_answer:user-2:0:{selected_token}",),
+        ),
+    )
+
+    assert state.output_schema_evidence is not None
+    assert state.output_schema_evidence.confidence == "high"
+    assert state.output_schema_evidence.evidence == [
+        "file:00000000-0000-0000-0000-000000000001:json_schema_attachment",
+        f"quote:structured_answer:user-2:0:{selected_token}",
+    ]
 
 
 def _slot(
@@ -663,7 +732,7 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
                 included_file_ids=[],
                 total_chars=0,
                 truncated=False,
-                output_schema_evidence=build_output_schema_evidence(
+                output_schema_evidence=build_schema_evidence(
                     json_schema={
                         "type": "object",
                         "properties": {"kundnamn": {"type": "string"}},
@@ -704,82 +773,101 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
 
 
 @pytest.mark.asyncio
-async def test_runtime_retains_attachment_json_schema_without_choosing_output() -> None:
+async def test_runtime_retains_attachment_schema_as_unassigned_candidate() -> None:
     file_id = uuid4()
-    attachment_evidence = build_output_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {"decision": {"type": "string"}},
-        },
-        source="attachment_json_schema",
+    candidate = build_declared_schema_candidate(
+        {"type": "object", "properties": {"decision": {"type": "string"}}},
         source_file_ids=(file_id,),
-        confidence="high",
-        evidence=[f"file:{file_id}:json_schema_attachment"],
+        provenance=(f"file:{file_id}:json_schema_attachment",),
     )
 
-    state = (
-        await build_runtime_discovery_context(
-            [],
-            tenant_id=uuid4(),
-            allow_classification=False,
-            attachment_context=AIBuilderAttachmentContext(
-                context=None,
-                evidence=(),
-                included_file_ids=[],
-                total_chars=0,
-                truncated=False,
-                output_schema_evidence=attachment_evidence,
+    context = await build_runtime_discovery_context(
+        [],
+        tenant_id=uuid4(),
+        allow_classification=False,
+        attachment_context=AIBuilderAttachmentContext(
+            context=None,
+            evidence=(),
+            included_file_ids=[],
+            total_chars=0,
+            truncated=False,
+            schema_discovery=AIBuilderAttachmentSchemaDiscovery(
+                candidates=(candidate,)
             ),
-        )
-    ).planning_state
+        ),
+    )
 
-    assert state.output_schema_evidence is attachment_evidence
-    assert "terminal_output" not in state.resolved_slots
+    assert context.schema_candidates == (candidate,)
+    assert context.schema_direction_pending is True
+    assert context.planning_state.input_schema_evidence is None
+    assert context.planning_state.output_schema_evidence is None
+    assert "terminal_output" not in context.planning_state.resolved_slots
 
 
 @pytest.mark.asyncio
 async def test_runtime_input_schema_does_not_override_requested_docx_output() -> None:
     file_id = uuid4()
+    candidate = build_declared_schema_candidate(
+        {
+            "type": "object",
+            "properties": {"case_id": {"type": "string"}},
+            "required": ["case_id"],
+        },
+        source_file_ids=(file_id,),
+        provenance=(f"file:{file_id}:json_schema_attachment",),
+    )
+    quote = "Det bifogade JSON-schemat validerar indata vid körning."
     conversation = [
         ConversationMessage(
             message_id="user-1",
             role="user",
             content=(
-                "Det bifogade JSON-schemat validerar indata vid körning. "
+                f"{quote} "
                 "Bygg ett flöde som tar emot JSON vid körning och genererar "
                 "en DOCX-rapport utan mall."
             ),
         )
     ]
-    attachment_evidence = build_output_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {"case_id": {"type": "string"}},
-            "required": ["case_id"],
-        },
-        source="attachment_json_schema",
-        source_file_ids=(file_id,),
-        confidence="high",
-        evidence=[f"file:{file_id}:json_schema_attachment"],
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "schema_direction": {
+                    "input_fingerprint": candidate.fingerprint,
+                    "output_fingerprint": None,
+                    "reference_only": False,
+                    "confidence": "medium",
+                    "reason": "The user identifies this as runtime input.",
+                    "evidence": [_cited(quote)],
+                },
+            }
+        )
     )
 
-    state = (
-        await build_runtime_discovery_context(
-            conversation,
-            tenant_id=uuid4(),
-            allow_classification=False,
-            attachment_context=AIBuilderAttachmentContext(
-                context=None,
-                evidence=(),
-                included_file_ids=[],
-                total_chars=0,
-                truncated=False,
-                output_schema_evidence=attachment_evidence,
+    context = await build_runtime_discovery_context(
+        conversation,
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        attachment_context=AIBuilderAttachmentContext(
+            context=None,
+            evidence=(),
+            included_file_ids=[],
+            total_chars=0,
+            truncated=False,
+            schema_discovery=AIBuilderAttachmentSchemaDiscovery(
+                candidates=(candidate,)
             ),
-        )
-    ).planning_state
+        ),
+    )
+    state = context.planning_state
 
-    assert state.output_schema_evidence is attachment_evidence
+    assert context.schema_direction_pending is False
+    assert state.input_schema_evidence is not None
+    assert state.input_schema_evidence.fingerprint == candidate.fingerprint
+    assert state.input_schema_evidence.confidence == "medium"
+    assert state.output_schema_evidence is None
     assert state.resolved_slots["terminal_output"].value == "docx_document"
     assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
     analysis = analyze_discovery(conversation, planning_state=state)
@@ -791,44 +879,38 @@ async def test_runtime_input_schema_does_not_override_requested_docx_output() ->
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("classified_value", ["structured_json", UNKNOWN_SLOT_VALUE])
-async def test_attachment_only_classification_does_not_replace_requested_docx(
-    classified_value: str,
-) -> None:
+async def test_attachment_only_direction_citation_does_not_assign_schema() -> None:
     file_id = uuid4()
     excerpt = '{"case_id":"123"}'
-    litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        json.dumps(
-            {
-                "slots": [
-                    {
-                        "slot_name": "terminal_output",
-                        "value": classified_value,
-                        "confidence": "medium",
-                        "reason": "the uploaded file contains JSON",
-                        "evidence": [
-                            {
-                                "source_id": f"uploaded_file:{file_id}",
-                                "quote": excerpt,
-                            }
-                        ],
-                        "evidence_level": "inferred",
-                    }
-                ]
-            }
-        )
-    )
-    attachment_evidence = build_output_schema_evidence(
-        json_schema={
+    candidate = build_declared_schema_candidate(
+        {
             "type": "object",
             "properties": {"case_id": {"type": "string"}},
             "required": ["case_id"],
         },
-        source="attachment_json_schema",
         source_file_ids=(file_id,),
-        confidence="high",
-        evidence=[f"file:{file_id}:json_schema_attachment"],
+        provenance=(f"file:{file_id}:json_schema_attachment",),
+    )
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "schema_direction": {
+                    "input_fingerprint": candidate.fingerprint,
+                    "output_fingerprint": None,
+                    "reference_only": False,
+                    "confidence": "medium",
+                    "reason": "The upload contains JSON.",
+                    "evidence": [
+                        {
+                            "source_id": f"uploaded_file:{file_id}",
+                            "quote": excerpt,
+                        }
+                    ],
+                },
+            }
+        )
     )
 
     context = await build_runtime_discovery_context(
@@ -858,15 +940,22 @@ async def test_attachment_only_classification_does_not_replace_requested_docx(
             included_file_ids=[file_id],
             total_chars=len(excerpt),
             truncated=False,
-            output_schema_evidence=attachment_evidence,
+            schema_discovery=AIBuilderAttachmentSchemaDiscovery(
+                candidates=(candidate,)
+            ),
         ),
     )
     state = context.planning_state
 
     assert state.resolved_slots["terminal_output"].value == "docx_document"
     assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+    assert state.input_schema_evidence is None
+    assert state.output_schema_evidence is None
+    assert context.schema_direction_pending is True
     assert context.slot_classification_result is not None
     assert context.slot_classification_result.slots == ()
+    assert context.slot_classification_result.schema_direction is not None
+    assert context.slot_classification_result.schema_direction.confidence == "low"
     assert context.slot_classification_metadata is not None
     assert context.slot_classification_metadata.slots == []
     litellm_client.acompletion.assert_awaited_once()
@@ -875,7 +964,7 @@ async def test_attachment_only_classification_does_not_replace_requested_docx(
 @pytest.mark.asyncio
 async def test_runtime_does_not_treat_template_placeholders_as_json_terminal() -> None:
     file_id = uuid4()
-    template_evidence = build_output_schema_evidence(
+    template_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"kundnamn": {"type": "string"}},
@@ -911,7 +1000,7 @@ async def test_runtime_does_not_treat_template_placeholders_as_json_terminal() -
         )
     ).planning_state
 
-    assert state.output_schema_evidence is template_evidence
+    assert state.output_schema_evidence == template_evidence
     assert "terminal_output" not in state.resolved_slots
 
 

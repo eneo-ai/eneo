@@ -1045,6 +1045,7 @@ class TestGetSessionEndpoint:
                     "secondary_obligations": [],
                     "form_intake": None,
                     "example_output_constraints": None,
+                    "schema_direction": None,
                     "assumptions": [],
                     "contradictions": [],
                 }

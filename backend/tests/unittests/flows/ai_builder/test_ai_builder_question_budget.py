@@ -45,7 +45,7 @@ def test_neutral_responses_spend_budget_once_per_user_requirement_question() -> 
             role="user",
             content="schema selection",
             metadata={
-                "question_response": {"question_id": "output_schema_conflict"},
+                "question_response": {"question_id": "schema_direction"},
             },
         ),
     ]

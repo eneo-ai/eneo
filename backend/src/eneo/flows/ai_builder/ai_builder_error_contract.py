@@ -137,7 +137,7 @@ class AIBuilderErrorCode(StrEnum):
     MODEL_NOT_AVAILABLE = "model_not_available"
     NOT_FOUND = "not_found"
     NO_PLANNER_MODEL_AVAILABLE = "no_planner_model_available"
-    OUTPUT_SCHEMA_LIMIT_EXCEEDED = "output_schema_limit_exceeded"
+    SCHEMA_LIMIT_EXCEEDED = "schema_limit_exceeded"
     PLAN_NOT_PROPOSED = "plan_not_proposed"
     PLAN_SESSION_MISMATCH = "plan_session_mismatch"
     PLANNING_STATE_PAYLOAD_TOO_LARGE = "planning_state_payload_too_large"
@@ -671,7 +671,7 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,
         ),
-        AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED: _entry(
+        AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,

@@ -16,8 +16,10 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    build_output_schema_evidence,
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    SCHEMA_MAX_JSON_BYTES,
+    build_schema_evidence,
+    canonical_schema_bytes,
 )
 from eneo.flows.ai_builder.planning_state import (
     ARCHITECTURE_HASH_HEX_LENGTH,
@@ -35,6 +37,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
     StepTriple,
+    enforce_planning_state_payload_cap,
 )
 from eneo.flows.enums import FlowAuthoringInputType, FlowAuthoringOutputMode
 
@@ -42,11 +45,11 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_eight(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 8
+    def test_builder_schema_version_is_ten(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 10
 
-    def test_payload_cap_is_128_kilobytes(self) -> None:
-        assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 128 * 1024
+    def test_payload_cap_is_512_kibibytes(self) -> None:
+        assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
 
     def test_fcm_version_is_positive_int(self) -> None:
         assert isinstance(FCM_VERSION, int)
@@ -72,13 +75,122 @@ class TestEmptyConstruction:
         assert state.signals == []
         assert state.resolved_slots == {}
         assert state.file_roles == []
+        assert state.input_schema_evidence is None
         assert state.output_schema_evidence is None
         assert state.architecture_commit is None
 
 
-class TestOutputSchemaEvidence:
+class TestSchemaEvidence:
+    def test_two_distinct_near_limit_schemas_round_trip_below_state_cap(
+        self,
+    ) -> None:
+        schemas = tuple(
+            {
+                "type": "object",
+                "description": fill * (SCHEMA_MAX_JSON_BYTES - 2_048),
+                "properties": {field: {"type": "string"}},
+            }
+            for fill, field in (("x", "case_id"), ("y", "decision"))
+        )
+        input_evidence, output_evidence = (
+            build_schema_evidence(
+                json_schema=schema,
+                source="declared_schema",
+                confidence="high",
+                evidence=(f"message:{index}", "fenced_json_schema"),
+            )
+            for index, schema in enumerate(schemas)
+        )
+        state = PlanningState.empty()
+        state.replace_schema_resolution(
+            input_evidence=input_evidence,
+            output_evidence=output_evidence,
+            example_inference=None,
+        )
+
+        payload = enforce_planning_state_payload_cap(state.model_dump(mode="json"))
+        restored = PlanningState.model_validate(payload)
+
+        assert all(
+            len(canonical_schema_bytes(schema)) > SCHEMA_MAX_JSON_BYTES * 0.95
+            for schema in schemas
+        )
+        assert len(payload["schema_resolution"]["schemas"]) == 2
+        assert restored.input_schema_evidence == input_evidence
+        assert restored.output_schema_evidence == output_evidence
+
+    def test_shared_near_limit_schema_is_stored_once_and_fits_state_cap(self) -> None:
+        schema = {
+            "type": "object",
+            "description": "x" * 70_000,
+            "properties": {"case_id": {"type": "string"}},
+        }
+        evidence = build_schema_evidence(
+            json_schema=schema,
+            source="declared_schema",
+            confidence="high",
+            evidence=("message:msg_schema", "fenced_json_schema"),
+        )
+        state = PlanningState.empty()
+        state.replace_schema_resolution(
+            input_evidence=evidence,
+            output_evidence=evidence,
+            example_inference=None,
+        )
+
+        payload = state.model_dump(mode="json")
+
+        assert len(str(schema).encode("utf-8")) < SCHEMA_MAX_JSON_BYTES
+        assert "input_schema_evidence" not in payload
+        assert "output_schema_evidence" not in payload
+        assert len(payload["schema_resolution"]["schemas"]) == 1
+        assert payload["schema_resolution"]["input"]["fingerprint"] == (
+            evidence.fingerprint
+        )
+        assert payload["schema_resolution"]["output"]["fingerprint"] == (
+            evidence.fingerprint
+        )
+        enforce_planning_state_payload_cap(payload)
+
+    @pytest.mark.parametrize(
+        ("input_selected", "output_selected"),
+        [(True, False), (False, True), (True, True)],
+    )
+    def test_declared_schema_round_trips_for_each_selected_boundary(
+        self,
+        input_selected: bool,
+        output_selected: bool,
+    ) -> None:
+        evidence = build_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"case_id": {"type": "string"}},
+            },
+            source="declared_schema",
+            confidence="high",
+            evidence=("message:msg_schema", "fenced_json_schema"),
+        )
+        state = PlanningState.empty()
+        state.replace_schema_resolution(
+            input_evidence=evidence if input_selected else None,
+            output_evidence=evidence if output_selected else None,
+            example_inference=None,
+        )
+
+        restored = PlanningState.model_validate_json(state.model_dump_json())
+
+        assert restored.input_schema_evidence == (evidence if input_selected else None)
+        assert restored.output_schema_evidence == (
+            evidence if output_selected else None
+        )
+        if input_selected and output_selected:
+            assert (
+                restored.input_schema_evidence.fingerprint
+                == restored.output_schema_evidence.fingerprint
+            )
+
     def test_accepts_template_placeholder_source(self) -> None:
-        evidence = build_output_schema_evidence(
+        evidence = build_schema_evidence(
             json_schema={
                 "type": "object",
                 "properties": {"kundnamn": {"type": "string"}},
@@ -161,7 +273,7 @@ class TestExampleOutputConstraints:
 class TestRoundTrip:
     @staticmethod
     def _populated_state() -> PlanningState:
-        return PlanningState(
+        state = PlanningState(
             fcm_version=FCM_VERSION,
             planner_contract_version=PLANNER_CONTRACT_VERSION,
             builder_schema_version=BUILDER_SCHEMA_VERSION,
@@ -208,16 +320,6 @@ class TestRoundTrip:
                     candidate_roles=["template"],
                 )
             ],
-            output_schema_evidence=build_output_schema_evidence(
-                json_schema={
-                    "type": "object",
-                    "properties": {"decision": {"type": "string"}},
-                    "required": ["decision"],
-                },
-                source="freeform_text",
-                confidence="high",
-                evidence=["message:msg_schema", "fenced_json_schema"],
-            ),
             architecture_commit=ArchitectureCommit(
                 tuples_chain=[
                     StepTriple(
@@ -231,6 +333,21 @@ class TestRoundTrip:
                 architecture_hash=_VALID_ARCH_HASH,
             ),
         )
+        state.replace_schema_resolution(
+            input_evidence=None,
+            output_evidence=build_schema_evidence(
+                json_schema={
+                    "type": "object",
+                    "properties": {"decision": {"type": "string"}},
+                    "required": ["decision"],
+                },
+                source="declared_schema",
+                confidence="high",
+                evidence=["message:msg_schema", "fenced_json_schema"],
+            ),
+            example_inference=None,
+        )
+        return state
 
     def test_model_dump_json_survives_round_trip(self) -> None:
         original = self._populated_state()

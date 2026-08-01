@@ -13,9 +13,6 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    project_output_schema_fields,
-)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -31,6 +28,9 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
     render_result_contract_prompt_block,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    project_schema_fields,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
@@ -109,6 +109,9 @@ def build_plan_proposal_system_prompt(
     file_roles_block = _file_roles_block(planning_state)
     if file_roles_block is not None:
         lines.extend(["", "Uploaded file roles:", file_roles_block])
+    input_schema_block = _input_schema_evidence_block(planning_state)
+    if input_schema_block is not None:
+        lines.extend(["", "Input schema evidence:", input_schema_block])
     output_schema_block = _output_schema_evidence_block(planning_state)
     if output_schema_block is not None:
         lines.extend(["", "Output schema evidence:", output_schema_block])
@@ -252,7 +255,7 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
     evidence = planning_state.output_schema_evidence
     if evidence is None:
         return None
-    projection = project_output_schema_fields(evidence.json_schema)
+    projection = project_schema_fields(evidence.json_schema)
     fields = projection.fields
     field_text = (
         ", ".join(render_ai_builder_evidence_value(field) for field in fields)
@@ -299,6 +302,33 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
             f"- source: {evidence.source}, {evidence.confidence} confidence",
             f"- declared top-level fields: {field_text}",
             "- Use output_fields consistent with these user-declared fields.",
+        ]
+    )
+
+
+def _input_schema_evidence_block(planning_state: PlanningState) -> str | None:
+    evidence = planning_state.input_schema_evidence
+    if evidence is None:
+        return None
+    projection = project_schema_fields(evidence.json_schema)
+    field_text = (
+        ", ".join(
+            render_ai_builder_evidence_value(field) for field in projection.fields
+        )
+        if projection.fields
+        else "top-level object"
+    )
+    if projection.truncated:
+        field_text = (
+            f"{field_text} "
+            f"(showing {len(projection.fields)} of {projection.total_count})"
+        )
+    return "\n".join(
+        [
+            f"- source: {evidence.source}, {evidence.confidence} confidence",
+            f"- declared top-level fields: {field_text}",
+            "- This schema describes the Flow input boundary. Do not turn its "
+            "primary payload fields into secondary input_fields.",
         ]
     )
 

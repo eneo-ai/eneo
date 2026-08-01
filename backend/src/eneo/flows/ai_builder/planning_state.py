@@ -4,10 +4,12 @@ PlanningState is rebuilt each turn from the compacted persisted conversation;
 it does not replace turn-by-turn reconstruction or become the sole authority
 for learned state. Slots, signals, and classifier semantics are derived from
 that conversation, whose compaction retains the latest effective typed
-classifier classes needed by rebuild. When conversation derivation does not
-own a prior or current fact, rebuild carries exactly `architecture_commit`,
-`output_schema_evidence`, and `file_roles`. Session and plan lifecycle status
-remain on their own tables.
+classifier classes needed by rebuild. Carry-forward is limited to facts that
+cannot be reconstructed safely: `architecture_commit`, an accepted mapped-file
+limit, current attachment roles, and still-attached output/example evidence.
+Input schema direction is rebuilt from retained conversation evidence instead
+of being copied blindly. Session and plan lifecycle status remain on their own
+tables.
 
 Business logic consumes the typed Pydantic model here. Partial JSONB operators
 (`jsonb_set`, `||`, path updates) are forbidden. Every mutation follows load →
@@ -52,8 +54,11 @@ from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 8
-PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
+BUILDER_SCHEMA_VERSION: int = 10
+# One state can retain two independently assigned 128-KiB schemas. The persisted
+# envelope leaves the other half for provenance, file roles, slots, and future
+# state growth without coupling the per-schema ceiling to the state ceiling.
+PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 512 * 1024
 ARCHITECTURE_HASH_HEX_LENGTH: int = 64
 
 _ARCHITECTURE_HASH_RE = re.compile(rf"^[0-9a-f]{{{ARCHITECTURE_HASH_HEX_LENGTH}}}$")
@@ -102,13 +107,12 @@ AttachmentCoverage = Literal[
     "excerpt_truncated",
     "inventory_only",
 ]
-OutputSchemaEvidenceSource = Literal[
-    "freeform_text",
+SchemaEvidenceSource = Literal[
+    "declared_schema",
     "template_placeholders",
-    "attachment_json_schema",
     "inferred_example",
 ]
-OutputSchemaEvidenceStrength = Literal["explicit", "inferred"]
+SchemaEvidenceStrength = Literal["explicit", "inferred"]
 ExampleOutputStyleCategory = Literal[
     "tone",
     "detail_level",
@@ -314,11 +318,11 @@ class FileRoleEvidence(_PlanningModel):
         return self
 
 
-class OutputSchemaEvidence(_PlanningModel):
+class SchemaEvidence(_PlanningModel):
     json_schema: JsonObject
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    source: OutputSchemaEvidenceSource
-    strength: OutputSchemaEvidenceStrength
+    source: SchemaEvidenceSource
+    strength: SchemaEvidenceStrength
     source_file_ids: list[UUID] = Field(max_length=100)
     confidence: SignalConfidence
     evidence: list[str] = Field(default_factory=list[str], max_length=200)
@@ -326,27 +330,21 @@ class OutputSchemaEvidence(_PlanningModel):
     truncated: bool = False
 
     @model_validator(mode="after")
-    def _validate_truncation_metadata(self) -> OutputSchemaEvidence:
+    def _validate_truncation_metadata(self) -> SchemaEvidence:
         from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 
         expected_fingerprint = canonical_json_hash(self.json_schema)
         if self.fingerprint != expected_fingerprint:
-            raise ValueError("output schema fingerprint must match json_schema")
-        expected_strength: OutputSchemaEvidenceStrength = (
-            "explicit"
-            if self.source in {"freeform_text", "attachment_json_schema"}
-            else "inferred"
+            raise ValueError("schema fingerprint must match json_schema")
+        expected_strength: SchemaEvidenceStrength = (
+            "explicit" if self.source == "declared_schema" else "inferred"
         )
         if self.strength != expected_strength:
-            raise ValueError("output schema strength must match its source")
+            raise ValueError("schema strength must match its source")
         if self.source_file_ids != sorted(set(self.source_file_ids), key=str):
-            raise ValueError("output schema source_file_ids must be unique and sorted")
-        if self.source != "freeform_text" and not self.source_file_ids:
-            raise ValueError(
-                "attachment-derived output schema requires source_file_ids"
-            )
-        if self.source == "freeform_text" and self.source_file_ids:
-            raise ValueError("freeform output schema cannot cite attachment files")
+            raise ValueError("schema source_file_ids must be unique and sorted")
+        if self.source != "declared_schema" and not self.source_file_ids:
+            raise ValueError("inferred output schema requires source_file_ids")
         if self.source != "template_placeholders":
             if self.total_count is not None or self.truncated:
                 raise ValueError(
@@ -366,6 +364,125 @@ class OutputSchemaEvidence(_PlanningModel):
                 "truncated placeholder evidence cannot have high confidence"
             )
         return self
+
+
+class SchemaAssignmentEvidence(_PlanningModel):
+    """Direction-specific evidence that references one canonical schema shape."""
+
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source: SchemaEvidenceSource
+    strength: SchemaEvidenceStrength
+    source_file_ids: list[UUID] = Field(max_length=100)
+    confidence: SignalConfidence
+    evidence: list[str] = Field(default_factory=list[str], max_length=200)
+    total_count: int | None = Field(default=None, ge=0)
+    truncated: bool = False
+
+    @classmethod
+    def from_evidence(cls, evidence: SchemaEvidence) -> SchemaAssignmentEvidence:
+        return cls.model_validate(
+            evidence.model_dump(exclude={"json_schema"}, mode="python")
+        )
+
+    def materialize(self, json_schema: JsonObject) -> SchemaEvidence:
+        return SchemaEvidence.model_validate(
+            {
+                "json_schema": json_schema,
+                **self.model_dump(mode="python"),
+            }
+        )
+
+
+class SchemaResolution(_PlanningModel):
+    """Bounded schema shapes with independent input and output assignments.
+
+    A shape is stored once even when both boundaries use it. Assignment evidence
+    remains separate because input and output decisions can have different
+    provenance and confidence.
+    """
+
+    schemas: dict[str, JsonObject] = Field(
+        default_factory=dict[str, JsonObject],
+        max_length=2,
+    )
+    input: SchemaAssignmentEvidence | None = None
+    output: SchemaAssignmentEvidence | None = None
+
+    @model_validator(mode="after")
+    def _validate_schema_references(self) -> SchemaResolution:
+        from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+
+        if list(self.schemas) != sorted(self.schemas):
+            raise ValueError("schema resolution shapes must be fingerprint-sorted")
+        for fingerprint, schema in self.schemas.items():
+            if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+                raise ValueError("schema resolution keys must be fingerprints")
+            if canonical_json_hash(schema) != fingerprint:
+                raise ValueError("schema resolution fingerprint must match shape")
+
+        assignments = tuple(
+            assignment
+            for assignment in (self.input, self.output)
+            if assignment is not None
+        )
+        referenced = {assignment.fingerprint for assignment in assignments}
+        if referenced != set(self.schemas):
+            raise ValueError(
+                "schema resolution must store exactly the assigned schema shapes"
+            )
+        if self.input is not None and self.input.source != "declared_schema":
+            raise ValueError(
+                "input schema evidence cannot use an output-only inferred source"
+            )
+        return self
+
+    @classmethod
+    def from_evidence(
+        cls,
+        *,
+        input_evidence: SchemaEvidence | None,
+        output_evidence: SchemaEvidence | None,
+    ) -> SchemaResolution:
+        evidence_items = tuple(
+            evidence
+            for evidence in (input_evidence, output_evidence)
+            if evidence is not None
+        )
+        shapes: dict[str, JsonObject] = {}
+        for evidence in evidence_items:
+            existing = shapes.get(evidence.fingerprint)
+            if existing is not None and existing != evidence.json_schema:
+                raise ValueError("one schema fingerprint cannot identify two shapes")
+            shapes[evidence.fingerprint] = evidence.json_schema
+        return cls(
+            schemas={
+                fingerprint: shapes[fingerprint] for fingerprint in sorted(shapes)
+            },
+            input=(
+                SchemaAssignmentEvidence.from_evidence(input_evidence)
+                if input_evidence is not None
+                else None
+            ),
+            output=(
+                SchemaAssignmentEvidence.from_evidence(output_evidence)
+                if output_evidence is not None
+                else None
+            ),
+        )
+
+    def input_evidence(self) -> SchemaEvidence | None:
+        return (
+            self.input.materialize(self.schemas[self.input.fingerprint])
+            if self.input is not None
+            else None
+        )
+
+    def output_evidence(self) -> SchemaEvidence | None:
+        return (
+            self.output.materialize(self.schemas[self.output.fingerprint])
+            if self.output is not None
+            else None
+        )
 
 
 ExampleOutputHeading = Annotated[str, Field(min_length=1, max_length=160)]
@@ -489,7 +606,7 @@ class PlanningState(_PlanningModel):
         default_factory=dict[str, ResolvedSlot]
     )
     file_roles: list[FileRoleEvidence] = Field(default_factory=list[FileRoleEvidence])
-    output_schema_evidence: OutputSchemaEvidence | None = None
+    schema_resolution: SchemaResolution = Field(default_factory=SchemaResolution)
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     example_output_schema_inference: ExampleOutputSchemaInferenceOutcome | None = None
     input_fields: list[FlowInputFieldIntent] = Field(
@@ -497,6 +614,30 @@ class PlanningState(_PlanningModel):
     )
     architecture_commit: ArchitectureCommit | None = None
     mapped_file_limit: MappedFileLimit = Field(default_factory=MappedFileLimit)
+
+    @property
+    def input_schema_evidence(self) -> SchemaEvidence | None:
+        return self.schema_resolution.input_evidence()
+
+    @input_schema_evidence.setter
+    def input_schema_evidence(self, evidence: SchemaEvidence | None) -> None:
+        self.replace_schema_resolution(
+            input_evidence=evidence,
+            output_evidence=self.output_schema_evidence,
+            example_inference=self.example_output_schema_inference,
+        )
+
+    @property
+    def output_schema_evidence(self) -> SchemaEvidence | None:
+        return self.schema_resolution.output_evidence()
+
+    @output_schema_evidence.setter
+    def output_schema_evidence(self, evidence: SchemaEvidence | None) -> None:
+        self.replace_schema_resolution(
+            input_evidence=self.input_schema_evidence,
+            output_evidence=evidence,
+            example_inference=self.example_output_schema_inference,
+        )
 
     @model_validator(mode="after")
     def _file_role_ids_are_unique(self) -> PlanningState:
@@ -566,18 +707,20 @@ class PlanningState(_PlanningModel):
     def has_template_file_role(self) -> bool:
         return any(item.role == "template" for item in self.file_roles)
 
-    def replace_output_schema_resolution(
+    def replace_schema_resolution(
         self,
         *,
-        evidence: OutputSchemaEvidence | None,
+        input_evidence: SchemaEvidence | None,
+        output_evidence: SchemaEvidence | None,
         example_inference: ExampleOutputSchemaInferenceOutcome | None,
     ) -> None:
-        """Atomically replace the two fields that form one schema resolution."""
+        """Atomically replace the fields that form one schema resolution."""
 
         self.replace_attachment_interpretation(
             file_roles=self.file_roles,
             example_constraints=self.example_output_constraints,
-            evidence=evidence,
+            input_evidence=input_evidence,
+            output_evidence=output_evidence,
             example_inference=example_inference,
         )
 
@@ -586,7 +729,8 @@ class PlanningState(_PlanningModel):
         *,
         file_roles: list[FileRoleEvidence],
         example_constraints: ExampleOutputConstraintEvidence | None,
-        evidence: OutputSchemaEvidence | None,
+        input_evidence: SchemaEvidence | None,
+        output_evidence: SchemaEvidence | None,
         example_inference: ExampleOutputSchemaInferenceOutcome | None,
     ) -> None:
         """Replace the coupled attachment interpretation as one valid snapshot.
@@ -601,7 +745,10 @@ class PlanningState(_PlanningModel):
                 **dict(self),
                 "file_roles": file_roles,
                 "example_output_constraints": example_constraints,
-                "output_schema_evidence": evidence,
+                "schema_resolution": SchemaResolution.from_evidence(
+                    input_evidence=input_evidence,
+                    output_evidence=output_evidence,
+                ),
                 "example_output_schema_inference": example_inference,
             }
         )
@@ -611,11 +758,7 @@ class PlanningState(_PlanningModel):
             "example_output_constraints",
             candidate.example_output_constraints,
         )
-        object.__setattr__(
-            self,
-            "output_schema_evidence",
-            candidate.output_schema_evidence,
-        )
+        object.__setattr__(self, "schema_resolution", candidate.schema_resolution)
         object.__setattr__(
             self,
             "example_output_schema_inference",

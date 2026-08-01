@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from uuid import UUID
 
 import pytest
@@ -22,12 +23,15 @@ from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_win
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     extract_freeform_user_messages,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    build_attachment_schema_candidate,
-    resolve_attachment_output_schema,
-)
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    SCHEMA_CANDIDATE_MAX_ITEMS,
+    build_declared_schema_candidate,
+    derive_freeform_schema_candidates,
+    resolve_structured_schema_direction,
+    schema_direction_option_values,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
@@ -64,6 +68,22 @@ def _msg(
         metadata=metadata,
         tool_calls=tool_calls,
         tool_call_id=tool_call_id,
+    )
+
+
+def _schema_fence(index: int) -> str:
+    schema = {
+        "type": "object",
+        "properties": {f"field_{index}": {"type": "string"}},
+    }
+    return f"```json\n{json.dumps(schema, separators=(',', ':'))}\n```"
+
+
+def _schema_message(index: int, *, padding: int = 0) -> ConversationMessage:
+    return ConversationMessage(
+        message_id=f"schema-source-{index}",
+        role="user",
+        content=_schema_fence(index) + "\n" + "x" * padding,
     )
 
 
@@ -614,14 +634,16 @@ def test_compaction_keeps_latest_tool_trace_pair() -> None:
     assert any(msg.tool_call_id == "call-1" for msg in compacted)
 
 
-def test_count_and_byte_compaction_keep_schema_conflict_selection_replayable() -> None:
-    first = build_attachment_schema_candidate(
+def test_count_and_byte_compaction_keep_schema_direction_replayable() -> None:
+    first = build_declared_schema_candidate(
         {"type": "object", "properties": {"decision": {"type": "string"}}},
         source_file_ids=(UUID(int=801),),
+        provenance=(f"file:{UUID(int=801)}:json_schema_attachment",),
     )
-    second = build_attachment_schema_candidate(
+    second = build_declared_schema_candidate(
         {"type": "object", "properties": {"count": {"type": "integer"}}},
         source_file_ids=(UUID(int=802),),
+        provenance=(f"file:{UUID(int=802)}:json_schema_attachment",),
     )
     conflict_question = _msg(
         "assistant",
@@ -631,18 +653,19 @@ def test_count_and_byte_compaction_keep_schema_conflict_selection_replayable() -
                 "id": "call-schema-conflict",
                 "name": "ask_structured_question",
                 "arguments": {
-                    "question_id": "output_schema_conflict",
-                    "question": "Which schema?",
+                    "question_id": "schema_direction",
+                    "question": "How should these schemas be used?",
                     "options": [
                         {
-                            "id": candidate.fingerprint,
-                            "label": f"Schema {index}",
-                            "value": candidate.fingerprint,
+                            "id": value,
+                            "label": value,
+                            "value": value,
                         }
-                        for index, candidate in enumerate((first, second), start=1)
+                        for value in schema_direction_option_values((first, second))
                     ],
-                    "selection_mode": "single",
+                    "selection_mode": "multi",
                     "allow_custom": False,
+                    "requires_confirm": True,
                 },
             }
         ],
@@ -657,9 +680,8 @@ def test_count_and_byte_compaction_keep_schema_conflict_selection_replayable() -
         content="Use schema 2.",
         metadata={
             "question_answer": {
-                "question_id": "output_schema_conflict",
-                "selected_option_id": second.fingerprint,
-                "selected_value": second.fingerprint,
+                "question_id": "schema_direction",
+                "selected_values": [f"output:{second.fingerprint}"],
             }
         },
     )
@@ -704,14 +726,12 @@ def test_count_and_byte_compaction_keep_schema_conflict_selection_replayable() -
     )
 
     for compacted in (count_compacted, byte_compacted):
-        resolution = resolve_attachment_output_schema(
+        resolution = resolve_structured_schema_direction(
             conversation=compacted,
             candidates=(first, second),
-            authoritative_evidence=None,
         )
-        assert resolution.conflict_pending is False
-        assert resolution.evidence is not None
-        assert resolution.evidence.fingerprint == second.fingerprint
+        assert resolution is not None
+        assert resolution.output_fingerprint == second.fingerprint
         assert any(
             message.tool_call_id == "call-schema-conflict" for message in compacted
         )
@@ -719,6 +739,175 @@ def test_count_and_byte_compaction_keep_schema_conflict_selection_replayable() -
             message.role == "tool" and message.tool_call_id == "call-schema-conflict"
             for message in compacted
         )
+
+
+def test_compaction_keeps_pasted_schema_source_with_its_direction_answer() -> None:
+    schema_message = ConversationMessage(
+        message_id="schema-source",
+        role="user",
+        content=(
+            '```json\n{"type":"object","properties":{"case_id":{"type":"string"}}}\n```'
+        ),
+    )
+    candidate = derive_freeform_schema_candidates([schema_message])[0]
+    question = _msg(
+        "assistant",
+        content="Choose how to use the schema.",
+        tool_calls=[
+            {
+                "id": "call-schema-direction",
+                "name": "ask_structured_question",
+                "arguments": {
+                    "question_id": "schema_direction",
+                    "question": "How should this schema be used?",
+                    "options": [
+                        {
+                            "id": value,
+                            "label": value,
+                            "value": value,
+                        }
+                        for value in schema_direction_option_values((candidate,))
+                    ],
+                    "selection_mode": "multi",
+                    "allow_custom": False,
+                    "requires_confirm": True,
+                },
+            }
+        ],
+    )
+    question_result = _msg(
+        "tool",
+        content="Question presented.",
+        tool_call_id="call-schema-direction",
+    )
+    answer = _msg(
+        "user",
+        content="Use it as input.",
+        metadata={
+            "question_answer": {
+                "question_id": "schema_direction",
+                "selected_values": [f"input:{candidate.fingerprint}"],
+            }
+        },
+    )
+    conversation = [
+        schema_message,
+        *[_msg("assistant", content=f"old filler {index}") for index in range(12)],
+        question,
+        question_result,
+        answer,
+        *[_msg("assistant", content="x" * 2_000) for _ in range(5)],
+        _msg("user", content="continue"),
+    ]
+
+    count_compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=8,
+        tail_messages=2,
+    )
+    required = [schema_message, question, question_result, answer, conversation[-1]]
+    byte_compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=100,
+        max_conversation_bytes=conversation_serialized_size_bytes(required) + 100,
+    )
+
+    for compacted in (count_compacted, byte_compacted):
+        retained_candidates = derive_freeform_schema_candidates(compacted)
+        assert retained_candidates == (candidate,)
+        resolution = resolve_structured_schema_direction(
+            conversation=compacted,
+            candidates=retained_candidates,
+        )
+        assert resolution is not None
+        assert resolution.input_fingerprint == candidate.fingerprint
+
+
+def test_count_compaction_prefers_newest_schema_sources_within_budget() -> None:
+    schema_messages = [_schema_message(index) for index in range(6)]
+    final_message = ConversationMessage(
+        message_id="continue-after-schemas",
+        role="user",
+        content="Continue.",
+    )
+
+    compacted = compact_ai_builder_conversation(
+        [*schema_messages, final_message],
+        max_messages=4,
+        tail_messages=1,
+    )
+
+    assert compacted == [*schema_messages[-3:], final_message]
+
+
+def test_byte_compaction_prefers_newest_schema_sources_within_budget() -> None:
+    schema_messages = [_schema_message(index, padding=2_000) for index in range(6)]
+    final_message = ConversationMessage(
+        message_id="continue-after-schemas",
+        role="user",
+        content="Continue.",
+    )
+    expected = [*schema_messages[-2:], final_message]
+
+    compacted = compact_ai_builder_conversation(
+        [*schema_messages, final_message],
+        max_messages=100,
+        max_conversation_bytes=conversation_serialized_size_bytes(expected),
+    )
+
+    assert compacted == expected
+
+
+def test_compaction_ignores_schema_extraction_limit_for_retention() -> None:
+    over_limit_schema_message = ConversationMessage(
+        message_id="too-many-schema-candidates",
+        role="user",
+        content="\n".join(
+            _schema_fence(index) for index in range(SCHEMA_CANDIDATE_MAX_ITEMS + 1)
+        ),
+    )
+    tail = [
+        ConversationMessage(
+            message_id=f"tail-{index}",
+            role="assistant" if index == 0 else "user",
+            content=f"tail {index}",
+        )
+        for index in range(2)
+    ]
+
+    compacted = compact_ai_builder_conversation(
+        [over_limit_schema_message, *tail],
+        max_messages=2,
+        tail_messages=2,
+    )
+
+    assert compacted == tail
+
+
+def test_compaction_ignores_oversized_schema_for_retention() -> None:
+    oversized_schema_message = ConversationMessage(
+        message_id="oversized-schema",
+        role="user",
+        content=(
+            '```json\n{"type":"object","description":"' + "😀" * 40_000 + '"}\n```'
+        ),
+    )
+    tail = [
+        ConversationMessage(
+            message_id=f"tail-{index}",
+            role="assistant" if index == 0 else "user",
+            content=f"tail {index}",
+        )
+        for index in range(2)
+    ]
+
+    compacted = compact_ai_builder_conversation(
+        [oversized_schema_message, *tail],
+        max_messages=2,
+        tail_messages=2,
+    )
+
+    assert compacted == tail
 
 
 def test_compaction_preserves_tool_trace_atomically_after_final_slice() -> None:

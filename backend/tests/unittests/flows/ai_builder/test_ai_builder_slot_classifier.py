@@ -35,8 +35,12 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    build_declared_schema_candidate,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
+    ClassifiedSchemaDirection,
     SlotClassificationInput,
     SlotClassificationSource,
     classify_slots,
@@ -78,6 +82,81 @@ def _make_response(content: str) -> MagicMock:
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries() -> (
+    None
+):
+    first = "a" * 64
+    second = "b" * 64
+    quote = "Use the case schema as input and the result schema as output."
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "example_output_constraints": None,
+                "schema_direction": {
+                    "input_fingerprint": first,
+                    "output_fingerprint": second,
+                    "reference_only": False,
+                    "confidence": "high",
+                    "reason": "The user assigned both boundaries.",
+                    "evidence": [_evidence(quote)],
+                },
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+        schema_candidate_fingerprints=(second, first),
+    )
+
+    assert result is not None
+    assert result.schema_direction == ClassifiedSchemaDirection(
+        candidate_fingerprints=(first, second),
+        input_fingerprint=first,
+        output_fingerprint=second,
+        reference_only=False,
+        confidence="high",
+        reason="The user assigned both boundaries.",
+        evidence=(ClassifiedEvidence(source_id="user_message:user-1", quote=quote),),
+    )
+
+
+def test_parser_rejects_schema_direction_outside_complete_candidate_set() -> None:
+    quote = "Use this schema as input."
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "example_output_constraints": None,
+                "schema_direction": {
+                    "input_fingerprint": "c" * 64,
+                    "output_fingerprint": None,
+                    "reference_only": False,
+                    "confidence": "high",
+                    "reason": "The user selected an unknown candidate.",
+                    "evidence": [_evidence(quote)],
+                },
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+        schema_candidate_fingerprints=("a" * 64, "b" * 64),
+    )
+
+    assert result is not None
+    assert result.schema_direction is None
 
 
 def _route(
@@ -1461,6 +1540,60 @@ def test_classification_prompt_includes_unconfirmed_uploaded_file_evidence() -> 
     assert "has_readable_text: false" in prompt
 
 
+def test_schema_candidate_prompt_maps_file_source_to_candidate_fingerprint() -> None:
+    file_ids = tuple(uuid4() for _ in range(4))
+    candidate = build_declared_schema_candidate(
+        {"type": "object", "properties": {"case_id": {"type": "string"}}},
+        source_file_ids=file_ids,
+        provenance=tuple(
+            f"file:{file_id}:json_schema_attachment" for file_id in file_ids
+        ),
+    )
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:user-1",
+                    kind="user_message",
+                    text="schema in intake.json is input",
+                    message_id="user-1",
+                ),
+                *(
+                    SlotClassificationSource(
+                        source_id=f"uploaded_file:{file_id}",
+                        kind="uploaded_file",
+                        text=(
+                            f"filename: intake-{index}.json\n"
+                            "file_type: text\n"
+                            "has_readable_text: true\n"
+                            "coverage: fully_seen"
+                        ),
+                        file_id=file_id,
+                        coverage="fully_seen",
+                    )
+                    for index, file_id in enumerate(file_ids, start=1)
+                ),
+            )
+        ),
+        allowed_slot_values={},
+        schema_candidates=(candidate,),
+        ui_language="en",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    candidate_line = next(
+        line for line in prompt.splitlines() if candidate.fingerprint in line
+    )
+    assert all(
+        f"file:{file_id}:json_schema_attachment" in candidate_line
+        for file_id in file_ids
+    )
+    fourth_file_id = file_ids[3]
+    assert f"uploaded_file:{fourth_file_id}" in prompt
+    assert "filename: intake-4.json" in prompt
+    assert "schema in intake.json is input" in prompt
+
+
 def test_classification_prompt_places_evidence_bounds_in_model_contract() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
         classification_input=_classification_input("Jag vill ha en PDF-rapport."),
@@ -1603,7 +1736,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     response_format = litellm_client.acompletion.await_args.kwargs["response_format"]
     assert response_format["type"] == "json_schema"
     json_schema = response_format["json_schema"]
-    assert json_schema["name"] == "ai_builder_slot_classification_v14"
+    assert json_schema["name"] == "ai_builder_slot_classification_v15"
     assert json_schema["strict"] is False
 
     schema = json_schema["schema"]
@@ -1612,6 +1745,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "file_roles",
         "form_intake",
         "example_output_constraints",
+        "schema_direction",
         "secondary_obligations",
         "assumptions",
         "contradictions",

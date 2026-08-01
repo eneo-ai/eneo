@@ -20,14 +20,14 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    build_output_schema_evidence,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    build_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
@@ -49,6 +49,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
+    SchemaResolution,
 )
 from eneo.flows.flow_authoring_spec import (
     InputSource,
@@ -96,7 +97,7 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
         "terminal_output",
         "docx_document",
     )
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"kundnamn": {"type": "string"}},
@@ -126,7 +127,7 @@ def test_compile_context_keeps_distinct_long_template_placeholder_names() -> Non
         "terminal_output",
         "docx_document",
     )
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {
@@ -151,7 +152,7 @@ def test_compile_context_keeps_distinct_long_template_placeholder_names() -> Non
     ] == [first, second]
 
 
-def test_compile_context_binds_attachment_json_schema_to_json_terminal() -> None:
+def test_compile_context_binds_declared_output_schema_to_json_terminal() -> None:
     state = PlanningState.empty()
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
@@ -162,9 +163,9 @@ def test_compile_context_binds_attachment_json_schema_to_json_terminal() -> None
         "properties": {"decision": {"type": "string"}},
         "required": ["decision"],
     }
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema=schema,
-        source="attachment_json_schema",
+        source="declared_schema",
         source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=["file:00000000-0000-0000-0000-000000000701:json_schema_attachment"],
@@ -223,12 +224,15 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
                     )
                 ],
             ),
-            "output_schema_evidence": build_output_schema_evidence(
-                json_schema=schema,
-                source="inferred_example",
-                source_file_ids=(file_id,),
-                confidence="medium",
-                evidence=(f"file:{file_id}:inferred_example_shape",),
+            "schema_resolution": SchemaResolution.from_evidence(
+                input_evidence=None,
+                output_evidence=build_schema_evidence(
+                    json_schema=schema,
+                    source="inferred_example",
+                    source_file_ids=(file_id,),
+                    confidence="medium",
+                    evidence=(f"file:{file_id}:inferred_example_shape",),
+                ),
             ),
             "example_output_schema_inference": ExampleOutputSchemaInferenceOutcome(
                 status="inferred",
@@ -245,18 +249,18 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
     assert "additionalProperties" not in context.terminal_output_schema
 
 
-def test_compile_context_keeps_undirected_schema_out_of_docx_terminal() -> None:
+def test_compile_context_keeps_input_schema_out_of_docx_terminal() -> None:
     state = PlanningState.empty()
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
         "docx_document",
     )
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.input_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"decision": {"type": "string"}},
         },
-        source="attachment_json_schema",
+        source="declared_schema",
         source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=["file:00000000-0000-0000-0000-000000000701:json_schema_attachment"],
@@ -2193,7 +2197,7 @@ def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
         "terminal_output",
         "docx_document",
     )
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {

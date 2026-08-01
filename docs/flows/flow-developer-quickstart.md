@@ -267,7 +267,7 @@ High-level builder flow:
    - `signals`
    - `resolved_slots`
    - `file_roles`
-   - `output_schema_evidence`
+   - `schema_resolution` (canonical shapes plus independent input/output evidence)
    - `architecture_commit`
 3. Discovery runtime merges conversation evidence, attachment evidence, and
    policy defaults into a planning context.
@@ -298,8 +298,17 @@ Important builder rules:
   budget is exhausted.
 - High-confidence assumptions must be visible in the requirements summary so
   the user can reject them.
-- Attachments are first-class evidence through typed file role and output schema
-  evidence. Avoid semantic filename or phrase-list heuristics.
+- Attachments are first-class evidence through typed file roles, neutral schema
+  candidates, and output-only template-placeholder evidence. Avoid semantic
+  filename or phrase-list heuristics.
+- A valid JSON Schema does not choose its own boundary. Builder derives bounded
+  current candidates with complete source provenance; explicit structured or
+  cited user evidence may assign one candidate to input, output, both, or
+  reference-only use. Conversation compaction prefers the newest pasted schema
+  sources but may drop older ones and reopen direction instead of making the
+  session unrecoverable. Genuine ambiguity is resolved by one server-owned typed
+  question. Attachment-only evidence cannot assign direction, and an unassigned
+  schema must not change the requested terminal output.
 - Builder attachment text is admitted against the selected model's context
   window after reserving output, safety, and active-conversation tokens. The
   remaining capacity is shared fairly across readable files; there are no

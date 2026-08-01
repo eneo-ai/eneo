@@ -60,7 +60,10 @@ def prepare_user_question_metadata(
         metadata = metadata_for_user_message(question_answer=requirements_confirmation)
     elif question_answer is not None:
         metadata = metadata_for_user_message(
-            question_answer=_validated_structured_question_answer(question_answer)
+            question_answer=_validated_structured_question_answer(
+                conversation=conversation,
+                question_answer=question_answer,
+            )
         )
 
     if metadata is None and not is_requirements_confirmation and message.strip():
@@ -81,6 +84,8 @@ def prepare_user_question_metadata(
 
 
 def _validated_structured_question_answer(
+    *,
+    conversation: list[ConversationMessage],
     question_answer: AIBuilderQuestionAnswerInput,
 ) -> StructuredQuestionAnswerMetadata:
     answer = structured_question_answer_from_input(question_answer)
@@ -99,6 +104,17 @@ def _validated_structured_question_answer(
 
     if _has_unsupported_slot_value(answer, question_id):
         _raise_invalid_question_payload("unsupported_question_value")
+
+    if canonical_question_id(question_id) == "schema_direction":
+        from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+            is_valid_structured_schema_direction_answer,
+        )
+
+        if not is_valid_structured_schema_direction_answer(
+            conversation=conversation,
+            answer=answer,
+        ):
+            _raise_invalid_question_payload("invalid_schema_direction")
 
     return answer
 

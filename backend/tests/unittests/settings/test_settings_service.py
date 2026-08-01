@@ -12,6 +12,7 @@ from eneo.data_retention.infrastructure.data_retention_service import (
 )
 from eneo.flows import flow_runtime_policy
 from eneo.flows.ai_builder import ai_builder_settings
+from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTES
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_evidence_policy import (
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
@@ -951,7 +952,10 @@ async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch)
     assert (
         settings.max_template_uncompressed_bytes_per_file_hard_limit == 50 * 1024 * 1024
     )
-    assert settings.max_planning_state_payload_bytes_hard_limit == 128 * 1024
+    assert (
+        settings.max_planning_state_payload_bytes_hard_limit
+        == PLANNING_STATE_PAYLOAD_CAP_BYTES
+    )
 
 
 async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch):

@@ -5,10 +5,54 @@ import {
   buildStructuredQuestionInputFieldsAnswer,
   buildStructuredQuestionSelection,
   getStructuredQuestionOptionKey,
+  toggleStructuredQuestionOption,
   type StructuredQuestion
 } from "./structuredQuestionAnswer";
 
 describe("structured question answer helpers", () => {
+  const schemaDirectionQuestion: StructuredQuestion = {
+    question_id: "schema_direction",
+    question: "How should the schemas be used?",
+    selection_mode: "multi",
+    allow_custom: false,
+    requires_confirm: true,
+    options: [
+      { id: `input:${"a".repeat(64)}`, label: "A as input", value: `input:${"a".repeat(64)}` },
+      { id: `input:${"b".repeat(64)}`, label: "B as input", value: `input:${"b".repeat(64)}` },
+      { id: `output:${"a".repeat(64)}`, label: "A as output", value: `output:${"a".repeat(64)}` },
+      { id: "reference_only", label: "Reference only", value: "reference_only" }
+    ]
+  };
+
+  it("keeps at most one schema per boundary", () => {
+    const firstInput = schemaDirectionQuestion.options[0];
+    const secondInput = schemaDirectionQuestion.options[1];
+    const output = schemaDirectionQuestion.options[2];
+
+    let selected = toggleStructuredQuestionOption(schemaDirectionQuestion, new Set(), firstInput);
+    selected = toggleStructuredQuestionOption(schemaDirectionQuestion, selected, output);
+    selected = toggleStructuredQuestionOption(schemaDirectionQuestion, selected, secondInput);
+
+    expect([...selected]).toEqual([
+      getStructuredQuestionOptionKey(output),
+      getStructuredQuestionOptionKey(secondInput)
+    ]);
+  });
+
+  it("keeps reference-only exclusive from boundary assignments", () => {
+    const input = schemaDirectionQuestion.options[0];
+    const output = schemaDirectionQuestion.options[2];
+    const referenceOnly = schemaDirectionQuestion.options[3];
+
+    let selected = toggleStructuredQuestionOption(schemaDirectionQuestion, new Set(), input);
+    selected = toggleStructuredQuestionOption(schemaDirectionQuestion, selected, output);
+    selected = toggleStructuredQuestionOption(schemaDirectionQuestion, selected, referenceOnly);
+    expect([...selected]).toEqual(["reference_only"]);
+
+    selected = toggleStructuredQuestionOption(schemaDirectionQuestion, selected, output);
+    expect([...selected]).toEqual([getStructuredQuestionOptionKey(output)]);
+  });
+
   it("prefers stable option ids and falls back to labels", () => {
     expect(
       getStructuredQuestionOptionKey({

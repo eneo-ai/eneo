@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
     question_answer_values,
     question_response_from_metadata,
+    slot_classification_from_metadata,
     slot_classification_metadata_from_result,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
@@ -37,17 +38,23 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
     slot_names_blocked_by_explicit_uncertainty,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    ExampleOutputJsonSource,
-    resolve_attachment_output_schema,
-    resolve_example_output_schema_inference,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_question_state import (
     assistant_question_id,
     last_answered_question,
 )
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    DeclaredSchemaCandidate,
+    ExampleOutputJsonSource,
+    SchemaDirectionSelection,
+    declared_candidate_evidence,
+    derive_freeform_schema_candidates,
+    merge_declared_schema_candidates,
+    resolve_example_output_schema_inference,
+    resolve_structured_schema_direction,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedSchemaDirection,
     SlotClassificationBias,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -82,7 +89,8 @@ class RuntimeDiscoveryContext:
     planning_state: PlanningState
     slot_classification_result: SlotClassificationResult | None = None
     slot_classification_metadata: SlotClassificationMetadata | None = None
-    output_schema_conflict_pending: bool = False
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
+    schema_direction_pending: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +98,8 @@ class DiscoveryRuntimeResult:
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
     slot_classification_metadata: SlotClassificationMetadata | None = None
-    output_schema_conflict_pending: bool = False
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
+    schema_direction_pending: bool = False
 
 
 def _apply_example_output_schema_inference(
@@ -104,8 +113,9 @@ def _apply_example_output_schema_inference(
             or state.output_schema_evidence.source != "inferred_example"
         ):
             return state
-        state.replace_output_schema_resolution(
-            evidence=(
+        state.replace_schema_resolution(
+            input_evidence=state.input_schema_evidence,
+            output_evidence=(
                 None
                 if state.output_schema_evidence is not None
                 and state.output_schema_evidence.source == "inferred_example"
@@ -147,8 +157,9 @@ def _apply_example_output_schema_inference(
         sources=tuple(sources),
         authoritative_evidence=state.output_schema_evidence,
     )
-    state.replace_output_schema_resolution(
-        evidence=resolution.evidence,
+    state.replace_schema_resolution(
+        input_evidence=state.input_schema_evidence,
+        output_evidence=resolution.evidence,
         example_inference=resolution.outcome,
     )
     return state
@@ -363,6 +374,129 @@ def _is_structured_answer_echo(
     }
 
 
+def _current_schema_candidates(
+    conversation: list[ConversationMessage],
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> tuple[DeclaredSchemaCandidate, ...]:
+    return merge_declared_schema_candidates(
+        derive_freeform_schema_candidates(conversation),
+        (
+            attachment_context.schema_discovery.candidates
+            if attachment_context is not None
+            else ()
+        ),
+    )
+
+
+def _latest_classified_schema_direction(
+    conversation: list[ConversationMessage],
+    *,
+    candidates: tuple[DeclaredSchemaCandidate, ...],
+) -> ClassifiedSchemaDirection | None:
+    current_fingerprints = tuple(
+        sorted(candidate.fingerprint for candidate in candidates)
+    )
+    for message in reversed(conversation):
+        metadata = slot_classification_from_metadata(message.metadata)
+        if metadata is None or metadata.schema_direction is None:
+            continue
+        direction = metadata.schema_direction.to_classified_schema_direction()
+        if (
+            direction.candidate_fingerprints != current_fingerprints
+            or direction.confidence == "low"
+        ):
+            return None
+        return direction
+    return None
+
+
+def _apply_schema_direction(
+    state: PlanningState,
+    *,
+    candidates: tuple[DeclaredSchemaCandidate, ...],
+    direction: ClassifiedSchemaDirection | SchemaDirectionSelection,
+) -> None:
+    candidates_by_fingerprint = {
+        candidate.fingerprint: candidate for candidate in candidates
+    }
+    input_candidate = (
+        candidates_by_fingerprint.get(direction.input_fingerprint)
+        if direction.input_fingerprint is not None
+        else None
+    )
+    output_candidate = (
+        candidates_by_fingerprint.get(direction.output_fingerprint)
+        if direction.output_fingerprint is not None
+        else None
+    )
+    if direction.candidate_fingerprints != tuple(sorted(candidates_by_fingerprint)):
+        return
+    assignment_evidence = (
+        tuple(item.planning_reference() for item in direction.evidence)
+        if isinstance(direction, ClassifiedSchemaDirection)
+        else direction.evidence
+    )
+    state.replace_schema_resolution(
+        input_evidence=(
+            declared_candidate_evidence(
+                input_candidate,
+                confidence=direction.confidence,
+                assignment_evidence=assignment_evidence,
+            )
+            if input_candidate is not None
+            else None
+        ),
+        output_evidence=(
+            declared_candidate_evidence(
+                output_candidate,
+                confidence=direction.confidence,
+                assignment_evidence=assignment_evidence,
+            )
+            if output_candidate is not None
+            else None
+        ),
+        example_inference=None,
+    )
+
+
+def _apply_attachment_output_evidence(
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> PlanningState:
+    attachment_output_evidence = (
+        attachment_context.output_schema_evidence
+        if attachment_context is not None
+        else None
+    )
+    if state.output_schema_evidence is None and attachment_output_evidence is not None:
+        state.replace_schema_resolution(
+            input_evidence=state.input_schema_evidence,
+            output_evidence=attachment_output_evidence,
+            example_inference=None,
+        )
+    return _apply_example_output_schema_inference(state, attachment_context)
+
+
+def _complete_runtime_discovery_context(
+    state: PlanningState,
+    *,
+    attachment_context: AIBuilderAttachmentContext | None,
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...],
+    schema_direction_pending: bool,
+    slot_classification_result: SlotClassificationResult | None = None,
+    slot_classification_metadata: SlotClassificationMetadata | None = None,
+) -> RuntimeDiscoveryContext:
+    if not schema_direction_pending:
+        state = _apply_attachment_output_evidence(state, attachment_context)
+    return RuntimeDiscoveryContext(
+        planning_state=state,
+        slot_classification_result=slot_classification_result,
+        slot_classification_metadata=slot_classification_metadata,
+        schema_candidates=schema_candidates,
+        schema_direction_pending=schema_direction_pending,
+    )
+
+
 async def build_runtime_discovery_context(
     conversation: list[ConversationMessage],
     *,
@@ -376,49 +510,47 @@ async def build_runtime_discovery_context(
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
+    prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
 ) -> RuntimeDiscoveryContext:
+    schema_candidates = (
+        prepared_schema_candidates
+        if prepared_schema_candidates is not None
+        else _current_schema_candidates(conversation, attachment_context)
+    )
     state = build_planning_state_from_conversation(
         conversation,
         flow=flow,
-        attachment_output_schema_evidence=(
-            attachment_context.output_schema_evidence
-            if attachment_context is not None
-            else None
-        ),
         attachment_file_roles=attachment_file_roles(attachment_context),
         mapped_execution_policy=mapped_execution_policy,
     )
     apply_attachment_structural_evidence_to_planning_state(state, attachment_context)
-    schema_resolution = resolve_attachment_output_schema(
+    structured_direction = resolve_structured_schema_direction(
         conversation=conversation,
-        candidates=(
-            attachment_context.output_schema_discovery.candidates
-            if attachment_context is not None
-            else ()
-        ),
-        authoritative_evidence=state.output_schema_evidence,
+        candidates=schema_candidates,
     )
-    state.replace_output_schema_resolution(
-        evidence=schema_resolution.evidence,
-        example_inference=(
-            state.example_output_schema_inference
-            if schema_resolution.evidence is not None
-            and schema_resolution.evidence.source == "inferred_example"
-            else None
-        ),
+    existing_direction = _latest_classified_schema_direction(
+        conversation,
+        candidates=schema_candidates,
     )
-    if schema_resolution.conflict_pending:
-        return RuntimeDiscoveryContext(
-            planning_state=state,
-            output_schema_conflict_pending=True,
+    accepted_direction = structured_direction or existing_direction
+    if accepted_direction is not None:
+        _apply_schema_direction(
+            state,
+            candidates=schema_candidates,
+            direction=accepted_direction,
         )
-    state = _apply_example_output_schema_inference(state, attachment_context)
+    schema_direction_pending = bool(schema_candidates) and accepted_direction is None
     if (
         not allow_classification
         or litellm_client is None
         or completion_model_route is None
     ):
-        return RuntimeDiscoveryContext(planning_state=state)
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+        )
 
     text = aggregate_unprompted_user_text(conversation)
     classification_input = build_slot_classification_input(
@@ -426,7 +558,12 @@ async def build_runtime_discovery_context(
         attachment_context,
     )
     if not classification_input.sources:
-        return RuntimeDiscoveryContext(planning_state=state)
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+        )
 
     allowed_values = llm_resolvable_slot_values_for_state(state)
     model_blocked_slots = slot_names_blocked_by_explicit_uncertainty(
@@ -440,8 +577,13 @@ async def build_runtime_discovery_context(
             for slot_name, values in allowed_values.items()
             if slot_name not in model_blocked_slots
         }
-    if not allowed_values:
-        return RuntimeDiscoveryContext(planning_state=state)
+    if not allowed_values and not schema_direction_pending:
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=False,
+        )
     bias = _targeted_classification_bias(
         conversation,
         allowed_values,
@@ -452,6 +594,7 @@ async def build_runtime_discovery_context(
         completion_model_route=completion_model_route,
         classification_input=classification_input,
         allowed_slot_values=allowed_values,
+        schema_candidates=(schema_candidates if schema_direction_pending else ()),
         tenant_id=tenant_id,
         ui_language=ui_language,
         bias=bias,
@@ -459,7 +602,12 @@ async def build_runtime_discovery_context(
         before_provider_call=before_provider_call,
     )
     if result is None:
-        return RuntimeDiscoveryContext(planning_state=state)
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+        )
 
     provider = slot_classification_provider_identity(
         provider_type=completion_model_route.provider_type,
@@ -469,6 +617,7 @@ async def build_runtime_discovery_context(
         classification_input=classification_input,
         ui_language=ui_language,
         allowed_slot_values=allowed_values,
+        schema_candidates=(schema_candidates if schema_direction_pending else ()),
         litellm_model=completion_model_route.litellm_model,
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
@@ -481,10 +630,24 @@ async def build_runtime_discovery_context(
         freeform_text=text,
         model_blocked_slots=model_blocked_slots,
     )
-    state = _apply_example_output_schema_inference(state, attachment_context)
+    classified_direction = result.schema_direction
+    if (
+        schema_direction_pending
+        and classified_direction is not None
+        and classified_direction.confidence != "low"
+    ):
+        _apply_schema_direction(
+            state,
+            candidates=schema_candidates,
+            direction=classified_direction,
+        )
+        schema_direction_pending = False
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
-    return RuntimeDiscoveryContext(
-        planning_state=state,
+    return _complete_runtime_discovery_context(
+        state,
+        attachment_context=attachment_context,
+        schema_candidates=schema_candidates,
+        schema_direction_pending=schema_direction_pending,
         slot_classification_result=result,
         slot_classification_metadata=slot_classification_metadata_from_result(
             result,
@@ -509,6 +672,7 @@ async def build_discovery_runtime_result(
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
+    prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -522,6 +686,7 @@ async def build_discovery_runtime_result(
         usage_tracker=usage_tracker,
         before_provider_call=before_provider_call,
         mapped_execution_policy=mapped_execution_policy,
+        prepared_schema_candidates=prepared_schema_candidates,
     )
     analysis = analyze_discovery(
         conversation,
@@ -533,5 +698,6 @@ async def build_discovery_runtime_result(
         discovery_analysis=analysis,
         planning_state=context.planning_state,
         slot_classification_metadata=context.slot_classification_metadata,
-        output_schema_conflict_pending=context.output_schema_conflict_pending,
+        schema_candidates=context.schema_candidates,
+        schema_direction_pending=context.schema_direction_pending,
     )

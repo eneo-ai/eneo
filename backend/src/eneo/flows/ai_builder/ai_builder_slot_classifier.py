@@ -22,6 +22,10 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
 )
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    DeclaredSchemaCandidate,
+    project_schema_fields,
+)
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     completion_token_usage_from_response,
 )
@@ -58,7 +62,7 @@ _USER_OWNED_CLASSIFICATION_SOURCE_KINDS: frozenset[SlotClassificationSourceKind]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 14
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 15
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
@@ -106,6 +110,17 @@ class ClassifiedEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassifiedSchemaDirection:
+    candidate_fingerprints: tuple[str, ...]
+    input_fingerprint: str | None
+    output_fingerprint: str | None
+    reference_only: bool
+    confidence: SlotClassificationConfidence
+    reason: str
+    evidence: tuple[ClassifiedEvidence, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ClassifiedSlot:
     slot_name: str
     value: str
@@ -141,6 +156,7 @@ class SlotClassificationResult:
     file_roles: tuple[ClassifiedFileRole, ...] = ()
     form_intake: ClassifiedFormIntake | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
+    schema_direction: ClassifiedSchemaDirection | None = None
     secondary_obligations: tuple[ResultObligation, ...] = ()
     assumptions: tuple[str, ...] = ()
     contradictions: tuple[str, ...] = ()
@@ -178,6 +194,7 @@ async def classify_slots(
     completion_model_route: ResolvedCompletionModelRoute,
     classification_input: SlotClassificationInput,
     allowed_slot_values: Mapping[str, Collection[str]],
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     tenant_id: UUID,
     ui_language: str | None = None,
     bias: SlotClassificationBias | None = None,
@@ -187,7 +204,10 @@ async def classify_slots(
     slot_values = _normalize_allowed_slot_values(allowed_slot_values)
     if not _classification_input_is_valid(classification_input):
         return None
-    if not slot_values:
+    schema_candidate_fingerprints = tuple(
+        sorted(candidate.fingerprint for candidate in schema_candidates)
+    )
+    if not slot_values and not schema_candidate_fingerprints:
         return None
 
     slot_names = tuple(slot_values.keys())
@@ -199,14 +219,19 @@ async def classify_slots(
     messages = _build_slot_classification_prompt(
         classification_input=classification_input,
         allowed_slot_values=slot_values,
+        schema_candidates=schema_candidates,
         ui_language=ui_language,
         bias=bias,
     )
-    response_format = _slot_classification_response_format(slot_values)
+    response_format = _slot_classification_response_format(
+        slot_values,
+        schema_candidate_fingerprints=schema_candidate_fingerprints,
+    )
     cache_key = slot_classification_prompt_hash(
         classification_input=classification_input,
         ui_language=ui_language,
         allowed_slot_values=slot_values,
+        schema_candidates=schema_candidates,
         litellm_model=litellm_model,
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
@@ -277,6 +302,7 @@ async def classify_slots(
         content,
         allowed_slot_values=slot_values,
         classification_input=classification_input,
+        schema_candidate_fingerprints=schema_candidate_fingerprints,
     )
     if result is None:
         return None
@@ -335,6 +361,7 @@ def parse_slot_classification_response(
     *,
     allowed_slot_values: Mapping[str, Collection[str]],
     classification_input: SlotClassificationInput,
+    schema_candidate_fingerprints: Collection[str] = (),
 ) -> SlotClassificationResult | None:
     try:
         raw = json.loads(content)
@@ -437,14 +464,85 @@ def parse_slot_classification_response(
     secondary_obligations = _parse_secondary_obligations(
         raw_dict.get("secondary_obligations", [])
     )
+    schema_direction = _parse_schema_direction(
+        raw_dict.get("schema_direction"),
+        classification_input=classification_input,
+        candidate_fingerprints=tuple(sorted(set(schema_candidate_fingerprints))),
+    )
     return SlotClassificationResult(
         slots=tuple(slots),
         file_roles=file_roles,
         form_intake=form_intake,
         example_output_constraints=example_output_constraints,
+        schema_direction=schema_direction,
         secondary_obligations=secondary_obligations,
         assumptions=assumptions,
         contradictions=contradictions,
+    )
+
+
+def _parse_schema_direction(
+    raw_value: object,
+    *,
+    classification_input: SlotClassificationInput,
+    candidate_fingerprints: tuple[str, ...],
+) -> ClassifiedSchemaDirection | None:
+    if not isinstance(raw_value, dict) or not candidate_fingerprints:
+        return None
+    raw = cast(dict[str, Any], raw_value)
+    input_fingerprint = raw.get("input_fingerprint")
+    output_fingerprint = raw.get("output_fingerprint")
+    reference_only = raw.get("reference_only")
+    confidence = raw.get("confidence")
+    reason = raw.get("reason")
+    evidence = _parse_classification_evidence(
+        raw.get("evidence", []),
+        classification_input=classification_input,
+    )
+    if input_fingerprint is not None and not isinstance(input_fingerprint, str):
+        return None
+    if output_fingerprint is not None and not isinstance(output_fingerprint, str):
+        return None
+    if not isinstance(reference_only, bool):
+        return None
+    if reference_only:
+        if input_fingerprint is not None or output_fingerprint is not None:
+            return None
+    elif input_fingerprint is None and output_fingerprint is None:
+        return None
+    current_fingerprints = frozenset(candidate_fingerprints)
+    if any(
+        fingerprint not in current_fingerprints
+        for fingerprint in (input_fingerprint, output_fingerprint)
+        if fingerprint is not None
+    ):
+        return None
+    if confidence not in {"high", "medium", "low"}:
+        return None
+    confidence_value = cast(SlotClassificationConfidence, confidence)
+    source_kinds_by_id: dict[str, SlotClassificationSourceKind] = {
+        source.source_id: source.kind for source in classification_input.sources
+    }
+    if confidence_value != "low" and not (
+        evidence
+        and classification_evidence_has_user_owned_source(
+            (item.source_id for item in evidence),
+            source_kinds_by_id=source_kinds_by_id,
+        )
+    ):
+        confidence_value = "low"
+    return ClassifiedSchemaDirection(
+        candidate_fingerprints=candidate_fingerprints,
+        input_fingerprint=input_fingerprint,
+        output_fingerprint=output_fingerprint,
+        reference_only=reference_only,
+        confidence=confidence_value,
+        reason=(
+            reason.strip()
+            if isinstance(reason, str) and reason.strip()
+            else "schema direction classification"
+        ),
+        evidence=evidence,
     )
 
 
@@ -766,6 +864,8 @@ def _classification_file_ids(
 
 def _slot_classification_response_format(
     allowed_slot_values: Mapping[str, Collection[str]],
+    *,
+    schema_candidate_fingerprints: Collection[str] = (),
 ) -> dict[str, object]:
     return {
         "type": "json_schema",
@@ -775,15 +875,21 @@ def _slot_classification_response_format(
             # provider subsets; parser and persisted metadata validators still
             # enforce the same bounds as a backstop.
             "strict": False,
-            "schema": _slot_classification_json_schema(allowed_slot_values),
+            "schema": _slot_classification_json_schema(
+                allowed_slot_values,
+                schema_candidate_fingerprints=schema_candidate_fingerprints,
+            ),
         },
     }
 
 
 def _slot_classification_json_schema(
     allowed_slot_values: Mapping[str, Collection[str]],
+    *,
+    schema_candidate_fingerprints: Collection[str] = (),
 ) -> dict[str, object]:
     normalized_values = _normalize_allowed_slot_values(allowed_slot_values)
+    normalized_fingerprints = tuple(sorted(set(schema_candidate_fingerprints)))
     return {
         "type": "object",
         "additionalProperties": False,
@@ -792,6 +898,7 @@ def _slot_classification_json_schema(
             "file_roles",
             "form_intake",
             "example_output_constraints",
+            "schema_direction",
             "secondary_obligations",
             "assumptions",
             "contradictions",
@@ -818,6 +925,16 @@ def _slot_classification_json_schema(
                     {"type": "null"},
                 ],
             },
+            "schema_direction": {
+                "anyOf": [
+                    *(
+                        [_classified_schema_direction_schema(normalized_fingerprints)]
+                        if normalized_fingerprints
+                        else []
+                    ),
+                    {"type": "null"},
+                ],
+            },
             "secondary_obligations": {
                 "type": "array",
                 "maxItems": len(RESULT_OBLIGATION_VALUES),
@@ -825,6 +942,37 @@ def _slot_classification_json_schema(
             },
             "assumptions": _classification_note_array_schema(),
             "contradictions": _classification_note_array_schema(),
+        },
+    }
+
+
+def _classified_schema_direction_schema(
+    candidate_fingerprints: tuple[str, ...],
+) -> dict[str, object]:
+    nullable_fingerprint = {
+        "anyOf": [
+            {"type": "string", "enum": list(candidate_fingerprints)},
+            {"type": "null"},
+        ]
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "input_fingerprint",
+            "output_fingerprint",
+            "reference_only",
+            "confidence",
+            "reason",
+            "evidence",
+        ],
+        "properties": {
+            "input_fingerprint": nullable_fingerprint,
+            "output_fingerprint": nullable_fingerprint,
+            "reference_only": {"type": "boolean"},
+            "confidence": _classification_confidence_schema(),
+            "reason": _classification_reason_schema(),
+            "evidence": _classification_evidence_array_schema(),
         },
     }
 
@@ -1031,6 +1179,7 @@ def slot_classification_prompt_hash(
     litellm_model: str,
     provider: str,
     supported_model_kwargs: SupportedModelKwargs,
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     bias: SlotClassificationBias | None = None,
 ) -> str:
     return hashlib.sha256(
@@ -1038,6 +1187,7 @@ def slot_classification_prompt_hash(
             classification_input=classification_input,
             ui_language=ui_language,
             allowed_slot_values=allowed_slot_values,
+            schema_candidates=schema_candidates,
             litellm_model=litellm_model,
             provider=provider,
             effective_optional_kwargs_fingerprint=(
@@ -1120,12 +1270,14 @@ def _build_slot_classification_prompt(
     classification_input: SlotClassificationInput,
     allowed_slot_values: Mapping[str, frozenset[str]],
     ui_language: str | None,
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     bias: SlotClassificationBias | None = None,
 ) -> list[dict[str, str]]:
     dimension_lines = [
         f"- {slot_name}: {', '.join(sorted(values))}"
         for slot_name, values in sorted(allowed_slot_values.items())
     ]
+    schema_candidate_lines = _schema_candidate_prompt_lines(schema_candidates)
     obligation_values = ", ".join(RESULT_OBLIGATION_VALUES)
     language_hint = (
         "Classify Swedish user intent."
@@ -1177,6 +1329,13 @@ def _build_slot_classification_prompt(
         "quotes for every content claim. Inventory-only sources cannot support "
         "headings or style. Attachment-only constraint evidence cannot be high "
         "confidence without independent user-message or structured-answer evidence. "
+        "When declared JSON schema candidates are listed, classify their complete "
+        "direction as one schema_direction object. Select an input_fingerprint, an "
+        "output_fingerprint, or both; the same fingerprint may serve both. Set "
+        "reference_only=true only when none controls a Flow boundary. Base direction "
+        "on meaning in exact user_message or structured_answer quotes. Uploaded-file "
+        "content proves schema shape, never direction. Return null when direction is "
+        "unresolved. "
         "An example guides structure and style but does not promise exact visual "
         "layout. Return null when no supported example constraint exists. "
         "A requested final document is terminal_output, not primary input. "
@@ -1249,6 +1408,8 @@ def _build_slot_classification_prompt(
         f"{_render_classification_sources(classification_input)}\n\n"
         "Unresolved slots and allowed values:\n"
         f"{chr(10).join(dimension_lines)}\n\n"
+        "Current declared schema candidates (complete set):\n"
+        f"{chr(10).join(schema_candidate_lines) if schema_candidate_lines else '(none)'}\n\n"
         "Allowed secondary_obligations values:\n"
         f"{obligation_values}\n\n"
         "Return JSON with this shape:\n"
@@ -1257,6 +1418,7 @@ def _build_slot_classification_prompt(
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
         '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
+        '"schema_direction": {"input_fingerprint": str|null, "output_fingerprint": str|null, "reference_only": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"secondary_obligations": [str], '
         '"assumptions": [str], '
         '"contradictions": [str]'
@@ -1270,11 +1432,28 @@ def _build_slot_classification_prompt(
     ]
 
 
+def _schema_candidate_prompt_lines(
+    candidates: tuple[DeclaredSchemaCandidate, ...],
+) -> list[str]:
+    lines: list[str] = []
+    for candidate in sorted(candidates, key=lambda item: item.fingerprint):
+        projection = project_schema_fields(candidate.json_schema)
+        fields = ", ".join(projection.fields) or "no named top-level fields"
+        if projection.truncated:
+            fields = f"{fields} (+{projection.total_count - len(projection.fields)})"
+        provenance = ", ".join(candidate.provenance)
+        lines.append(
+            f"- {candidate.fingerprint}: fields={fields}; sources={provenance}"
+        )
+    return lines
+
+
 def _classification_cache_payload(
     *,
     classification_input: SlotClassificationInput,
     ui_language: str | None,
     allowed_slot_values: Mapping[str, Collection[str]],
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...],
     litellm_model: str,
     provider: str,
     effective_optional_kwargs_fingerprint: str,
@@ -1284,6 +1463,7 @@ def _classification_cache_payload(
     prompt = _build_slot_classification_prompt(
         classification_input=classification_input,
         allowed_slot_values=normalized_values,
+        schema_candidates=schema_candidates,
         ui_language=ui_language,
         bias=bias,
     )
@@ -1299,7 +1479,12 @@ def _classification_cache_payload(
         "model": litellm_model,
         "prompt": prompt,
         "provider": provider,
-        "response_format": _slot_classification_response_format(normalized_values),
+        "response_format": _slot_classification_response_format(
+            normalized_values,
+            schema_candidate_fingerprints=tuple(
+                candidate.fingerprint for candidate in schema_candidates
+            ),
+        ),
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 

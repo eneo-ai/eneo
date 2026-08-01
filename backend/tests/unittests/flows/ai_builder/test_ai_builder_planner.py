@@ -26,7 +26,7 @@ from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentContextPolicy,
-    AIBuilderAttachmentOutputSchemaDiscovery,
+    AIBuilderAttachmentSchemaDiscovery,
     build_ai_builder_attachment_context,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
@@ -57,9 +57,6 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_text_event,
     encode_ai_builder_stream_event,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    OUTPUT_SCHEMA_MAX_JSON_BYTES,
-)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -73,7 +70,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ServerOutputPrepared,
     build_proposal_prepared,
     prepare_planner_request,
-    validate_preprovider_output_schema_gate,
+    validate_preprovider_schema_gate,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -89,6 +86,10 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    SCHEMA_MAX_JSON_BYTES,
+    DeclaredSchemaCandidate,
 )
 from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
     ScopedPlanRevisionOutcome,
@@ -108,7 +109,6 @@ from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
-    AskOutputSchemaConflict,
     CommitArchitecture,
     ConfirmRequirements,
     ReviseArchitecture,
@@ -315,7 +315,7 @@ async def _prepare_planner_request_for_test(
     persisted_planning_state: PlanningState | None = None,
     before_provider_call: AsyncMock | None = None,
     prepared_attachment_context: AIBuilderAttachmentContext | None = None,
-    output_schema_gate_checked: bool = False,
+    prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
 ):
     return await prepare_planner_request(
         PlannerRequestPreparationInput(
@@ -349,7 +349,7 @@ async def _prepare_planner_request_for_test(
             ),
             before_provider_call=before_provider_call,
             prepared_attachment_context=prepared_attachment_context,
-            output_schema_gate_checked=output_schema_gate_checked,
+            prepared_schema_candidates=prepared_schema_candidates,
         )
     )
 
@@ -669,23 +669,50 @@ def test_prepare_user_question_metadata_keeps_supported_non_slot_questions(
     }
 
 
-def test_prepare_user_question_metadata_accepts_output_schema_conflict_answer() -> None:
+def test_prepare_user_question_metadata_accepts_schema_direction_answer() -> None:
     fingerprint = "a" * 64
+    option_values = [
+        f"input:{fingerprint}",
+        f"output:{fingerprint}",
+        "reference_only",
+    ]
 
     prepared = prepare_user_question_metadata(
-        conversation=[],
+        conversation=[
+            ConversationMessage(
+                role="assistant",
+                content="Assign the schema.",
+                tool_calls=[
+                    {
+                        "id": "schema-direction",
+                        "name": "ask_structured_question",
+                        "arguments": {
+                            "question_id": "schema_direction",
+                            "question": "How should the schema be used?",
+                            "options": [
+                                {"id": value, "label": value, "value": value}
+                                for value in option_values
+                            ],
+                            "selection_mode": "multi",
+                            "allow_custom": False,
+                            "requires_confirm": True,
+                        },
+                    }
+                ],
+            )
+        ],
         message="",
         question_answer={
             "kind": "structured_question_answer",
-            "question_id": "output_schema_conflict",
-            "selected_values": [fingerprint],
+            "question_id": "schema_direction",
+            "selected_values": [f"output:{fingerprint}"],
         },
     )
 
     assert prepared.metadata == {
         "question_answer": {
-            "question_id": "output_schema_conflict",
-            "selected_values": [fingerprint],
+            "question_id": "schema_direction",
+            "selected_values": [f"output:{fingerprint}"],
         }
     }
 
@@ -747,7 +774,7 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
 
 
 @pytest.mark.asyncio
-async def test_prepare_planner_request_asks_about_distinct_attachment_schemas_before_provider() -> (
+async def test_prepare_planner_request_asks_when_attachment_schema_direction_is_unresolved() -> (
     None
 ):
     planner = _make_planner()
@@ -773,35 +800,37 @@ async def test_prepare_planner_request_asks_about_distinct_attachment_schemas_be
     )
 
     assert isinstance(prepared, ServerOutputPrepared)
-    assert isinstance(prepared.server_decision, AskOutputSchemaConflict)
+    assert isinstance(prepared.server_decision, AskCanonicalQuestion)
+    assert prepared.server_decision.slot_name == "schema_direction"
+    assert prepared.server_decision.question is not None
     assert prepared.server_decision.question.question_data.question_id == (
-        "output_schema_conflict"
+        "schema_direction"
     )
-    assert len(prepared.server_decision.question.question_data.options) == 2
-    provider_callback.assert_not_awaited()
+    assert len(prepared.server_decision.question.question_data.options) == 5
+    provider_callback.assert_awaited_once()
 
 
-def test_preprovider_gate_promotes_user_declared_schema_refusal() -> None:
+def test_preprovider_gate_promotes_structural_schema_refusal() -> None:
     attachment = _make_file(
-        name="expected-output.txt",
-        text='{"description":"' + ("x" * OUTPUT_SCHEMA_MAX_JSON_BYTES) + '"}',
-        mimetype="text/plain",
+        name="expected.schema.json",
+        text='{"description":"' + ("x" * SCHEMA_MAX_JSON_BYTES) + '"}',
+        mimetype="application/schema+json",
     )
     attachment_context = build_ai_builder_attachment_context([attachment])
     assert attachment_context is not None
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
-        validate_preprovider_output_schema_gate(
+        validate_preprovider_schema_gate(
             conversation=[
                 ConversationMessage(
                     role="user",
-                    content="Use expected-output.txt as the output schema.",
+                    content="Use the attachment as reference material.",
                 )
             ],
             attachment_context=attachment_context,
         )
 
-    assert exc_info.value.code is AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED
+    assert exc_info.value.code is AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
     assert exc_info.value.context["file_id"] == str(attachment.id)
 
 
@@ -830,7 +859,7 @@ async def test_prepare_planner_request_rejects_canonical_schema_expansion_before
             before_provider_call=provider_callback,
         )
 
-    assert exc_info.value.code is AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED
+    assert exc_info.value.code is AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
     assert exc_info.value.context["reason"] == "canonical_bytes"
     assert exc_info.value.context["file_id"] == str(attachment.id)
     provider_callback.assert_not_awaited()
@@ -839,13 +868,13 @@ async def test_prepare_planner_request_rejects_canonical_schema_expansion_before
 def test_preprovider_gate_keeps_unclassified_large_json_text_nonblocking() -> None:
     attachment = _make_file(
         name="large-example.txt",
-        text='{"records":"' + ("x" * OUTPUT_SCHEMA_MAX_JSON_BYTES) + '"}',
+        text='{"records":"' + ("x" * SCHEMA_MAX_JSON_BYTES) + '"}',
         mimetype="text/plain",
     )
     attachment_context = build_ai_builder_attachment_context([attachment])
     assert attachment_context is not None
 
-    conflict_pending = validate_preprovider_output_schema_gate(
+    result = validate_preprovider_schema_gate(
         conversation=[
             ConversationMessage(
                 role="user",
@@ -855,7 +884,7 @@ def test_preprovider_gate_keeps_unclassified_large_json_text_nonblocking() -> No
         attachment_context=attachment_context,
     )
 
-    assert conflict_pending is False
+    assert result == ()
 
 
 @pytest.mark.asyncio
@@ -878,7 +907,7 @@ async def test_prepare_planner_request_reuses_checked_empty_attachment_context(
         completion_model_route=_route(),
         attachment_files=[],
         prepared_attachment_context=None,
-        output_schema_gate_checked=True,
+        prepared_schema_candidates=(),
     )
 
     assert isinstance(prepared, ServerOutputPrepared)
@@ -959,8 +988,56 @@ async def test_send_message_builds_attachment_context_once_before_request_prepar
     )
     assert captured_request is not None
     assert captured_request.prepared_attachment_context is prepared_context
-    assert captured_request.output_schema_gate_checked is True
+    assert captured_request.prepared_schema_candidates is not None
+    assert len(captured_request.prepared_schema_candidates) == 2
     planner.repo.mark_session_turn_processing.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_message_rejects_schema_overflow_before_accepting_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+    )
+    planner.repo.get_session.return_value = session
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(None, None)),
+    )
+    message = "\n".join(
+        "```json\n"
+        + json.dumps(
+            {
+                "type": "object",
+                "properties": {f"field_{index}": {"type": "string"}},
+            }
+        )
+        + "\n```"
+        for index in range(101)
+    )
+    stream = planner.send_message(
+        session_id=uuid4(),
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot(message),
+        message=message,
+        completion_model_route=_route(),
+        attachment_files=[],
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await anext(stream)
+
+    assert exc_info.value.code is AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
+    planner.repo.accept_session_turn.assert_not_awaited()
+    assert session.conversation == []
 
 
 @pytest.mark.asyncio
@@ -1227,7 +1304,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
         included_file_ids=[],
         total_chars=0,
         truncated=False,
-        output_schema_discovery=AIBuilderAttachmentOutputSchemaDiscovery(candidates=()),
+        schema_discovery=AIBuilderAttachmentSchemaDiscovery(candidates=()),
     )
 
     with (
@@ -1330,9 +1407,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
                 included_file_ids=[],
                 total_chars=18,
                 truncated=False,
-                output_schema_discovery=AIBuilderAttachmentOutputSchemaDiscovery(
-                    candidates=()
-                ),
+                schema_discovery=AIBuilderAttachmentSchemaDiscovery(candidates=()),
             ),
         ) as build_attachment_context,
         patch(

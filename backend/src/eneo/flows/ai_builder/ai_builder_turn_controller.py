@@ -31,9 +31,6 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    project_output_schema_fields,
-)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_EN,
     DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_SV,
@@ -45,6 +42,10 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
     DEFAULT_RUNTIME_INPUT_NEEDS_REVIEW_SV,
     DEFAULT_USER_REVIEWS_PLAN_EN,
     DEFAULT_USER_REVIEWS_PLAN_SV,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    DeclaredSchemaCandidate,
+    project_schema_fields,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
@@ -68,11 +69,7 @@ _ATTACHMENT_ASSUMPTION_PREFIX_SV = "Bilageunderlag – "
 class AskCanonicalQuestion:
     slot_name: str
     prompt: str
-
-
-@dataclass(frozen=True, slots=True)
-class AskOutputSchemaConflict:
-    question: BackendQuestion
+    question: BackendQuestion | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +95,6 @@ class GenerateProposal:
 
 BuilderTurnDecision: TypeAlias = (
     AskCanonicalQuestion
-    | AskOutputSchemaConflict
     | CommitArchitecture
     | ReviseArchitecture
     | ConfirmRequirements
@@ -119,17 +115,22 @@ def resolve_turn_control(
     ui_language: str | None,
     discovery_assumptions: tuple[str, ...] = (),
     attachment_context: AIBuilderAttachmentContext | None = None,
-    output_schema_conflict_pending: bool = False,
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
+    schema_direction_pending: bool = False,
 ) -> BuilderTurnControl:
-    if output_schema_conflict_pending:
-        if attachment_context is None:
-            raise ValueError("output schema conflict requires attachment context")
+    if schema_direction_pending:
+        if not schema_candidates:
+            raise ValueError("pending schema direction requires candidates")
+        question = _schema_direction_question(
+            schema_candidates,
+            attachment_context=attachment_context,
+            locale=_locale(ui_language),
+        )
         return BuilderTurnControl(
-            decision=AskOutputSchemaConflict(
-                question=_output_schema_conflict_question(
-                    attachment_context,
-                    _locale(ui_language),
-                )
+            decision=AskCanonicalQuestion(
+                slot_name="schema_direction",
+                prompt=question.assistant_text,
+                question=question,
             )
         )
     requirements_payload = _confirm_requirements_payload(
@@ -159,6 +160,7 @@ def resolve_turn_control(
 def _attachment_evidence_fingerprint(
     session_state: PlanningState,
 ) -> str:
+    input_schema = session_state.input_schema_evidence
     output_schema = session_state.output_schema_evidence
     serialized = json.dumps(
         {
@@ -169,6 +171,18 @@ def _attachment_evidence_fingerprint(
                     key=lambda item: str(item.file_id),
                 )
             ],
+            "input_schema": (
+                {
+                    "fingerprint": input_schema.fingerprint,
+                    "source": input_schema.source,
+                    "strength": input_schema.strength,
+                    "source_file_ids": [
+                        str(file_id) for file_id in input_schema.source_file_ids
+                    ],
+                }
+                if input_schema is not None
+                else None
+            ),
             "output_schema": (
                 {
                     "fingerprint": output_schema.fingerprint,
@@ -253,17 +267,22 @@ def _question_prompt(target: str, ui_language: str | None) -> str:
     return f"{rendered.question}\n\n{option_lines}"
 
 
-def _output_schema_conflict_question(
-    attachment_context: AIBuilderAttachmentContext,
+def _schema_direction_question(
+    candidates: tuple[DeclaredSchemaCandidate, ...],
+    *,
+    attachment_context: AIBuilderAttachmentContext | None,
     locale: Locale,
 ) -> BackendQuestion:
     filenames_by_id = {
         item.file_id: render_ai_builder_evidence_value(item.filename)
-        for item in attachment_context.evidence
+        for item in (
+            attachment_context.evidence if attachment_context is not None else ()
+        )
     }
     options: list[StructuredQuestionOptionPayload] = []
+    candidate_summaries: list[tuple[DeclaredSchemaCandidate, str, str]] = []
     for index, candidate in enumerate(
-        attachment_context.output_schema_discovery.candidates,
+        sorted(candidates, key=lambda item: item.fingerprint),
         start=1,
     ):
         filenames = [
@@ -274,51 +293,74 @@ def _output_schema_conflict_question(
         visible_filenames = ", ".join(filenames[:2])
         if len(filenames) > 2:
             visible_filenames = f"{visible_filenames} (+{len(filenames) - 2})"
-        projection = project_output_schema_fields(candidate.json_schema)
+        projection = project_schema_fields(candidate.json_schema)
         visible_fields = ", ".join(projection.fields)
         if projection.truncated:
             visible_fields = (
                 f"{visible_fields} (+{projection.total_count - len(projection.fields)})"
             )
-        if locale == "sv":
-            label = (
-                f"Schema {index}: {visible_filenames or 'namnlös JSON-fil'} "
-                f"({candidate.fingerprint[:8]})"
-            )
-            description = f"Fält: {visible_fields or 'inga namngivna toppnivåfält'}."
-        else:
-            label = (
-                f"Schema {index}: {visible_filenames or 'unnamed JSON file'} "
-                f"({candidate.fingerprint[:8]})"
-            )
-            description = f"Fields: {visible_fields or 'no named top-level fields'}."
-        options.append(
-            StructuredQuestionOptionPayload(
-                id=candidate.fingerprint,
-                label=label,
-                value=candidate.fingerprint,
-                description=description,
-            )
+        source = visible_filenames or (
+            "konversationen" if locale == "sv" else "conversation"
         )
+        schema_label = f"Schema {index} ({candidate.fingerprint[:8]})"
+        description = (
+            f"Källa: {source}. Fält: {visible_fields or 'inga namngivna toppnivåfält'}."
+            if locale == "sv"
+            else f"Source: {source}. Fields: {visible_fields or 'no named top-level fields'}."
+        )
+        candidate_summaries.append((candidate, schema_label, description))
+    for candidate, schema_label, description in candidate_summaries:
+        for boundary in ("input", "output"):
+            direction_label = (
+                "Indata"
+                if boundary == "input" and locale == "sv"
+                else "Utdata"
+                if boundary == "output" and locale == "sv"
+                else "Input"
+                if boundary == "input"
+                else "Output"
+            )
+            value = f"{boundary}:{candidate.fingerprint}"
+            options.append(
+                StructuredQuestionOptionPayload(
+                    id=value,
+                    label=f"{direction_label} — {schema_label}",
+                    value=value,
+                    description=description,
+                )
+            )
+    options.append(
+        StructuredQuestionOptionPayload(
+            id="reference_only",
+            label=("Endast referens" if locale == "sv" else "Reference only"),
+            value="reference_only",
+            description=(
+                "Använd schemana som underlag utan att låta dem styra indata eller utdata."
+                if locale == "sv"
+                else "Use the schemas as reference material without assigning an input or output boundary."
+            ),
+        )
+    )
     if locale == "sv":
-        question_text = "Vilket av de bifogade JSON-schemana ska styra utdatan?"
+        question_text = "Hur ska de upptäckta JSON-schemana användas i flödet?"
         assistant_text = (
-            "Jag hittade flera olika uttryckliga JSON-scheman. Välj vilket som "
-            "ska styra flödets utdata."
+            "Jag hittade JSON-scheman men behöver veta om de beskriver flödets "
+            "indata, utdata, båda eller endast referensmaterial."
         )
     else:
-        question_text = "Which attached JSON schema should control the output?"
+        question_text = "How should the discovered JSON schemas be used in the flow?"
         assistant_text = (
-            "I found several distinct explicit JSON schemas. Choose which one "
-            "should control the flow output."
+            "I found JSON schemas and need to know whether they describe the flow "
+            "input, output, both, or reference material only."
         )
     return BackendQuestion(
         question_data=StructuredQuestionPayload(
-            question_id="output_schema_conflict",
+            question_id="schema_direction",
             question=question_text,
             options=options,
-            selection_mode="single",
+            selection_mode="multi",
             allow_custom=False,
+            requires_confirm=True,
         ),
         assistant_text=assistant_text,
     )
@@ -352,9 +394,9 @@ def _confirm_requirements_payload(
     input_description = _input_description(resolved, locale)
     output_description = _output_description(resolved, locale)
     summary = _summary_text(resolved, locale)
-    output_schema_summary = _output_schema_summary_line(session_state, locale)
-    if output_schema_summary is not None:
-        summary = f"{summary} {output_schema_summary}"
+    schema_summary_lines = _schema_summary_lines(session_state, locale)
+    if schema_summary_lines:
+        summary = f"{summary} {' '.join(schema_summary_lines)}"
     return RequirementsSummaryPayload(
         summary=summary,
         key_decisions=key_decisions,
@@ -478,6 +520,32 @@ def _attachment_coverage_description(
     return assert_never(coverage)
 
 
+def _schema_summary_lines(
+    session_state: PlanningState,
+    locale: Locale,
+) -> list[str]:
+    lines: list[str] = []
+    input_evidence = session_state.input_schema_evidence
+    if input_evidence is not None:
+        projection = project_schema_fields(input_evidence.json_schema)
+        field_text = _bounded_projection_text(projection.fields, locale=locale)
+        lines.append(
+            (
+                "Ett uttryckligt indataschema har valts för flödets strukturerade indata. "
+                f"Valda fält: {field_text}."
+            )
+            if locale == "sv"
+            else (
+                "An explicit input schema is selected for the flow's structured input. "
+                f"Selected fields: {field_text}."
+            )
+        )
+    output_line = _output_schema_summary_line(session_state, locale)
+    if output_line is not None:
+        lines.append(output_line)
+    return lines
+
+
 def _output_schema_summary_line(
     session_state: PlanningState,
     locale: Locale,
@@ -485,7 +553,7 @@ def _output_schema_summary_line(
     evidence = session_state.output_schema_evidence
     if evidence is None:
         return None
-    projection = project_output_schema_fields(evidence.json_schema)
+    projection = project_schema_fields(evidence.json_schema)
     field_text = _bounded_projection_text(projection.fields, locale=locale)
     if evidence.source == "template_placeholders":
         if not evidence.truncated or evidence.total_count is None:

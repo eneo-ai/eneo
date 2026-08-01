@@ -41,11 +41,6 @@ from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    OutputSchemaCandidateRefusal,
-    OutputSchemaLimitExceeded,
-    resolve_attachment_output_schema,
-)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
     extract_requested_output_sections,
@@ -82,6 +77,14 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    DeclaredSchemaCandidate,
+    SchemaCandidateRefusal,
+    SchemaLimitExceeded,
+    derive_freeform_schema_candidates,
+    latest_schema_direction_answer_matches_candidates,
+    merge_declared_schema_candidates,
+)
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
@@ -92,7 +95,6 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
-    derive_freeform_output_schema_evidence,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
@@ -107,24 +109,6 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow, FlowStep
 
 logger = get_logger(__name__)
-
-_OUTPUT_SCHEMA_DECLARATION_MARKERS = (
-    "output schema",
-    "output-schema",
-    "json schema",
-    "json-schema",
-    "utdataschema",
-    "utdata-schema",
-)
-_ATTACHMENT_DECLARATION_MARKERS = (
-    "attached",
-    "attachment",
-    "uploaded",
-    "upload",
-    "bifogad",
-    "bilaga",
-    "filen",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +135,7 @@ class PlannerRequestPreparationInput:
     usage_tracker: ProposalTurnTelemetry
     before_provider_call: Callable[[], Awaitable[None]] | None = None
     prepared_attachment_context: AIBuilderAttachmentContext | None = None
-    output_schema_gate_checked: bool = False
+    prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,10 +192,11 @@ async def prepare_planner_request(
 ) -> PreparedTurnOutcome:
     requirements_state = resolve_requirements_state(request.conversation)
     ui_language = _resolve_ui_language(request.conversation)
-    attachment_context_result = (
-        request.prepared_attachment_context
-        if request.output_schema_gate_checked
-        else build_ai_builder_attachment_context_for_model(
+    if request.prepared_schema_candidates is not None:
+        attachment_context_result = request.prepared_attachment_context
+        schema_candidates = request.prepared_schema_candidates
+    else:
+        attachment_context_result = build_ai_builder_attachment_context_for_model(
             request.attachment_files,
             policy=request.attachment_context_policy,
             model_name=request.completion_model_route.litellm_model,
@@ -222,9 +207,7 @@ async def prepare_planner_request(
                 request.budget_policy.minimum_conversation_budget_tokens
             ),
         )
-    )
-    if not request.output_schema_gate_checked:
-        validate_preprovider_output_schema_gate(
+        schema_candidates = validate_preprovider_schema_gate(
             conversation=request.conversation,
             attachment_context=attachment_context_result,
         )
@@ -239,6 +222,7 @@ async def prepare_planner_request(
         usage_tracker=request.usage_tracker,
         before_provider_call=request.before_provider_call,
         mapped_execution_policy=request.mapped_execution_policy,
+        prepared_schema_candidates=schema_candidates,
     )
     discovery_analysis = discovery_runtime.discovery_analysis
     rebuilt_planning_state = discovery_runtime.planning_state
@@ -263,9 +247,10 @@ async def prepare_planner_request(
         request.persisted_planning_state,
         attached_file_ids={file.id for file in request.attachment_files},
     )
-    if discovery_runtime.output_schema_conflict_pending:
-        rebuilt_planning_state.replace_output_schema_resolution(
-            evidence=None,
+    if discovery_runtime.schema_direction_pending:
+        rebuilt_planning_state.replace_schema_resolution(
+            input_evidence=None,
+            output_evidence=None,
             example_inference=None,
         )
     turn_control = resolve_turn_control(
@@ -277,9 +262,8 @@ async def prepare_planner_request(
         ui_language=ui_language,
         discovery_assumptions=discovery_analysis.assumptions,
         attachment_context=attachment_context_result,
-        output_schema_conflict_pending=(
-            discovery_runtime.output_schema_conflict_pending
-        ),
+        schema_candidates=discovery_runtime.schema_candidates,
+        schema_direction_pending=discovery_runtime.schema_direction_pending,
     )
     if not isinstance(turn_control.decision, GenerateProposal):
         return ServerOutputPrepared(
@@ -482,35 +466,37 @@ def _fit_proposal_attachment_context(
     )
 
 
-def validate_preprovider_output_schema_gate(
+def validate_preprovider_schema_gate(
     *,
     conversation: list[ConversationMessage],
     attachment_context: AIBuilderAttachmentContext | None,
-) -> bool:
+) -> tuple[DeclaredSchemaCandidate, ...]:
     """Validate deterministic schema blockers before any provider work."""
 
     if attachment_context is not None:
-        user_declared_schema_file_ids = _user_declared_schema_file_ids(
-            conversation,
-            attachment_context,
-        )
         blocking_refusal = next(
             (
                 refusal
-                for refusal in attachment_context.output_schema_discovery.refusals
+                for refusal in attachment_context.schema_discovery.refusals
                 if refusal.blocks_provider_work
-                or refusal.file_id in user_declared_schema_file_ids
             ),
             None,
         )
         if blocking_refusal is not None:
-            _raise_output_schema_limit(blocking_refusal)
+            _raise_schema_limit(blocking_refusal)
     try:
-        authoritative_evidence = derive_freeform_output_schema_evidence(conversation)
-    except OutputSchemaLimitExceeded as error:
+        candidates = merge_declared_schema_candidates(
+            derive_freeform_schema_candidates(conversation),
+            (
+                attachment_context.schema_discovery.candidates
+                if attachment_context is not None
+                else ()
+            ),
+        )
+    except SchemaLimitExceeded as error:
         raise AIBuilderBadRequestException(
-            "The supplied output schema exceeds the Builder safety limit.",
-            code=AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED,
+            "The supplied schema exceeds the Builder safety limit.",
+            code=AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED,
             context={
                 "reason": error.reason,
                 "max_value": error.max_value,
@@ -521,43 +507,22 @@ def validate_preprovider_output_schema_gate(
                 ),
             },
         ) from error
-    resolution = resolve_attachment_output_schema(
+    if not latest_schema_direction_answer_matches_candidates(
         conversation=conversation,
-        candidates=(
-            attachment_context.output_schema_discovery.candidates
-            if attachment_context is not None
-            else ()
-        ),
-        authoritative_evidence=authoritative_evidence,
-    )
-    return resolution.conflict_pending
-
-
-def _user_declared_schema_file_ids(
-    conversation: list[ConversationMessage],
-    attachment_context: AIBuilderAttachmentContext,
-) -> frozenset[UUID]:
-    text = aggregate_unprompted_user_text(conversation).casefold()
-    if not any(marker in text for marker in _OUTPUT_SCHEMA_DECLARATION_MARKERS):
-        return frozenset()
-    declared = {
-        item.file_id
-        for item in attachment_context.evidence
-        if item.filename.casefold() in text
-    }
-    if declared:
-        return frozenset(declared)
-    if len(attachment_context.evidence) == 1 and any(
-        marker in text for marker in _ATTACHMENT_DECLARATION_MARKERS
+        candidates=candidates,
     ):
-        return frozenset({attachment_context.evidence[0].file_id})
-    return frozenset()
+        raise AIBuilderBadRequestException(
+            "The schema-direction answer does not match the current schemas.",
+            code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
+            context={"reason": "invalid_schema_direction"},
+        )
+    return candidates
 
 
-def _raise_output_schema_limit(refusal: OutputSchemaCandidateRefusal) -> None:
+def _raise_schema_limit(refusal: SchemaCandidateRefusal) -> None:
     raise AIBuilderBadRequestException(
-        "An attached output schema exceeds the Builder safety limit.",
-        code=AIBuilderErrorCode.OUTPUT_SCHEMA_LIMIT_EXCEEDED,
+        "An attached schema exceeds the Builder safety limit.",
+        code=AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED,
         context={
             "reason": refusal.reason,
             "max_value": refusal.max_value,

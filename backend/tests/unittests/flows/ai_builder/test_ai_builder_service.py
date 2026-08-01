@@ -437,9 +437,8 @@ def _make_confirmed_requirements_conversation() -> list[ConversationMessage]:
     summary_data = summary.model_dump(mode="json")
     return [
         ConversationMessage(
-            role="tool",
+            role="assistant",
             content="Requirements presented to user. Awaiting confirmation.",
-            tool_call_id="call_requirements",
             metadata={
                 "requirements_summary": summary_data,
                 "requirements_version": version,

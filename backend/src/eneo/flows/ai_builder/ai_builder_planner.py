@@ -12,6 +12,9 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContextPolicy,
     build_ai_builder_attachment_context_for_model,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
+    compact_ai_builder_conversation,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
     metadata_for_user_message,
@@ -51,7 +54,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ServerOutputPrepared,
     build_proposal_prepared,
     prepare_planner_request,
-    validate_preprovider_output_schema_gate,
+    validate_preprovider_schema_gate,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
@@ -386,6 +389,21 @@ class AIBuilderPlanner:
             content=message,
             metadata=user_message_metadata,
         )
+        prepared_attachment_context = build_ai_builder_attachment_context_for_model(
+            attachment_files or [],
+            policy=attachment_context_policy,
+            model_name=litellm_model,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
+            safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
+            minimum_conversation_tokens=(
+                budget_policy.minimum_conversation_budget_tokens
+            ),
+        )
+        prepared_schema_candidates = validate_preprovider_schema_gate(
+            conversation=compact_ai_builder_conversation([*conversation, user_message]),
+            attachment_context=prepared_attachment_context,
+        )
         async with claim_ai_builder_send_turn(
             repo=self.repo,
             session_id=session_id,
@@ -446,21 +464,6 @@ class AIBuilderPlanner:
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
             )
-            prepared_attachment_context = build_ai_builder_attachment_context_for_model(
-                attachment_files or [],
-                policy=attachment_context_policy,
-                model_name=litellm_model,
-                max_input_tokens=max_input_tokens,
-                max_output_tokens=max_output_tokens,
-                safety_buffer_tokens=(budget_policy.conversation_safety_buffer_tokens),
-                minimum_conversation_tokens=(
-                    budget_policy.minimum_conversation_budget_tokens
-                ),
-            )
-            validate_preprovider_output_schema_gate(
-                conversation=conversation,
-                attachment_context=prepared_attachment_context,
-            )
             metadata = prepared_metadata.metadata
             if plan_edit_context is not None:
                 metadata = {
@@ -500,7 +503,7 @@ class AIBuilderPlanner:
                         usage_tracker=usage_tracker,
                         before_provider_call=mark_provider_work_started,
                         prepared_attachment_context=prepared_attachment_context,
-                        output_schema_gate_checked=True,
+                        prepared_schema_candidates=prepared_schema_candidates,
                     )
                 )
             except AIBuilderKnownProviderRejectionException as error:

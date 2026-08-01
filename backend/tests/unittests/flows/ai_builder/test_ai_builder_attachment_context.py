@@ -28,11 +28,12 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    OUTPUT_SCHEMA_MAX_DEPTH,
-    OUTPUT_SCHEMA_MAX_JSON_BYTES,
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    SCHEMA_MAX_DEPTH,
+    SCHEMA_MAX_JSON_BYTES,
 )
 from eneo.flows.ai_builder.planning_state import (
+    PLANNING_STATE_PAYLOAD_CAP_BYTES,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     FileRole,
     PlanningState,
@@ -276,9 +277,10 @@ def test_template_placeholder_evidence_keeps_full_identity_beyond_display_cap() 
         state.file_roles = attachment_file_roles(result)
         apply_attachment_structural_evidence_to_planning_state(state, result)
 
-        evidence = state.output_schema_evidence
+        evidence = result.output_schema_evidence
         assert evidence is not None
-        assert result.output_schema_discovery.disposition == "none"
+        assert state.output_schema_evidence is None
+        assert result.schema_discovery.candidates == ()
         assert evidence.total_count == total_count
         assert evidence.truncated is (total_count > 8)
         assert evidence.confidence == ("medium" if total_count > 8 else "high")
@@ -317,8 +319,9 @@ def test_template_placeholder_total_deduplicates_across_multiple_templates() -> 
     state.file_roles = attachment_file_roles(result)
     apply_attachment_structural_evidence_to_planning_state(state, result)
 
-    evidence = state.output_schema_evidence
+    evidence = result.output_schema_evidence
     assert evidence is not None
+    assert state.output_schema_evidence is None
     assert evidence.total_count == 11
     assert evidence.truncated is True
     properties = evidence.json_schema["properties"]
@@ -458,7 +461,7 @@ def test_template_placeholder_budget_counts_unique_identities_across_session() -
 
 
 def test_template_evidence_must_fit_exact_persisted_state_boundary() -> None:
-    placeholder = f"field_{'x' * 130_000}"
+    placeholder = f"field_{'x' * (PLANNING_STATE_PAYLOAD_CAP_BYTES + 1_024)}"
     template_text = (
         " ".join(f"{{{{ small_{index} }}}}" for index in range(8))
         + f" {{{{ {placeholder} }}}}"
@@ -551,7 +554,7 @@ def test_non_template_transcription_does_not_become_placeholder_schema() -> None
     assert state.output_schema_evidence is None
 
 
-def test_json_schema_attachment_uses_structured_output_schema_evidence() -> None:
+def test_json_schema_attachment_is_a_neutral_candidate() -> None:
     result = build_ai_builder_attachment_context(
         [
             _make_file(
@@ -570,23 +573,18 @@ def test_json_schema_attachment_uses_structured_output_schema_evidence() -> None
     state.file_roles = attachment_file_roles(result)
     apply_attachment_structural_evidence_to_planning_state(state, result)
 
-    evidence = state.output_schema_evidence
-    assert evidence is not None
-    assert evidence.source == "attachment_json_schema"
-    assert evidence.confidence == "high"
-    assert evidence.json_schema["required"] == ["decision"]
-    assert evidence.evidence == [
-        f"file:{result.evidence[0].file_id}:json_schema_attachment"
-    ]
-    assert result.output_schema_discovery.disposition == "single"
-    assert result.output_schema_discovery.candidates[0].source_file_ids == (
-        result.evidence[0].file_id,
+    assert state.input_schema_evidence is None
+    assert state.output_schema_evidence is None
+    assert len(result.schema_discovery.candidates) == 1
+    candidate = result.schema_discovery.candidates[0]
+    assert candidate.json_schema["required"] == ["decision"]
+    assert candidate.provenance == (
+        f"file:{result.evidence[0].file_id}:json_schema_attachment",
     )
+    assert candidate.source_file_ids == (result.evidence[0].file_id,)
 
 
-def test_json_schema_filename_uses_structured_evidence_with_plain_text_mimetype() -> (
-    None
-):
+def test_json_schema_filename_discovers_candidate_with_plain_text_mimetype() -> None:
     result = build_ai_builder_attachment_context(
         [
             _make_file(
@@ -598,8 +596,8 @@ def test_json_schema_filename_uses_structured_evidence_with_plain_text_mimetype(
     )
 
     assert result is not None
-    assert result.output_schema_evidence is not None
-    assert result.output_schema_evidence.source == "attachment_json_schema"
+    assert len(result.schema_discovery.candidates) == 1
+    assert result.output_schema_evidence is None
 
 
 def test_json_schema_discovery_keeps_every_candidate_in_stable_order() -> None:
@@ -621,18 +619,16 @@ def test_json_schema_discovery_keeps_every_candidate_in_stable_order() -> None:
 
     assert forward is not None
     assert reverse is not None
-    assert forward.output_schema_discovery.disposition == "ambiguous"
-    assert reverse.output_schema_discovery.disposition == "ambiguous"
+    assert len(forward.schema_discovery.candidates) == 2
+    assert len(reverse.schema_discovery.candidates) == 2
     assert tuple(
-        candidate.fingerprint
-        for candidate in forward.output_schema_discovery.candidates
+        candidate.fingerprint for candidate in forward.schema_discovery.candidates
     ) == tuple(
-        candidate.fingerprint
-        for candidate in reverse.output_schema_discovery.candidates
+        candidate.fingerprint for candidate in reverse.schema_discovery.candidates
     )
     assert {
         tuple(candidate.source_file_ids)
-        for candidate in forward.output_schema_discovery.candidates
+        for candidate in forward.schema_discovery.candidates
     } == {(low_id_file.id,), (high_id_file.id,)}
     assert forward.output_schema_evidence is None
     assert reverse.output_schema_evidence is None
@@ -661,13 +657,11 @@ def test_json_schema_discovery_deduplicates_canonical_value_and_merges_sources()
     result = build_ai_builder_attachment_context([first, second])
 
     assert result is not None
-    assert result.output_schema_discovery.disposition == "single"
-    assert len(result.output_schema_discovery.candidates) == 1
-    candidate = result.output_schema_discovery.candidates[0]
+    assert len(result.schema_discovery.candidates) == 1
+    candidate = result.schema_discovery.candidates[0]
     assert len(candidate.fingerprint) == 64
     assert candidate.source_file_ids == tuple(sorted((first.id, second.id), key=str))
-    assert result.output_schema_evidence is not None
-    assert result.output_schema_evidence.json_schema == candidate.json_schema
+    assert result.output_schema_evidence is None
 
 
 def test_json_schema_discovery_selects_one_valid_candidate_among_invalid_files() -> (
@@ -692,15 +686,10 @@ def test_json_schema_discovery_selects_one_valid_candidate_among_invalid_files()
     result = build_ai_builder_attachment_context([invalid, unreadable, valid])
 
     assert result is not None
-    assert result.output_schema_discovery.disposition == "single"
     assert tuple(
-        candidate.source_file_ids
-        for candidate in result.output_schema_discovery.candidates
+        candidate.source_file_ids for candidate in result.schema_discovery.candidates
     ) == ((valid.id,),)
-    assert result.output_schema_evidence is not None
-    assert result.output_schema_evidence.evidence == [
-        f"file:{valid.id}:json_schema_attachment"
-    ]
+    assert result.output_schema_evidence is None
 
 
 def test_schema_shaped_json_is_discovered_without_json_filename_or_mimetype() -> None:
@@ -713,36 +702,31 @@ def test_schema_shaped_json_is_discovered_without_json_filename_or_mimetype() ->
     result = build_ai_builder_attachment_context([file])
 
     assert result is not None
-    assert result.output_schema_discovery.disposition == "single"
-    assert result.output_schema_discovery.candidates[0].source_file_ids == (file.id,)
-    assert result.output_schema_evidence is not None
-    assert result.output_schema_evidence.source == "attachment_json_schema"
+    assert len(result.schema_discovery.candidates) == 1
+    assert result.schema_discovery.candidates[0].source_file_ids == (file.id,)
+    assert result.output_schema_evidence is None
 
 
 def test_explicit_schema_over_raw_byte_limit_retains_blocking_refusal() -> None:
     file = _make_file(
         name="too-large.schema.json",
-        text='{"type":"object","description":"'
-        + ("x" * OUTPUT_SCHEMA_MAX_JSON_BYTES)
-        + '"}',
+        text='{"type":"object","description":"' + ("x" * SCHEMA_MAX_JSON_BYTES) + '"}',
         mimetype="application/schema+json",
     )
 
     result = build_ai_builder_attachment_context([file])
 
     assert result is not None
-    assert result.output_schema_discovery.candidates == ()
-    assert result.output_schema_discovery.refusals[0].reason == "raw_bytes"
-    assert result.output_schema_discovery.refusals[0].max_value == (
-        OUTPUT_SCHEMA_MAX_JSON_BYTES
-    )
-    assert result.output_schema_discovery.refusals[0].actual_value is not None
-    assert result.output_schema_discovery.refusals[0].blocks_provider_work is True
+    assert result.schema_discovery.candidates == ()
+    assert result.schema_discovery.refusals[0].reason == "raw_bytes"
+    assert result.schema_discovery.refusals[0].max_value == (SCHEMA_MAX_JSON_BYTES)
+    assert result.schema_discovery.refusals[0].actual_value is not None
+    assert result.schema_discovery.refusals[0].blocks_provider_work is True
 
 
 def test_explicit_schema_over_depth_limit_retains_blocking_refusal() -> None:
     nested: dict[str, object] = {"type": "string"}
-    for _ in range(OUTPUT_SCHEMA_MAX_DEPTH + 1):
+    for _ in range(SCHEMA_MAX_DEPTH + 1):
         nested = {"type": "object", "properties": {"nested": nested}}
     file = _make_file(
         name="too-deep.schema.json",
@@ -753,9 +737,9 @@ def test_explicit_schema_over_depth_limit_retains_blocking_refusal() -> None:
     result = build_ai_builder_attachment_context([file])
 
     assert result is not None
-    refusal = result.output_schema_discovery.refusals[0]
+    refusal = result.schema_discovery.refusals[0]
     assert refusal.reason == "depth"
-    assert refusal.max_value == OUTPUT_SCHEMA_MAX_DEPTH
+    assert refusal.max_value == SCHEMA_MAX_DEPTH
     assert refusal.actual_value is not None
     assert refusal.blocks_provider_work is True
 
@@ -763,14 +747,14 @@ def test_explicit_schema_over_depth_limit_retains_blocking_refusal() -> None:
 def test_generic_uninspectable_json_retains_nonblocking_bounded_refusal() -> None:
     file = _make_file(
         name="large-data.json",
-        text='{"records":"' + ("x" * OUTPUT_SCHEMA_MAX_JSON_BYTES) + '"}',
+        text='{"records":"' + ("x" * SCHEMA_MAX_JSON_BYTES) + '"}',
         mimetype="application/json",
     )
 
     result = build_ai_builder_attachment_context([file])
 
     assert result is not None
-    refusal = result.output_schema_discovery.refusals[0]
+    refusal = result.schema_discovery.refusals[0]
     assert refusal.file_id == file.id
     assert refusal.reason == "raw_bytes"
     assert refusal.blocks_provider_work is False
@@ -779,14 +763,14 @@ def test_generic_uninspectable_json_retains_nonblocking_bounded_refusal() -> Non
 def test_uninspectable_json_text_retains_nonblocking_refusal_for_declaration() -> None:
     file = _make_file(
         name="expected-output.txt",
-        text='{"records":"' + ("x" * OUTPUT_SCHEMA_MAX_JSON_BYTES) + '"}',
+        text='{"records":"' + ("x" * SCHEMA_MAX_JSON_BYTES) + '"}',
         mimetype="text/plain",
     )
 
     result = build_ai_builder_attachment_context([file])
 
     assert result is not None
-    refusal = result.output_schema_discovery.refusals[0]
+    refusal = result.schema_discovery.refusals[0]
     assert refusal.file_id == file.id
     assert refusal.reason == "raw_bytes"
     assert refusal.blocks_provider_work is False
@@ -802,7 +786,7 @@ def test_parser_recursion_is_reported_as_depth_refusal() -> None:
     result = build_ai_builder_attachment_context([file])
 
     assert result is not None
-    refusal = result.output_schema_discovery.refusals[0]
+    refusal = result.schema_discovery.refusals[0]
     assert refusal.reason == "depth"
     assert refusal.actual_value is None
     assert refusal.blocks_provider_work is True

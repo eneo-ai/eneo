@@ -16,6 +16,7 @@
     buildStructuredQuestionInputFieldsAnswer,
     buildStructuredQuestionSelection,
     getStructuredQuestionOptionKey,
+    toggleStructuredQuestionOption,
     type StructuredQuestion,
     type StructuredQuestionAnswerPayload,
     type StructuredInputFieldType,
@@ -45,8 +46,10 @@
   const questionLabelId = `ai-builder-q-${Math.random().toString(36).slice(2, 10)}`;
 
   const reducedMotion = prefersReducedMotion();
+  const schemaDirectionVisibleOptionLimit = 24;
 
   const selectedOptionKeys = new SvelteSet<string>();
+  let optionFilter = $state("");
   let customSelected = $state(false);
   let customText = $state("");
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
@@ -61,8 +64,42 @@
   ]);
 
   const isSingle = $derived(question.selection_mode === "single");
+  const isSchemaDirection = $derived(question.question_id === "schema_direction");
   const requiresConfirm = $derived(question.requires_confirm === true);
   const isInputFieldCollection = $derived(question.input_field_collection === true);
+  const matchingOptions = $derived.by(() => {
+    if (!isSchemaDirection) return question.options;
+    const query = optionFilter.trim().toLocaleLowerCase();
+    if (!query) return question.options;
+    return question.options.filter((option) =>
+      [option.label, option.description, option.id, option.value]
+        .filter((value): value is string => typeof value === "string")
+        .some((value) => value.toLocaleLowerCase().includes(query))
+    );
+  });
+  const visibleOptions = $derived.by(() => {
+    if (!isSchemaDirection) return matchingOptions;
+
+    const matchingKeys = new SvelteSet(matchingOptions.map(getStructuredQuestionOptionKey));
+    const visibleKeys = new SvelteSet<string>();
+    for (const option of question.options) {
+      const optionKey = getStructuredQuestionOptionKey(option);
+      if (selectedOptionKeys.has(optionKey) || optionKey === "reference_only") {
+        visibleKeys.add(optionKey);
+      }
+    }
+    for (const option of question.options) {
+      if (visibleKeys.size >= schemaDirectionVisibleOptionLimit) break;
+      const optionKey = getStructuredQuestionOptionKey(option);
+      if (matchingKeys.has(optionKey)) visibleKeys.add(optionKey);
+    }
+    return question.options.filter((option) =>
+      visibleKeys.has(getStructuredQuestionOptionKey(option))
+    );
+  });
+  const visibleMatchingOptionCount = $derived(
+    visibleOptions.filter((option) => matchingOptions.includes(option)).length
+  );
 
   const canConfirm = $derived.by(() => {
     if (answered) return false;
@@ -107,11 +144,9 @@
       return;
     }
 
-    if (selectedOptionKeys.has(optionKey)) {
-      selectedOptionKeys.delete(optionKey);
-    } else {
-      selectedOptionKeys.add(optionKey);
-    }
+    const nextSelection = toggleStructuredQuestionOption(question, selectedOptionKeys, option);
+    selectedOptionKeys.clear();
+    for (const selectedKey of nextSelection) selectedOptionKeys.add(selectedKey);
   }
 
   function selectCustom() {
@@ -248,12 +283,29 @@
         </button>
       </div>
     {:else}
+      {#if isSchemaDirection && question.options.length > schemaDirectionVisibleOptionLimit}
+        <label class="option-filter">
+          <span>{m.ai_builder_question_schema_filter()}</span>
+          <input
+            type="search"
+            bind:value={optionFilter}
+            placeholder={m.ai_builder_question_schema_filter_placeholder()}
+            {disabled}
+          />
+        </label>
+        <p class="option-filter-summary" aria-live="polite">
+          {m.ai_builder_question_schema_filter_summary({
+            shown: visibleMatchingOptionCount,
+            total: matchingOptions.length
+          })}
+        </p>
+      {/if}
       <div
         class="options-stack"
         role={isSingle ? "radiogroup" : "group"}
         aria-labelledby={questionLabelId}
       >
-        {#each question.options as option (getStructuredQuestionOptionKey(option))}
+        {#each visibleOptions as option (getStructuredQuestionOptionKey(option))}
           {@const optionKey = getStructuredQuestionOptionKey(option)}
           {@const isSelected = selectedOptionKeys.has(optionKey)}
           <button
@@ -384,6 +436,23 @@
   /* One surface with hairline dividers; never one border per option. */
   .options-stack {
     @apply flex flex-col;
+  }
+
+  .option-filter {
+    @apply mb-1 flex flex-col gap-1 text-xs font-medium;
+    color: var(--text-secondary);
+  }
+
+  .option-filter input {
+    @apply h-9 rounded-md border px-3 text-sm font-normal;
+    border-color: var(--border-default);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  .option-filter-summary {
+    @apply mb-2 text-xs;
+    color: var(--text-secondary);
   }
 
   .options-stack > .option-row + .option-row {

@@ -6,9 +6,6 @@ from uuid import UUID
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    build_output_schema_evidence,
-)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -18,6 +15,9 @@ from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    build_schema_evidence,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     PlanningState,
     ResolvedSlot,
+    SchemaResolution,
     SlotConfidence,
     SlotSource,
     StepTriple,
@@ -277,7 +278,7 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
 
 def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None:
     state = _state_with_slot("terminal_output", "structured_json")
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {
@@ -287,7 +288,7 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
             "required": ["decision"],
             "additionalProperties": False,
         },
-        source="freeform_text",
+        source="declared_schema",
         confidence="high",
         evidence=["message:msg_schema", "fenced_json_schema"],
     )
@@ -303,19 +304,21 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
 
     assert "Output schema evidence:" in prompt
     assert "decision, next_steps" in prompt
-    assert "freeform_text, high confidence" in prompt
+    assert "declared_schema, high confidence" in prompt
     assert "Use output_fields consistent with these user-declared fields." in prompt
     assert "additionalProperties" not in prompt
 
 
-def test_plan_proposal_prompt_does_not_direct_undirected_schema_to_docx() -> None:
+def test_plan_proposal_prompt_describes_input_schema_without_directing_docx_output() -> (
+    None
+):
     state = _state_with_slot("terminal_output", "docx_document")
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.input_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {"case_id": {"type": "string"}},
         },
-        source="attachment_json_schema",
+        source="declared_schema",
         source_file_ids=("00000000-0000-0000-0000-000000000001",),
         confidence="high",
         evidence=("file:00000000-0000-0000-0000-000000000001:json_schema",),
@@ -330,8 +333,13 @@ def test_plan_proposal_prompt_does_not_direct_undirected_schema_to_docx() -> Non
         resource_catalog=_empty_catalog(),
     )
 
+    assert "Input schema evidence:" in prompt
+    assert "case_id" in prompt
     assert "Output schema evidence:" not in prompt
     assert "Use output_fields consistent with these user-declared fields." not in prompt
+    assert (
+        "Do not turn its primary payload fields into secondary input_fields." in prompt
+    )
 
 
 def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> None:
@@ -377,17 +385,20 @@ def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> No
                     )
                 ],
             ),
-            "output_schema_evidence": build_output_schema_evidence(
-                json_schema={
-                    "type": "object",
-                    "properties": {
-                        f"field_{index}": {"type": "string"} for index in range(12)
+            "schema_resolution": SchemaResolution.from_evidence(
+                input_evidence=None,
+                output_evidence=build_schema_evidence(
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            f"field_{index}": {"type": "string"} for index in range(12)
+                        },
                     },
-                },
-                source="inferred_example",
-                source_file_ids=(file_id,),
-                confidence="medium",
-                evidence=(f"file:{file_id}:inferred_example_shape",),
+                    source="inferred_example",
+                    source_file_ids=(file_id,),
+                    confidence="medium",
+                    evidence=(f"file:{file_id}:inferred_example_shape",),
+                ),
             ),
             "example_output_schema_inference": ExampleOutputSchemaInferenceOutcome(
                 status="inferred",
@@ -420,7 +431,7 @@ def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> No
 
 def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
     state = PlanningState.empty()
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {
@@ -471,7 +482,7 @@ def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> N
             candidate_roles=["template"],
         )
     ]
-    state.output_schema_evidence = build_output_schema_evidence(
+    state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
             "properties": {long_placeholder: {"type": "string"}},

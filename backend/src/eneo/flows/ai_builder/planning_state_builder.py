@@ -8,7 +8,6 @@ and committed architecture state.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Literal
@@ -46,10 +45,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
-from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
-    build_output_schema_evidence,
-    parse_output_schema_candidate,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
@@ -64,6 +59,9 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     NO_EXTRA_RUNTIME_METADATA,
     extract_runtime_input_field_hints,
     infer_runtime_metadata_slot,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    build_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
@@ -85,10 +83,10 @@ from eneo.flows.ai_builder.planning_state import (
     FileRole,
     FileRoleEvidence,
     MappedFileLimit,
-    OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
+    SchemaEvidence,
     SlotConfidence,
     SlotSource,
 )
@@ -123,30 +121,13 @@ _POLICY_DEFAULT_RULES: dict[str, _PolicyDefaultRule] = {
     ),
 }
 
-_FENCED_JSON_BLOCK_RE = re.compile(
-    r"```(?:json|jsonschema|schema)?\s*(.*?)```",
-    re.IGNORECASE | re.DOTALL,
-)
-_OUTPUT_SCHEMA_LABELS = (
-    "output schema",
-    "output json schema",
-    "json output schema",
-    "result schema",
-    "response schema",
-    "schema för utdata",
-    "schema för resultat",
-    "utdata schema",
-    "utdataschema",
-    "resultatschema",
-    "output-schemat",
-    "utdata-schemat",
-)
 CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
     {
         "slot",
         "file_role",
         "form_intake",
         "example_output_constraint",
+        "schema_direction",
         "secondary_obligation",
     }
 )
@@ -156,7 +137,6 @@ def build_planning_state_from_conversation(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
-    attachment_output_schema_evidence: OutputSchemaEvidence | None = None,
     attachment_file_roles: list[FileRoleEvidence] | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
 ) -> PlanningState:
@@ -166,16 +146,6 @@ def build_planning_state_from_conversation(
     this function seeds the deterministic slot surface from the compacted
     conversation that was actually persisted.
     """
-    attachment_json_schema_evidence = (
-        attachment_output_schema_evidence
-        if attachment_output_schema_evidence is not None
-        and attachment_output_schema_evidence.source == "attachment_json_schema"
-        else None
-    )
-    output_schema_evidence = (
-        derive_freeform_output_schema_evidence(conversation)
-        or attachment_json_schema_evidence
-    )
     resolved_slots = _resolve_slots(conversation, flow=flow)
     state = PlanningState(
         fcm_version=FCM_VERSION,
@@ -183,7 +153,6 @@ def build_planning_state_from_conversation(
         builder_schema_version=BUILDER_SCHEMA_VERSION,
         resolved_slots=resolved_slots,
         file_roles=list(attachment_file_roles or ()),
-        output_schema_evidence=output_schema_evidence,
         input_fields=_confirmed_input_fields(conversation),
         mapped_file_limit=_mapped_file_limit(
             conversation,
@@ -402,23 +371,24 @@ def carry_forward_persisted_planner_state(
     ):
         carried_evidence = None
     if carried_evidence is not None or carried_inference is not None:
-        rebuilt.replace_output_schema_resolution(
-            evidence=carried_evidence,
+        rebuilt.replace_schema_resolution(
+            input_evidence=rebuilt.input_schema_evidence,
+            output_evidence=carried_evidence,
             example_inference=carried_inference,
         )
 
 
 def _carryable_output_schema_evidence(
-    evidence: OutputSchemaEvidence,
+    evidence: SchemaEvidence,
     *,
     attached_file_ids: Collection[UUID],
-) -> OutputSchemaEvidence | None:
-    if evidence.source == "freeform_text":
-        return evidence
+) -> SchemaEvidence | None:
+    if evidence.source == "declared_schema":
+        return None
 
     attached = set(attached_file_ids)
     source_file_ids = set(evidence.source_file_ids)
-    if evidence.source in {"attachment_json_schema", "inferred_example"}:
+    if evidence.source == "inferred_example":
         return evidence if source_file_ids and source_file_ids <= attached else None
 
     if evidence.truncated and source_file_ids and not source_file_ids <= attached:
@@ -443,7 +413,7 @@ def _carryable_output_schema_evidence(
         in attached
     ]
     retained_source_file_ids = tuple(sorted(source_file_ids & attached, key=str))
-    return build_output_schema_evidence(
+    return build_schema_evidence(
         json_schema=_filter_template_placeholder_schema(
             evidence.json_schema,
             retained_placeholders=retained_placeholders,
@@ -467,7 +437,7 @@ def _carryable_example_output_schema_inference(
     inference: ExampleOutputSchemaInferenceOutcome | None,
     *,
     constraints: ExampleOutputConstraintEvidence | None,
-    output_schema_evidence: OutputSchemaEvidence | None,
+    output_schema_evidence: SchemaEvidence | None,
     attached_file_ids: Collection[UUID],
 ) -> ExampleOutputSchemaInferenceOutcome | None:
     if inference is None or constraints is None:
@@ -548,43 +518,6 @@ def _filter_template_placeholder_schema(
     return filtered
 
 
-def derive_freeform_output_schema_evidence(
-    conversation: list[ConversationMessage],
-) -> OutputSchemaEvidence | None:
-    evidence: OutputSchemaEvidence | None = None
-    for message in conversation:
-        if message.role != "user" or not message.content:
-            continue
-        for match in _FENCED_JSON_BLOCK_RE.finditer(message.content):
-            if not _mentions_output_schema_near_fence(message.content, match):
-                continue
-            schema = parse_output_schema_candidate(match.group(1))
-            if schema is None:
-                continue
-            evidence = build_output_schema_evidence(
-                json_schema=schema,
-                source="freeform_text",
-                confidence="high",
-                evidence=(
-                    f"message:{message.message_id}",
-                    "fenced_json_schema",
-                ),
-            )
-    return evidence
-
-
-def _mentions_output_schema_near_fence(
-    content: str,
-    match: re.Match[str],
-) -> bool:
-    # Labels usually sit immediately before the fence; keep the window local
-    # so unrelated earlier schema talk does not claim a later JSON example.
-    start = max(0, match.start() - 240)
-    end = min(len(content), match.end() + 80)
-    window = content[start:end].casefold()
-    return any(label in window for label in _OUTPUT_SCHEMA_LABELS)
-
-
 def merge_llm_resolved_slots(
     state: PlanningState,
     classification_result: SlotClassificationResult,
@@ -634,7 +567,8 @@ def merge_llm_resolved_slots(
         state.replace_attachment_interpretation(
             file_roles=file_roles,
             example_constraints=example_constraints,
-            evidence=evidence,
+            input_evidence=state.input_schema_evidence,
+            output_evidence=evidence,
             example_inference=example_inference,
         )
 
