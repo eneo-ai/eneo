@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 JsonObject = dict[str, Any]
 DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json")
@@ -52,6 +53,21 @@ class ApiConfig:
     base_url: str
     api_key: str
     timeout_seconds: int
+
+
+class BattleTurnError(ValueError):
+    """A failed logical Builder turn whose caller identity must remain recoverable."""
+
+    def __init__(self, *, client_turn_id: str, cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.client_turn_id = client_turn_id
+
+
+def _failure_error_fields(error: Exception) -> JsonObject:
+    fields: JsonObject = {"error": str(error)}
+    if isinstance(error, BattleTurnError):
+        fields["client_turn_id"] = error.client_turn_id
+    return fields
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,7 +175,7 @@ def main() -> int:
             "app_version": LOCAL_APP_VERSION,
             "base_url": config.base_url,
             "space_id": args.space_id,
-            "error": str(error),
+            **_failure_error_fields(error),
         }
         failure["artifact_mode"] = "live_execution_failure"
         _write_json_exclusive(bundle_path, failure)
@@ -1110,7 +1126,7 @@ def _run_suite(
                     "complexity": case.complexity,
                     "domain": case.domain,
                     "repetition": repetition,
-                    "error": str(error),
+                    **_failure_error_fields(error),
                     "release_identity": release_identity,
                 }
                 failure_path = _write_bundle(
@@ -1816,41 +1832,50 @@ def _send_and_fetch(
     ui_language: str,
     question_answer: JsonObject | None,
 ) -> JsonObject:
+    client_turn_id = str(uuid4())
     payload: JsonObject = {
+        "client_turn_id": client_turn_id,
         "message": message,
         "model_id": model_id,
         "file_ids": list(file_ids) or None,
         "question_answer": question_answer,
         "ui_language": ui_language,
     }
-    events = list(
-        _send_message_stream(
-            config=config,
-            session_id=session_id,
-            payload=payload,
+    try:
+        events = list(
+            _send_message_stream(
+                config=config,
+                session_id=session_id,
+                payload=payload,
+            )
         )
-    )
-    print(f"received {len(events)} stream events")
+        print(f"received {len(events)} stream events")
 
-    latest_session = _request_json(
-        config=config,
-        method="GET",
-        path=f"/flows/ai-builder/sessions/{session_id}",
-    )
-    plan_id = _last_plan_id(events) or _optional_string(
-        latest_session,
-        "latest_plan_id",
-    )
-    plan = (
-        _request_json(
+        latest_session = _request_json(
             config=config,
             method="GET",
-            path=f"/flows/ai-builder/plans/{plan_id}",
+            path=f"/flows/ai-builder/sessions/{session_id}",
         )
-        if plan_id
-        else None
-    )
+        plan_id = _last_plan_id(events) or _optional_string(
+            latest_session,
+            "latest_plan_id",
+        )
+        plan = (
+            _request_json(
+                config=config,
+                method="GET",
+                path=f"/flows/ai-builder/plans/{plan_id}",
+            )
+            if plan_id
+            else None
+        )
+    except (HTTPError, URLError, TimeoutError, ValueError) as error:
+        raise BattleTurnError(
+            client_turn_id=client_turn_id,
+            cause=error,
+        ) from error
     return {
+        "client_turn_id": client_turn_id,
         "message": message,
         "question_answer": question_answer,
         "events": events,

@@ -5,10 +5,11 @@ import importlib.util
 import json
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from uuid import UUID
 
 from pytest import MonkeyPatch, raises
 
@@ -28,6 +29,100 @@ def _battle_harness() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_send_and_fetch_supplies_fresh_caller_owned_turn_identity(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    turn_ids = (
+        UUID("00000000-0000-0000-0000-000000000901"),
+        UUID("00000000-0000-0000-0000-000000000902"),
+    )
+    generated_turn_ids = iter(turn_ids)
+    sent_payloads: list[dict[str, object]] = []
+
+    monkeypatch.setattr(harness, "uuid4", lambda: next(generated_turn_ids))
+
+    def send_message_stream(**kwargs: object) -> Iterator[dict[str, object]]:
+        payload = kwargs["payload"]
+        assert isinstance(payload, dict)
+        sent_payloads.append(payload)
+        return iter(())
+
+    monkeypatch.setattr(harness, "_send_message_stream", send_message_stream)
+    monkeypatch.setattr(harness, "_request_json", lambda **_kwargs: {})
+
+    config = harness.ApiConfig(
+        base_url="http://localhost/api/v1",
+        api_key="local-test-key",
+        timeout_seconds=1,
+    )
+    results = [
+        harness._send_and_fetch(
+            config=config,
+            session_id="session-1",
+            message="Bygg ett flöde.",
+            model_id=None,
+            file_ids=(),
+            ui_language="sv",
+            question_answer=None,
+        )
+        for _ in turn_ids
+    ]
+
+    expected_payload = {
+        "message": "Bygg ett flöde.",
+        "model_id": None,
+        "file_ids": None,
+        "question_answer": None,
+        "ui_language": "sv",
+    }
+    assert sent_payloads == [
+        {
+            **expected_payload,
+            "client_turn_id": str(turn_id),
+        }
+        for turn_id in turn_ids
+    ]
+    assert [result["client_turn_id"] for result in results] == [
+        str(turn_id) for turn_id in turn_ids
+    ]
+
+
+def test_send_failure_preserves_turn_identity_for_failure_bundle(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    turn_id = UUID("00000000-0000-0000-0000-000000000903")
+
+    monkeypatch.setattr(harness, "uuid4", lambda: turn_id)
+
+    def fail_send(**_kwargs: object) -> Iterator[dict[str, object]]:
+        raise harness.URLError("connection reset")
+
+    monkeypatch.setattr(harness, "_send_message_stream", fail_send)
+
+    with raises(harness.BattleTurnError) as exc_info:
+        harness._send_and_fetch(
+            config=harness.ApiConfig(
+                base_url="http://localhost/api/v1",
+                api_key="local-test-key",
+                timeout_seconds=1,
+            ),
+            session_id="session-1",
+            message="Bygg ett flöde.",
+            model_id=None,
+            file_ids=(),
+            ui_language="sv",
+            question_answer=None,
+        )
+
+    assert exc_info.value.client_turn_id == str(turn_id)
+    assert harness._failure_error_fields(exc_info.value) == {
+        "error": "<urlopen error connection reset>",
+        "client_turn_id": str(turn_id),
+    }
 
 
 def _document_plan(
