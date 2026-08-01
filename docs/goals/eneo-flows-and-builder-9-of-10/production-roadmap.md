@@ -42,6 +42,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-01 | **Canonical Builder discovery evidence**: free-text replies now reach one cited classifier instead of deterministic option matching, and accepted typed planning slots replace conflicting raw signals in the discovery profile while raw text still fills genuinely missing input, output, and output-submode dimensions; a resolved primary input projects one coherent architecture and cannot reopen a stale mixed-input question (`cbc1132e2` plus this change) |
 | 2026-08-01 | **Explicit Builder question exhaustion**: architecture candidates and quality questions with an explicit `ask` policy remain askable after the normal user-question budget; every registered quality question has a terminal policy if it reaches the budget decision—to ask, surface a no-runtime-fields assumption, or reject an irrelevant refinement; rejected candidates still do not consume a question family, now pinned by a behavior test, and the assumption survives the public confirmation and persisted requirements contract (`414177328..631f2504e`, Codex and Claude gates green 8/10, no blockers) |
 | 2026-07-31 | **Flows and platform convergence**: integrated the frozen develop platform foundations into Flow and Builder at their canonical owners; durable object content, Skills, typed identity, generated SDK contracts, and Flow runtime evidence now coexist behind one Alembic head without parallel compatibility paths; frontend builds now use bounded translation output, direct icon modules, and the Bun 1.3.14 workspace lock without unsafe heap overrides (`64fd7446e` integrated, Codex gate green 9/10, no blockers) |
 | 2026-07-31 | **Typed Builder stream boundary**: every known SSE event and nested payload is validated before entering frontend state; malformed and unknown events fail closed; one explicit `idle/streaming/failed` lifecycle owns transport and server failures without duplicate banners; structured request identity and backend error codes survive the boundary; DOM tests run in an isolated jsdom project while pure protocol tests stay in the default project (`a2642c1a1`, Codex and Claude gates green 8/10, no findings) |
@@ -336,8 +337,9 @@ plan above controls all other ordering.
   its behavior tests: form variables (inmatningsfält), targeted underlag per
   step, enforced JSON input/output schemas, unusual-input resilience, and
   deterministic zero-call behavior. Measured economics stay in item 10.
-- **B7** (= item 8b/8c deepened, five ordered owner slices): (a) one gated
-  semantic-owner series deletes the unused discovery-follow-up and readiness
+- **B7** (= item 8b/8c deepened, five ordered owner slices): (a) **LANDED
+  `cbc1132e2`** — one gated semantic-owner series deleted the unused
+  discovery-follow-up and readiness
   paths, adds one typed `question_response` marker containing only the pending
   user-requirement question id, preserves distinct-question budget counts through
   compaction, freezes focused Swedish/English exact-label, paraphrase, negation,
@@ -351,9 +353,9 @@ plan above controls all other ordering.
   normalized equality through the cited-evidence path, never explicit-answer
   metadata. Question policy asks only for unresolved information that can change
   the Flow's contract, topology, quality, or governance; the confirmation surface
-  exposes consequential assumptions instead of hiding them. (b) typed resolved
-  slots become canonical in the discovery profile;
-  raw text resolves only missing dimensions. (c) correct the known neutral
+  exposes consequential assumptions instead of hiding them. (b) **LANDED in this
+  change** — typed resolved slots are canonical in the discovery profile and raw
+  text resolves only missing dimensions. (c) correct the known neutral
   vocabulary defects and delete `case_like_flow` phrase ownership with pinned
   before/after question-topology behavior. (d) architecture-impact dimensions
   never commit from policy defaults or heuristics; confirmation bucketing stays

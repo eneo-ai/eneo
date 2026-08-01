@@ -34,29 +34,25 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     InputIntentResolution,
     resolve_input_intent,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import PlanningState, SlotSource
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from eneo.flows.domain.flow import Flow
 
-_PROFILE_ANSWER_SOURCES: frozenset[str] = frozenset(
+_ACTIVE_REQUEST_ANSWER_SOURCES: frozenset[SlotSource] = frozenset(
+    {
+        "model",
+        "requirements_summary",
+        "structured_answer",
+    }
+)
+_PROFILE_DEFAULT_ANSWER_SOURCES: frozenset[SlotSource] = frozenset(
     {
         "flow_default",
-        "model",
         "policy_default",
-        "requirements_summary",
-        "structured_answer",
     }
 )
-_ACTIVE_REQUEST_ANSWER_SOURCES: frozenset[str] = frozenset(
-    {
-        "model",
-        "requirements_summary",
-        "structured_answer",
-    }
-)
-
 _TASK_VERB_PREFIXES_SV = (
     # Prefixes are intentional: Swedish/English user requests are often
     # inflected, compounded, or phrased as "*-flöde" / "* flow"; matching is
@@ -227,29 +223,27 @@ def build_discovery_profile(
         active_conversation,
         flow=flow,
     )
-    planning_state_answers = answer_signals_from_planning_state(planning_state)
-    active_planning_state_answers = answer_signals_from_planning_state(
+    canonical_planning_state_answers = answer_signals_from_planning_state(
         planning_state,
         accepted_sources=_ACTIVE_REQUEST_ANSWER_SOURCES,
     )
-    answers = merge_answer_signals(
+    default_planning_state_answers = answer_signals_from_planning_state(
+        planning_state,
+        accepted_sources=_PROFILE_DEFAULT_ANSWER_SOURCES,
+    )
+    answers = _overlay_answer_signals(
         extract_answer_signals(conversation),
-        planning_state_answers,
+        canonical_planning_state_answers,
+        fallback_answers=default_planning_state_answers,
     )
     text = (
         active_window.text
         if active_window is not None and active_window.text
         else full_text
     )
-    active_answers = merge_answer_signals(
-        extract_answer_signals(
-            (
-                conversation[active_window.start_index :]
-                if active_window is not None and active_window.start_index is not None
-                else conversation
-            )
-        ),
-        active_planning_state_answers,
+    active_answers = _overlay_answer_signals(
+        extract_answer_signals(active_conversation),
+        canonical_planning_state_answers,
     )
     active_explicit_question_ids = {
         question_id
@@ -286,6 +280,10 @@ def build_discovery_profile(
         active_answers,
         flow=flow,
         explicit_question_ids=explicit_input_question_ids,
+    )
+    input_intent = _project_canonical_input_intent(
+        input_intent,
+        canonical_planning_state_answers,
     )
     explicit_output = output_intent.terminal_output
     default_input_modes = flow_defaults.get("primary_runtime_input", set())
@@ -429,22 +427,24 @@ def resolve_reference_source(
     )
 
 
-def merge_answer_signals(
-    primary: dict[str, set[str]],
-    supplemental: dict[str, set[str]] | None,
+def _overlay_answer_signals(
+    raw_answers: dict[str, set[str]],
+    canonical_answers: dict[str, set[str]],
+    *,
+    fallback_answers: dict[str, set[str]] | None = None,
 ) -> dict[str, set[str]]:
-    merged = {key: set(values) for key, values in primary.items()}
-    if supplemental is None:
-        return merged
-    for key, values in supplemental.items():
-        merged.setdefault(key, set()).update(values)
-    return merged
+    projected = {key: set(values) for key, values in raw_answers.items()}
+    for key, values in (fallback_answers or {}).items():
+        projected.setdefault(key, set(values))
+    for key, values in canonical_answers.items():
+        projected[key] = set(values)
+    return projected
 
 
 def answer_signals_from_planning_state(
     planning_state: PlanningState,
     *,
-    accepted_sources: frozenset[str] = _PROFILE_ANSWER_SOURCES,
+    accepted_sources: frozenset[SlotSource],
 ) -> dict[str, set[str]]:
     answers: dict[str, set[str]] = {}
     for slot in planning_state.resolved_slots.values():
@@ -452,6 +452,34 @@ def answer_signals_from_planning_state(
             continue
         answers.setdefault(slot.name, set()).add(slot.value)
     return answers
+
+
+def _project_canonical_input_intent(
+    resolved: InputIntentResolution,
+    canonical_planning_state_answers: dict[str, set[str]],
+) -> InputIntentResolution:
+    primary_runtime_input = canonical_planning_state_answers.get(
+        "primary_runtime_input"
+    )
+    if not primary_runtime_input:
+        return resolved
+    if len(primary_runtime_input) != 1:
+        raise ValueError(
+            "PlanningState primary_runtime_input must contain exactly one value"
+        )
+
+    # An accepted primary-input slot owns the whole runtime-input dimension;
+    # incidental text must not reconstruct secondary modalities and reopen it.
+    canonical = resolve_input_intent(
+        "",
+        {"primary_runtime_input": primary_runtime_input},
+        explicit_question_ids={"primary_runtime_input"},
+    )
+    if canonical.primary_runtime_input == "unknown":
+        raise ValueError(
+            "PlanningState primary_runtime_input contains an unsupported value"
+        )
+    return canonical
 
 
 def expresses_task_intent(text: str) -> bool:

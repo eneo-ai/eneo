@@ -1251,6 +1251,43 @@ class TestExtendedClarificationHints:
         assert "flow_input_architecture" not in question_ids
         assert "primary_runtime_input" not in question_ids
 
+    def test_cited_document_input_does_not_reask_from_stale_raw_conflict(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "I will upload an audio file and documents at runtime. "
+                    "Transcribe the audio, analyze the documents, and return a report."
+                ),
+                metadata={"ui_language": "en"},
+            )
+        ]
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots = {
+            "primary_runtime_input": _resolved_slot(
+                "primary_runtime_input",
+                "documents",
+            ),
+            "terminal_output": _resolved_slot(
+                "terminal_output",
+                "structured_text",
+            ),
+        }
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=planning_state,
+        )
+        question_ids = {
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        }
+
+        assert "flow_input_architecture" not in question_ids
+        assert "primary_runtime_input" not in question_ids
+        assert "terminal_output" not in question_ids
+
     def test_audio_edit_with_derived_underlag_does_not_trigger_mixed_input_question(
         self,
     ) -> None:

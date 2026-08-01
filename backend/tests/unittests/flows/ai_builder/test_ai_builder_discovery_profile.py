@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
@@ -13,6 +15,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_edit_scope import has_change_semantics
+from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot, SlotSource
 from eneo.flows.domain.flow import Flow, FlowStep
 
 
@@ -62,6 +65,21 @@ def _make_flow(*steps: FlowStep, metadata_json: dict | None = None) -> Flow:
         published=False,
         published_version=None,
         draft_revision=3,
+    )
+
+
+def _resolved_slot(
+    name: str,
+    value: str,
+    *,
+    source: SlotSource = "model",
+) -> ResolvedSlot:
+    return ResolvedSlot(
+        name=name,
+        value=value,
+        source=source,
+        confidence="high",
+        evidence=["quote:test"],
     )
 
 
@@ -262,6 +280,143 @@ def test_build_discovery_profile_keeps_docx_output_intent_when_input_mentions_pd
     assert (
         profile.planning_state.resolved_slots.get("document_material_scope") is not None
     )
+
+
+def test_typed_primary_input_projects_one_coherent_runtime_architecture() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["primary_runtime_input"] = _resolved_slot(
+        "primary_runtime_input",
+        "documents",
+    )
+
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "I will upload an audio file and documents at runtime. "
+                    "Transcribe the audio, analyze the documents, then return a PDF report."
+                ),
+            )
+        ],
+        planning_state=planning_state,
+    )
+
+    assert profile.input_intent.primary_runtime_input == "documents"
+    assert profile.input_intent.document_runtime_input_requested is True
+    assert profile.input_intent.audio_requested is False
+    assert profile.input_intent.needs_architecture_clarification is False
+    assert profile.output_intent.terminal_output == "pdf_document"
+    assert profile.answers["primary_runtime_input"] == {"documents"}
+
+
+def test_typed_primary_input_rejects_unsupported_persisted_value() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["primary_runtime_input"] = _resolved_slot(
+        "primary_runtime_input",
+        "video",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="primary_runtime_input contains an unsupported value",
+    ):
+        build_discovery_profile(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "I will upload an audio file and documents at runtime. "
+                        "Transcribe the audio and analyze the documents."
+                    ),
+                )
+            ],
+            planning_state=planning_state,
+        )
+
+
+def test_structured_output_slots_override_raw_text_while_input_fills_its_gap() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "terminal_output": _resolved_slot(
+            "terminal_output",
+            "pdf_document",
+            source="structured_answer",
+        ),
+        "pdf_generation_mode": _resolved_slot(
+            "pdf_generation_mode",
+            "generated_pdf",
+            source="structured_answer",
+        ),
+    }
+
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag ska skicka in en ljudfil som ska transkriberas. "
+                    "Fyll en DOCX-mall som slutresultat."
+                ),
+            )
+        ],
+        planning_state=planning_state,
+    )
+
+    assert profile.input_intent.primary_runtime_input == "audio"
+    assert profile.output_intent.terminal_output == "pdf_document"
+    assert profile.output_intent.pdf_generation_mode == "generated_pdf"
+    assert profile.output_intent.docx_output_mode is None
+    assert profile.answers["terminal_output"] == {"pdf_document"}
+
+
+def test_raw_text_fills_missing_docx_submode_below_typed_terminal_output() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots["terminal_output"] = _resolved_slot(
+        "terminal_output",
+        "docx_document",
+    )
+
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Users upload documents at runtime. Generate the final DOCX "
+                    "without using a template."
+                ),
+            )
+        ],
+        planning_state=planning_state,
+    )
+
+    assert profile.input_intent.primary_runtime_input == "documents"
+    assert profile.output_intent.terminal_output == "docx_document"
+    assert profile.output_intent.docx_output_mode == "generated_docx"
+
+
+def test_typed_docx_submode_overrides_conflicting_raw_generation_detail() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "terminal_output": _resolved_slot("terminal_output", "docx_document"),
+        "docx_output_mode": _resolved_slot(
+            "docx_output_mode",
+            "template_fill_docx",
+        ),
+    }
+
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content="Generate the final DOCX without using a template.",
+            )
+        ],
+        planning_state=planning_state,
+    )
+
+    assert profile.output_intent.terminal_output == "docx_document"
+    assert profile.output_intent.docx_output_mode == "template_fill_docx"
 
 
 def test_build_discovery_profile_exposes_runtime_metadata_and_structured_analysis_slots() -> (
