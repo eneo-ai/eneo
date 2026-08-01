@@ -21,6 +21,7 @@ services:
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
     ports:
       - "3000:3000"
+      - "3001:3001"
       - "8123:8123"
     volumes:
       - ../:/workspace
