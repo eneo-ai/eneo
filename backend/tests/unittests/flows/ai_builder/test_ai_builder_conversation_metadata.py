@@ -467,6 +467,44 @@ def test_classifier_rebuild_classes_all_have_canonical_retention_rules() -> None
     assert CLASSIFIER_REBUILD_INPUT_CLASSES == CLASSIFIER_RETENTION_CLASSES
 
 
+def test_classifier_metadata_rejects_attachment_only_terminal_output() -> None:
+    file_id = uuid4()
+    source_id = f"uploaded_file:{file_id}"
+
+    classification = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_json",
+                    confidence="medium",
+                    reason="the attachment contains JSON",
+                    evidence=(
+                        ClassifiedEvidence(source_id=source_id, quote='{"id": 1}'),
+                    ),
+                    evidence_level="inferred",
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=source_id,
+                    kind="uploaded_file",
+                    text='{"id": 1}',
+                    file_id=file_id,
+                    coverage="fully_seen",
+                ),
+            )
+        ),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+
+    assert classification is None
+
+
 def test_classifier_retention_identities_follow_replay_confidence_rules() -> None:
     classification = slot_classification_metadata_from_result(
         SlotClassificationResult(

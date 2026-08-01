@@ -332,6 +332,36 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_englis
 
 
 @pytest.mark.parametrize(
+    ("ui_language", "misleading_fragment"),
+    [
+        ("en", "controls the JSON result"),
+        ("sv", "styr JSON-resultatet"),
+    ],
+)
+def test_confirmation_does_not_present_undirected_schema_as_docx_contract(
+    ui_language: str,
+    misleading_fragment: str,
+) -> None:
+    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    state.output_schema_evidence = build_output_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"case_id": {"type": "string"}},
+        },
+        source="attachment_json_schema",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
+        confidence="high",
+        evidence=("file:00000000-0000-0000-0000-000000000001:json_schema",),
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language=ui_language)
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert misleading_fragment not in decision.payload.summary
+
+
+@pytest.mark.parametrize(
     ("ui_language", "summary_fragment", "layout_fragment"),
     [
         (

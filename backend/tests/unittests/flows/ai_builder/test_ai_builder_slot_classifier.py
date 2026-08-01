@@ -344,8 +344,8 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
             {
                 "slots": [
                     {
-                        "slot_name": "terminal_output",
-                        "value": "pdf_document",
+                        "slot_name": "primary_runtime_input",
+                        "value": "documents",
                         "confidence": "high",
                         "reason": "unsupported",
                     },
@@ -360,7 +360,7 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
                 ],
             }
         ),
-        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        allowed_slot_values={"primary_runtime_input": {"documents"}},
         classification_input=SlotClassificationInput(
             sources=(
                 SlotClassificationSource(
@@ -425,18 +425,18 @@ def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
             {
                 "slots": [
                     {
-                        "slot_name": "terminal_output",
-                        "value": "pdf_document",
+                        "slot_name": "primary_runtime_input",
+                        "value": "documents",
                         "confidence": "high",
                         "reason": "fabricated evidence",
-                        "evidence": [_evidence("User requested a PDF")],
+                        "evidence": [_evidence("User requested documents")],
                         "evidence_level": "explicit",
                     }
                 ]
             }
         ),
-        allowed_slot_values={"terminal_output": {"pdf_document"}},
-        classification_input=_classification_input("User requested a DOCX"),
+        allowed_slot_values={"primary_runtime_input": {"documents"}},
+        classification_input=_classification_input("User requested audio"),
     )
 
     assert result is not None
@@ -445,7 +445,7 @@ def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
     assert result.slots[0].evidence_level == "inferred"
 
 
-def test_attachment_only_evidence_cannot_be_explicit() -> None:
+def test_attachment_only_evidence_cannot_classify_terminal_output() -> None:
     file_id = uuid4()
     source_id = f"uploaded_file:{file_id}"
     result = parse_slot_classification_response(
@@ -480,8 +480,7 @@ def test_attachment_only_evidence_cannot_be_explicit() -> None:
     )
 
     assert result is not None
-    assert result.slots[0].confidence == "medium"
-    assert result.slots[0].evidence_level == "inferred"
+    assert result.slots == ()
 
 
 def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> None:
@@ -1839,7 +1838,7 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
     assert "does not promise exact visual layout" in prompt
     assert "Use the conversation and file evidence together" in prompt
     assert "Do not wait for deterministic inferred_role example_output" in prompt
-    assert "report_disposition, terminal_output" in prompt
+    assert "Never classify terminal_output from uploaded-file evidence alone" in prompt
     assert "filename: bilaga.pdf" in prompt
     assert "så här ska rapporten se ut" in prompt
 

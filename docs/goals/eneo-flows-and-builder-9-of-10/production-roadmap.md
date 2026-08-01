@@ -42,7 +42,8 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
-| 2026-08-01 | **Canonical Builder discovery evidence**: free-text replies now reach one cited classifier instead of deterministic option matching, and accepted typed planning slots replace conflicting raw signals in the discovery profile while raw text still fills genuinely missing input, output, and output-submode dimensions; a resolved primary input projects one coherent architecture and cannot reopen a stale mixed-input question (`cbc1132e2` plus this change) |
+| 2026-08-01 | **Directional Builder schema guard**: valid JSON-schema evidence remains available to planning without selecting, replacing, or reopening the terminal output; attachment-only classifier evidence cannot own that user choice, and non-JSON confirmation, proposal prompting, and compilation neither describe nor apply an undirected schema as an output contract; a runtime-input schema plus an explicit generated-DOCX request now survives discovery through compilation, while duplicate reconciliation and chronology paths are deleted (this change) |
+| 2026-08-01 | **Canonical Builder discovery evidence**: free-text replies now reach one cited classifier instead of deterministic option matching, and accepted typed planning slots replace conflicting raw signals in the discovery profile while raw text still fills genuinely missing input, output, and output-submode dimensions; a resolved primary input projects one coherent architecture and cannot reopen a stale mixed-input question (`cbc1132e2`, `65af265bb`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-01 | **Explicit Builder question exhaustion**: architecture candidates and quality questions with an explicit `ask` policy remain askable after the normal user-question budget; every registered quality question has a terminal policy if it reaches the budget decision—to ask, surface a no-runtime-fields assumption, or reject an irrelevant refinement; rejected candidates still do not consume a question family, now pinned by a behavior test, and the assumption survives the public confirmation and persisted requirements contract (`414177328..631f2504e`, Codex and Claude gates green 8/10, no blockers) |
 | 2026-07-31 | **Flows and platform convergence**: integrated the frozen develop platform foundations into Flow and Builder at their canonical owners; durable object content, Skills, typed identity, generated SDK contracts, and Flow runtime evidence now coexist behind one Alembic head without parallel compatibility paths; frontend builds now use bounded translation output, direct icon modules, and the Bun 1.3.14 workspace lock without unsafe heap overrides (`64fd7446e` integrated, Codex gate green 9/10, no blockers) |
 | 2026-07-31 | **Typed Builder stream boundary**: every known SSE event and nested payload is validated before entering frontend state; malformed and unknown events fail closed; one explicit `idle/streaming/failed` lifecycle owns transport and server failures without duplicate banners; structured request identity and backend error codes survive the boundary; DOM tests run in an isolated jsdom project while pure protocol tests stay in the default project (`a2642c1a1`, Codex and Claude gates green 8/10, no findings) |
@@ -363,9 +364,13 @@ plan above controls all other ordering.
   model-aware/admin budget owner while source-count and structured-value bounds
   remain named parser-shape invariants pending item 10. No classifier expansion
   for intentionally structured-only lanes. *(L)*
-- **B9** (directional JSON contracts, three ordered slices): (a) stop schema
-  presence from changing terminal output before output direction is owned, with a
-  regression where a runtime-input schema plus requested DOCX remains DOCX; (b)
+- **B9** (directional JSON contracts, three ordered slices): (a) **LANDED in
+  this change** — schema presence no longer changes terminal output before
+  output direction is owned; a runtime-input schema plus requested generated
+  DOCX remains DOCX through compilation, attachment-only classification cannot
+  own the terminal choice, and schema evidence remains available for the
+  directional owner without misleading confirmation or proposal instructions;
+  (b)
   rename the already-neutral evidence value to `SchemaEvidence` and let
   `PlanningState` carry two explicit optional fields—input and output—so both may
   coexist without a list/set wrapper or compatibility reader; deterministic

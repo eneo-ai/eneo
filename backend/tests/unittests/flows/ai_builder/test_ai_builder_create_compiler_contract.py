@@ -245,7 +245,7 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
     assert "additionalProperties" not in context.terminal_output_schema
 
 
-def test_compile_context_rejects_attachment_json_schema_for_docx_terminal() -> None:
+def test_compile_context_keeps_undirected_schema_out_of_docx_terminal() -> None:
     state = PlanningState.empty()
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
@@ -262,10 +262,11 @@ def test_compile_context_rejects_attachment_json_schema_for_docx_terminal() -> N
         evidence=["file:00000000-0000-0000-0000-000000000701:json_schema_attachment"],
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as exc:
-        create_compile_context_from_planning_state(state)
+    context = create_compile_context_from_planning_state(state)
 
-    assert exc.value.public_code == "architecture_critic_invariant_failed"
+    assert context is not None
+    assert context.final_output_type is OutputType.DOCX
+    assert context.terminal_output_schema is None
 
 
 def test_compile_context_requires_only_summary_source_reader_obligation() -> None:

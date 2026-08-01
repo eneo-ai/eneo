@@ -24,6 +24,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     slot_classification_metadata_from_result,
 )
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    create_compile_context_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
@@ -699,9 +702,7 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
 
 
 @pytest.mark.asyncio
-async def test_runtime_applies_attachment_json_schema_evidence_without_model_call() -> (
-    None
-):
+async def test_runtime_retains_attachment_json_schema_without_choosing_output() -> None:
     file_id = uuid4()
     attachment_evidence = build_output_schema_evidence(
         json_schema={
@@ -731,9 +732,142 @@ async def test_runtime_applies_attachment_json_schema_evidence_without_model_cal
     ).planning_state
 
     assert state.output_schema_evidence is attachment_evidence
-    terminal_output = state.resolved_slots["terminal_output"]
-    assert terminal_output.value == "structured_json"
-    assert terminal_output.source == "heuristic"
+    assert "terminal_output" not in state.resolved_slots
+
+
+@pytest.mark.asyncio
+async def test_runtime_input_schema_does_not_override_requested_docx_output() -> None:
+    file_id = uuid4()
+    conversation = [
+        ConversationMessage(
+            message_id="user-1",
+            role="user",
+            content=(
+                "Det bifogade JSON-schemat validerar indata vid körning. "
+                "Bygg ett flöde som tar emot JSON vid körning och genererar "
+                "en DOCX-rapport utan mall."
+            ),
+        )
+    ]
+    attachment_evidence = build_output_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"case_id": {"type": "string"}},
+            "required": ["case_id"],
+        },
+        source="attachment_json_schema",
+        source_file_ids=(file_id,),
+        confidence="high",
+        evidence=[f"file:{file_id}:json_schema_attachment"],
+    )
+
+    state = (
+        await build_runtime_discovery_context(
+            conversation,
+            tenant_id=uuid4(),
+            allow_classification=False,
+            attachment_context=AIBuilderAttachmentContext(
+                context=None,
+                evidence=(),
+                included_file_ids=[],
+                total_chars=0,
+                truncated=False,
+                output_schema_evidence=attachment_evidence,
+            ),
+        )
+    ).planning_state
+
+    assert state.output_schema_evidence is attachment_evidence
+    assert state.resolved_slots["terminal_output"].value == "docx_document"
+    assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+    analysis = analyze_discovery(conversation, planning_state=state)
+    assert "terminal_output" not in analysis.selected_question_ids
+    compile_context = create_compile_context_from_planning_state(state)
+    assert compile_context is not None
+    assert compile_context.final_output_type.value == "docx"
+    assert compile_context.terminal_output_schema is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("classified_value", ["structured_json", UNKNOWN_SLOT_VALUE])
+async def test_attachment_only_classification_does_not_replace_requested_docx(
+    classified_value: str,
+) -> None:
+    file_id = uuid4()
+    excerpt = '{"case_id":"123"}'
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": classified_value,
+                        "confidence": "medium",
+                        "reason": "the uploaded file contains JSON",
+                        "evidence": [
+                            {
+                                "source_id": f"uploaded_file:{file_id}",
+                                "quote": excerpt,
+                            }
+                        ],
+                        "evidence_level": "inferred",
+                    }
+                ]
+            }
+        )
+    )
+    attachment_evidence = build_output_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"case_id": {"type": "string"}},
+            "required": ["case_id"],
+        },
+        source="attachment_json_schema",
+        source_file_ids=(file_id,),
+        confidence="high",
+        evidence=[f"file:{file_id}:json_schema_attachment"],
+    )
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="Generate a DOCX report without a template.",
+            )
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        attachment_context=AIBuilderAttachmentContext(
+            context=excerpt,
+            evidence=(
+                AIBuilderAttachmentEvidence(
+                    file_id=file_id,
+                    filename="runtime-input.schema.json",
+                    file_type=FileType.TEXT,
+                    mimetype="application/json",
+                    has_readable_text=True,
+                    excerpt=excerpt,
+                    coverage="fully_seen",
+                ),
+            ),
+            included_file_ids=[file_id],
+            total_chars=len(excerpt),
+            truncated=False,
+            output_schema_evidence=attachment_evidence,
+        ),
+    )
+    state = context.planning_state
+
+    assert state.resolved_slots["terminal_output"].value == "docx_document"
+    assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+    assert context.slot_classification_result is not None
+    assert context.slot_classification_result.slots == ()
+    assert context.slot_classification_metadata is not None
+    assert context.slot_classification_metadata.slots == []
+    litellm_client.acompletion.assert_awaited_once()
 
 
 @pytest.mark.asyncio

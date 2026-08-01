@@ -281,6 +281,9 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 "the user must provide at runtime.",
             ]
         )
+    terminal_output = planning_state.resolved_slots.get("terminal_output")
+    if terminal_output is None or terminal_output.value != "structured_json":
+        return None
     if evidence.source == "inferred_example":
         return "\n".join(
             [

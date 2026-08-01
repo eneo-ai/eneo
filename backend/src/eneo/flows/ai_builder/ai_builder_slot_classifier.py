@@ -50,6 +50,9 @@ SlotClassificationSourceKind = Literal[
     "structured_answer",
     "uploaded_file",
 ]
+_USER_OWNED_CLASSIFICATION_SOURCE_KINDS: frozenset[SlotClassificationSourceKind] = (
+    frozenset({"user_message", "structured_answer"})
+)
 
 # Tenant id is intentionally log-only; classification depends on typed sources and slots.
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
@@ -156,6 +159,17 @@ class SlotClassificationBias:
     target_slot_name: str
     asked_question_id: str
     answer_source_id: str
+
+
+def classification_evidence_has_user_owned_source(
+    evidence_source_ids: Iterable[str],
+    *,
+    source_kinds_by_id: Mapping[str, SlotClassificationSourceKind],
+) -> bool:
+    return any(
+        source_kinds_by_id.get(source_id) in _USER_OWNED_CLASSIFICATION_SOURCE_KINDS
+        for source_id in evidence_source_ids
+    )
 
 
 async def classify_slots(
@@ -335,6 +349,9 @@ def parse_slot_classification_response(
         return None
 
     slot_values = _normalize_allowed_slot_values(allowed_slot_values)
+    source_kinds_by_id: dict[str, SlotClassificationSourceKind] = {
+        source.source_id: source.kind for source in classification_input.sources
+    }
     slots: list[ClassifiedSlot] = []
     seen_slot_names: set[str] = set()
     for item in cast(list[object], raw_slots):
@@ -369,6 +386,13 @@ def parse_slot_classification_response(
             classification_input=classification_input,
             structured_question_id=slot_name,
         )
+        if slot_name == "terminal_output" and not (
+            classification_evidence_has_user_owned_source(
+                (item.source_id for item in evidence),
+                source_kinds_by_id=source_kinds_by_id,
+            )
+        ):
+            continue
         confidence_value = cast(SlotClassificationConfidence, confidence)
         slots.append(
             ClassifiedSlot(
@@ -1211,8 +1235,10 @@ def _build_slot_classification_prompt(
         "sections plus a shared overview, comparison, or conclusion. "
         "If the conversation and uploaded-file evidence show that an upload is an "
         "example_output, classify that file_role and use the same exact quoted "
-        "evidence for report_disposition, terminal_output, and visible output-shape "
-        "requirements when those slots are unresolved. Do not wait for deterministic "
+        "evidence for report_disposition and visible output-shape requirements when "
+        "those slots are unresolved. Never classify terminal_output from uploaded-file "
+        "evidence alone; it requires at least one exact quote from a user_message or "
+        "structured_answer source. Do not wait for deterministic "
         "inferred_role example_output; semantic example recognition belongs in this "
         "classifier response. Treat attachment-only conclusions as medium "
         "confidence unless the conversation independently confirms the same "

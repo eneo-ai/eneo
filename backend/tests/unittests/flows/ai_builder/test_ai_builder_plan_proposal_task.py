@@ -276,7 +276,7 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
 
 
 def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None:
-    state = PlanningState.empty()
+    state = _state_with_slot("terminal_output", "structured_json")
     state.output_schema_evidence = build_output_schema_evidence(
         json_schema={
             "type": "object",
@@ -308,11 +308,38 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
     assert "additionalProperties" not in prompt
 
 
+def test_plan_proposal_prompt_does_not_direct_undirected_schema_to_docx() -> None:
+    state = _state_with_slot("terminal_output", "docx_document")
+    state.output_schema_evidence = build_output_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"case_id": {"type": "string"}},
+        },
+        source="attachment_json_schema",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
+        confidence="high",
+        evidence=("file:00000000-0000-0000-0000-000000000001:json_schema",),
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(summary="Generate a DOCX report."),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Output schema evidence:" not in prompt
+    assert "Use output_fields consistent with these user-declared fields." not in prompt
+
+
 def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> None:
     file_id = UUID("00000000-0000-0000-0000-000000000713")
+    base_state = _state_with_slot("terminal_output", "structured_json")
     state = PlanningState.model_validate(
         {
-            **dict(PlanningState.empty()),
+            **dict(base_state),
             "file_roles": [
                 FileRoleEvidence(
                     file_id=file_id,

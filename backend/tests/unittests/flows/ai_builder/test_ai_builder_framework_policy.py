@@ -683,21 +683,6 @@ def test_resolve_output_intent_defaults_report_like_prompt_to_structured_text() 
     assert intent.pdf_generation_mode is None
 
 
-def test_resolve_output_intent_uses_declared_output_schema_as_json_contract() -> None:
-    intent = resolve_output_intent(
-        (
-            "Ta emot text och skapa en strukturerad rapport. "
-            "Output JSON schema anges separat."
-        ),
-        {},
-        output_schema_evidence_present=True,
-    )
-
-    assert intent.terminal_output == "structured_json"
-    assert intent.docx_output_mode is None
-    assert intent.pdf_generation_mode is None
-
-
 def test_resolve_output_intent_defaults_text_answer_flow_to_structured_text() -> None:
     intent = resolve_output_intent(
         (

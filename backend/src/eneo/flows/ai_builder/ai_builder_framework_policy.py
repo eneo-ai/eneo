@@ -1006,7 +1006,6 @@ def resolve_output_intent(
     *,
     flow_defaults: dict[str, set[str]] | None = None,
     conversation: Sequence[ConversationMessage | Mapping[str, Any]] | None = None,
-    output_schema_evidence_present: bool = False,
 ) -> OutputIntentResolution:
     normalized_text = normalize_signal_text(text)
     content_shape = _infer_output_content_shape(normalized_text)
@@ -1015,12 +1014,6 @@ def resolve_output_intent(
         answer_signals,
         flow_defaults=flow_defaults,
         conversation=conversation,
-    )
-    terminal_output = _reconcile_terminal_output_with_declared_schema(
-        terminal_output,
-        answer_signals,
-        conversation=conversation,
-        output_schema_evidence_present=output_schema_evidence_present,
     )
     return OutputIntentResolution(
         terminal_output=terminal_output,
@@ -1036,26 +1029,6 @@ def resolve_output_intent(
             explicit_output=terminal_output,
         ),
     )
-
-
-def _reconcile_terminal_output_with_declared_schema(
-    terminal_output: str | None,
-    answer_signals: dict[str, set[str]],
-    *,
-    conversation: Sequence[ConversationMessage | Mapping[str, Any]] | None,
-    output_schema_evidence_present: bool,
-) -> str | None:
-    if not output_schema_evidence_present or terminal_output not in {
-        None,
-        "structured_text",
-    }:
-        return terminal_output
-    if conversation is not None:
-        if has_explicit_structured_answer(conversation, "terminal_output"):
-            return terminal_output
-    elif answer_signals.get("terminal_output"):
-        return terminal_output
-    return "structured_json"
 
 
 def _looks_like_text_analysis_output(text: str) -> bool:

@@ -500,6 +500,9 @@ def _output_schema_summary_line(
             f"The template contains {evidence.total_count} unique placeholders; "
             f"{visible_count} are shown in the planning evidence."
         )
+    terminal_output = session_state.resolved_slots.get("terminal_output")
+    if terminal_output is None or terminal_output.value != "structured_json":
+        return None
     if evidence.strength == "explicit":
         if locale == "sv":
             return (

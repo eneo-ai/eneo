@@ -59,6 +59,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
     SlotClassificationSource,
     SlotClassificationSourceKind,
+    classification_evidence_has_user_owned_source,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
@@ -384,6 +385,20 @@ class SlotClassificationMetadata(BaseModel):
             evidence_items.extend(self.form_intake.evidence)
         if any(evidence.source_id not in source_ids for evidence in evidence_items):
             raise ValueError("classification evidence must cite inventoried sources")
+        source_kinds_by_id: dict[str, SlotClassificationSourceKind] = {
+            source.source_id: source.kind for source in self.source_inventory
+        }
+        if any(
+            slot.slot_name == "terminal_output"
+            and not classification_evidence_has_user_owned_source(
+                (evidence.source_id for evidence in slot.evidence),
+                source_kinds_by_id=source_kinds_by_id,
+            )
+            for slot in self.slots
+        ):
+            raise ValueError(
+                "terminal-output classification requires user-owned evidence"
+            )
         file_ids = {
             source.file_id
             for source in self.source_inventory
