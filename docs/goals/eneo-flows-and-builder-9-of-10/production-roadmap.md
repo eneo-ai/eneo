@@ -20,6 +20,12 @@ plan against current source, not carried over blind).
   reasons.
 - Multi-tenancy will be retired later: preserve isolation (a security
   requirement today), never deepen tenancy machinery.
+- Preserve the Builder's architectural spine: bounded structural evidence and
+  one cited semantic-understanding owner feed `PlanningState`; server policy owns
+  questions and confirmation; the model proposes semantic intent; the compiler
+  alone owns schemas, dataflow, topology, and runtime mechanics; normal Flow
+  draft/publish/runtime remains the only execution path. Do not introduce a
+  second agent graph, planning store, or workflow runtime.
 - Working model: the lead agent owns scope, source verification, validation,
   final judgment, roadmap, and git. Workers implement only substantial frozen,
   independently testable slices in separate worktrees; the lead handles small
@@ -153,9 +159,14 @@ external release gate (item 10); BM0.2 is external (item 10).
    persistence without a source-owned safety ceiling. Deepen this owner with
    named deployment/storage invariants and admin-configurable effective values
    below them; reject malformed stored policy explicitly; admit mapped
-   collection cardinality, aggregate packaged input, and serialized structured
-   output before provider preparation or persistence. Fix numeric ceilings from
-   the pre-release capacity evidence in item 10, not post-hoc observation.
+   collection cardinality, aggregate packaged input, serialized structured
+   output, and the existing overview/reducer fan-in before provider preparation,
+   leaf calls, or persistence. Authoring may expose selected-model reserves,
+   admin-effective bounds, structural fan-out, explicit representative-input
+   assumptions, and exact headroom for supplied samples; it must not promise that
+   unknown future uploads fit or invent provider-call/currency estimates. Fix
+   numeric ceilings from the pre-release capacity evidence in item 10, not
+   post-hoc observation.
 7c. **One authored HTTP timeout policy** *(medium)* — backend configuration,
    authored-schema defaults, runtime fallbacks, and frontend validation currently
    repeat 30/120-second values. Make one backend policy own the effective default
@@ -183,7 +194,12 @@ external release gate (item 10); BM0.2 is external (item 10).
    evidence without changing the already-honest confirmation buckets. (f) move
    aggregate classifier transcript admission into the existing model-aware/admin
    budget owner; keep named per-source parser-shape invariants fixed until item
-   10 benchmarks them.
+   10 benchmarks them. (g) keep ask/progress/plan/diagram as typed server events
+   and frontend projections, delete the dead Builder MCP label-resolver path, and
+   add no model-visible presentation tools; an end-result preview is a later
+   plan-bound structural projection only if user-value evidence justifies it.
+   Directional schemas and precise dataflow are owned by B9/B10 below; multi-stage
+   exact-template authoring is owned by B11.
 9. ~~Docs-site contract correction~~ — **LANDED** `4d13889a4`.
    The attachment-to-template lifecycle landed with item 5 (`2d608b309`).
    The guide now documents the exact lineage reader/writer contract and all
@@ -204,8 +220,13 @@ external release gate (item 10); BM0.2 is external (item 10).
     for the cited classifier's supported slots before live evaluation, including
     Swedish/English exact-label, paraphrase, negation, ambiguity, adversarial,
     and topic-change cases; benchmark aggregate classifier context plus the
-    named source-count and structured-value shape ceilings. Preserve raw
-    receipts. Then: server build identity, structural goldens (BM5.2–5.4),
+    named source-count and structured-value shape ceilings. Include exact input
+    plus output schema direction, confirmed form-field consumers, targeted
+    Underlag, a simple one-step transform, checkpoint/template behavior, and a
+    frozen representative high-cardinality exhaustive-processing case. Repeated
+    runtime economics use measured representative runs and visible assumptions;
+    any x1000 figure is arithmetic over that evidence, never a guessed estimate.
+    Preserve raw receipts. Then: server build identity, structural goldens (BM5.2–5.4),
     HTTP-secret deployment inventory (M2.9 operational half; with zero users any
     hit means reset/delete), branch-protection evidence (BM0.2).
 
@@ -218,23 +239,53 @@ inputs to be fixed before execution.
 
 **Deferred:** export streaming/pagination transport until item 2 exists and
 measured refusal metrics justify more; document-render offloading (M6.6)
-until loop-lag/heartbeat measurements with maximum-size inputs demand it.
+until loop-lag/heartbeat measurements with maximum-size inputs demand it;
+hierarchical single-source chunking or cross-source reduction until B12's frozen
+two-condition gate is met.
 **Rejected:** standalone test-factory consolidation (three local `File`
 constructors stay local until a real contract emerges); any new snapshot
 coordinator/query-bus/per-repo-session machinery; a second aggregation
-service for token totals; a separate "official decision basis" store.
+service for token totals; a separate "official decision basis" store; internal
+Builder MCP for native question/progress/plan/diagram/preview actions; importing
+a generic agent/workflow runtime beside Eneo's compiler and Flow runtime.
 
 ## Builder-excellence track (source-verified 2026-08-01)
 
 Source: the initial review of Builder intent-understanding, attachments, HITL,
 and generated-flow efficiency against `10ccd6b94`, refreshed against current
-source after the platform merge. The refresh verified explicit-answer
-provenance end to end, rejected a disproven question-exhaustion crash, found the
-classifier's exact supported-slot boundary, and froze the semantic-owner and
-question-lifecycle sequence below.
+source after the platform merge and a whole-system review of schema direction,
+Underlag/form-field dataflow, large-input topology, exact template workflows,
+native UX tools, and official Dify/n8n/Flowise/LangGraph/PydanticAI patterns. The
+refresh verified explicit-answer provenance end to end, rejected a disproven
+question-exhaustion crash, found the classifier's exact supported-slot boundary,
+and froze the semantic-owner and question-lifecycle sequence below. The external
+systems support typed map/loop/HITL/projection patterns; none becomes a parallel
+Eneo runtime or source of executable topology.
 `production-roadmap.md` is the SOLE execution authority; the retired BM
 ledger is evidence only. (`goal.md`/`notes/handoff.md` still name retired
 roadmaps — user-owned dirty files, flagged to the human owner.)
+
+**Builder target contract:** authoring may spend extra tokens to understand the
+municipal process before compiling a Flow. One cited semantic-understanding owner
+records what is known, missing, ambiguous, assumed, and supported by attachments;
+server policy asks one relevant unresolved high-impact question at a time and
+shows material assumptions at confirmation. It must not infer intent through an
+ever-growing Swedish/English synonym table or treat free text as an explicit UI
+answer.
+
+Each generated step's prompt/instructions owns the task, quality criteria, and
+required result. Compiler-owned **Underlag till text** supplies only the source,
+attachment, form-input, or prior-step material that step needs; it does not
+duplicate the prompt or forward every upstream result. Confirmed
+**inmatningsfält** retain exact names and types, remain distinct from the primary
+runtime input, and have explicit semantic consumers. Exact JSON input and output
+schemas may coexist and compile onto their correct Flow boundaries. The Builder
+chooses the fewest steps that preserve quality: split only for a real context,
+model/tool, typed-artifact, retry, checkpoint, or deterministic-render boundary,
+and merge adjacent model calls that use the same evidence for one coherent task.
+Attachments retain explicit roles, and an exact output template remains the
+deterministic rendering authority. High-cardinality uploads are a capacity and
+recovery gate for this contract, not the center of the Builder design.
 
 Product defaults adopted (owner may override): an uploaded fillable
 template binds as an immutable TEMPLATE_FILL asset (exact layout); an
@@ -245,9 +296,12 @@ claims. Checkpoint vocabulary freezes to FlowStepReviewMode (view/edit).
 Hard ordering constraints: the B5a prerequisite for item 2c is complete
 (`4b0796152`); B5b follows B1; B2 runs evidence → interpretation → binding;
 B7 runs semantic ownership → typed projection → vocabulary neutrality →
-architecture commitment → transcript admission; B4 runs
-understanding/confirmation → compile/apply after B7's semantic-owner slice. The
-ranked plan above controls all other ordering.
+architecture commitment → transcript admission; B9 then closes schema direction,
+B10 closes semantic dataflow, and B4/B11 close checkpoints and exact-template
+topology before item 7b's remaining capacity work. B9's first terminal-output
+guard may start after B7(a) if it does not overlap a changing owner; do not create
+parallel edits in the same files. Item 7b precedes any B12 capability. The ranked
+plan above controls all other ordering.
 
 - **B1** (= item 4): **LANDED** `c606411f7..48e9be497`. Terminal replayable
   Builder persistence and bounded canonical proposal snapshots. *(L)*
@@ -295,7 +349,10 @@ ranked plan above controls all other ordering.
   Offline exact-label and negation contracts must be 100%; if exact-label cannot
   pass through the real classifier prompt/parse/bias contract, retain only exact
   normalized equality through the cited-evidence path, never explicit-answer
-  metadata. (b) typed resolved slots become canonical in the discovery profile;
+  metadata. Question policy asks only for unresolved information that can change
+  the Flow's contract, topology, quality, or governance; the confirmation surface
+  exposes consequential assumptions instead of hiding them. (b) typed resolved
+  slots become canonical in the discovery profile;
   raw text resolves only missing dimensions. (c) correct the known neutral
   vocabulary defects and delete `case_like_flow` phrase ownership with pinned
   before/after question-topology behavior. (d) architecture-impact dimensions
@@ -304,6 +361,50 @@ ranked plan above controls all other ordering.
   model-aware/admin budget owner while source-count and structured-value bounds
   remain named parser-shape invariants pending item 10. No classifier expansion
   for intentionally structured-only lanes. *(L)*
+- **B9** (directional JSON contracts, three ordered slices): (a) stop schema
+  presence from changing terminal output before output direction is owned, with a
+  regression where a runtime-input schema plus requested DOCX remains DOCX; (b)
+  rename the already-neutral evidence value to `SchemaEvidence` and let
+  `PlanningState` carry two explicit optional fields—input and output—so both may
+  coexist without a list/set wrapper or compatibility reader; deterministic
+  parsing proves schema shape, while explicit or cited user evidence assigns a
+  boundary direction and one typed question resolves genuine ambiguity; a schema
+  may remain validation/reference material; (c) compile input evidence onto the
+  first Flow-input JSON consumer and output evidence onto the terminal JSON
+  contract, then extend the real JSON golden to assert both contracts. One parser
+  and evidence type, no schema registry or second ledger. *(M)*
+- **B10** (precise semantic dataflow, three ordered slices): (a) project exact
+  confirmed form-field names/types from `PlanningState` into proposal context,
+  keep existing `uses_form_fields` as the semantic consumer contract, delete the
+  final-step auto-placement fallback, and fail with structured feedback when a
+  field has no actual consumer; (b) make invalid typed source refs a Builder
+  compile error instead of degrading to rendered strings; (c) compile an input
+  schema for explicit structured Underlag projections and remove broad
+  `all_previous_steps` fan-in where declared dependencies are sufficient. The
+  model names semantic obligations; only the compiler creates bindings and refs.
+  Generated prompt/instructions describe the task and result; compiled Underlag
+  owns the selected material. Behavior tests prove that prompts do not duplicate
+  Underlag or unrelated prior outputs and that form variables appear only at
+  their declared consumers. No generic dataflow DSL. *(M)*
+- **B11** (exact-template workflow topology): after B4's checkpoint-intent owner
+  is available, allow justified analysis/validation/review stages before the
+  existing deterministic TEMPLATE_FILL terminal step. Preserve the exact selected
+  attachment, placeholder completeness, atomic asset binding, zero-token fill,
+  and typed rejection behavior. Prove “analyze, validate, then fill this exact
+  template” without permitting model-authored render mechanics. *(M)*
+- **B12** (large-corpus capability gate, deferred): item 7b first bounds the
+  current per-source/per-item leaves and existing overview/reducer before any leaf
+  call is paid, while authoring surfaces only factual policy/model shape and
+  explicit assumptions. Implement hierarchical processing only when a frozen
+  municipal release case both (1) requires exhaustive synthesis whose typed
+  aggregate exceeds one selected-model context after per-source structuring and
+  (2) is blocked by the honest refusal. If triggered, split individually oversized
+  source chunk/map/reduce from cross-source hierarchical reduction; each needs
+  deterministic batching/order, bounded calls/context/storage, explicit
+  partial-versus-atomic failure, persisted restart progress, source/span
+  provenance merge, and no silent summary replacing original evidence. Selective
+  stable-corpus lookup remains RAG, not exhaustive coverage. *(gate, not current
+  implementation commitment)*
 - The resource-limit audit leaves bounded follow-ups with existing owners: B7
   owns classifier transcript admission and response-marker compaction; source and
   output compaction heuristics change only with their semantic owner; item 10
@@ -321,9 +422,11 @@ ranked plan above controls all other ordering.
 ResolvedSlot -> action-policy -> confirmation surface already exists); a
 provenance enum on explicit-answer metadata after inferred producers are
 deleted; a token/currency cost estimator; a numeric step-count knob; per-step
-rationale fields; attachment RAG/indexing; module splits driven by line
-count (the critic/compiler/metadata modules are deep, not defective —
-the debt is duplicated semantic ownership).
+rationale fields; attachment RAG/indexing; model-visible native Builder MCP
+presentation tools; dynamic/unpinned MCP catalogs as orchestration or permission
+owners; generic LangGraph/PydanticAI/Dify/Flowise/n8n runtime adoption; module
+splits driven by line count (the critic/compiler/metadata modules are deep, not
+defective — the debt is duplicated semantic ownership).
 
 ## Update protocol
 
