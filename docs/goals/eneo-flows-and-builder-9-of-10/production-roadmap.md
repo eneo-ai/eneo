@@ -36,6 +36,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-01 | **Explicit Builder question exhaustion**: architecture and source-specific commit-grade questions remain askable after the normal user-question budget; every current quality candidate now has an exhaustive terminal policy to ask, surface an explicit no-runtime-fields assumption, or reject an irrelevant refinement; rejected candidates no longer hide later architecture questions in the same family, and the assumption survives the public confirmation and persisted requirements contract (`dc4a3a943`, Codex gate green 8/10, no findings) |
 | 2026-07-31 | **Flows and platform convergence**: integrated the frozen develop platform foundations into Flow and Builder at their canonical owners; durable object content, Skills, typed identity, generated SDK contracts, and Flow runtime evidence now coexist behind one Alembic head without parallel compatibility paths; frontend builds now use bounded translation output, direct icon modules, and the Bun 1.3.14 workspace lock without unsafe heap overrides (`64fd7446e` integrated, Codex gate green 9/10, no blockers) |
 | 2026-07-31 | **Typed Builder stream boundary**: every known SSE event and nested payload is validated before entering frontend state; malformed and unknown events fail closed; one explicit `idle/streaming/failed` lifecycle owns transport and server failures without duplicate banners; structured request identity and backend error codes survive the boundary; DOM tests run in an isolated jsdom project while pure protocol tests stay in the default project (`a2642c1a1`, Codex and Claude gates green 8/10, no findings) |
 | 2026-07-31 | **Exact resolved-input evidence**: every admitted attempt now exposes one typed lineage state in evidence views and v16 exports; one tenant/run-scoped batch read stays inside the repeatable-read snapshot and existing attempt-evidence budgets; identity-scoped retention proof prevents foreign markers from creating false purge claims across lineage, manifests, retention, and RAG summaries; malformed data remains explicit corruption; the generated SDK and docs define all states and all four synchronous export safety guards without claiming retrieval proves influence (`4d13889a4`, gate green 8/10 after three same-session passes, no findings) |
@@ -162,18 +163,27 @@ external release gate (item 10); BM0.2 is external (item 10).
    startup, expose the effective contract to authoring, and delete duplicated
    frontend/schema/runtime constants. Admins may lower operational values below
    the named deployment safety ceiling; no generic constraints-discovery API.
-8. **Builder frontend/server contract closure** *(medium, four reviewed
-   commits by owner)* — (a) stream/attachment/draft contract: attachment-limit
+8. **Builder frontend/server contract closure** *(medium, owner-separated
+   slices)* — (a) stream/attachment/draft contract: attachment-limit
    ownership is **LANDED** `478dfeb1c`; runtime SSE validation, fail-closed
    unknown-event handling, and explicit stream failure are **LANDED**
-   `a2642c1a1`; remaining work makes the draft lifecycle explicit. (b) vocabulary
-   neutrality: directly correct `case_documents`, `basic_case_metadata`,
-   `case_like_flow`, including the false use of generic `underlag` as a
-   case-domain marker — no tolerant readers. (c) delete another heuristic
-   family only after source evidence proves a canonical semantic owner and
-   behavior equivalence. (d) serve RAG policy ceilings through the existing
-   settings response and delete the duplicated admin-page TS constants — no
-   generic constraints-discovery API.
+   `a2642c1a1`; remaining work makes the draft lifecycle explicit. (b) make the
+   existing cited slot classifier the sole semantic owner for supported
+   free-text replies, while explicit answer submissions remain the only source
+   of explicit-answer metadata; preserve the user-question budget through a
+   typed response-only lifecycle marker, and delete the weaker matcher,
+   adjudicator, and dead follow-up paths behind the focused evaluation gate in
+   B7. (c) project typed resolved slots into discovery before text fallback,
+   then correct `case_documents`, `basic_case_metadata`, and `case_like_flow`,
+   including the false use of generic `underlag` as a case-domain marker — no
+   tolerant readers. (d) serve RAG policy ceilings through the existing settings
+   response and delete the duplicated admin-page TS constants — no generic
+   constraints-discovery API. (e) narrow architecture-impact commitment to
+   explicit, flow-default, requirements-summary, or cited high-confidence model
+   evidence without changing the already-honest confirmation buckets. (f) move
+   aggregate classifier transcript admission into the existing model-aware/admin
+   budget owner; keep named per-source parser-shape invariants fixed until item
+   10 benchmarks them.
 9. ~~Docs-site contract correction~~ — **LANDED** `4d13889a4`.
    The attachment-to-template lifecycle landed with item 5 (`2d608b309`).
    The guide now documents the exact lineage reader/writer contract and all
@@ -190,10 +200,14 @@ external release gate (item 10); BM0.2 is external (item 10).
     for attachment count, message length, per-file and aggregate DOCX
     inspection, placeholder evidence, and synchronous parser capacity before
     production; the current safety values are conservative bounds, not
-    certified best-practice capacity. Preserve raw receipts. Then: server build
-    identity, structural goldens (BM5.2–5.4), HTTP-secret deployment
-    inventory (M2.9 operational half; with zero users any hit means
-    reset/delete), branch-protection evidence (BM0.2).
+    certified best-practice capacity. Freeze selected-model semantic thresholds
+    for the cited classifier's supported slots before live evaluation, including
+    Swedish/English exact-label, paraphrase, negation, ambiguity, adversarial,
+    and topic-change cases; benchmark aggregate classifier context plus the
+    named source-count and structured-value shape ceilings. Preserve raw
+    receipts. Then: server build identity, structural goldens (BM5.2–5.4),
+    HTTP-secret deployment inventory (M2.9 operational half; with zero users any
+    hit means reset/delete), branch-protection evidence (BM0.2).
 
 **Product decisions adopted as defaults (owner may override):** token
 totals survive debug retention via a typed tombstone summary rather than
@@ -210,10 +224,14 @@ constructors stay local until a real contract emerges); any new snapshot
 coordinator/query-bus/per-repo-session machinery; a second aggregation
 service for token totals; a separate "official decision basis" store.
 
-## Builder-excellence track (source-verified 2026-07-29, peer pass 2)
+## Builder-excellence track (source-verified 2026-08-01)
 
-Source: xhigh peer review of Builder intent-understanding, attachments,
-HITL, and generated-flow efficiency against source at `10ccd6b94`.
+Source: the initial review of Builder intent-understanding, attachments, HITL,
+and generated-flow efficiency against `10ccd6b94`, refreshed against current
+source after the platform merge. The refresh verified explicit-answer
+provenance end to end, rejected a disproven question-exhaustion crash, found the
+classifier's exact supported-slot boundary, and froze the semantic-owner and
+question-lifecycle sequence below.
 `production-roadmap.md` is the SOLE execution authority; the retired BM
 ledger is evidence only. (`goal.md`/`notes/handoff.md` still name retired
 roadmaps — user-owned dirty files, flagged to the human owner.)
@@ -226,8 +244,10 @@ claims. Checkpoint vocabulary freezes to FlowStepReviewMode (view/edit).
 
 Hard ordering constraints: the B5a prerequisite for item 2c is complete
 (`4b0796152`); B5b follows B1; B2 runs evidence → interpretation → binding;
-B4 runs understanding/confirmation → compile/apply. The ranked plan above
-controls all other ordering.
+B7 runs semantic ownership → typed projection → vocabulary neutrality →
+architecture commitment → transcript admission; B4 runs
+understanding/confirmation → compile/apply after B7's semantic-owner slice. The
+ranked plan above controls all other ordering.
 
 - **B1** (= item 4): **LANDED** `c606411f7..48e9be497`. Terminal replayable
   Builder persistence and bounded canonical proposal snapshots. *(L)*
@@ -244,11 +264,12 @@ controls all other ordering.
   the same File, compile exact runtime-provable placeholders before approval,
   and keep reference/context/example attachments planning-only. Evidence,
   interpretation, then binding; no richer coverage state was invented. *(L)*
-- **B3**: no silent guessing after question-budget exhaustion — preserve each
-  candidate's source-specific commit-grade policy; every material commit-grade
-  candidate ends asked, explicitly defaulted and surfaced at confirmation, or
-  rejected as irrelevant. Do not make the generic `ResolvedSlot.is_commit_grade`
-  default into a new global policy. *(M)*
+- **B3**: **LANDED `dc4a3a943`**. No silent guessing after question-budget
+  exhaustion: every current quality candidate has an explicit terminal policy;
+  architecture and necessary source-specific questions remain askable; the only
+  default is surfaced at confirmation and persisted. The seven registered
+  quality candidates and seven policy keys are exhaustively equal; the earlier
+  claim of a current unknown-candidate crash was disproven. *(M)*
 - **B4** (two ordered slices): (a) the existing understanding pass records typed,
   cited checkpoint intents and confirmation exposes them; (b) compile/apply and
   the critic share one canonical requested-versus-compiled checkpoint predicate.
@@ -261,13 +282,32 @@ controls all other ordering.
   its behavior tests: form variables (inmatningsfält), targeted underlag per
   step, enforced JSON input/output schemas, unusual-input resilience, and
   deterministic zero-call behavior. Measured economics stay in item 10.
-- **B7** (= item 8b/8c): first correct the known vocabulary defects directly;
-  then delete one heuristic family at a time only after evidence proves the
-  canonical semantic owner and behavior equivalence. *(M)*
-- The resource-limit audit leaves bounded follow-ups with existing owners:
-  B3 evaluates discovery question and transcript exhaustion; B7 evaluates
-  source/output compaction heuristics only with their semantic-owner work; item
-  10 measures attachment/parser budgets and the four-call proposal
+- **B7** (= item 8b/8c deepened, five ordered owner slices): (a) one gated
+  semantic-owner series deletes the unused discovery-follow-up and readiness
+  paths, adds one typed `question_response` marker containing only the pending
+  user-requirement question id, preserves distinct-question budget counts through
+  compaction, freezes focused Swedish/English exact-label, paraphrase, negation,
+  ambiguity, adversarial, and topic-change fixtures for the classifier's
+  supported slots, then deletes the deterministic option matcher, uncited
+  adjudicator, and duplicate provider-call gate. Only explicit request answers
+  produce `question_answer`; supported free text resolves as cited model evidence;
+  unsupported option questions remain honestly unresolved and re-promptable.
+  Offline exact-label and negation contracts must be 100%; if exact-label cannot
+  pass through the real classifier prompt/parse/bias contract, retain only exact
+  normalized equality through the cited-evidence path, never explicit-answer
+  metadata. (b) typed resolved slots become canonical in the discovery profile;
+  raw text resolves only missing dimensions. (c) correct the known neutral
+  vocabulary defects and delete `case_like_flow` phrase ownership with pinned
+  before/after question-topology behavior. (d) architecture-impact dimensions
+  never commit from policy defaults or heuristics; confirmation bucketing stays
+  unchanged. (e) aggregate classifier transcript admission joins the existing
+  model-aware/admin budget owner while source-count and structured-value bounds
+  remain named parser-shape invariants pending item 10. No classifier expansion
+  for intentionally structured-only lanes. *(L)*
+- The resource-limit audit leaves bounded follow-ups with existing owners: B7
+  owns classifier transcript admission and response-marker compaction; source and
+  output compaction heuristics change only with their semantic owner; item 10
+  measures attachment/parser/classifier budgets and the proposal
   spend/reliability guard before any policy change. Planning/proposal
   persistence and run-evidence/export bounds remain fixed backend invariants
   unless storage or runtime measurements justify changing their owners.
@@ -279,7 +319,8 @@ controls all other ordering.
 
 **Rejected as overengineering**: a second assumption ledger (the
 ResolvedSlot -> action-policy -> confirmation surface already exists); a
-token/currency cost estimator; a numeric step-count knob; per-step
+provenance enum on explicit-answer metadata after inferred producers are
+deleted; a token/currency cost estimator; a numeric step-count knob; per-step
 rationale fields; attachment RAG/indexing; module splits driven by line
 count (the critic/compiler/metadata modules are deep, not defective —
 the debt is duplicated semantic ownership).
