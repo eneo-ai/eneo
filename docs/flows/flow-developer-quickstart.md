@@ -287,6 +287,10 @@ Important builder rules:
 
 - The classifier or understanding call produces evidence. It does not write
   questions.
+- Only an explicit structured answer submission creates `question_answer`
+  metadata. A free-text reply records only the canonical pending question id in
+  `question_response`; the cited classifier owns any meaning derived from that
+  text.
 - Prefer one bounded, typed understanding pass per Builder turn when model
   interpretation is needed. Split it only for a measured context-window limit;
   do not scatter semantic ownership across phrase scans.

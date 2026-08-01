@@ -6,6 +6,9 @@ from types import SimpleNamespace
 from typing import get_args
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder import ai_builder_conversation_metadata as metadata_module
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     CLASSIFIER_RETENTION_CLASSES,
@@ -19,6 +22,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     provider_safe_tool_call_id,
     question_answer_from_metadata,
     question_answer_question_id,
+    question_interaction_id_from_metadata,
+    question_response_from_metadata,
+    question_response_to_metadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
     requirements_summary_to_metadata,
@@ -123,6 +129,61 @@ def test_question_answer_request_discriminator_is_not_persisted() -> None:
     answer = question_answer_from_metadata(metadata)
     assert answer is not None
     assert question_answer_question_id(answer) == "primary_runtime_input"
+
+
+def test_question_response_metadata_round_trips_canonical_question_identity() -> None:
+    metadata = question_response_to_metadata("final_output_mode")
+
+    assert metadata == {"question_response": {"question_id": "terminal_output"}}
+    response = question_response_from_metadata(metadata)
+    assert response is not None
+    assert response.question_id == "terminal_output"
+
+
+def test_question_response_metadata_rejects_empty_persisted_identity(
+    monkeypatch,
+) -> None:
+    warnings = _capture_metadata_warnings(monkeypatch)
+
+    assert (
+        question_response_from_metadata({"question_response": {"question_id": ""}})
+        is None
+    )
+    assert warnings[0][1]["metadata_kind"] == "question_response"
+
+
+def test_question_response_metadata_rejects_unsupported_persisted_identity(
+    monkeypatch,
+) -> None:
+    warnings = _capture_metadata_warnings(monkeypatch)
+
+    assert (
+        question_response_from_metadata(
+            {"question_response": {"question_id": "invented_question"}}
+        )
+        is None
+    )
+    assert warnings[0][1]["metadata_kind"] == "question_response"
+
+
+def test_question_response_writer_rejects_unsupported_question_identity() -> None:
+    with pytest.raises(ValidationError):
+        question_response_to_metadata("invented_question")
+
+
+def test_question_interaction_identity_prefers_explicit_answer() -> None:
+    assert (
+        question_interaction_id_from_metadata(
+            {
+                "question_answer": {
+                    "question_id": "primary_runtime_input",
+                    "selected_value": "documents",
+                },
+                "question_response": {"question_id": "terminal_output"},
+            }
+        )
+        == "primary_runtime_input"
+    )
 
 
 def test_requirements_confirmation_is_persisted_as_top_level_metadata() -> None:

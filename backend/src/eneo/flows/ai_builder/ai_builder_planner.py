@@ -88,7 +88,6 @@ from eneo.flows.ai_builder.ai_builder_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
-    resolve_user_question_metadata,
 )
 from eneo.flows.ai_builder.planning_state import PlanningStatePayloadTooLargeError
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
@@ -458,37 +457,11 @@ class AIBuilderPlanner:
                     budget_policy.minimum_conversation_budget_tokens
                 ),
             )
-            schema_conflict_pending = validate_preprovider_output_schema_gate(
+            validate_preprovider_output_schema_gate(
                 conversation=conversation,
                 attachment_context=prepared_attachment_context,
             )
-            if schema_conflict_pending:
-                metadata = prepared_metadata.metadata
-                metadata_resolution_used_auxiliary_llm = False
-            else:
-                try:
-                    metadata_resolution = await resolve_user_question_metadata(
-                        litellm_client=self.litellm_client,
-                        conversation=conversation,
-                        message=message,
-                        question_answer=question_answer,
-                        ui_language=ui_language,
-                        completion_model_route=completion_model_route,
-                        prepared=prepared_metadata,
-                        usage_tracker=usage_tracker,
-                        before_provider_call=mark_provider_work_started,
-                    )
-                except AIBuilderKnownProviderRejectionException as error:
-                    yield await self._complete_known_provider_rejection(
-                        turn=turn,
-                        error=error,
-                    )
-                    yield build_done_event()
-                    return
-                metadata = metadata_resolution.metadata
-                metadata_resolution_used_auxiliary_llm = (
-                    metadata_resolution.used_auxiliary_llm
-                )
+            metadata = prepared_metadata.metadata
             if plan_edit_context is not None:
                 metadata = {
                     **(metadata or {}),
@@ -506,7 +479,6 @@ class AIBuilderPlanner:
                 prepared_request = await prepare_planner_request(
                     PlannerRequestPreparationInput(
                         conversation=conversation,
-                        message=message,
                         litellm_client=self.litellm_client,
                         completion_model_route=completion_model_route,
                         available_models=available_models,
@@ -521,9 +493,6 @@ class AIBuilderPlanner:
                         mapped_execution_policy=mapped_execution_policy,
                         plan_edit_context=plan_edit_context,
                         prior_plan_for_revision=prior_plan_for_revision,
-                        allow_discovery_semantic_adjudication=(
-                            not metadata_resolution_used_auxiliary_llm
-                        ),
                         persisted_planning_state=persisted_planning_state,
                         base_planning_state_version=turn.base_planning_state_version,
                         tenant_id=self.user.tenant_id,

@@ -39,7 +39,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
+    aggregate_unprompted_user_text,
 )
 from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
     OutputSchemaCandidateRefusal,
@@ -130,7 +130,6 @@ _ATTACHMENT_DECLARATION_MARKERS = (
 @dataclass(frozen=True, slots=True)
 class PlannerRequestPreparationInput:
     conversation: list[ConversationMessage]
-    message: str
     litellm_client: Any
     completion_model_route: ResolvedCompletionModelRoute
     available_models: list[AIBuilderAvailableModelResource] | None
@@ -147,7 +146,6 @@ class PlannerRequestPreparationInput:
     tenant_id: UUID
     plan_edit_context: AIBuilderPlanEditContext | None
     prior_plan_for_revision: BuilderPlan | None
-    allow_discovery_semantic_adjudication: bool
     persisted_planning_state: PlanningState | None
     current_turn_start: int
     usage_tracker: ProposalTurnTelemetry
@@ -236,7 +234,6 @@ async def prepare_planner_request(
         litellm_client=request.litellm_client,
         completion_model_route=request.completion_model_route,
         ui_language=ui_language,
-        allow_classification=request.allow_discovery_semantic_adjudication,
         tenant_id=request.tenant_id,
         attachment_context=attachment_context_result,
         usage_tracker=request.usage_tracker,
@@ -347,7 +344,7 @@ def build_proposal_prepared(
     section_signal_text = "\n".join(
         part
         for part in (
-            aggregate_freeform_user_text(conversation),
+            aggregate_unprompted_user_text(conversation),
             build_requirements_signal_text(confirmed_requirements),
         )
         if part
@@ -540,7 +537,7 @@ def _user_declared_schema_file_ids(
     conversation: list[ConversationMessage],
     attachment_context: AIBuilderAttachmentContext,
 ) -> frozenset[UUID]:
-    text = aggregate_freeform_user_text(conversation).casefold()
+    text = aggregate_unprompted_user_text(conversation).casefold()
     if not any(marker in text for marker in _OUTPUT_SCHEMA_DECLARATION_MARKERS):
         return frozenset()
     declared = {

@@ -93,9 +93,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
     ScopedPlanRevisionOutcome,
 )
-from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
-    PendingQuestionResolution,
-)
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionDispatchResult,
@@ -119,7 +116,6 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 )
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
-    resolve_user_question_metadata,
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -303,7 +299,6 @@ async def _prepare_planner_request_for_test(
     planner: AIBuilderPlanner,
     *,
     conversation: list[ConversationMessage],
-    message: str,
     completion_model_route: ResolvedCompletionModelRoute,
     available_models: list[AIBuilderAvailableModelResource] | None = None,
     available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
@@ -316,7 +311,6 @@ async def _prepare_planner_request_for_test(
     base_planning_state_version: int = 0,
     plan_edit_context: object = None,
     prior_plan_for_revision: BuilderPlan | None = None,
-    allow_discovery_semantic_adjudication: bool = True,
     persisted_planning_state: PlanningState | None = None,
     before_provider_call: AsyncMock | None = None,
     prepared_attachment_context: AIBuilderAttachmentContext | None = None,
@@ -325,7 +319,6 @@ async def _prepare_planner_request_for_test(
     return await prepare_planner_request(
         PlannerRequestPreparationInput(
             conversation=conversation,
-            message=message,
             litellm_client=planner.litellm_client,
             completion_model_route=completion_model_route,
             available_models=available_models,
@@ -346,7 +339,6 @@ async def _prepare_planner_request_for_test(
             tenant_id=planner.user.tenant_id,
             plan_edit_context=cast(Any, plan_edit_context),
             prior_plan_for_revision=prior_plan_for_revision,
-            allow_discovery_semantic_adjudication=allow_discovery_semantic_adjudication,
             persisted_planning_state=persisted_planning_state,
             current_turn_start=0,
             usage_tracker=ProposalTurnTelemetry(
@@ -516,59 +508,18 @@ def _force_fast_send_lock_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-@pytest.mark.asyncio
-async def test_resolve_user_question_metadata_uses_freeform_inference_before_adjudication() -> (
+def test_prepare_user_question_metadata_preserves_requirements_confirmation_and_ui_language() -> (
     None
 ):
-    planner = _make_planner()
-    inferred_answer = {
-        "question_id": "primary_runtime_input",
-        "selected_values": ["documents"],
-    }
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
-            "infer_question_answer_from_freeform",
-            return_value=inferred_answer,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
-            "adjudicate_pending_question_answer",
-            new_callable=AsyncMock,
-        ) as adjudicate,
-    ):
-        result = await resolve_user_question_metadata(
-            litellm_client=planner.litellm_client,
-            conversation=[],
-            message="Use uploaded documents.",
-            question_answer=None,
-            completion_model_route=_route(),
-        )
-
-    assert result.is_requirements_confirmation is False
-    assert result.metadata == {"question_answer": inferred_answer}
-    adjudicate.assert_not_awaited()
-    assert result.used_auxiliary_llm is False
-
-
-@pytest.mark.asyncio
-async def test_resolve_user_question_metadata_preserves_requirements_confirmation_and_ui_language() -> (
-    None
-):
-    planner = _make_planner()
-
-    result = await resolve_user_question_metadata(
-        litellm_client=planner.litellm_client,
+    result = prepare_user_question_metadata(
         conversation=[],
-        message="Yes",
+        message="",
         question_answer={
             "kind": "requirements_confirmation",
             "requirements_confirmed": True,
             "requirements_version": "req-v2",
             "ui_language": "en",
         },
-        completion_model_route=_route(),
     )
 
     assert result.is_requirements_confirmation is True
@@ -577,15 +528,10 @@ async def test_resolve_user_question_metadata_preserves_requirements_confirmatio
         "requirements_version": "req-v2",
         "ui_language": "en",
     }
-    assert result.used_auxiliary_llm is False
 
 
-@pytest.mark.asyncio
-async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -> None:
-    planner = _make_planner()
-
-    result = await resolve_user_question_metadata(
-        litellm_client=planner.litellm_client,
+def test_prepare_user_question_metadata_ingests_structured_slot_answer() -> None:
+    result = prepare_user_question_metadata(
         conversation=[],
         message="documents",
         question_answer={
@@ -593,7 +539,6 @@ async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -
             "question_id": "primary_runtime_input",
             "selected_values": ["documents"],
         },
-        completion_model_route=_route(),
     )
 
     assert result.metadata == {
@@ -616,7 +561,6 @@ async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -
     assert slot.source == "structured_answer"
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("question_answer", "reason"),
     [
@@ -684,45 +628,36 @@ async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -
         ),
     ],
 )
-async def test_resolve_user_question_metadata_rejects_uningestable_structured_answers(
+def test_prepare_user_question_metadata_rejects_uningestable_structured_answers(
     question_answer: dict[str, object],
     reason: str,
 ) -> None:
-    planner = _make_planner()
-
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
-        await resolve_user_question_metadata(
-            litellm_client=planner.litellm_client,
+        prepare_user_question_metadata(
             conversation=[],
-            message="documents",
+            message="",
             question_answer=question_answer,
-            completion_model_route=_route(),
         )
 
     assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
     assert exc_info.value.context == {"reason": reason}
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "question_id",
     ["flow_input_architecture", "final_pdf_type"],
 )
-async def test_resolve_user_question_metadata_keeps_supported_non_slot_questions(
+def test_prepare_user_question_metadata_keeps_supported_non_slot_questions(
     question_id: str,
 ) -> None:
-    planner = _make_planner()
-
-    result = await resolve_user_question_metadata(
-        litellm_client=planner.litellm_client,
+    result = prepare_user_question_metadata(
         conversation=[],
-        message="banana",
+        message="",
         question_answer={
             "kind": "structured_question_answer",
             "question_id": question_id,
             "selected_values": ["banana"],
         },
-        completion_model_route=_route(),
     )
 
     assert result.metadata == {
@@ -738,7 +673,7 @@ def test_prepare_user_question_metadata_accepts_output_schema_conflict_answer() 
 
     prepared = prepare_user_question_metadata(
         conversation=[],
-        message="Use the first schema",
+        message="",
         question_answer={
             "kind": "structured_question_answer",
             "question_id": "output_schema_conflict",
@@ -752,144 +687,17 @@ def test_prepare_user_question_metadata_accepts_output_schema_conflict_answer() 
             "selected_values": [fingerprint],
         }
     }
-    assert prepared.needs_auxiliary_llm is False
 
 
-@pytest.mark.asyncio
-async def test_resolve_user_question_metadata_does_not_adjudicate_without_pending_question() -> (
-    None
-):
-    planner = _make_planner()
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
-            "infer_question_answer_from_freeform",
-            return_value=None,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
-            "adjudicate_pending_question_answer",
-            new_callable=AsyncMock,
-        ) as adjudicate,
-    ):
-        result = await resolve_user_question_metadata(
-            litellm_client=planner.litellm_client,
-            conversation=[],
-            message="Bygg ett flöde som skapar en DOCX-rapport från ljud.",
-            question_answer=None,
-            completion_model_route=_route(),
-        )
-
-    assert result.metadata is None
-    assert result.used_auxiliary_llm is False
-    adjudicate.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_resolve_user_question_metadata_marks_auxiliary_llm_when_pending_answer_adjudication_runs() -> (
-    None
-):
-    planner = _make_planner()
-    conversation = [
-        ConversationMessage(
-            role="assistant",
-            content="What should the flow produce?",
-            tool_calls=[
-                {
-                    "id": "call_q1",
-                    "name": "ask_structured_question",
-                    "arguments": {
-                        "question_id": "terminal_output",
-                        "question": "What should the flow produce?",
-                        "options": [
-                            {"id": "structured_text", "label": "Structured text"},
-                            {"id": "pdf_document", "label": "PDF"},
-                        ],
-                        "selection_mode": "single",
-                    },
-                }
-            ],
-        )
-    ]
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
-            "infer_question_answer_from_freeform",
-            return_value=None,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_user_question_metadata."
-            "adjudicate_pending_question_answer",
-            new_callable=AsyncMock,
-            return_value=PendingQuestionResolution(
-                question_id="terminal_output",
-                selected_option_ids=("pdf_document",),
-                selected_values=("pdf_document",),
-            ),
-        ),
-    ):
-        result = await resolve_user_question_metadata(
-            litellm_client=planner.litellm_client,
-            conversation=conversation,
-            message="Make it a PDF",
-            question_answer=None,
-            completion_model_route=_route(),
-        )
-
-    assert result.used_auxiliary_llm is True
-
-
-@pytest.mark.asyncio
-async def test_resolve_user_question_metadata_infers_final_output_answer_from_structured_label() -> (
-    None
-):
-    planner = _make_planner()
-    conversation = [
-        ConversationMessage(
-            role="assistant",
-            content="Jag behöver förstå slutresultatet lite bättre innan jag kan bekräfta lösningen.",
-            tool_calls=[
-                {
-                    "id": "call_q1",
-                    "name": "ask_structured_question",
-                    "arguments": {
-                        "question_id": "terminal_output",
-                        "question": "Vad ska flödet producera som slutresultat?",
-                        "options": [
-                            {
-                                "id": "structured_text",
-                                "label": "Strukturerat textresultat",
-                            },
-                            {"id": "pdf_document", "label": "PDF-dokument"},
-                            {"id": "docx_document", "label": "DOCX-dokument"},
-                        ],
-                        "selection_mode": "single",
-                        "allow_custom": True,
-                    },
-                }
-            ],
-        )
-    ]
-
-    result = await resolve_user_question_metadata(
-        litellm_client=planner.litellm_client,
-        conversation=conversation,
-        message="PDF-dokument",
+def test_prepare_user_question_metadata_without_pending_question_is_neutral() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=[],
+        message="Hello",
         question_answer=None,
-        completion_model_route=_route(),
     )
 
-    assert result.is_requirements_confirmation is False
-    assert result.metadata == {
-        "question_answer": {
-            "question_id": "terminal_output",
-            "selected_option_id": "pdf_document",
-            "selected_value": "pdf_document",
-            "answer": "pdf_document",
-        }
-    }
+    assert prepared.metadata is None
+    assert prepared.is_requirements_confirmation is False
 
 
 @pytest.mark.asyncio
@@ -917,7 +725,6 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
         prepared = await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message="Build a flow",
             completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
@@ -948,7 +755,6 @@ async def test_prepare_planner_request_asks_about_distinct_attachment_schemas_be
     prepared = await _prepare_planner_request_for_test(
         planner,
         conversation=[ConversationMessage(role="user", content="Build a flow")],
-        message="Build a flow",
         completion_model_route=_route(),
         attachment_files=[
             _make_file(
@@ -1018,7 +824,6 @@ async def test_prepare_planner_request_rejects_canonical_schema_expansion_before
         await _prepare_planner_request_for_test(
             _make_planner(),
             conversation=[ConversationMessage(role="user", content="Build a flow")],
-            message="Build a flow",
             completion_model_route=_route(),
             attachment_files=[attachment],
             before_provider_call=provider_callback,
@@ -1069,10 +874,8 @@ async def test_prepare_planner_request_reuses_checked_empty_attachment_context(
     prepared = await _prepare_planner_request_for_test(
         planner,
         conversation=[ConversationMessage(role="user", content="Build a flow")],
-        message="Build a flow",
         completion_model_route=_route(),
         attachment_files=[],
-        allow_discovery_semantic_adjudication=False,
         prepared_attachment_context=None,
         output_schema_gate_checked=True,
     )
@@ -1082,7 +885,7 @@ async def test_prepare_planner_request_reuses_checked_empty_attachment_context(
 
 
 @pytest.mark.asyncio
-async def test_send_message_checks_attachment_conflict_before_metadata_provider_and_builds_context_once(
+async def test_send_message_builds_attachment_context_once_before_request_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     planner = _make_planner()
@@ -1106,9 +909,6 @@ async def test_send_message_checks_attachment_conflict_before_metadata_provider_
     ]
     prepared_context = build_ai_builder_attachment_context(attachments)
     build_context = MagicMock(return_value=prepared_context)
-    resolve_metadata = AsyncMock(
-        side_effect=AssertionError("metadata provider must not run before conflict")
-    )
     captured_request: PlannerRequestPreparationInput | None = None
 
     async def stop_after_request(
@@ -1126,10 +926,6 @@ async def test_send_message_checks_attachment_conflict_before_metadata_provider_
         "eneo.flows.ai_builder.ai_builder_planner."
         "build_ai_builder_attachment_context_for_model",
         build_context,
-    )
-    monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_planner.resolve_user_question_metadata",
-        resolve_metadata,
     )
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
@@ -1160,7 +956,6 @@ async def test_send_message_checks_attachment_conflict_before_metadata_provider_
         safety_buffer_tokens=128,
         minimum_conversation_tokens=256,
     )
-    resolve_metadata.assert_not_awaited()
     assert captured_request is not None
     assert captured_request.prepared_attachment_context is prepared_context
     assert captured_request.output_schema_gate_checked is True
@@ -1254,9 +1049,7 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
         prepared = await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message="Build a report flow",
             completion_model_route=_route(),
-            allow_discovery_semantic_adjudication=False,
             before_provider_call=provider_callback,
         )
 
@@ -1306,7 +1099,6 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
         prepared = await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message=conversation[0].content,
             completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
@@ -1377,7 +1169,6 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
         prepared = await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message=conversation[0].content,
             completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
@@ -1460,7 +1251,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
         prepared = await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message=conversation[0].content,
             completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
@@ -1560,7 +1350,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
         await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message="Build from this file",
             completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
@@ -1644,7 +1433,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
         prepared = await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message="Build a report flow",
             completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
@@ -1762,49 +1550,6 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
 
 
 @pytest.mark.asyncio
-async def test_prepare_planner_request_disables_discovery_semantic_adjudication_when_auxiliary_llm_already_used() -> (
-    None
-):
-    planner = _make_planner()
-    conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = DiscoveryAnalysis(issues=())
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
-            return_value=requirements_state,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
-            new_callable=AsyncMock,
-            return_value=_runtime_result(discovery_analysis, PlanningState.empty()),
-        ) as discovery_runtime,
-    ):
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            message="Build a flow",
-            completion_model_route=_route(),
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
-            budget_policy=AIBuilderBudgetPolicy(
-                conversation_safety_buffer_tokens=128,
-                minimum_conversation_budget_tokens=256,
-            ),
-            base_planning_state_version=0,
-            allow_discovery_semantic_adjudication=False,
-        )
-
-    assert discovery_runtime.await_args.kwargs["allow_classification"] is False
-
-
-@pytest.mark.asyncio
 async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
@@ -1862,7 +1607,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
         await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message="Build a report flow",
             completion_model_route=_route(),
             available_models=None,
             available_kbs=None,

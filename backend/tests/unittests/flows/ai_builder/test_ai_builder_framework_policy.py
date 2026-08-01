@@ -13,9 +13,8 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
+    aggregate_unprompted_user_text,
     extract_answer_signals,
-    infer_question_answer_from_freeform,
     is_supported_structured_question_id,
     latest_pending_structured_question,
     mentions_runtime_metadata,
@@ -23,7 +22,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     normalize_question_answer,
     normalize_requirements_summary_for_flow,
     normalize_structured_question_payload,
-    question_is_already_resolved,
     resolve_docx_output_mode,
     resolve_explicit_output_choice,
     resolve_output_intent,
@@ -173,7 +171,7 @@ def test_resolve_output_intent_allows_later_freeform_output_clarification() -> N
             content="Slutresultatet ska vara ett DOCX-dokument.",
         ),
     ]
-    text = aggregate_freeform_user_text(conversation)
+    text = aggregate_unprompted_user_text(conversation)
 
     output = resolve_output_intent(
         text,
@@ -968,7 +966,6 @@ def test_structured_answer_signals_use_canonical_value_not_display_label(
     ]
 
     assert extract_answer_signals(conversation)["report_disposition"] == {"both"}
-    assert question_is_already_resolved("report_disposition", conversation)
 
 
 def test_structured_answer_signals_preserve_explicit_custom_value() -> None:
@@ -988,7 +985,6 @@ def test_structured_answer_signals_preserve_explicit_custom_value() -> None:
     assert extract_answer_signals(conversation)["document_kind"] == {
         "use the board-report template"
     }
-    assert question_is_already_resolved("document_kind", conversation)
 
 
 def test_latest_pending_structured_question_reads_backend_question_payload() -> None:
@@ -1021,124 +1017,6 @@ def test_latest_pending_structured_question_reads_backend_question_payload() -> 
     assert question["question_id"] == "terminal_output"
 
 
-def test_infer_question_answer_from_freeform_matches_exact_option_label() -> None:
-    answer = infer_question_answer_from_freeform(
-        [
-            ConversationMessage(
-                role="assistant",
-                content="Question",
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "processing_scope",
-                            "question": "Hur ska flödet hantera ärendematerial per körning?",
-                            "options": [
-                                {
-                                    "id": "single_case",
-                                    "label": "Ett ärende åt gången",
-                                    "value": "single_case",
-                                },
-                                {
-                                    "id": "multiple_cases",
-                                    "label": "Flera ärenden i samma körning",
-                                    "value": "multiple_cases",
-                                },
-                            ],
-                        },
-                    }
-                ],
-            )
-        ],
-        "Ett ärende åt gången.",
-    )
-
-    assert answer is not None
-    assert answer["question_id"] == "processing_scope"
-    assert answer["selected_option_id"] == "single_case"
-
-
-def test_infer_question_answer_from_freeform_matches_option_description() -> None:
-    answer = infer_question_answer_from_freeform(
-        [
-            ConversationMessage(
-                role="assistant",
-                content="Question",
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "comparison_scope",
-                            "question": "När ska flödet jämföra dokument?",
-                            "options": [
-                                {
-                                    "id": "same_run_compare",
-                                    "label": "Jämför dokument i samma körning",
-                                    "description": "Ladda upp flera dokument tillsammans och jämför dem direkt.",
-                                    "value": "same_run_compare",
-                                },
-                                {
-                                    "id": "compare_previous_material",
-                                    "label": "Jämför mot tidigare sparat material",
-                                    "description": "Ladda upp ett dokument och jämför det mot tidigare material.",
-                                    "value": "compare_previous_material",
-                                },
-                            ],
-                        },
-                    }
-                ],
-            )
-        ],
-        "Låt användaren ladda upp flera PDF:er i samma körning.",
-    )
-
-    assert answer is not None
-    assert answer["question_id"] == "comparison_scope"
-    assert answer["selected_option_id"] == "same_run_compare"
-
-
-def test_infer_question_answer_from_freeform_uses_question_family_specific_scope_signals() -> (
-    None
-):
-    answer = infer_question_answer_from_freeform(
-        [
-            ConversationMessage(
-                role="assistant",
-                content="Question",
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "document_material_scope",
-                            "question": "Hur brukar underlaget för ett ärende se ut?",
-                            "options": [
-                                {
-                                    "id": "single_document_case",
-                                    "label": "Ett huvuddokument per ärende",
-                                    "value": "single_document_case",
-                                },
-                                {
-                                    "id": "multiple_documents_case",
-                                    "label": "Flera dokument för samma ärende",
-                                    "value": "multiple_documents_case",
-                                },
-                            ],
-                        },
-                    }
-                ],
-            )
-        ],
-        "Ett avtal åt gången.",
-    )
-
-    assert answer is not None
-    assert answer["question_id"] == "document_material_scope"
-    assert answer["selected_option_id"] == "single_document_case"
-
-
 def test_extract_answer_signals_infers_freeform_document_signals_without_metadata() -> (
     None
 ):
@@ -1157,6 +1035,20 @@ def test_extract_answer_signals_infers_freeform_document_signals_without_metadat
     assert "contracts_agreements" in signals["document_kind"]
     assert "multiple_documents_case" in signals["document_material_scope"]
     assert "documents" in signals["primary_runtime_input"]
+
+
+def test_extract_answer_signals_does_not_interpret_tagged_question_response() -> None:
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": "PDF-dokument",
+                "metadata": {"question_response": {"question_id": "terminal_output"}},
+            }
+        ]
+    )
+
+    assert "terminal_output" not in signals
 
 
 def test_extract_answer_signals_infers_swedish_flexible_pdf_answers() -> None:
@@ -2050,8 +1942,8 @@ def test_resolve_output_intent_keeps_pdf_when_summary_phrase_describes_pdf_conte
     assert intent.terminal_output == "pdf_document"
 
 
-def test_aggregate_freeform_user_text_ignores_structured_answer_messages() -> None:
-    text = aggregate_freeform_user_text(
+def test_aggregate_unprompted_user_text_ignores_structured_answer_messages() -> None:
+    text = aggregate_unprompted_user_text(
         [
             ConversationMessage(
                 role="user",
@@ -2074,10 +1966,25 @@ def test_aggregate_freeform_user_text_ignores_structured_answer_messages() -> No
     assert "behåll samma flöde" in text
 
 
-def test_aggregate_freeform_user_text_keeps_messages_when_question_answer_lacks_real_answer() -> (
+def test_aggregate_unprompted_user_text_ignores_tagged_question_responses() -> None:
+    text = aggregate_unprompted_user_text(
+        [
+            ConversationMessage(role="user", content="Build a report"),
+            ConversationMessage(
+                role="user",
+                content="PDF-dokument",
+                metadata={"question_response": {"question_id": "terminal_output"}},
+            ),
+        ]
+    )
+
+    assert text == "build a report"
+
+
+def test_aggregate_unprompted_user_text_keeps_messages_when_question_answer_lacks_real_answer() -> (
     None
 ):
-    text = aggregate_freeform_user_text(
+    text = aggregate_unprompted_user_text(
         [
             ConversationMessage(
                 role="user",
@@ -2090,10 +1997,10 @@ def test_aggregate_freeform_user_text_keeps_messages_when_question_answer_lacks_
     assert "word dokument" in text
 
 
-def test_aggregate_freeform_user_text_keeps_long_freeform_message_even_with_structured_answer_metadata() -> (
+def test_aggregate_unprompted_user_text_keeps_long_freeform_message_even_with_structured_answer_metadata() -> (
     None
 ):
-    text = aggregate_freeform_user_text(
+    text = aggregate_unprompted_user_text(
         [
             ConversationMessage(
                 role="user",
@@ -2111,10 +2018,10 @@ def test_aggregate_freeform_user_text_keeps_long_freeform_message_even_with_stru
     assert "word dokument istället för en pdf" in text
 
 
-def test_aggregate_freeform_user_text_filters_structured_answer_echo_with_terminal_punctuation() -> (
+def test_aggregate_unprompted_user_text_filters_structured_answer_echo_with_terminal_punctuation() -> (
     None
 ):
-    text = aggregate_freeform_user_text(
+    text = aggregate_unprompted_user_text(
         [
             ConversationMessage(
                 role="user",
@@ -2132,10 +2039,10 @@ def test_aggregate_freeform_user_text_filters_structured_answer_echo_with_termin
     assert text == ""
 
 
-def test_aggregate_freeform_user_text_keeps_mixed_content_after_structured_answer_echo() -> (
+def test_aggregate_unprompted_user_text_keeps_mixed_content_after_structured_answer_echo() -> (
     None
 ):
-    text = aggregate_freeform_user_text(
+    text = aggregate_unprompted_user_text(
         [
             ConversationMessage(
                 role="user",
@@ -2151,57 +2058,6 @@ def test_aggregate_freeform_user_text_keeps_mixed_content_after_structured_answe
     )
 
     assert "lägg till källor också" in text
-
-
-def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed() -> (
-    None
-):
-    flow = Flow(
-        id=uuid4(),
-        tenant_id=uuid4(),
-        space_id=uuid4(),
-        name="Bora",
-        description=None,
-        metadata_json={},
-        steps=[
-            FlowStep(
-                id=uuid4(),
-                flow_id=uuid4(),
-                tenant_id=uuid4(),
-                assistant_id=uuid4(),
-                step_order=1,
-                user_description="Summarize",
-                input_source="flow_input",
-                input_type="text",
-                output_mode="pass_through",
-                output_type="text",
-            )
-        ],
-        published_version=None,
-        draft_revision=0,
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="DOCX document",
-            metadata={
-                "question_answer": {
-                    "question_id": "terminal_output",
-                    "selected_option_id": "docx_document",
-                }
-            },
-        ),
-        ConversationMessage(
-            role="user",
-            content="Behåll samma flöde men lägg till makrotrender.",
-        ),
-    ]
-
-    assert question_is_already_resolved(
-        "terminal_output",
-        conversation,
-        flow=flow,
-    )
 
 
 def test_slot_name_answer_signals_drive_input_and_output_resolution() -> None:

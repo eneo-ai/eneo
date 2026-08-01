@@ -1,37 +1,14 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
-
-import pytest
-
-from eneo.ai_models.completion_models.completion_model import CompletionModel
-from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
-from eneo.completion_models.infrastructure.completion_service import (
-    CompletionService,
-    ResolvedCompletionModelRoute,
-)
-from eneo.flows.ai_builder import (
-    ai_builder_error_contract as error_contract_module,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from eneo.flows.ai_builder.ai_builder_error_contract import (
-    AIBuilderProviderOutcomeUnknownException,
-)
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
-    PreparedUserQuestionMetadata,
-    resolve_user_question_metadata,
+    prepare_user_question_metadata,
 )
-from eneo.model_providers.infrastructure.litellm_provider import (
-    ResolvedLiteLLMProvider,
-)
-from eneo.tenants.tenant import TenantInDB
 
 
-def _pending_question_conversation() -> list[ConversationMessage]:
+def _pending_question_conversation(
+    question_id: str = "terminal_output",
+) -> list[ConversationMessage]:
     return [
         ConversationMessage(
             role="assistant",
@@ -41,7 +18,7 @@ def _pending_question_conversation() -> list[ConversationMessage]:
                     "id": "tool-1",
                     "name": "ask_structured_question",
                     "arguments": {
-                        "question_id": "terminal_output",
+                        "question_id": question_id,
                         "question": "Output?",
                         "options": [
                             {
@@ -57,134 +34,102 @@ def _pending_question_conversation() -> list[ConversationMessage]:
     ]
 
 
-@pytest.mark.asyncio
-async def test_auxiliary_adjudication_post_start_failure_emits_one_safe_event() -> None:
-    litellm_client = MagicMock()
-    litellm_client.acompletion = AsyncMock(
-        side_effect=RuntimeError("sensitive-provider-material")
+def test_free_text_records_only_which_pending_question_the_user_responded_to() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_pending_question_conversation(),
+        message="Make it a PDF",
+        question_answer=None,
     )
-    before_provider_call = AsyncMock()
 
-    with patch.object(error_contract_module.logger, "info") as event_log:
-        with pytest.raises(AIBuilderProviderOutcomeUnknownException):
-            await resolve_user_question_metadata(
-                litellm_client=litellm_client,
-                conversation=_pending_question_conversation(),
-                message="private-user-content",
-                question_answer=None,
-                completion_model_route=ResolvedCompletionModelRoute(
-                    litellm_model="private-model",
-                    litellm_kwargs={"api_key": "private-credential"},
-                    supported_model_kwargs=SupportedModelKwargs(),
-                ),
-                prepared=PreparedUserQuestionMetadata(
-                    metadata=None,
-                    is_requirements_confirmation=False,
-                    needs_auxiliary_llm=True,
-                ),
-                before_provider_call=before_provider_call,
-            )
-
-    before_provider_call.assert_awaited_once_with()
-    assert litellm_client.acompletion.await_count == 1
-    event_log.assert_called_once()
-    payload = event_log.call_args.kwargs["extra"]
-    assert payload["operation"] == "semantic_adjudication"
-    assert payload["failure_kind"] == "unknown"
-    encoded = str(payload)
-    assert "sensitive-provider-material" not in encoded
-    assert "private-user-content" not in encoded
-    assert "private-model" not in encoded
-    assert "private-credential" not in encoded
+    assert prepared.metadata == {
+        "question_response": {"question_id": "terminal_output"}
+    }
+    assert prepared.metadata is not None
+    assert "question_answer" not in prepared.metadata
 
 
-@pytest.mark.asyncio
-async def test_auxiliary_adjudication_uses_resolved_route_at_provider_boundary() -> (
-    None
-):
-    tenant = TenantInDB.model_construct(id=uuid4(), name="Test tenant")
-    now = datetime.now(timezone.utc)
-    model = CompletionModel(
-        id=uuid4(),
-        created_at=now,
-        updated_at=now,
-        name="gpt-test",
-        nickname="GPT test",
-        max_input_tokens=4096,
-        max_output_tokens=1024,
-        is_deprecated=False,
-        vision=False,
-        reasoning=False,
-        tenant_id=tenant.id,
-        provider_id=uuid4(),
-        provider_type="openai",
-        model_kwargs_capabilities=None,
-    )
-    provider = ResolvedLiteLLMProvider(
-        id=model.provider_id,
-        tenant_id=tenant.id,
-        name="Test provider",
-        provider_type="openai",
-        credentials={"api_key": "test-only"},
-        config={},
-    )
-    encryption_service = MagicMock()
-    encryption_service.is_active.return_value = False
-    completion_service = CompletionService(
-        context_builder=MagicMock(),
-        tenant=tenant,
-        session=AsyncMock(),
-        encryption_service=encryption_service,
-    )
-    provider_loader = AsyncMock(return_value=provider)
-    with patch(
-        "eneo.model_providers.infrastructure.litellm_provider.load_active_litellm_provider",
-        new=provider_loader,
-    ):
-        route = await completion_service.resolve_model_route(model)
-
-    events: list[str] = []
-
-    async def complete(**_kwargs: object) -> SimpleNamespace:
-        events.append("provider")
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=json.dumps(
-                            {
-                                "selected_option_id": "pdf_document",
-                                "reason": "PDF requested",
-                            }
-                        )
-                    )
-                )
-            ]
-        )
-
-    async def mark_provider_started() -> None:
-        events.append("started")
-
-    litellm_client = MagicMock()
-    litellm_client.acompletion = AsyncMock(side_effect=complete)
-    result = await resolve_user_question_metadata(
-        litellm_client=litellm_client,
+def test_explicit_ui_answer_is_the_only_source_of_question_answer_metadata() -> None:
+    prepared = prepare_user_question_metadata(
         conversation=_pending_question_conversation(),
         message="PDF",
-        question_answer=None,
-        completion_model_route=route,
-        prepared=PreparedUserQuestionMetadata(
-            metadata=None,
-            is_requirements_confirmation=False,
-            needs_auxiliary_llm=True,
-        ),
-        before_provider_call=mark_provider_started,
+        question_answer={
+            "kind": "structured_question_answer",
+            "question_id": "terminal_output",
+            "selected_values": ["pdf_document"],
+            "ui_language": "sv",
+        },
     )
 
-    assert result.used_auxiliary_llm is True
-    assert events == ["started", "provider"]
-    assert provider_loader.await_count == 1
-    assert litellm_client.acompletion.await_count == 1
-    outgoing = litellm_client.acompletion.await_args.kwargs
-    assert outgoing["api_key"] == "test-only"
-    assert "temperature" not in outgoing
+    assert prepared.metadata == {
+        "question_answer": {
+            "question_id": "terminal_output",
+            "selected_values": ["pdf_document"],
+        },
+        "ui_language": "sv",
+    }
+
+
+def test_free_text_for_non_classifier_question_remains_response_only() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_pending_question_conversation("flow_input_architecture"),
+        message="Use one shared input",
+        question_answer=None,
+    )
+
+    assert prepared.metadata == {
+        "question_response": {"question_id": "flow_input_architecture"}
+    }
+    assert prepared.metadata is not None
+    assert "question_answer" not in prepared.metadata
+
+
+def test_free_text_for_unsupported_pending_question_records_no_response() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_pending_question_conversation("runtime_metadata_field_details"),
+        message="Case id",
+        question_answer=None,
+    )
+
+    assert prepared.metadata is None
+
+
+def test_answered_question_is_not_attributed_to_later_free_text() -> None:
+    conversation = [
+        *_pending_question_conversation(),
+        ConversationMessage(
+            role="user",
+            content="PDF",
+            metadata={
+                "question_response": {"question_id": "terminal_output"},
+            },
+        ),
+    ]
+
+    prepared = prepare_user_question_metadata(
+        conversation=conversation,
+        message="One more thing",
+        question_answer=None,
+    )
+
+    assert prepared.metadata is None
+
+
+def test_free_text_without_a_pending_question_preserves_only_ui_language() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=[],
+        message="Hello",
+        question_answer=None,
+        ui_language="en",
+    )
+
+    assert prepared.metadata == {"ui_language": "en"}
+
+
+def test_blank_turn_does_not_claim_to_answer_a_pending_question() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_pending_question_conversation(),
+        message="  \n",
+        question_answer=None,
+    )
+
+    assert prepared.metadata is None

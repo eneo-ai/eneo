@@ -1574,7 +1574,7 @@ class TestSendMessage:
         assert mock_litellm.acompletion.await_count == 1
 
     @pytest.mark.anyio
-    async def test_context_limit_commits_without_ack_or_provider_work(
+    async def test_context_limit_after_slot_classification_commits_without_ack(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1601,19 +1601,6 @@ class TestSendMessage:
         monkeypatch.setattr(
             "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
             lambda _tools, _model: 0,
-        )
-
-        async def resolve_without_auxiliary_provider(**kwargs: Any) -> SimpleNamespace:
-            prepared = kwargs["prepared"]
-            return SimpleNamespace(
-                metadata=prepared.metadata,
-                is_requirements_confirmation=prepared.is_requirements_confirmation,
-                used_auxiliary_llm=True,
-            )
-
-        monkeypatch.setattr(
-            "eneo.flows.ai_builder.ai_builder_planner.resolve_user_question_metadata",
-            resolve_without_auxiliary_provider,
         )
 
         with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
@@ -1646,7 +1633,14 @@ class TestSendMessage:
         )
         acceptance = repo.accept_session_turn.await_args.kwargs["acceptance"]
         assert acceptance.acknowledge_duplicate_provider_spend is False
-        mock_litellm.acompletion.assert_not_awaited()
+        mock_litellm.acompletion.assert_awaited_once()
+        classification_call = mock_litellm.acompletion.await_args.kwargs
+        assert classification_call["stream"] is False
+        assert "tools" not in classification_call
+        assert classification_call["response_format"]["type"] == "json_schema"
+        assert classification_call["response_format"]["json_schema"]["name"].startswith(
+            "ai_builder_slot_classification_v"
+        )
 
     @pytest.mark.anyio
     async def test_llm_error_preserves_provider_outcome_unknown(self):

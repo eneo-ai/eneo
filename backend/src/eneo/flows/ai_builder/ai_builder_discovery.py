@@ -4,9 +4,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Final
 
-from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    question_answer_from_metadata,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     apply_discovery_decision_engine,
 )
@@ -30,9 +27,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     has_same_run_comparison_contradiction as _has_same_run_comparison_contradiction,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    latest_pending_question_id as _latest_pending_question_id,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     looks_like_case_scope_is_vague as _looks_like_case_scope_is_vague,
@@ -118,7 +112,6 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     has_explicit_structured_answer,
-    question_is_already_resolved,
 )
 from eneo.flows.ai_builder.ai_builder_signal_confidence import (
     has_low_confidence_signals,
@@ -129,9 +122,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
-from eneo.flows.ai_builder.question_catalog import (
-    runtime_metadata_field_details_question,
-)
 from eneo.flows.domain.flow import Flow
 
 DiscoveryIssueBuilder = Callable[
@@ -693,98 +683,6 @@ def _dedupe_issues(issues: list[DiscoveryIssue]) -> list[DiscoveryIssue]:
         if question_id is not None:
             seen_question_ids.add(question_id)
     return sort_discovery_issues(deduped)
-
-
-def build_discovery_followup(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-    analysis: DiscoveryAnalysis | None = None,
-) -> BackendQuestion | None:
-    profile = _build_discovery_profile(conversation, flow=flow)
-    if _runtime_metadata_field_details_required(conversation):
-        question = runtime_metadata_field_details_question(profile.language)
-        return BackendQuestion(
-            question_data=StructuredQuestionPayload(
-                question_id="runtime_metadata_field_details",
-                question=question,
-                options=[],
-                selection_mode="multi",
-                allow_custom=False,
-                requires_confirm=True,
-                input_field_collection=True,
-            ),
-            assistant_text=question,
-        )
-    analysis = analysis or analyze_discovery(conversation, flow=flow)
-    pending_question_id = _latest_pending_question_id(conversation)
-    if pending_question_id is not None and not question_is_already_resolved(
-        pending_question_id,
-        conversation,
-        flow=flow,
-    ):
-        suggestion = question_suggestion_for_id(
-            pending_question_id,
-            language=profile.language,
-        )
-        if suggestion is not None and suggestion.exposure == "user_requirement":
-            issue = next(
-                (
-                    current_issue
-                    for current_issue in analysis.issues
-                    if current_issue.suggestion is not None
-                    and current_issue.suggestion.question_id == pending_question_id
-                ),
-                DiscoveryIssue(
-                    issue_id=f"pending_{pending_question_id}",
-                    category=_question_category(pending_question_id),
-                    severity="blocking",
-                    message="",
-                    suggestion=suggestion,
-                ),
-            )
-            return BackendQuestion(
-                issue=issue,
-                question_data=_structured_question_payload_from_suggestion(suggestion),
-                assistant_text=build_discovery_followup_text(
-                    issue,
-                    profile.language,
-                ),
-            )
-
-    issue = analysis.next_issue
-    if issue is None or issue.suggestion is None:
-        return None
-
-    suggestion = issue.suggestion
-    return BackendQuestion(
-        issue=issue,
-        question_data=_structured_question_payload_from_suggestion(suggestion),
-        assistant_text=build_discovery_followup_text(issue, profile.language),
-    )
-
-
-def _runtime_metadata_field_details_required(
-    conversation: list[ConversationMessage],
-) -> bool:
-    metadata_selected = False
-    details_provided = False
-    for message in conversation:
-        answer = question_answer_from_metadata(message.metadata)
-        if answer is None:
-            continue
-        if answer.question_id == "runtime_metadata_fields":
-            values = {
-                value
-                for value in answer.selected_values or []
-                if isinstance(value, str)
-            }
-            metadata_selected = bool(
-                values & {"basic_case_metadata", "detailed_case_metadata"}
-            )
-        elif answer.question_id == "runtime_metadata_field_details":
-            details_provided = bool(answer.input_fields)
-    return metadata_selected and not details_provided
 
 
 def build_registry_question_followup(

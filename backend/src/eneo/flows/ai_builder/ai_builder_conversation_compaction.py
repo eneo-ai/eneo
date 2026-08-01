@@ -9,8 +9,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ClassifierRetentionIdentity,
     metadata_has_requirements_summary,
     metadata_with_slot_classification,
-    question_answer_from_metadata,
-    question_answer_question_id,
+    question_interaction_id_from_metadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
     requirements_version_from_metadata,
@@ -20,7 +19,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    canonical_question_id,
     extract_freeform_user_messages,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
@@ -226,7 +224,7 @@ def _required_message_indices(
         )
         if confirmation_index is not None:
             required_indices.add(confirmation_index)
-    required_indices.update(_latest_structured_answer_indices(conversation))
+    required_indices.update(_latest_question_interaction_indices(conversation))
     required_indices.update(_latest_output_schema_conflict_trace_indices(conversation))
     required_indices.update(_latest_tool_trace_indices(conversation))
     required_indices.update(_classifier_semantic_indices(conversation))
@@ -333,19 +331,17 @@ def _latest_user_request_before_index(
     return None
 
 
-def _latest_structured_answer_indices(
+def _latest_question_interaction_indices(
     conversation: list[ConversationMessage],
 ) -> Iterable[int]:
     latest_by_question: dict[str, int] = {}
     for index, message in enumerate(conversation):
         if message.role != "user":
             continue
-        question_answer = question_answer_from_metadata(message.metadata)
-        if question_answer is None:
+        question_id = question_interaction_id_from_metadata(message.metadata)
+        if question_id is None:
             continue
-        question_id = question_answer_question_id(question_answer)
-        if question_id is not None:
-            latest_by_question[canonical_question_id(question_id)] = index
+        latest_by_question[question_id] = index
     return sorted(latest_by_question.values())
 
 

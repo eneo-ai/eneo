@@ -1840,6 +1840,31 @@ def test_targeted_bias_canonicalizes_legacy_question_id_to_slot() -> None:
     assert bias.answer_source_id == "user_message:user-answer-1"
 
 
+def test_targeted_bias_uses_neutral_response_identity_after_compaction() -> None:
+    conversation = [
+        ConversationMessage(
+            message_id="user-answer-1",
+            role="user",
+            content="en fil jag kan ladda ner",
+            metadata={
+                "question_response": {"question_id": "final_output_mode"},
+            },
+        ),
+    ]
+    classification_input = build_slot_classification_input(conversation, None)
+
+    bias = _targeted_classification_bias(
+        conversation,
+        {"terminal_output": {"docx_document", "structured_text"}},
+        classification_input,
+    )
+
+    assert classification_input.sources[0].question_id == "terminal_output"
+    assert bias is not None
+    assert bias.target_slot_name == "terminal_output"
+    assert bias.answer_source_id == "user_message:user-answer-1"
+
+
 def test_targeted_bias_is_none_when_target_already_resolved() -> None:
     conversation = [
         ConversationMessage(

@@ -90,7 +90,6 @@ ProposalTerminalFailureKind = Literal[
 ]
 ProposalAttemptKind = Literal["initial", "repair"]
 ProposalCallKind = Literal[
-    "semantic_adjudication",
     "slot_classification",
     "proposal_initial",
     "forced_tool_continuation",
@@ -382,11 +381,11 @@ class ProposalTurnTelemetry:
             total_tokens=usage.total_tokens,
             tool_call_count=tool_call_count,
             used_auxiliary_llm=any(
-                record.call_kind in {"semantic_adjudication", "slot_classification"}
+                record.call_kind == "slot_classification"
                 for record in self.call_records
             ),
             auxiliary_llm_call_count=sum(
-                record.call_kind in {"semantic_adjudication", "slot_classification"}
+                record.call_kind == "slot_classification"
                 for record in self.call_records
             ),
             token_usage_source=usage.source,

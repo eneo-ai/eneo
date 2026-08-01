@@ -23,7 +23,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
+    aggregate_unprompted_user_text,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -82,7 +82,7 @@ async def process_create_intent_arguments(
 ) -> ToolProcessingResult:
     try:
         intent = parse_create_flow_intent_arguments(arguments)
-        aggregate_text = aggregate_freeform_user_text(conversation)
+        aggregate_text = aggregate_unprompted_user_text(conversation)
         compile_context = create_compile_context_from_planning_state(
             planning_state,
             ui_language=resolve_ui_language(conversation),

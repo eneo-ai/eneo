@@ -57,7 +57,6 @@ AIBuilderProviderFailureKind = Literal[
 AIBuilderProviderFailureStage = Literal[
     "proposal_completion",
     "slot_classification",
-    "semantic_adjudication",
 ]
 AIBuilderProviderTurnState = Literal["committed", "provider_outcome_unknown"]
 AIBuilderProviderRetryScope = Literal["new_turn", "acknowledged_same_turn"]

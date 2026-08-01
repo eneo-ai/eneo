@@ -25,6 +25,7 @@ from pydantic import (
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
+    is_supported_structured_question_id,
     normalize_question_answer,
     normalize_structured_question_payload,
 )
@@ -74,6 +75,7 @@ from eneo.main.logging import get_logger
 logger = get_logger(__name__)
 
 QUESTION_ANSWER_METADATA_KEY = "question_answer"
+QUESTION_RESPONSE_METADATA_KEY = "question_response"
 REQUIREMENTS_CONFIRMED_METADATA_KEY = "requirements_confirmed"
 REQUIREMENTS_SUMMARY_METADATA_KEY = "requirements_summary"
 REQUIREMENTS_VERSION_METADATA_KEY = "requirements_version"
@@ -625,6 +627,26 @@ class StructuredQuestionAnswerMetadata(BaseModel):
         return self
 
 
+class QuestionResponseMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question_id: Annotated[str, Field(min_length=1, max_length=128)]
+
+    @field_validator("question_id", mode="before")
+    @classmethod
+    def normalize_question_id(cls, question_id: object) -> object:
+        if not isinstance(question_id, str):
+            return question_id
+        return canonical_question_id(question_id)
+
+    @field_validator("question_id")
+    @classmethod
+    def require_supported_question_id(cls, question_id: str) -> str:
+        if not is_supported_structured_question_id(question_id):
+            raise ValueError("question response requires a supported question id")
+        return question_id
+
+
 class RequirementsConfirmationMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -840,6 +862,29 @@ def question_answer_from_metadata(
     except ValidationError as error:
         _warn_invalid_persisted_metadata(QUESTION_ANSWER_METADATA_KEY, error)
         return None
+
+
+def question_response_from_metadata(
+    metadata: object,
+) -> QuestionResponseMetadata | None:
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return None
+    response = _mapping_value(metadata_map.get(QUESTION_RESPONSE_METADATA_KEY))
+    if response is None:
+        return None
+    try:
+        return QuestionResponseMetadata.model_validate(response)
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(QUESTION_RESPONSE_METADATA_KEY, error)
+        return None
+
+
+def question_response_to_metadata(question_id: str) -> FlowPersistedJsonObject:
+    response = QuestionResponseMetadata(question_id=question_id)
+    return {
+        QUESTION_RESPONSE_METADATA_KEY: response.model_dump(mode="json"),
+    }
 
 
 def question_answer_to_metadata(
@@ -1222,6 +1267,16 @@ def question_answer_question_id(
     payload = _question_answer_payload(answer)
     question_id = payload.get("question_id")
     return question_id if isinstance(question_id, str) and question_id else None
+
+
+def question_interaction_id_from_metadata(metadata: object) -> str | None:
+    answer = question_answer_from_metadata(metadata)
+    if answer is not None:
+        question_id = question_answer_question_id(answer)
+        if question_id is not None:
+            return question_id
+    response = question_response_from_metadata(metadata)
+    return response.question_id if response is not None else None
 
 
 def ui_language_from_metadata(metadata: object) -> Literal["sv", "en"] | None:

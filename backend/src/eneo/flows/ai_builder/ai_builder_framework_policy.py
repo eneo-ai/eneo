@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_has_real_payload,
     question_answer_question_id,
     question_answer_values,
+    question_response_from_metadata,
     structured_question_payload_from_tool_arguments,
     tool_calls_from_message,
 )
@@ -66,12 +67,11 @@ from eneo.flows.flow_authoring_spec import (
 )
 
 __all__ = [
-    "aggregate_freeform_user_text",
+    "aggregate_unprompted_user_text",
     "canonical_option_id",
     "canonical_question_id",
     "extract_freeform_user_messages",
     "extract_answer_signals",
-    "infer_question_answer_from_freeform",
     "is_supported_structured_question_id",
     "latest_pending_structured_question",
     "mentions_output_change",
@@ -80,7 +80,6 @@ __all__ = [
     "normalize_requirements_summary_for_flow",
     "normalize_question_answer",
     "normalize_structured_question_payload",
-    "question_is_already_resolved",
     "has_explicit_docx_mode_text",
     "has_explicit_pdf_mode_text",
     "resolve_docx_output_mode",
@@ -234,73 +233,10 @@ def has_explicit_structured_answer(
     return False
 
 
-def infer_question_answer_from_freeform(
-    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
-    message: str,
-) -> dict[str, Any] | None:
-    question = latest_pending_structured_question(conversation)
-    if question is None:
-        return None
-
-    question_id = question.get("question_id")
-    options = question.get("options")
-    if not isinstance(question_id, str) or not isinstance(options, list):
-        return None
-
-    inferred_values = infer_answer_signals_from_text(message).get(question_id, set())
-    if len(inferred_values) == 1:
-        inferred_value = next(iter(inferred_values))
-        return normalize_question_answer(
-            {
-                "question_id": question_id,
-                "selected_option_id": inferred_value,
-                "selected_value": inferred_value,
-                "answer": inferred_value,
-            }
-        )
-
-    normalized_message = normalize_signal_text(message)
-    if not normalized_message:
-        return None
-
-    best_option: dict[str, Any] | None = None
-    best_score = 0.0
-    tie = False
-    for option in cast(list[object], options):
-        if not isinstance(option, Mapping):
-            continue
-        option_map = cast(Mapping[str, Any], option)
-        score = _score_option_match(normalized_message, option_map)
-        if score > best_score:
-            best_option = dict(option_map)
-            best_score = score
-            tie = False
-        elif score > 0 and abs(score - best_score) < 1e-6:
-            tie = True
-
-    if best_option is None or best_score < 0.45 or tie:
-        return None
-
-    option_id = best_option.get("id")
-    option_value = best_option.get("value")
-    selected = option_id if isinstance(option_id, str) and option_id else option_value
-    if not isinstance(selected, str) or not selected:
-        return None
-
-    return normalize_question_answer(
-        {
-            "question_id": question_id,
-            "selected_option_id": selected,
-            "selected_value": selected,
-            "answer": selected,
-        }
-    )
-
-
-def aggregate_freeform_user_text(
+def aggregate_unprompted_user_text(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
 ) -> str:
-    return _aggregate_user_text(conversation, include_structured_answers=False)
+    return _aggregate_user_text(conversation)
 
 
 def extract_freeform_user_messages(
@@ -325,6 +261,8 @@ def extract_freeform_user_messages(
         )
         if role != "user" or not isinstance(content, str):
             continue
+        if question_response_from_metadata(metadata) is not None:
+            continue
         question_answer = question_answer_from_metadata(metadata)
         if question_answer is not None and _looks_like_structured_answer_echo(
             content,
@@ -337,8 +275,6 @@ def extract_freeform_user_messages(
 
 def _aggregate_user_text(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
-    *,
-    include_structured_answers: bool,
 ) -> str:
     parts: list[str] = []
     for message in conversation:
@@ -359,11 +295,11 @@ def _aggregate_user_text(
         )
         if role != "user" or not isinstance(content, str):
             continue
+        if question_response_from_metadata(metadata) is not None:
+            continue
         question_answer = question_answer_from_metadata(metadata)
-        if (
-            not include_structured_answers
-            and question_answer is not None
-            and _looks_like_structured_answer_echo(content, question_answer)
+        if question_answer is not None and _looks_like_structured_answer_echo(
+            content, question_answer
         ):
             continue
         parts.append(content.casefold())
@@ -400,43 +336,6 @@ def _looks_like_structured_answer_echo(
     )
 
 
-def _score_option_match(message: str, option: Mapping[str, Any]) -> float:
-    candidates = [
-        option.get("label"),
-        option.get("description"),
-        option.get("value"),
-        option.get("id"),
-    ]
-    normalized_candidates = [
-        normalize_signal_text(candidate)
-        for candidate in candidates
-        if isinstance(candidate, str) and candidate.strip()
-    ]
-    if not normalized_candidates:
-        return 0.0
-
-    if any(message == candidate for candidate in normalized_candidates):
-        return 1.0
-    if any(
-        candidate in message or message in candidate
-        for candidate in normalized_candidates
-    ):
-        return 0.8
-
-    message_tokens = set(message.split())
-    best = 0.0
-    for candidate in normalized_candidates:
-        candidate_tokens = set(candidate.split())
-        if not candidate_tokens:
-            continue
-        overlap = len(message_tokens & candidate_tokens)
-        if overlap < 2:
-            continue
-        ratio = overlap / max(1, min(len(message_tokens), len(candidate_tokens)))
-        best = max(best, ratio)
-    return best
-
-
 def extract_answer_signals(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
 ) -> dict[str, set[str]]:
@@ -469,8 +368,14 @@ def extract_answer_signals(
             continue
 
         answer = question_answer_from_metadata(metadata)
+        response = question_response_from_metadata(metadata)
 
-        if isinstance(content, str) and content.strip() and answer is None:
+        if (
+            isinstance(content, str)
+            and content.strip()
+            and answer is None
+            and response is None
+        ):
             inferred_signals = infer_answer_signals_from_text(content)
             for inferred_question_id, inferred_values in inferred_signals.items():
                 if (
@@ -555,7 +460,7 @@ def _conversation_explicitly_changes_runtime_input(
         return True
 
     requested_input = resolve_input_intent(
-        aggregate_freeform_user_text(conversation),
+        aggregate_unprompted_user_text(conversation),
         {},
     ).primary_runtime_input
     return requested_input not in {"unknown", default_runtime_input}
@@ -629,45 +534,6 @@ def _runtime_input_label(runtime_input: str, *, language: str | None) -> str:
         "text": "text",
         "text_and_documents": "text och dokument",
     }.get(runtime_input, runtime_input)
-
-
-def question_is_already_resolved(
-    question_id: str,
-    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
-    *,
-    flow: Flow | None = None,
-) -> bool:
-    canonical_id = canonical_question_id(question_id)
-    answer_signals = extract_answer_signals(conversation)
-    freeform_text = aggregate_freeform_user_text(conversation)
-    flow_defaults = build_flow_discovery_defaults(flow)
-
-    if canonical_id == "terminal_output":
-        return (
-            resolve_explicit_output_choice(
-                freeform_text,
-                answer_signals,
-                flow_defaults=flow_defaults,
-                conversation=conversation,
-            )
-            is not None
-        )
-
-    if canonical_id == "docx_output_mode":
-        values = answer_signals.get("docx_output_mode", set())
-        if values:
-            return True
-        return bool(
-            flow_defaults.get("docx_output_mode")
-        ) and not mentions_output_change(freeform_text)
-
-    values = answer_signals.get(canonical_id, set())
-    if values:
-        return True
-
-    return bool(flow_defaults.get(canonical_id)) and not mentions_output_change(
-        freeform_text
-    )
 
 
 def resolve_explicit_output_choice(
@@ -829,7 +695,7 @@ def slot_names_blocked_by_explicit_uncertainty(
     *,
     flow: Flow | None = None,
 ) -> frozenset[str]:
-    text = aggregate_freeform_user_text(conversation)
+    text = aggregate_unprompted_user_text(conversation)
     if terminal_output_uncertainty_is_unresolved(
         text,
         extract_answer_signals(conversation),

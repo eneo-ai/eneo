@@ -25,7 +25,7 @@ from eneo.flows.ai_builder.ai_builder_edit_scope import (
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     OutputIntentResolution,
-    aggregate_freeform_user_text,
+    aggregate_unprompted_user_text,
     extract_answer_signals,
     has_explicit_structured_answer,
     resolve_output_intent,
@@ -210,7 +210,7 @@ def build_discovery_profile(
     flow: Flow | None = None,
     planning_state: PlanningState | None = None,
 ) -> DiscoveryProfile:
-    full_text = aggregate_freeform_user_text(conversation)
+    full_text = aggregate_unprompted_user_text(conversation)
     capabilities = build_flow_capability_profile(flow)
     flow_defaults = capabilities.to_signal_defaults()
     active_window = (

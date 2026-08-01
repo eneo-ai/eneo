@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     StructuredQuestionAnswerMetadata,
     question_answer_from_metadata,
     question_answer_values,
+    question_response_from_metadata,
     slot_classification_metadata_from_result,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
@@ -33,7 +34,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
+    aggregate_unprompted_user_text,
     slot_names_blocked_by_explicit_uncertainty,
 )
 from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
@@ -230,6 +231,8 @@ def build_slot_classification_input(
         if message.role != "user":
             continue
         answer = question_answer_from_metadata(message.metadata)
+        response = question_response_from_metadata(message.metadata)
+        response_question_id = response.question_id if response is not None else None
         if isinstance(message.content, str) and message.content.strip():
             if answer is None or not _is_structured_answer_echo(
                 message.content, answer
@@ -240,7 +243,7 @@ def build_slot_classification_input(
                         kind="user_message",
                         text=message.content.strip(),
                         message_id=message.message_id,
-                        question_id=pending_question_id,
+                        question_id=response_question_id or pending_question_id,
                     )
                 )
         if answer is None or answer.question_id is None:
@@ -417,7 +420,7 @@ async def build_runtime_discovery_context(
     ):
         return RuntimeDiscoveryContext(planning_state=state)
 
-    text = aggregate_freeform_user_text(conversation)
+    text = aggregate_unprompted_user_text(conversation)
     classification_input = build_slot_classification_input(
         conversation,
         attachment_context,

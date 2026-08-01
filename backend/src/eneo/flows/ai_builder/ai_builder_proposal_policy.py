@@ -26,7 +26,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_draft_preflight import run_draft_preflight
 from eneo.flows.ai_builder.ai_builder_edit_preview_models import EditAdvisory
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
+    aggregate_unprompted_user_text,
     extract_answer_signals,
     resolve_output_intent,
 )
@@ -287,7 +287,7 @@ def terminal_output_type_for_conversation(
         )
 
     output_intent = resolve_output_intent(
-        aggregate_freeform_user_text(conversation),
+        aggregate_unprompted_user_text(conversation),
         extract_answer_signals(conversation),
         conversation=conversation,
     )

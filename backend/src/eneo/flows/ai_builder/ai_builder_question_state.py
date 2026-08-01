@@ -12,14 +12,21 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
+from eneo.flows.ai_builder.ai_builder_canonicalization import (
+    canonical_question_id,
+    is_supported_structured_question_id,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     assistant_question_id_from_metadata,
     file_ids_from_metadata,
     metadata_has_question_answer,
+    question_response_from_metadata,
     requirements_confirmation_from_metadata,
     structured_question_payload_from_tool_arguments,
     tool_calls_from_message,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_questions import (
+    question_exposure_for_id,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -71,6 +78,8 @@ def _is_user_evidence(message: ConversationMessage | Mapping[str, Any]) -> bool:
     )
     if metadata_has_question_answer(metadata):
         return True
+    if question_response_from_metadata(metadata) is not None:
+        return True
     if requirements_confirmation_from_metadata(metadata) is not None:
         return True
     if file_ids_from_metadata(metadata):
@@ -118,6 +127,25 @@ def last_answered_question(
             last_question_id = question_id
             latest_answer = None
             continue
+        metadata = (
+            message.metadata
+            if isinstance(message, ConversationMessage)
+            else message.get("metadata")
+        )
+        response = question_response_from_metadata(metadata)
+        if response is not None:
+            last_question_id = response.question_id
+            content = (
+                message.content
+                if isinstance(message, ConversationMessage)
+                else message.get("content")
+            )
+            latest_answer = (
+                content.strip()
+                if isinstance(content, str) and content.strip()
+                else None
+            )
+            continue
         if last_question_id is None or not _is_user_evidence(message):
             continue
         content = (
@@ -132,7 +160,27 @@ def last_answered_question(
     return last_question_id, latest_answer
 
 
+def pending_user_requirement_question_id(
+    conversation: Sequence[ConversationMessage],
+) -> str | None:
+    pending_question_id: str | None = None
+    for message in conversation:
+        question_id = assistant_question_id(message)
+        if question_id is not None:
+            pending_question_id = (
+                question_id
+                if is_supported_structured_question_id(question_id)
+                and question_exposure_for_id(question_id) == "user_requirement"
+                else None
+            )
+            continue
+        if pending_question_id is not None and _is_user_evidence(message):
+            pending_question_id = None
+    return pending_question_id
+
+
 __all__ = [
     "assistant_question_id",
     "last_answered_question",
+    "pending_user_requirement_question_id",
 ]

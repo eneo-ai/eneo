@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-from unittest.mock import patch
 from uuid import UUID
 
 import pytest
@@ -14,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
+    question_response_from_metadata,
     slot_classification_from_metadata,
     slot_classification_metadata_from_result,
 )
@@ -22,7 +22,6 @@ from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_win
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     extract_freeform_user_messages,
 )
-from eneo.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
 from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
     build_attachment_schema_candidate,
     resolve_attachment_output_schema,
@@ -742,38 +741,6 @@ def test_compaction_preserves_tool_trace_atomically_after_final_slice() -> None:
     assert any(msg.tool_call_id == "call-42" for msg in compacted)
 
 
-def test_compaction_preserves_structured_answers_needed_for_discovery_soft_bypass() -> (
-    None
-):
-    conversation = []
-    for i in range(4):
-        conversation.append(
-            _msg(
-                "user",
-                content=f"answer {i}",
-                metadata={
-                    "question_answer": {
-                        "question_id": f"q{i}",
-                        "selected_value": f"answer-{i}",
-                    }
-                },
-            )
-        )
-    conversation.extend(_msg("user", content=f"tail {i}") for i in range(70))
-
-    compacted = compact_ai_builder_conversation(
-        conversation,
-        max_messages=20,
-        tail_messages=10,
-    )
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_interaction_utils.build_discovery_block_message",
-        return_value="still blocked",
-    ):
-        assert analyze_discovery_ready(compacted) is True
-
-
 def test_compaction_preserves_latest_user_request_before_requirements_confirmation() -> (
     None
 ):
@@ -1037,6 +1004,49 @@ def test_compaction_deduplicates_structured_answers_by_canonical_question_id() -
     ]
     assert len(preserved_answers) == 1
     assert preserved_answers[0].content == "new answer"
+
+
+def test_compaction_preserves_latest_neutral_response_for_each_question() -> None:
+    conversation = [
+        _msg(
+            "user",
+            content="old output response",
+            metadata={
+                "question_response": {"question_id": "final_output_mode"},
+            },
+        ),
+        _msg(
+            "user",
+            content="latest output response",
+            metadata={
+                "question_response": {"question_id": "terminal_output"},
+            },
+        ),
+        _msg(
+            "user",
+            content="input response",
+            metadata={
+                "question_response": {"question_id": "primary_runtime_input"},
+            },
+        ),
+    ]
+    conversation.extend(_msg("assistant", content=f"tail {i}") for i in range(80))
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=20,
+        tail_messages=10,
+    )
+
+    responses = [
+        (message.content, response.question_id)
+        for message in compacted
+        if (response := question_response_from_metadata(message.metadata)) is not None
+    ]
+    assert responses == [
+        ("latest output response", "terminal_output"),
+        ("input response", "primary_runtime_input"),
+    ]
 
 
 def test_compaction_accepts_exact_per_message_serialized_byte_cap() -> None:

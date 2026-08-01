@@ -8,10 +8,49 @@ from __future__ import annotations
 
 import pytest
 
+from eneo.flows.ai_builder import (
+    ai_builder_discovery_decision_engine as decision_engine,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     compute_question_budget,
     has_explicit_step_plan,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+
+
+def test_neutral_responses_spend_budget_once_per_user_requirement_question() -> None:
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="first output reply",
+            metadata={
+                "question_response": {"question_id": "final_output_mode"},
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="revised output reply",
+            metadata={
+                "question_response": {"question_id": "terminal_output"},
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="input reply",
+            metadata={
+                "question_response": {"question_id": "primary_runtime_input"},
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="schema selection",
+            metadata={
+                "question_response": {"question_id": "output_schema_conflict"},
+            },
+        ),
+    ]
+
+    assert decision_engine._answered_user_requirement_question_count(conversation) == 3
 
 
 class TestComputeQuestionBudget:

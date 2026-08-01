@@ -27,9 +27,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    question_is_already_resolved,
-)
 from eneo.flows.ai_builder.ai_builder_output_schema_evidence import (
     build_output_schema_evidence,
 )
@@ -1389,7 +1386,6 @@ class TestPolicyDefaults:
         assert slot.source == "structured_answer"
         assert slot.confidence == "high"
         assert slot.evidence == ["question_answer:report_disposition"]
-        assert question_is_already_resolved("report_disposition", conversation)
 
     def test_document_input_does_not_default_runtime_metadata(self) -> None:
         state = build_planning_state_from_conversation(
@@ -1967,6 +1963,57 @@ class TestSlotClassificationMetadataReplay:
         slot = state.resolved_slots["terminal_output"]
         assert slot.value == "structured_json"
         assert slot.source == "structured_answer"
+
+    def test_question_response_is_unresolved_without_cited_classifier_evidence(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="test-source",
+                    role="user",
+                    content="PDF-dokument",
+                    metadata={"question_response": {"question_id": "terminal_output"}},
+                )
+            ]
+        )
+
+        assert "terminal_output" not in state.resolved_slots
+
+    def test_question_response_resolves_from_cited_classifier_evidence(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="test-source",
+                    role="user",
+                    content="PDF-dokument",
+                    metadata={
+                        "question_response": {"question_id": "terminal_output"},
+                        **_slot_classification_metadata(
+                            _classified(
+                                "terminal_output",
+                                "pdf_document",
+                                "high",
+                                evidence=("PDF-dokument",),
+                            )
+                        ),
+                    },
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["terminal_output"]
+        assert slot.value == "pdf_document"
+        assert slot.source == "model"
+
+    def test_unprompted_free_text_retains_heuristic_fallback(self) -> None:
+        state = build_planning_state_from_conversation(
+            [ConversationMessage(role="user", content="PDF-dokument")]
+        )
+
+        slot = state.resolved_slots["terminal_output"]
+        assert slot.value == "pdf_document"
+        assert slot.source == "heuristic"
 
     def test_structured_report_answer_wins_after_classifier_prerequisite_replay(
         self,
@@ -3259,6 +3306,28 @@ def test_mapped_file_limit_accepts_lower_custom_value_as_authored() -> None:
     assert state.mapped_file_limit.accepted_value == 3
     assert state.mapped_file_limit.provenance == "authored"
     assert state.mapped_file_limit.diagnostic is None
+
+
+def test_mapped_file_limit_free_text_response_stays_unresolved() -> None:
+    conversation = _mapped_file_limit_conversation()[:-1]
+    conversation.append(
+        ConversationMessage(
+            role="user",
+            content="3",
+            metadata={"question_response": {"question_id": "mapped_file_limit"}},
+        )
+    )
+
+    state = build_planning_state_from_conversation(
+        conversation,
+        mapped_execution_policy=FlowMappedExecutionPolicy(
+            max_provider_calls_per_mapped_step=8
+        ),
+    )
+
+    assert state.mapped_file_limit.accepted_value is None
+    assert state.mapped_file_limit.proposed_value == 8
+    assert state.mapped_file_limit.diagnostic == "confirmation_required"
 
 
 @pytest.mark.parametrize(

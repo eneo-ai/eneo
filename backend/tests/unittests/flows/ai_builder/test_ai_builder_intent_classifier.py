@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from eneo.flows.ai_builder.ai_builder_interaction_utils import (
+from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     looks_like_information_request,
 )
 

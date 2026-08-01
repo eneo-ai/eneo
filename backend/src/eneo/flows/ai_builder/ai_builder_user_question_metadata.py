@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NoReturn
+from typing import NoReturn
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
@@ -16,6 +15,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_has_real_payload,
     question_answer_question_id,
     question_answer_values,
+    question_response_to_metadata,
     requirements_confirmation_from_question_answer,
     structured_question_answer_from_input,
     ui_language_from_question_answer,
@@ -25,13 +25,8 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    infer_question_answer_from_freeform,
-    latest_pending_structured_question,
-)
-from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
-from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
-    adjudicate_pending_question_answer,
+from eneo.flows.ai_builder.ai_builder_question_state import (
+    pending_user_requirement_question_id,
 )
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
@@ -39,24 +34,11 @@ from eneo.flows.ai_builder.question_catalog import (
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 
-if TYPE_CHECKING:
-    from eneo.completion_models.infrastructure.completion_service import (
-        ResolvedCompletionModelRoute,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class UserQuestionMetadataResolution:
-    metadata: FlowPersistedJsonObject | None
-    is_requirements_confirmation: bool
-    used_auxiliary_llm: bool
-
 
 @dataclass(frozen=True, slots=True)
 class PreparedUserQuestionMetadata:
     metadata: FlowPersistedJsonObject | None
     is_requirements_confirmation: bool
-    needs_auxiliary_llm: bool
 
 
 def prepare_user_question_metadata(
@@ -81,15 +63,10 @@ def prepare_user_question_metadata(
             question_answer=_validated_structured_question_answer(question_answer)
         )
 
-    needs_auxiliary_llm = False
-    if metadata is None and not is_requirements_confirmation:
-        inferred_answer = infer_question_answer_from_freeform(conversation, message)
-        if inferred_answer is not None:
-            metadata = metadata_for_user_message(question_answer=inferred_answer)
-        else:
-            needs_auxiliary_llm = (
-                latest_pending_structured_question(conversation) is not None
-            )
+    if metadata is None and not is_requirements_confirmation and message.strip():
+        pending_question_id = pending_user_requirement_question_id(conversation)
+        if pending_question_id is not None:
+            metadata = question_response_to_metadata(pending_question_id)
 
     if ui_language is not None:
         metadata = {
@@ -100,55 +77,6 @@ def prepare_user_question_metadata(
     return PreparedUserQuestionMetadata(
         metadata=metadata,
         is_requirements_confirmation=is_requirements_confirmation,
-        needs_auxiliary_llm=needs_auxiliary_llm,
-    )
-
-
-async def resolve_user_question_metadata(
-    *,
-    litellm_client: object,
-    conversation: list[ConversationMessage],
-    message: str,
-    question_answer: AIBuilderQuestionAnswerInput | None,
-    ui_language: str | None = None,
-    completion_model_route: ResolvedCompletionModelRoute,
-    prepared: PreparedUserQuestionMetadata | None = None,
-    usage_tracker: ProposalTurnTelemetry | None = None,
-    before_provider_call: Callable[[], Awaitable[None]] | None = None,
-) -> UserQuestionMetadataResolution:
-    prepared = prepared or prepare_user_question_metadata(
-        conversation=conversation,
-        message=message,
-        question_answer=question_answer,
-        ui_language=ui_language,
-    )
-    metadata = prepared.metadata
-    used_auxiliary_llm = False
-    if prepared.needs_auxiliary_llm:
-        adjudicated_answer = await adjudicate_pending_question_answer(
-            litellm_client=litellm_client,
-            completion_model_route=completion_model_route,
-            conversation=conversation,
-            user_message=message,
-            usage_tracker=usage_tracker,
-            before_provider_call=before_provider_call,
-        )
-        if adjudicated_answer is not None:
-            metadata = {
-                **(metadata or {}),
-                **(
-                    metadata_for_user_message(
-                        question_answer=adjudicated_answer.to_question_answer()
-                    )
-                    or {}
-                ),
-            }
-        used_auxiliary_llm = True
-
-    return UserQuestionMetadataResolution(
-        metadata=metadata,
-        is_requirements_confirmation=prepared.is_requirements_confirmation,
-        used_auxiliary_llm=used_auxiliary_llm,
     )
 
 

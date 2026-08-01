@@ -33,9 +33,6 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     build_text_event,
 )
-from eneo.flows.ai_builder.ai_builder_interaction_utils import (
-    looks_like_information_request,
-)
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionToolCall,
 )
@@ -69,6 +66,32 @@ from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
 _MAX_PUBLIC_FAILURE_CODES = 3
+
+
+def looks_like_information_request(text: str) -> bool:
+    lowered = text.casefold()
+    if "?" not in text or len(text.strip()) >= 240:
+        return False
+    action_keywords = (
+        "proposal",
+        "förslag",
+        "plan",
+        "steg",
+        "steps",
+        "flow",
+        "bygg",
+        "skapa",
+        "lägg till",
+        "ändra",
+        "ta bort",
+        "build",
+        "create",
+        "add",
+        "remove",
+        "modify",
+        "make",
+    )
+    return not any(keyword in lowered for keyword in action_keywords)
 
 
 @dataclass(frozen=True, slots=True)

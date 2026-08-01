@@ -41,7 +41,7 @@ from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
     SECTIONED_FORM_INTAKE_SIGNAL,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
+    aggregate_unprompted_user_text,
     extract_answer_signals,
     has_explicit_docx_mode_text,
     has_explicit_pdf_mode_text,
@@ -298,7 +298,7 @@ def _replay_slot_classification_metadata(
     flow: Flow | None,
 ) -> None:
     """Replay persisted classifier facts and only then apply derived defaults."""
-    freeform_text = aggregate_freeform_user_text(conversation)
+    freeform_text = aggregate_unprompted_user_text(conversation)
     model_blocked_slots = slot_names_blocked_by_explicit_uncertainty(
         conversation,
         flow=flow,
@@ -1164,13 +1164,7 @@ def _model_slot_can_replace(
     existing_slot: ResolvedSlot | None,
     model_confidence: SlotConfidence,
 ) -> bool:
-    """Return whether model classification may write this slot.
-
-    Earlier model-sourced slots intentionally anchor the conversation until
-    explicit structured answers, flow defaults, or requirements summaries
-    produce a different source. This avoids a later speculative classifier
-    turn rewriting accepted model evidence without user-visible confirmation.
-    """
+    """Protect authoritative sources while permitting cited model corrections."""
     if existing_slot is None:
         return model_confidence in {"high", "medium"}
     if existing_slot.source in _MODEL_PROTECTED_SOURCES:
@@ -1195,7 +1189,7 @@ def _resolve_slots(
     answer_signals = extract_answer_signals(conversation)
     requirements_state = resolve_requirements_state(conversation)
     freeform_text = _semantic_planning_text(
-        aggregate_freeform_user_text(conversation),
+        aggregate_unprompted_user_text(conversation),
         requirements_state,
     )
     flow_defaults = build_flow_discovery_defaults(flow)

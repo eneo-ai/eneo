@@ -153,7 +153,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         CompletionTokenUsage(),
     )
     kinds: tuple[ProposalCallKind, ...] = (
-        "semantic_adjudication",
+        "slot_classification",
         "proposal_initial",
         "proposal_repair",
     )
@@ -199,7 +199,6 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
 @pytest.mark.parametrize(
     "call_kind",
     [
-        "semantic_adjudication",
         "slot_classification",
         "proposal_initial",
         "forced_tool_continuation",
@@ -230,7 +229,7 @@ def test_failed_auxiliary_call_is_finished_once_with_bounded_disposition() -> No
         model="openai/gpt-5.4-nano",
         target_kind=TargetKind.CREATE,
     )
-    call = telemetry.begin_call(call_kind="semantic_adjudication")
+    call = telemetry.begin_call(call_kind="slot_classification")
     failure = classify_ai_builder_provider_failure(
         APIError(
             503,
@@ -238,7 +237,7 @@ def test_failed_auxiliary_call_is_finished_once_with_bounded_disposition() -> No
             model="private-model",
             llm_provider="private-provider",
         ),
-        stage="semantic_adjudication",
+        stage="slot_classification",
     )
 
     telemetry.fail_call(call=call, failure=failure)
@@ -249,7 +248,7 @@ def test_failed_auxiliary_call_is_finished_once_with_bounded_disposition() -> No
     assert payload["used_auxiliary_llm"] is True
     assert payload["call_records"] == [
         {
-            "call_kind": "semantic_adjudication",
+            "call_kind": "slot_classification",
             "request_id": "req-auxiliary-failure",
             "attempt": 1,
             "token_usage_source": "none",
@@ -272,7 +271,7 @@ def test_failed_auxiliary_call_rejects_a_foreign_record() -> None:
         request_id="req-foreign",
         model="openai/gpt-5.4-nano",
         target_kind=TargetKind.CREATE,
-    ).begin_call(call_kind="semantic_adjudication")
+    ).begin_call(call_kind="slot_classification")
     failure = classify_ai_builder_provider_failure(
         APIError(
             503,
@@ -280,7 +279,7 @@ def test_failed_auxiliary_call_rejects_a_foreign_record() -> None:
             model="private-model",
             llm_provider="private-provider",
         ),
-        stage="semantic_adjudication",
+        stage="slot_classification",
     )
 
     with pytest.raises(ValueError, match="does not belong to this turn"):

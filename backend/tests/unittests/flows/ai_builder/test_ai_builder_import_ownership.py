@@ -210,6 +210,9 @@ SEND_LEASE_MODULE = ".".join(("eneo", "flows", "ai_builder", "ai_builder_send_le
 USER_QUESTION_METADATA_MODULE = ".".join(
     ("eneo", "flows", "ai_builder", "ai_builder_user_question_metadata")
 )
+SEMANTIC_ADJUDICATION_MODULE = ".".join(
+    ("eneo", "flows", "ai_builder", "ai_builder_semantic_adjudication")
+)
 SERVER_DECISION_DISPATCH_PATH = Path(
     "src/eneo/flows/ai_builder/ai_builder_server_decision_dispatch.py"
 )
@@ -222,6 +225,9 @@ PLANNER_FAILURE_EVENTS_PATH = Path(
 SEND_LEASE_PATH = Path("src/eneo/flows/ai_builder/ai_builder_send_lease.py")
 USER_QUESTION_METADATA_PATH = Path(
     "src/eneo/flows/ai_builder/ai_builder_user_question_metadata.py"
+)
+SEMANTIC_ADJUDICATION_PATH = Path(
+    "src/eneo/flows/ai_builder/ai_builder_semantic_adjudication.py"
 )
 PLANNER_PATH = Path("src/eneo/flows/ai_builder/ai_builder_planner.py")
 PROPOSAL_INTENT_MODULE = ".".join(
@@ -314,9 +320,7 @@ SEND_LEASE_PUBLIC_NAMES = frozenset(
 USER_QUESTION_METADATA_PUBLIC_NAMES = frozenset(
     {
         "PreparedUserQuestionMetadata",
-        "UserQuestionMetadataResolution",
         "prepare_user_question_metadata",
-        "resolve_user_question_metadata",
     }
 )
 PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS = frozenset(
@@ -1709,6 +1713,7 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
     planner_path = backend_root / PLANNER_PATH
     send_lease_path = backend_root / SEND_LEASE_PATH
     metadata_path = backend_root / USER_QUESTION_METADATA_PATH
+    semantic_adjudication_path = backend_root / SEMANTIC_ADJUDICATION_PATH
     violations: list[str] = []
 
     if importlib.util.find_spec(SEND_LEASE_MODULE) is None:
@@ -1716,6 +1721,13 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
     if importlib.util.find_spec(USER_QUESTION_METADATA_MODULE) is None:
         violations.append(
             f"{metadata_path}: missing user question metadata owner module"
+        )
+    if (
+        importlib.util.find_spec(SEMANTIC_ADJUDICATION_MODULE) is not None
+        or semantic_adjudication_path.exists()
+    ):
+        violations.append(
+            f"{semantic_adjudication_path}: stale semantic adjudicator exists"
         )
 
     planner_tree = ast.parse(planner_path.read_text(), filename=str(planner_path))
@@ -1783,6 +1795,8 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
                 AI_BUILDER_PLANNER_MODULE,
                 SERVER_DECISION_DISPATCH_MODULE,
                 SEND_LEASE_MODULE,
+                SEMANTIC_ADJUDICATION_MODULE,
+                "eneo.flows.ai_builder.ai_builder_framework_policy",
                 "eneo.flows.ai_builder.ai_builder_repo",
                 "eneo.flows.ai_builder.ai_builder_litellm_completion",
             }:

@@ -161,7 +161,7 @@ The bounded fields are:
 
 | Field | Allowed values or shape | Aggregation guidance |
 |---|---|---|
-| `operation` | `proposal_completion`, `slot_classification`, `semantic_adjudication` | Low cardinality; safe to index. |
+| `operation` | `proposal_completion`, `slot_classification` | Low cardinality; safe to index. |
 | `failure_kind` | `rejected`, `rate_limited`, `timeout`, `transport_ambiguous`, `unknown` | Low cardinality; safe to index. |
 | `failure_code` | HTTP status class such as `4xx`, or `null` | Low cardinality; safe to index. |
 | `safe_detail.provider_status_code` | Integer `100`–`599`, only from a recognized typed provider status/timeout exception | Medium cardinality; parse on demand unless an operator has a specific status dashboard. |

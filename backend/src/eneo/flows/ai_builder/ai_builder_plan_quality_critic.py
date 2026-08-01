@@ -17,7 +17,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
+    aggregate_unprompted_user_text,
     extract_answer_signals,
     resolve_output_intent,
 )
@@ -93,7 +93,7 @@ def build_conversation_critic_context(
     ),
 ) -> CriticContext:
     answer_signals = extract_answer_signals(conversation)
-    text = aggregate_freeform_user_text(conversation)
+    text = aggregate_unprompted_user_text(conversation)
     requirements_state = resolve_requirements_state(
         [
             item

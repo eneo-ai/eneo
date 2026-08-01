@@ -5,8 +5,7 @@ from types import MappingProxyType
 from typing import Literal, TypeAlias
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    question_answer_from_metadata,
-    question_answer_question_id,
+    question_interaction_id_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_families import (
     family_for_issue,
@@ -220,10 +219,7 @@ def _answered_user_requirement_question_count(
     for message in conversation:
         if message.role != "user":
             continue
-        answer = question_answer_from_metadata(message.metadata)
-        if answer is None:
-            continue
-        question_id = question_answer_question_id(answer)
+        question_id = question_interaction_id_from_metadata(message.metadata)
         if question_id is None:
             continue
         if question_exposure_for_id(question_id) != "user_requirement":

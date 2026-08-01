@@ -31,7 +31,6 @@ from eneo.flows.ai_builder import (
     ai_builder_error_contract as error_contract_module,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
-    ConversationMessage,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -60,8 +59,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest as ProposalCompletionRequestContract,
 )
-from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
-    adjudicate_pending_question_answer,
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    SlotClassificationInput,
+    SlotClassificationSource,
+    classify_slots,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -1126,8 +1127,21 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
     auxiliary_response = _make_response_with_text(
         json.dumps(
             {
-                "selected_option_id": "pdf_document",
-                "reason": "mentions PDF",
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "The user explicitly requested PDF output.",
+                        "evidence": [
+                            {
+                                "source_id": "user_message:turn-usage",
+                                "quote": "PDF",
+                            }
+                        ],
+                        "evidence_level": "explicit",
+                    }
+                ],
             }
         ),
         prompt_tokens=2,
@@ -1153,37 +1167,24 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
             ]
         )
     )
-    conversation = [
-        ConversationMessage(
-            role="assistant",
-            content=None,
-            tool_calls=[
-                {
-                    "id": "tool-1",
-                    "name": "ask_structured_question",
-                    "arguments": {
-                        "question_id": "terminal_output",
-                        "question": "Output?",
-                        "options": [
-                            {
-                                "id": "pdf_document",
-                                "label": "PDF",
-                                "value": "pdf_document",
-                            }
-                        ],
-                    },
-                }
-            ],
-        )
-    ]
-
-    await adjudicate_pending_question_answer(
+    classification = await classify_slots(
         litellm_client=client,
         completion_model_route=_route(),
-        conversation=conversation,
-        user_message="PDF",
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:turn-usage",
+                    kind="user_message",
+                    text=f"Create a PDF report. {uuid4()}",
+                    message_id="turn-usage",
+                ),
+            )
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
         usage_tracker=tracker,
     )
+    assert classification is not None
     call_budget = ProposalCallBudget(call_limit=2)
     calls: tuple[tuple[ProposalCallKind, bool], ...] = (
         ("proposal_initial", False),
@@ -1215,7 +1216,7 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
     assert metadata is not None
     planner = metadata["planner_telemetry"]
     assert [record["call_kind"] for record in planner["call_records"]] == [
-        "semantic_adjudication",
+        "slot_classification",
         "proposal_initial",
         "proposal_repair",
     ]

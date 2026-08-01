@@ -19,7 +19,6 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
-    build_discovery_followup,
     build_discovery_followup_text,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
@@ -823,47 +822,6 @@ class TestExtendedClarificationHints:
         ]
         assert "comparison_scope" not in question_ids
 
-    def test_repeats_latest_blocking_question_until_it_is_resolved(self) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Jag vill bygga ett flöde som analyserar leverantörsavtal i PDF och "
-                    "använda strukturerad data där det förbättrar kvaliteten."
-                ),
-            ),
-            ConversationMessage(
-                role="assistant",
-                content="Jag behöver förstå slutresultatet lite bättre innan jag kan bekräfta lösningen.",
-                tool_calls=[
-                    {
-                        "id": "call_output",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "terminal_output",
-                            "question": "Vad ska flödet producera som slutresultat?",
-                            "options": [],
-                        },
-                    }
-                ],
-            ),
-            ConversationMessage(
-                role="tool",
-                content="Question presented to user. Awaiting their selection.",
-                tool_call_id="call_output",
-            ),
-            ConversationMessage(
-                role="user",
-                content="Ett avtal åt gången.",
-            ),
-        ]
-
-        followup = build_discovery_followup(conversation)
-
-        assert followup is not None
-        question_data = followup.question_data
-        assert question_data.question_id == "terminal_output"
-
     def test_rich_prompt_uses_full_question_budget_when_slots_remain(
         self,
     ) -> None:
@@ -905,8 +863,6 @@ class TestExtendedClarificationHints:
 
         analysis = analyze_discovery(conversation)
         assert analysis.ready_for_confirmation
-        followup = build_discovery_followup(conversation)
-        assert followup is None
 
     def test_vague_case_analysis_prompt_is_resolved_after_full_answers(self) -> None:
         """After 5 explicit answers covering scope, input, output mode, and
@@ -970,39 +926,6 @@ class TestExtendedClarificationHints:
 
         analysis = analyze_discovery(conversation)
         assert analysis.ready_for_confirmation
-
-    def test_prefers_ui_language_for_backend_generated_followup_questions(self) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content="I want a flow that helps me process documents.",
-                metadata={"ui_language": "sv"},
-            )
-        ]
-
-        followup = build_discovery_followup(conversation)
-        assert followup is not None
-        question = followup.question_data
-        assert question.question == "Vad ska flödet hjälpa dig göra med materialet?"
-        first_option = question.options[0]
-        assert first_option.label == "Bara grundresultatet"
-        assert all(
-            option.label != english
-            for option, english in zip(
-                question.options,
-                [
-                    "Only the primary result",
-                    "Summarize or give an overview",
-                    "Extract key information",
-                    "Structure the material",
-                    "Decisions, next steps, and follow-up",
-                    "Recommendations and guidance",
-                    "Review risks or issues",
-                    "Compare or validate",
-                ],
-                strict=True,
-            )
-        )
 
     def test_pdf_output_counts_as_explicit_output_choice(self) -> None:
         conversation = [
@@ -2196,70 +2119,6 @@ class TestExtendedClarificationHints:
 
         assert "comparison_scope" in question_ids
 
-    @pytest.mark.parametrize(
-        ("language", "selection", "selection_text", "field_label"),
-        [
-            ("sv", "basic_case_metadata", "Grundläggande metadata", "Ärendenummer"),
-            ("en", "detailed_case_metadata", "Detailed metadata", "Case number"),
-        ],
-    )
-    def test_runtime_metadata_selection_asks_once_for_field_details_and_answer_resolves_it(
-        self,
-        language: str,
-        selection: str,
-        selection_text: str,
-        field_label: str,
-    ) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=selection_text,
-                metadata={
-                    "question_answer": {
-                        "question_id": "runtime_metadata_fields",
-                        "selected_values": [selection],
-                    },
-                    "ui_language": language,
-                },
-            )
-        ]
-
-        followup = build_discovery_followup(conversation)
-
-        assert followup is not None
-        assert followup.question_data.question_id == "runtime_metadata_field_details"
-        assert followup.question_data.input_field_collection is True
-        assert followup.question_data.options == []
-
-        resolved_conversation = [
-            *conversation,
-            ConversationMessage(
-                role="user",
-                content=field_label,
-                metadata={
-                    "question_answer": {
-                        "question_id": "runtime_metadata_field_details",
-                        "input_fields": [
-                            {
-                                "variable_name": "case_number",
-                                "label": field_label,
-                                "field_type": "text",
-                                "required": True,
-                                "options": [],
-                            }
-                        ],
-                    },
-                    "ui_language": language,
-                },
-            ),
-        ]
-
-        next_followup = build_discovery_followup(resolved_conversation)
-
-        assert next_followup is None or (
-            next_followup.question_data.question_id != "runtime_metadata_field_details"
-        )
-
     def test_structured_analysis_answer_resolves_audio_docx_extraction_question(
         self,
     ) -> None:
@@ -2640,68 +2499,6 @@ class TestExtendedClarificationHints:
         ]
 
         assert "terminal_output" not in question_ids
-
-    @pytest.mark.parametrize(
-        ("prompt", "language", "assistant_snippet", "question_snippet"),
-        [
-            (
-                "Jag vill läsa ett dokument, extrahera viktig information och skicka resultatet till ett API.",
-                "sv",
-                "kan inte skapa ett utgående API-leveranssteg automatiskt",
-                "Vilket internt resultat ska flödet skapa",
-            ),
-            (
-                "Extrahera fält från dokumentet och posta resultatet till en webhook.",
-                "sv",
-                "kan inte skapa ett utgående API-leveranssteg automatiskt",
-                "Vilket internt resultat ska flödet skapa",
-            ),
-            (
-                "Extrahera informationen och anropa ett externt API med resultatet.",
-                "sv",
-                "kan inte skapa ett utgående API-leveranssteg automatiskt",
-                "Vilket internt resultat ska flödet skapa",
-            ),
-            (
-                "Read a document, extract the important fields, and send the result to an external system.",
-                "en",
-                "cannot automatically create an outbound API delivery step",
-                "What internal result should the flow create",
-            ),
-            (
-                "Extract data from the uploaded document and POST the result to a webhook.",
-                "en",
-                "cannot automatically create an outbound API delivery step",
-                "What internal result should the flow create",
-            ),
-        ],
-    )
-    def test_external_delivery_request_uses_specific_unsupported_delivery_followup(
-        self,
-        prompt: str,
-        language: str,
-        assistant_snippet: str,
-        question_snippet: str,
-    ) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=prompt,
-                metadata={"ui_language": language},
-            )
-        ]
-
-        followup = build_discovery_followup(conversation)
-
-        assert followup is not None
-        assert followup.issue is not None
-        issue = followup.issue
-        question_data = followup.question_data
-        assistant_text = followup.assistant_text
-        assert issue.issue_id == "external_delivery_unsupported"
-        assert question_data.question_id == "terminal_output"
-        assert assistant_snippet in assistant_text
-        assert question_snippet in question_data.question
 
     @pytest.mark.parametrize(
         "prompt",
@@ -3209,49 +3006,6 @@ class TestExtendedClarificationHints:
         ]
 
         assert "final_pdf_type" not in question_ids
-
-    def test_pending_question_is_reoffered_even_when_latest_turn_is_short(self) -> None:
-        conversation = [
-            ConversationMessage(
-                role="assistant",
-                content=None,
-                tool_calls=[
-                    {
-                        "id": "call_docx_mode",
-                        "name": "ask_structured_question",
-                        "arguments": {
-                            "question_id": "docx_output_mode",
-                            "question": "Hur ska DOCX-resultatet skapas?",
-                            "options": [
-                                {
-                                    "id": "generated_docx",
-                                    "label": "Genererad DOCX",
-                                    "description": "Skapa dokumentet direkt.",
-                                    "value": "generated_docx",
-                                },
-                                {
-                                    "id": "template_fill_docx",
-                                    "label": "DOCX från mall",
-                                    "description": "Fyll en mall.",
-                                    "value": "template_fill_docx",
-                                },
-                            ],
-                        },
-                    }
-                ],
-            ),
-            ConversationMessage(
-                role="user",
-                content="Kortare.",
-                metadata={"ui_language": "sv"},
-            ),
-        ]
-
-        followup = build_discovery_followup(conversation)
-
-        assert followup is not None
-        question_data = followup.question_data
-        assert question_data.question_id == "docx_output_mode"
 
     def test_structured_docx_output_answer_does_not_reopen_docx_mode_question(
         self,
