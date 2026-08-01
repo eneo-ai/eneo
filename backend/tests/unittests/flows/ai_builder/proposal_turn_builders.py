@@ -98,6 +98,7 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
         "tool_schemas": [],
         "route": ResolvedCompletionModelRoute(
             litellm_model=litellm_model,
+            provider_type="openai",
             litellm_kwargs=provider_kwargs,
             supported_model_kwargs=SupportedModelKwargs(
                 temperature=ModelKwargCapability(supported=True)

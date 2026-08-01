@@ -362,6 +362,7 @@ def _make_container(
         ),
         completion_model_route=ResolvedCompletionModelRoute(
             litellm_model="openai/gpt-4",
+            provider_type="openai",
             litellm_kwargs={"api_key": "sk-test"},
             supported_model_kwargs=SupportedModelKwargs(),
         ),
@@ -1846,6 +1847,7 @@ class TestSendMessageEndpoint:
             ),
             completion_model_route=ResolvedCompletionModelRoute(
                 litellm_model="openai/gpt-4",
+                provider_type="openai",
                 litellm_kwargs={"api_key": "sk-test"},
                 supported_model_kwargs=SupportedModelKwargs(),
             ),
@@ -1909,6 +1911,7 @@ class TestSendMessageEndpoint:
             ),
             completion_model_route=ResolvedCompletionModelRoute(
                 litellm_model="azure/gpt-4",
+                provider_type="azure",
                 litellm_kwargs={
                     "api_key": "sk-test",
                     "api_base": "https://azure.example.com",

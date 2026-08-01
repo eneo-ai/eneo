@@ -193,7 +193,7 @@ async def classify_slots(
     slot_names = tuple(slot_values.keys())
     litellm_model = completion_model_route.litellm_model
     provider = slot_classification_provider_identity(
-        litellm_model=litellm_model,
+        provider_type=completion_model_route.provider_type,
         litellm_kwargs=completion_model_route.litellm_kwargs,
     )
     messages = _build_slot_classification_prompt(
@@ -226,7 +226,7 @@ async def classify_slots(
         return replace(cached, cached=True)
 
     started_at = time.perf_counter()
-    completion_kwargs = completion_model_route.filter_unsupported_model_kwargs(
+    completion_kwargs = completion_model_route.prepare_provider_kwargs(
         ModelKwargs(temperature=0.0)
     )
     completion_kwargs["response_format"] = response_format
@@ -1052,17 +1052,12 @@ def slot_classification_prompt_hash(
 
 def slot_classification_provider_identity(
     *,
-    litellm_model: str,
+    provider_type: str,
     litellm_kwargs: Mapping[str, object],
 ) -> str:
-    explicit_provider = litellm_kwargs.get("custom_llm_provider")
-    if isinstance(explicit_provider, str) and explicit_provider.strip():
-        provider = explicit_provider.strip()
-    else:
-        model_provider, separator, _ = litellm_model.partition("/")
-        provider = model_provider.strip() if separator else "unspecified"
-        if not provider:
-            provider = "unspecified"
+    provider = provider_type.strip()
+    if not provider:
+        raise ValueError("Provider type is required for slot classification identity")
 
     execution_config = {
         field: value.strip()

@@ -98,6 +98,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
 def _route() -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model="openai/gpt-5.4",
+        provider_type="openai",
         litellm_kwargs={},
         supported_model_kwargs=SupportedModelKwargs(
             temperature=ModelKwargCapability(supported=True)

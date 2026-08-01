@@ -90,7 +90,7 @@ async def call_proposal_completion(
     messages = flatten_proposal_message_groups(message_groups)
     if not request.call_budget.try_start_call():
         raise ProposalCallBudgetExhausted
-    provider_kwargs = request.route.filter_unsupported_model_kwargs(
+    provider_kwargs = request.route.prepare_provider_kwargs(
         ModelKwargs(temperature=request.temperature)
     )
     provider_kwargs.pop("drop_params", None)

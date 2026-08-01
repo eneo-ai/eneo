@@ -210,6 +210,7 @@ def _canonical_question(slot_name: str, locale: Locale) -> StructuredQuestionPay
 def _route() -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model="openai/semantic-contract-test",
+        provider_type="openai",
         litellm_kwargs={},
         supported_model_kwargs=SupportedModelKwargs(
             temperature=ModelKwargCapability(supported=True)

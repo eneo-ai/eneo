@@ -28,6 +28,7 @@ from eneo.completion_models.infrastructure.adapters.base_adapter import Provider
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
+    normalize_reasoning_effort,
 )
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -155,10 +156,11 @@ class CompletionRouteEvidence:
 @dataclass(frozen=True, slots=True)
 class ResolvedCompletionModelRoute:
     litellm_model: str
+    provider_type: str
     litellm_kwargs: dict[str, object]
     supported_model_kwargs: SupportedModelKwargs
 
-    def filter_unsupported_model_kwargs(
+    def prepare_provider_kwargs(
         self,
         requested: ModelKwargs,
     ) -> dict[str, object]:
@@ -172,7 +174,12 @@ class ResolvedCompletionModelRoute:
                 exclude_none=True
             )
         )
-        return provider_kwargs
+        return normalize_reasoning_effort(
+            litellm_model=self.litellm_model,
+            provider_type=self.provider_type,
+            model_kwargs=provider_kwargs,
+            openai_absent_effort="none",
+        )
 
     def incident_evidence(self) -> CompletionRouteEvidence:
         configuration_fields: list[CompletionEvidenceField] = []
@@ -406,6 +413,7 @@ class CompletionService:
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             supported_model_kwargs=model.supported_model_kwargs,
+            provider_type=adapter.provider_type,
         )
 
     async def resolve_structured_output_capability(

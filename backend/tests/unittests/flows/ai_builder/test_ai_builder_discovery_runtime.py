@@ -82,10 +82,12 @@ def _make_response(content: str) -> MagicMock:
 def _route(
     *,
     model: str = "gpt-test",
+    provider_type: str = "openai",
     kwargs: dict[str, object] | None = None,
 ) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model=model,
+        provider_type=provider_type,
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=SupportedModelKwargs(
             temperature=ModelKwargCapability(supported=True)
@@ -1724,7 +1726,11 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
             )
         ],
         litellm_client=litellm_client,
-        completion_model_route=_route(model="azure/gpt-test", kwargs=provider_kwargs),
+        completion_model_route=_route(
+            model="azure/gpt-test",
+            provider_type="azure",
+            kwargs=provider_kwargs,
+        ),
         tenant_id=uuid4(),
         ui_language="sv",
     )
@@ -1742,7 +1748,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
     assert result.slot_classification_metadata is not None
     assert result.slot_classification_metadata.provider == (
         slot_classification_provider_identity(
-            litellm_model="azure/gpt-test",
+            provider_type="azure",
             litellm_kwargs=provider_kwargs,
         )
     )

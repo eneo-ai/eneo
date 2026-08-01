@@ -17,8 +17,12 @@ from litellm.exceptions import (
     Timeout,
     UnprocessableEntityError,
 )
+from litellm.utils import get_optional_params
 
-from eneo.ai_models.completion_models.completion_model import CompletionModel
+from eneo.ai_models.completion_models.completion_model import (
+    CompletionModel,
+    ModelKwargs,
+)
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -74,11 +78,13 @@ from eneo.tenants.tenant import TenantInDB
 def _route(
     *,
     model: str = "openai/gpt-5.4",
+    provider_type: str = "openai",
     kwargs: dict[str, object] | None = None,
     supported: SupportedModelKwargs | None = None,
 ) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model=model,
+        provider_type=provider_type,
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
@@ -338,6 +344,129 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
     assert call_kwargs["tool_choice"] == tool_choice
+
+
+@pytest.mark.asyncio
+async def test_proposal_call_uses_explicit_off_reasoning_when_model_supports_it() -> (
+    None
+):
+    route = await _resolved_route(None)
+    litellm_client = SimpleNamespace(
+        acompletion=AsyncMock(return_value=_make_response_with_text("proposal"))
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
+    ) as mock_litellm:
+        mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
+        mock_litellm.get_model_info.return_value = {
+            "supports_none_reasoning_effort": True
+        }
+        await call_proposal_completion(
+            litellm_client=litellm_client,
+            request=_completion_request(
+                messages=[{"role": "user", "content": "Build a flow"}],
+                tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+                route=route,
+                max_output_tokens=1024,
+                temperature=0.2,
+                tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
+            ),
+        )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_luna_proposal_call_uses_real_pinned_reasoning_capability() -> None:
+    litellm_client = SimpleNamespace(
+        acompletion=AsyncMock(return_value=_make_response_with_text("proposal"))
+    )
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+            route=_route(model="openai/gpt-5.6-luna"),
+            max_output_tokens=1024,
+            temperature=0.2,
+            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
+        ),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "low"
+    assert call_kwargs["tools"] == [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+
+
+@pytest.mark.asyncio
+async def test_gpt5_mini_proposal_uses_low_when_none_is_not_supported() -> None:
+    litellm_client = SimpleNamespace(
+        acompletion=AsyncMock(return_value=_make_response_with_text("proposal"))
+    )
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+            route=_route(model="openai/gpt-5-mini"),
+            max_output_tokens=1024,
+            temperature=0.2,
+            tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
+        ),
+    )
+
+    assert litellm_client.acompletion.await_args.kwargs["reasoning_effort"] == "low"
+
+
+def test_builder_explicit_off_reasoning_preserves_temperature_in_pinned_litellm() -> (
+    None
+):
+    prepared = _route(model="openai/gpt-5.4").prepare_provider_kwargs(
+        ModelKwargs(temperature=0.0)
+    )
+
+    provider_kwargs = get_optional_params(
+        model="gpt-5.4",
+        custom_llm_provider="openai",
+        drop_params=True,
+        **prepared,
+    )
+
+    assert provider_kwargs["reasoning_effort"] == "none"
+    assert provider_kwargs["temperature"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_proposal_call_stops_when_capability_lookup_fails() -> None:
+    route = await _resolved_route(None)
+    litellm_client = SimpleNamespace(
+        acompletion=AsyncMock(return_value=_make_response_with_text("proposal"))
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
+    ) as mock_litellm:
+        mock_litellm.get_supported_openai_params.side_effect = RuntimeError(
+            "capability registry unavailable"
+        )
+        with pytest.raises(RuntimeError, match="capability registry unavailable"):
+            await call_proposal_completion(
+                litellm_client=litellm_client,
+                request=_completion_request(
+                    messages=[{"role": "user", "content": "Build a flow"}],
+                    tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+                    route=route,
+                    max_output_tokens=1024,
+                    temperature=0.2,
+                    tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
+                ),
+            )
+
+    litellm_client.acompletion.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

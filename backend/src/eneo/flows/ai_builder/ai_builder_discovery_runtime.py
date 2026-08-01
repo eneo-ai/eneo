@@ -462,7 +462,7 @@ async def build_runtime_discovery_context(
         return RuntimeDiscoveryContext(planning_state=state)
 
     provider = slot_classification_provider_identity(
-        litellm_model=completion_model_route.litellm_model,
+        provider_type=completion_model_route.provider_type,
         litellm_kwargs=completion_model_route.litellm_kwargs,
     )
     prompt_hash = slot_classification_prompt_hash(

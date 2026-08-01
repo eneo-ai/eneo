@@ -88,6 +88,7 @@ def _route(
 ) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model=model,
+        provider_type="openai",
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
@@ -1156,7 +1157,7 @@ def test_provider_execution_identity_partitions_behavior_and_excludes_secrets() 
         "deployment_name": "flow-builder-a",
     }
     base_identity = classifier.slot_classification_provider_identity(
-        litellm_model="azure/gpt-test",
+        provider_type="azure",
         litellm_kwargs=base_kwargs,
     )
 
@@ -1166,13 +1167,13 @@ def test_provider_execution_identity_partitions_behavior_and_excludes_secrets() 
         ("deployment_name", "flow-builder-b"),
     ):
         changed_identity = classifier.slot_classification_provider_identity(
-            litellm_model="azure/gpt-test",
+            provider_type="azure",
             litellm_kwargs={**base_kwargs, field: value},
         )
         assert changed_identity != base_identity
 
     credential_only_identity = classifier.slot_classification_provider_identity(
-        litellm_model="azure/gpt-test",
+        provider_type="azure",
         litellm_kwargs={
             **base_kwargs,
             "api_key": "secret-key-b",
@@ -1373,6 +1374,38 @@ async def test_classification_cache_separates_effective_optional_kwargs() -> Non
     assert litellm_client.acompletion.await_count == 2
     assert "temperature" not in litellm_client.acompletion.await_args_list[0].kwargs
     assert litellm_client.acompletion.await_args_list[1].kwargs["temperature"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_luna_classification_uses_explicit_reasoning_control() -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "PDF report requested",
+                        "evidence": [_evidence("luna-pdf")],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            }
+        )
+    )
+
+    await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(model="openai/gpt-5.6-luna"),
+        classification_input=_classification_input("luna-pdf"),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "low"
 
 
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:

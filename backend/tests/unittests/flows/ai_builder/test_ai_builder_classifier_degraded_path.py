@@ -189,6 +189,7 @@ async def test_classifier_outage_keeps_deterministic_slot_fallbacks(
         litellm_client=object(),
         completion_model_route=ResolvedCompletionModelRoute(
             litellm_model="gpt-test",
+            provider_type="openai",
             litellm_kwargs={},
             supported_model_kwargs=SupportedModelKwargs(),
         ),
@@ -235,6 +236,7 @@ async def test_classifier_outage_asks_report_disposition_instead_of_keyword_gues
         litellm_client=object(),
         completion_model_route=ResolvedCompletionModelRoute(
             litellm_model="gpt-test",
+            provider_type="openai",
             litellm_kwargs={},
             supported_model_kwargs=SupportedModelKwargs(),
         ),
@@ -299,6 +301,7 @@ async def test_classifier_primary_path_merges_result_into_planning_state(
         litellm_client=object(),
         completion_model_route=ResolvedCompletionModelRoute(
             litellm_model="gpt-test",
+            provider_type="openai",
             litellm_kwargs={},
             supported_model_kwargs=SupportedModelKwargs(),
         ),

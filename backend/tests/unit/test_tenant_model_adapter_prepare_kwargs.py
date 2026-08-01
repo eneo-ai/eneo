@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
@@ -190,6 +192,17 @@ class TestPrepareKwargsReasoningEffortTranslation:
             mock_litellm.get_supported_openai_params.return_value = []
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
         assert "reasoning_effort" not in result
+
+    def test_capability_lookup_failure_stops_before_provider_preparation(self):
+        adapter = _make_adapter("openai")
+        with patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.side_effect = RuntimeError(
+                "capability registry unavailable"
+            )
+            with pytest.raises(RuntimeError, match="capability registry unavailable"):
+                adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
 
     def test_anthropic_drops_none_reasoning_effort(self):
         """Anthropic uses LiteLLM's extended-thinking mapping; explicit

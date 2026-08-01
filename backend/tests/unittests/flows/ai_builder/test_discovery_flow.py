@@ -1859,6 +1859,7 @@ class TestExtendedClarificationHints:
                 litellm_client=object(),
                 completion_model_route=ResolvedCompletionModelRoute(
                     litellm_model="test-model",
+                    provider_type="openai",
                     litellm_kwargs={},
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
@@ -1915,6 +1916,7 @@ class TestExtendedClarificationHints:
                 litellm_client=object(),
                 completion_model_route=ResolvedCompletionModelRoute(
                     litellm_model="test-model",
+                    provider_type="openai",
                     litellm_kwargs={},
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
@@ -2231,6 +2233,7 @@ class TestExtendedClarificationHints:
                 litellm_client=object(),
                 completion_model_route=ResolvedCompletionModelRoute(
                     litellm_model="test-model",
+                    provider_type="openai",
                     litellm_kwargs={},
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
@@ -2282,6 +2285,7 @@ class TestExtendedClarificationHints:
                 litellm_client=object(),
                 completion_model_route=ResolvedCompletionModelRoute(
                     litellm_model="test-model",
+                    provider_type="openai",
                     litellm_kwargs={},
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
@@ -2351,6 +2355,7 @@ class TestExtendedClarificationHints:
                 litellm_client=object(),
                 completion_model_route=ResolvedCompletionModelRoute(
                     litellm_model="test-model",
+                    provider_type="openai",
                     litellm_kwargs={},
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
@@ -3230,6 +3235,7 @@ class TestPlannerDiscoveryQuestionDispatch:
                 ui_language="sv",
                 completion_model_route=ResolvedCompletionModelRoute(
                     litellm_model="openai/gpt-5.4",
+                    provider_type="openai",
                     litellm_kwargs={},
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
@@ -3294,6 +3300,7 @@ class TestPlannerDiscoveryQuestionDispatch:
                 ui_language="en",
                 completion_model_route=ResolvedCompletionModelRoute(
                     litellm_model="openai/gpt-5.4",
+                    provider_type="openai",
                     litellm_kwargs={},
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),

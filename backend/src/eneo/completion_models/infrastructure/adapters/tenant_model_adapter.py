@@ -64,6 +64,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
+    normalize_reasoning_effort,
     resolve_structured_output_capability,
 )
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
@@ -931,26 +932,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            supported_params = _get_supported_openai_params(self.litellm_model) or []
-            reasoning_supported = "reasoning_effort" in supported_params
-            if "reasoning_effort" in model_kwargs_dict:
-                is_off_signal = model_kwargs_dict["reasoning_effort"] in (
-                    None,
-                    "none",
-                    "",
-                )
-                if not reasoning_supported:
-                    del model_kwargs_dict["reasoning_effort"]
-                elif is_off_signal:
-                    if self.provider_type == "openai":
-                        model_kwargs_dict["reasoning_effort"] = "low"
-                    else:
-                        del model_kwargs_dict["reasoning_effort"]
-            elif reasoning_supported and self.provider_type == "openai":
-                # The UI's default value is stripped by exclude_none above.
-                # OpenAI reasoning models otherwise restore their provider
-                # default effort, so make the lowest supported choice explicit.
-                model_kwargs_dict["reasoning_effort"] = "low"
+            model_kwargs_dict = normalize_reasoning_effort(
+                litellm_model=self.litellm_model,
+                provider_type=self.provider_type,
+                model_kwargs=model_kwargs_dict,
+                openai_absent_effort="low",
+            )
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast
+from typing import Literal, cast
 
 import litellm
 
@@ -115,6 +116,81 @@ def get_supported_openai_params(
     return tuple(params) if params is not None else None
 
 
+def normalize_reasoning_effort(
+    *,
+    litellm_model: str,
+    provider_type: str,
+    model_kwargs: Mapping[str, object],
+    openai_absent_effort: Literal["none", "low"],
+) -> dict[str, object]:
+    """Return explicit provider-safe reasoning controls for one request.
+
+    OpenAI reasoning models restore a provider default when effort is omitted.
+    Callers therefore choose the explicit absent-effort policy for their use
+    case. This transport policy is intentionally independent of the persisted
+    user-facing reasoning controls. Other providers use absence as the off
+    signal. Parameter-capability errors propagate before provider I/O. Missing
+    value-level metadata uses the existing low-effort fallback instead of
+    emitting an unverified `none` value.
+    """
+
+    normalized = dict(model_kwargs)
+    supported_params = get_supported_openai_params(
+        model=litellm_model,
+        custom_llm_provider=provider_type,
+    )
+    reasoning_supported = (
+        supported_params is not None and "reasoning_effort" in supported_params
+    )
+    absent_effort = openai_absent_effort
+    if reasoning_supported and provider_type == "openai":
+        absent_effort = _resolve_openai_absent_effort(
+            litellm_model=litellm_model,
+            provider_type=provider_type,
+            requested=openai_absent_effort,
+        )
+    if "reasoning_effort" in normalized:
+        is_off_signal = normalized["reasoning_effort"] in (None, "none", "")
+        if not reasoning_supported:
+            normalized.pop("reasoning_effort")
+        elif is_off_signal:
+            if provider_type == "openai":
+                normalized["reasoning_effort"] = absent_effort
+            else:
+                normalized.pop("reasoning_effort")
+    elif reasoning_supported and provider_type == "openai":
+        normalized["reasoning_effort"] = absent_effort
+    return normalized
+
+
+def _resolve_openai_absent_effort(
+    *,
+    litellm_model: str,
+    provider_type: str,
+    requested: Literal["none", "low"],
+) -> Literal["none", "low"]:
+    if requested == "low":
+        return "low"
+    try:
+        model_info = cast(
+            Mapping[str, object],
+            getattr(litellm, "get_model_info")(
+                model=litellm_model,
+                custom_llm_provider=provider_type,
+            ),
+        )
+    except Exception:
+        logger.warning(
+            "LiteLLM model metadata unavailable; using low reasoning fallback",
+            extra={
+                "litellm_model": litellm_model,
+                "provider_type": provider_type,
+            },
+        )
+        return "low"
+    return "none" if model_info.get("supports_none_reasoning_effort") is True else "low"
+
+
 def supports_response_schema(
     *,
     model: str,
@@ -180,6 +256,7 @@ __all__ = [
     "StructuredOutputDecisionSource",
     "StructuredOutputMode",
     "get_supported_openai_params",
+    "normalize_reasoning_effort",
     "resolve_structured_output_capability",
     "supports_response_schema",
     "unsupported_structured_output_decision",
