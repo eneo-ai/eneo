@@ -30,6 +30,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     OrderedEditProposal,
     parse_create_flow_intent_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
+    RuntimeInputFieldHint,
+)
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
@@ -85,6 +88,167 @@ def test_declared_input_field_without_step_use_fails_create_compilation() -> Non
     assert exc_info.value.public_code == "architecture_materialization_failed"
     assert exc_info.value.log_context["reason"] == "unplaced_form_fields"
     assert exc_info.value.log_context["field_names"] == "priority"
+
+
+def test_confirmed_input_field_without_semantic_consumer_fails_compilation() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case review",
+            "plan_rationale": "Review the submitted case.",
+            "steps": [
+                {
+                    "name": "Review case",
+                    "instructions": "Review the submitted case.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            outline,
+            context=CreateCompileContext(
+                runtime_input_field_hints=(
+                    RuntimeInputFieldHint(
+                        "case_type",
+                        "Case type",
+                        provenance="user_confirmed",
+                    ),
+                ),
+            ),
+        )
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "unplaced_form_fields"
+    assert exc_info.value.log_context["field_names"] == "case_type"
+
+
+def test_unknown_semantic_form_field_consumer_fails_compilation() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case review",
+            "plan_rationale": "Review the submitted case.",
+            "steps": [
+                {
+                    "name": "Review case",
+                    "instructions": "Review the submitted case.",
+                    "uses_form_fields": ["unknown_case_type"],
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(outline)
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["reason"] == "unknown_form_field_refs_open"
+    assert exc_info.value.log_context["field_names"] == "unknown_case_type"
+
+
+def test_confirmed_field_contract_rejects_unknown_semantic_consumer() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case review",
+            "plan_rationale": "Review the submitted case.",
+            "steps": [
+                {
+                    "name": "Review case",
+                    "instructions": "Review the submitted case.",
+                    "uses_form_fields": ["tone"],
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            outline,
+            context=CreateCompileContext(
+                runtime_input_field_hints=(
+                    RuntimeInputFieldHint(
+                        "case_type",
+                        "Case type",
+                        provenance="user_confirmed",
+                    ),
+                ),
+            ),
+        )
+
+    assert exc_info.value.log_context["reason"] == "unknown_form_field_refs_closed"
+    assert exc_info.value.log_context["field_names"] == "tone"
+
+
+def test_inferred_field_context_allows_new_declared_runtime_field() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case routing",
+            "plan_rationale": "Route the case using runtime fields.",
+            "input_fields": [
+                {"variable_name": "case_type", "label": "Case type"},
+                {"variable_name": "tone", "label": "Tone"},
+            ],
+            "steps": [
+                {
+                    "name": "Route case",
+                    "instructions": "Route the case using its type and tone.",
+                    "uses_form_fields": ["case_type", "tone"],
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_field_hints=(
+                RuntimeInputFieldHint("case_type", "Case type"),
+            ),
+        ),
+    )
+
+    assert [field.name for field in compiled.form_fields or ()] == [
+        "case_type",
+        "tone",
+    ]
+
+
+def test_template_field_context_allows_new_declared_runtime_field() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Template report",
+            "plan_rationale": "Fill a template using runtime fields.",
+            "input_fields": [
+                {"variable_name": "tone", "label": "Tone"},
+            ],
+            "steps": [
+                {
+                    "name": "Prepare report",
+                    "instructions": "Prepare the report for the template.",
+                    "uses_form_fields": ["template_value", "tone"],
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            template_placeholder_field_hints=(
+                RuntimeInputFieldHint("template_value", "Template value"),
+            ),
+        ),
+    )
+
+    assert [field.name for field in compiled.form_fields or ()] == [
+        "tone",
+        "template_value",
+    ]
 
 
 def test_renderer_terminal_form_field_without_step_use_fails_create_compilation() -> (

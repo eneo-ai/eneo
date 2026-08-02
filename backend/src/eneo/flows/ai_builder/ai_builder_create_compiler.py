@@ -38,11 +38,10 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
+    NO_EXTRA_RUNTIME_METADATA,
     RuntimeInputFieldHint,
     RuntimeMetadataState,
-    extract_runtime_input_field_hints,
     normalize_runtime_metadata_state,
-    runtime_metadata_allows_input_fields,
     runtime_metadata_disables_declared_input_fields,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
@@ -118,6 +117,67 @@ class CreateCompileContext:
             )
         if self.runtime_max_files is not None and self.runtime_max_files < 1:
             raise ValueError("runtime_max_files must be at least 1 when provided")
+        if (
+            self.runtime_metadata_disables_declared_input_fields
+            and self.runtime_metadata_state != NO_EXTRA_RUNTIME_METADATA
+        ):
+            raise ValueError(
+                "CreateCompileContext can disable declared input fields only "
+                "for an explicit no-extra-metadata decision"
+            )
+
+    @property
+    def admitted_runtime_input_field_hints(
+        self,
+    ) -> tuple[RuntimeInputFieldHint, ...]:
+        if self.runtime_metadata_disables_declared_input_fields:
+            return ()
+        return self.runtime_input_field_hints
+
+    @property
+    def admitted_form_field_hints(self) -> tuple[RuntimeInputFieldHint, ...]:
+        hints: list[RuntimeInputFieldHint] = []
+        seen: set[str] = set()
+        for hint in (
+            *self.admitted_runtime_input_field_hints,
+            *self.template_placeholder_field_hints,
+        ):
+            if hint.variable_name in seen:
+                continue
+            if is_primary_runtime_input_shadow_field(
+                variable_name=hint.variable_name,
+                field_type=hint.field_type,
+                runtime_input_type=self.runtime_input_type,
+            ):
+                continue
+            hints.append(hint)
+            seen.add(hint.variable_name)
+        return tuple(hints)
+
+    @property
+    def confirmed_runtime_field_contract_closed(self) -> bool:
+        return any(
+            hint.provenance == "user_confirmed"
+            for hint in self.admitted_runtime_input_field_hints
+        )
+
+    @property
+    def incompatible_confirmed_form_field_names(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                hint.variable_name
+                for hint in (
+                    *self.admitted_runtime_input_field_hints,
+                    *self.template_placeholder_field_hints,
+                )
+                if hint.provenance == "user_confirmed"
+                and is_primary_runtime_input_shadow_field(
+                    variable_name=hint.variable_name,
+                    field_type=hint.field_type,
+                    runtime_input_type=self.runtime_input_type,
+                )
+            )
+        )
 
 
 def compile_create_intent_to_spec(
@@ -150,32 +210,15 @@ def compile_create_intent_to_spec(
         intent,
         field_names=dropped_form_field_ref_names,
     )
-    referenced_hint_names = {
-        field_name
-        for semantic_step in intent_with_admitted_form_refs.steps
-        for field_name in semantic_step.uses_form_fields
-    }
     known_field_order = [field.name for field in form_fields]
-    known_field_names = set(known_field_order)
-    server_owned_field_names = _server_owned_runtime_field_names(
-        context=context,
-        known_field_names=known_field_names,
-    )
-    server_owned_fields_requiring_placement = [
-        field_name
-        for field_name in known_field_order
-        if field_name in server_owned_field_names
-        and field_name not in referenced_hint_names
-    ]
-    intent_with_server_owned_field_placement = (
-        _intent_with_server_owned_form_field_placement(
-            intent_with_admitted_form_refs,
-            field_names=server_owned_fields_requiring_placement,
-        )
-    )
     _raise_for_unplaced_create_form_fields(
-        intent_with_server_owned_field_placement,
+        intent_with_admitted_form_refs,
         field_order=known_field_order,
+        confirmed_runtime_field_contract_closed=(
+            context.confirmed_runtime_field_contract_closed
+            if context is not None
+            else False
+        ),
     )
 
     final_output_mode = context.final_output_mode if context is not None else None
@@ -209,7 +252,7 @@ def compile_create_intent_to_spec(
         }
     )
     assembly_spec = try_compile_create_intent_with_assembly(
-        intent_with_server_owned_field_placement,
+        intent_with_admitted_form_refs,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
@@ -245,9 +288,7 @@ def compile_create_intent_to_spec(
                 ),
                 "pattern_ids": ",".join(pattern_ids),
                 "chain_steps": ",".join(chain_steps),
-                "semantic_step_count": len(
-                    intent_with_server_owned_field_placement.steps
-                ),
+                "semantic_step_count": len(intent_with_admitted_form_refs.steps),
             },
         )
     else:
@@ -324,14 +365,40 @@ def _raise_for_unplaced_create_form_fields(
     intent: CreateFlowIntent,
     *,
     field_order: list[str],
+    confirmed_runtime_field_contract_closed: bool,
 ) -> None:
-    if not field_order:
-        return
-    placed_field_names = {
+    placed_field_order = list(
+        dict.fromkeys(
+            field_name
+            for semantic_step in intent.steps
+            for field_name in semantic_step.uses_form_fields
+        )
+    )
+    known_field_names = set(field_order)
+    unknown_field_names = [
         field_name
-        for semantic_step in intent.steps
-        for field_name in semantic_step.uses_form_fields
-    }
+        for field_name in placed_field_order
+        if field_name not in known_field_names
+    ]
+    if unknown_field_names:
+        failure_code = (
+            "unknown_form_field_refs_closed"
+            if confirmed_runtime_field_contract_closed
+            else "unknown_form_field_refs_open"
+        )
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail=(
+                "Create-flow steps reference unknown input fields: "
+                f"{', '.join(unknown_field_names)}."
+            ),
+            log_context={
+                "failure_code": failure_code,
+                "reason": failure_code,
+                "field_names": ",".join(unknown_field_names),
+            },
+        )
+    placed_field_names = set(placed_field_order)
     unplaced_field_names = [
         field_name for field_name in field_order if field_name not in placed_field_names
     ]
@@ -339,39 +406,15 @@ def _raise_for_unplaced_create_form_fields(
         return
     raise AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
-        detail="Create-flow input fields must be referenced by at least one step.",
+        detail=(
+            "Create-flow input fields must be referenced by at least one step: "
+            f"{', '.join(unplaced_field_names)}."
+        ),
         log_context={
             "failure_code": "unplaced_form_fields",
             "reason": "unplaced_form_fields",
             "field_names": ",".join(unplaced_field_names),
         },
-    )
-
-
-def _intent_with_server_owned_form_field_placement(
-    intent: CreateFlowIntent,
-    *,
-    field_names: list[str],
-) -> CreateFlowIntent:
-    if not field_names or not intent.steps:
-        return intent
-
-    final_step = intent.steps[-1]
-    uses_form_fields = [
-        *final_step.uses_form_fields,
-        *(
-            field_name
-            for field_name in field_names
-            if field_name not in final_step.uses_form_fields
-        ),
-    ]
-    return intent.model_copy(
-        update={
-            "steps": [
-                *intent.steps[:-1],
-                final_step.model_copy(update={"uses_form_fields": uses_form_fields}),
-            ]
-        }
     )
 
 
@@ -405,7 +448,6 @@ def create_compile_context_from_planning_state(
     planning_state: PlanningState | None,
     *,
     ui_language: str | None = None,
-    runtime_input_hint_text: str | None = None,
 ) -> CreateCompileContext | None:
     runtime_metadata_state = _runtime_metadata_state_from_planning_state(planning_state)
     metadata_disables_declared_input_fields = (
@@ -415,9 +457,6 @@ def create_compile_context_from_planning_state(
     )
     runtime_input_field_hints = _runtime_input_field_hints_from_planning_state(
         planning_state
-    ) or _runtime_input_field_hints_from_source(
-        runtime_metadata_state=runtime_metadata_state,
-        runtime_input_hint_text=runtime_input_hint_text,
     )
     template_placeholder_field_hints = (
         _template_placeholder_field_hints_from_planning_state(planning_state)
@@ -643,21 +682,6 @@ def _runtime_metadata_disables_declared_input_fields_from_planning_state(
     )
 
 
-def _runtime_input_field_hints_from_source(
-    *,
-    runtime_metadata_state: RuntimeMetadataState | None,
-    runtime_input_hint_text: str | None,
-) -> tuple[RuntimeInputFieldHint, ...]:
-    if runtime_input_hint_text is None:
-        return ()
-    source_text = runtime_input_hint_text.strip()
-    if not source_text:
-        return ()
-    if not runtime_metadata_allows_input_fields(runtime_metadata_state):
-        return ()
-    return extract_runtime_input_field_hints(source_text)
-
-
 def _runtime_input_field_hints_from_planning_state(
     planning_state: PlanningState | None,
 ) -> tuple[RuntimeInputFieldHint, ...]:
@@ -872,11 +896,11 @@ def _compile_form_fields(
     runtime_input_type: InputType | None,
     field_diagnostics: list[LintWarning] | None,
 ) -> tuple[list[FormFieldSpec], list[str], set[str]]:
-    runtime_metadata_state = (
-        context.runtime_metadata_state if context is not None else None
+    raw_runtime_input_field_hints = (
+        context.runtime_input_field_hints if context is not None else ()
     )
     runtime_input_field_hints = (
-        context.runtime_input_field_hints if context is not None else ()
+        context.admitted_runtime_input_field_hints if context is not None else ()
     )
     template_placeholder_field_hints = (
         context.template_placeholder_field_hints if context is not None else ()
@@ -888,33 +912,25 @@ def _compile_form_fields(
     )
     active_intent_fields = intent_fields
     dropped_form_field_ref_names: set[str] = set()
-    if runtime_metadata_state is not None and not runtime_metadata_allows_input_fields(
-        runtime_metadata_state
-    ):
+    if metadata_disables_declared_input_fields:
         _log_dropped_runtime_metadata_input_fields(
             field_names=[
-                *(
-                    field.variable_name
-                    for field in intent_fields
-                    if metadata_disables_declared_input_fields
-                ),
-                *(hint.variable_name for hint in runtime_input_field_hints),
+                *(field.variable_name for field in intent_fields),
+                *(hint.variable_name for hint in raw_runtime_input_field_hints),
             ],
-            runtime_metadata_state=runtime_metadata_state,
+            runtime_metadata_state=NO_EXTRA_RUNTIME_METADATA,
         )
         dropped_ref_names = {
             *(field.variable_name for field in intent_fields),
-            *(hint.variable_name for hint in runtime_input_field_hints),
+            *(hint.variable_name for hint in raw_runtime_input_field_hints),
         }
-        runtime_input_field_hints = ()
-        if metadata_disables_declared_input_fields:
-            _reject_or_diagnose_field_drops(
-                fields=intent_fields,
-                code="runtime_metadata_form_field_dropped",
-                field_diagnostics=field_diagnostics,
-            )
-            active_intent_fields = []
-            dropped_form_field_ref_names.update(dropped_ref_names)
+        _reject_or_diagnose_field_drops(
+            fields=intent_fields,
+            code="runtime_metadata_form_field_dropped",
+            field_diagnostics=field_diagnostics,
+        )
+        active_intent_fields = []
+        dropped_form_field_ref_names.update(dropped_ref_names)
 
     fields: list[FormFieldSpec] = []
     dropped_primary_input_field_names: list[str] = []
@@ -922,33 +938,58 @@ def _compile_form_fields(
     template_hint_names = {
         hint.variable_name for hint in template_placeholder_field_hints
     }
+    unconfirmed_field_names = [
+        field.variable_name
+        for field in active_intent_fields
+        if context is not None
+        and context.confirmed_runtime_field_contract_closed
+        and field.variable_name not in metadata_hint_names
+        and field.variable_name not in template_hint_names
+    ]
+    if unconfirmed_field_names:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail=(
+                "Create-flow input fields are outside the confirmed runtime field "
+                f"contract: {', '.join(unconfirmed_field_names)}."
+            ),
+            log_context={
+                "failure_code": "unconfirmed_runtime_form_fields",
+                "reason": "unconfirmed_runtime_form_fields",
+                "field_names": ",".join(unconfirmed_field_names),
+            },
+        )
+    server_hints_by_name: dict[str, RuntimeInputFieldHint] = {}
+    for hint in (*runtime_input_field_hints, *template_placeholder_field_hints):
+        server_hints_by_name.setdefault(hint.variable_name, hint)
     for field in active_intent_fields:
-        if (
-            metadata_hint_names
-            and field.variable_name not in metadata_hint_names
-            and field.variable_name not in template_hint_names
-        ):
-            _reject_or_diagnose_field_drops(
-                fields=[field],
-                code="unconfirmed_runtime_form_field_dropped",
-                field_diagnostics=field_diagnostics,
-            )
-            dropped_form_field_ref_names.add(field.variable_name)
-            continue
+        server_hint = server_hints_by_name.get(field.variable_name)
+        field_definition = server_hint or field
         if is_primary_runtime_input_shadow_field(
-            variable_name=field.variable_name,
-            field_type=field.field_type,
+            variable_name=field_definition.variable_name,
+            field_type=field_definition.field_type,
             runtime_input_type=runtime_input_type,
         ):
-            _reject_or_diagnose_field_drops(
-                fields=[field],
-                code="primary_input_shadow_form_field_dropped",
-                field_diagnostics=field_diagnostics,
-            )
+            if server_hint is not None:
+                _reject_or_diagnose_field_drops(
+                    fields=[server_hint],
+                    code="primary_input_shadow_form_field_dropped",
+                    field_diagnostics=field_diagnostics,
+                )
+            else:
+                _reject_or_diagnose_field_drops(
+                    fields=[field],
+                    code="primary_input_shadow_form_field_dropped",
+                    field_diagnostics=field_diagnostics,
+                )
             dropped_primary_input_field_names.append(field.variable_name)
             dropped_form_field_ref_names.add(field.variable_name)
             continue
-        fields.append(_compile_input_field(field))
+        fields.append(
+            _compile_form_field(server_hint)
+            if server_hint is not None
+            else _compile_form_field(field)
+        )
 
     seen = {field.name for field in fields}
     for hint in (*runtime_input_field_hints, *template_placeholder_field_hints):
@@ -967,15 +1008,7 @@ def _compile_form_fields(
             continue
         if hint.variable_name in seen:
             continue
-        fields.append(
-            FormFieldSpec(
-                name=hint.variable_name,
-                label=hint.label,
-                type=hint.field_type,
-                required=hint.required,
-                options=list(hint.options) or None,
-            )
-        )
+        fields.append(_compile_form_field(hint))
         seen.add(hint.variable_name)
     return fields, dropped_primary_input_field_names, dropped_form_field_ref_names
 
@@ -1012,23 +1045,6 @@ def _reject_or_diagnose_field_drops(
                 field_provenance=field.provenance,
             )
         )
-
-
-def _server_owned_runtime_field_names(
-    *,
-    context: CreateCompileContext | None,
-    known_field_names: set[str],
-) -> set[str]:
-    if context is None:
-        return set()
-    return {
-        hint.variable_name
-        for hint in (
-            *context.runtime_input_field_hints,
-            *context.template_placeholder_field_hints,
-        )
-        if hint.variable_name in known_field_names
-    }
 
 
 def _log_dropped_runtime_metadata_input_fields(
@@ -1127,7 +1143,9 @@ def _log_dropped_primary_input_shadow_fields(
     )
 
 
-def _compile_input_field(field: FlowInputFieldIntent) -> FormFieldSpec:
+def _compile_form_field(
+    field: FlowInputFieldIntent | RuntimeInputFieldHint,
+) -> FormFieldSpec:
     return FormFieldSpec(
         name=field.variable_name,
         label=field.label,

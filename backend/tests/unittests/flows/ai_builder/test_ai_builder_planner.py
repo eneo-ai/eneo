@@ -72,6 +72,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     prepare_planner_request,
     validate_preprovider_schema_gate,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalMessageGroup,
@@ -1471,6 +1472,14 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
         committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
         architecture_hash="a" * 64,
     )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="case_id",
+            label="Case ID",
+            required=True,
+            provenance="user_confirmed",
+        )
+    ]
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build a report flow.",
@@ -1527,6 +1536,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     assert isinstance(prepared, ProposalPrepared)
     assert prepared.llm_messages[0]["role"] == "system"
     assert "Call exactly one `propose_flow` tool" in prepared.llm_messages[0]["content"]
+    assert '"variable_name": "case_id"' in prepared.llm_messages[0]["content"]
 
 
 def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> None:
@@ -1623,6 +1633,57 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
             tool_schemas=[tool_schema],
             model_name=model_name,
         )
+
+
+def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+        name="primary_runtime_input",
+        value="text",
+        source="structured_answer",
+        confidence="high",
+    )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="text",
+            label="Text",
+            provenance="user_confirmed",
+        )
+    ]
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        build_proposal_prepared(
+            requirements_state=RequirementsState(),
+            ui_language="en",
+            slot_classification_metadata=None,
+            conversation=[ConversationMessage(role="user", content="Summarize text")],
+            planning_state=state,
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=False,
+            resource_catalog=build_ai_builder_resource_catalog(
+                available_models=None,
+                available_kbs=None,
+            ),
+            current_steps=None,
+            plan_edit_context=None,
+            prior_plan_for_revision=None,
+            litellm_model="gpt-4o-mini",
+            max_input_tokens=4096,
+            max_output_tokens=256,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+            ),
+            attachment_file_count=0,
+            current_turn_start=0,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    assert exc_info.value.context == {
+        "reason": "confirmed_form_field_incompatible",
+        "field_names": ["text"],
+    }
 
 
 @pytest.mark.asyncio

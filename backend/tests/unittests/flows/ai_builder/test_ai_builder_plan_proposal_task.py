@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -529,6 +531,107 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
     assert "Do not leave user-named facts only in instructions" in prompt
     assert "generic facts/notes fields" in prompt
     assert "instead of introducing new source-derived facts only in prose" in prompt
+
+
+def test_plan_proposal_prompt_projects_confirmed_runtime_field_contract() -> None:
+    state = PlanningState.empty()
+    long_name = f"case_{'x' * 90}"
+    long_option = f"permit, with conditions {'y' * 90}"
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name=long_name,
+            label='Case type "as submitted"',
+            field_type="select",
+            required=True,
+            options=[long_option, "complaint"],
+            provenance="user_confirmed",
+        )
+    ]
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Server-owned runtime input fields:" in prompt
+    assert (
+        json.dumps(
+            {
+                "variable_name": long_name,
+                "field_type": "select",
+                "required": True,
+                "label": 'Case type "as submitted"',
+                "options": [long_option, "complaint"],
+                "provenance": "user_confirmed",
+            },
+            ensure_ascii=False,
+        )
+        in prompt
+    )
+    assert "…" not in prompt
+    assert "exact variable_name in uses_form_fields" in prompt
+    assert "Do not redeclare or rename these server-owned fields" in prompt
+
+
+def test_plan_proposal_prompt_omits_primary_input_shadow_field() -> None:
+    state = _state_with_slot("primary_runtime_input", "text")
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="text",
+            label="Text",
+            provenance="user_confirmed",
+        )
+    ]
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Server-owned runtime input fields:" not in prompt
+    assert '"variable_name": "text"' not in prompt
+
+
+def test_plan_proposal_prompt_projects_normalized_template_runtime_fields() -> None:
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000703",
+            filename="ärendemall.docx",
+            file_type="document",
+            mimetype=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml."
+                "document"
+            ),
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="heuristic",
+            confidence="high",
+            template_placeholders=["kundnamn", "flow_input.case_id", "datum"],
+        )
+    ]
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert '"variable_name": "kundnamn"' in prompt
+    assert '"variable_name": "case_id"' in prompt
+    assert '"variable_name": "datum"' not in prompt
 
 
 def test_plan_proposal_prompt_marks_resolved_slot_decision_strength() -> None:

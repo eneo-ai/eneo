@@ -554,8 +554,27 @@ def _build_retry_feedback(
     if target_kind == TargetKind.CREATE:
         intent_rules = [
             "Every steps[] item must be one complete semantic intent step with at least name and instructions.",
-            "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_form_fields.",
         ]
+        if "unplaced_form_fields" in failure_codes:
+            intent_rules.append(
+                "Reference each existing runtime form field by its exact name in uses_form_fields only on semantic steps that consume it; do not redeclare server-owned fields."
+            )
+        elif "unknown_form_field_refs_closed" in failure_codes:
+            intent_rules.append(
+                "The proposal context's runtime field set is confirmed and closed. Replace each unknown reference with an exact listed name or remove it; do not declare additional input_fields."
+            )
+        elif "unknown_form_field_refs_open" in failure_codes:
+            intent_rules.append(
+                "Correct an unknown runtime field reference to an exact listed or declared name. A genuinely new secondary runtime input must be declared in top-level input_fields[] and referenced by the same exact name in uses_form_fields."
+            )
+        elif "unconfirmed_runtime_form_fields" in failure_codes:
+            intent_rules.append(
+                "The proposal context's server-owned runtime field set is confirmed and closed. Remove any additional input_fields and use only exact listed names in uses_form_fields on their semantic consumers."
+            )
+        else:
+            intent_rules.append(
+                "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_form_fields."
+            )
         if "json_output_no_contract" in failure_codes:
             intent_rules.append(
                 "For every JSON semantic step that feeds later steps, set output_fields with named fields that match the step's extracted data."

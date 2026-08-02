@@ -20,6 +20,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     tool_calls_from_message,
     ui_language_from_metadata,
 )
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    create_compile_context_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
 )
@@ -348,6 +351,24 @@ def build_proposal_prepared(
         context=plan_edit_context,
         prior_plan=prior_plan_for_revision,
     )
+    compile_context = create_compile_context_from_planning_state(
+        planning_state,
+        ui_language=ui_language,
+    )
+    incompatible_field_names = (
+        compile_context.incompatible_confirmed_form_field_names
+        if compile_context is not None and not is_edit_mode
+        else ()
+    )
+    if incompatible_field_names:
+        raise AIBuilderBadRequestException(
+            "Confirmed runtime fields conflict with the primary flow input.",
+            code=AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED,
+            context={
+                "reason": "confirmed_form_field_incompatible",
+                "field_names": list(incompatible_field_names),
+            },
+        )
 
     def build_proposal_prompt(attachment_text: str | None) -> str:
         return build_plan_proposal_system_prompt(
@@ -359,6 +380,7 @@ def build_proposal_prepared(
             resource_catalog=resource_catalog,
             requested_output_sections=requested_output_sections,
             plan_revision_context=plan_revision_context,
+            compile_context=compile_context,
         )
 
     fitted_attachment_context = _fit_proposal_attachment_context(

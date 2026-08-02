@@ -42,6 +42,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-02 | **Exact Builder runtime-field consumers**: confirmed runtime fields now reach proposal drafting with their exact server-owned names, types, required state, labels, and options; `uses_form_fields` is the sole semantic consumer contract, confirmed definitions override model redeclarations, missing consumers return named repairable feedback, and the compiler no longer hides unused fields by attaching them to the final step; behavior tests pin comparison, report, audio, template, and JSON-input placement (this change; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Directional Builder JSON contract compilation**: resolved input-schema evidence now reaches the first Flow-input JSON consumer while independently resolved output evidence remains on the terminal JSON contract; compiler-owned raw JSON bindings are removed only at that typed boundary, downstream step contracts remain independent, composite JSON/form input fails explicitly without futile model-repair turns, and a real JSON golden proves both declared contracts survive canonical authoring materialization (this change; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-01 | **Explicit Builder schema direction**: one neutral schema-evidence owner now retains bounded JSON Schema candidates with complete provenance, while `PlanningState` stores independently selected input and output evidence; explicit structured answers or citation-backed user intent can assign the same or different candidates to either boundary, a replay-safe bilingual multi-select question resolves genuine ambiguity, and reference-only schemas remain unassigned; attachment-only evidence cannot choose direction, schemas do not reopen the terminal output, and the public overflow error plus generated client use one direction-neutral contract (this change) |
 | 2026-08-01 | **Canonical Builder discovery evidence**: free-text replies now reach one cited classifier instead of deterministic option matching, and accepted typed planning slots replace conflicting raw signals in the discovery profile while raw text still fills genuinely missing input, output, and output-submode dimensions; a resolved primary input projects one coherent architecture and cannot reopen a stale mixed-input question (`cbc1132e2`, `65af265bb`; Codex and Claude gates green 8/10, no blockers) |
@@ -218,8 +219,38 @@ external release gate (item 10); BM0.2 is external (item 10).
     results. After each deployable Builder slice, compare a locked-model smoke
     cohort with the preceding receipt; assess question choice, unsupported
     assumptions, plan topology, schema use, and failure category rather than
-    optimizing for one example prompt. Promote a failure to a deterministic
-    product test only when it expresses a general rule. Before the release-gate
+    optimizing for one example prompt. The target is a correct first proposal;
+    bounded repair remains a safety net and is measured as a degraded path, not
+    counted as success. Receipts retain each ordered structured-question payload
+    (id, text, option ids, custom-answer support, and turn), question count and
+    repetition, first-question fit to the highest-impact unknown, grounded
+    assumptions, first-proposal outcome, repair rounds/codes, plan topology,
+    directional input/output contract use, review moments, and authoring
+    token/call/latency usage. Report true first-pass success separately from
+    repaired success and terminal failure; include p50/p95 values rather than
+    averages alone.
+    Question review also records whether the question is answerable from the
+    user's perspective, non-leading, offers sufficient option coverage or a
+    usable custom-answer path, resolves after its answer, and avoids reopening
+    already settled requirements. Proposal review uses a requirement-coverage
+    matrix rather than one overall score: primary input, secondary runtime
+    fields, prompt variables, targeted Underlag, directional schemas, requested
+    output shape, justified review checkpoints, and deterministic versus
+    model-backed work. It flags redundant steps, duplicated or unrelated
+    context, unsupported assumptions by severity, and needless model calls.
+    Applied cases compare the built contract with actual execution evidence,
+    including per-step token use and schema/artifact validity; plan plausibility
+    alone is insufficient.
+    Segment comparisons by vague, single-missing-dimension, complete,
+    attachment/template, JSON, audio, form-field, and human-review cohorts;
+    aggregate improvement cannot hide a critical-cohort regression. Pin the
+    baseline commit, corpus/harness hashes, model/provider route, UI language,
+    and configuration; repeat observations to measure output variance, include
+    paraphrase and Swedish/English intent-equivalence pairs, manually
+    adjudicate representative wins and failures, and execute applied cases where
+    the harness supports it so a plausible plan is not mistaken for a correct
+    Flow. Promote a failure to a deterministic product test only when it
+    expresses a general rule. Before the release-gate
     live run, freeze in the tracked gate input: three repetitions, required
     cases, non-municipal domain families, provider route/model identity, and
     numeric p50/p95 latency + token/call ceilings (the corpus still has only
@@ -394,11 +425,12 @@ plan above controls all other ordering.
   canonical authoring, and unsupported composite bindings fail without entering
   model repair. One parser, one evidence type, and one bounded in-state resolution
   aggregate—not a reusable schema registry or second ledger. *(M)*
-- **B10** (precise semantic dataflow, three ordered slices): (a) project exact
-  confirmed form-field names/types from `PlanningState` into proposal context,
-  keep existing `uses_form_fields` as the semantic consumer contract, delete the
-  final-step auto-placement fallback, and fail with structured feedback when a
-  field has no actual consumer; (b) make invalid typed source refs a Builder
+- **B10** (precise semantic dataflow, three ordered slices): (a) **LANDED in this
+  change** — project exact confirmed form-field names/types from `PlanningState`
+  into proposal context, keep existing `uses_form_fields` as the semantic
+  consumer contract, delete the final-step auto-placement fallback, and fail
+  with structured feedback when a field has no actual consumer; (b) make invalid
+  typed source refs a Builder
   compile error instead of degrading to rendered strings; (c) compile an input
   schema for explicit structured Underlag projections and remove broad
   `all_previous_steps` fan-in where declared dependencies are sufficient. The

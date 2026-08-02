@@ -35,6 +35,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     StepSpec,
 )
+from eneo.flows.flow_variable_definitions import form_field_reference_expression
 from eneo.flows.input_binding_contract_rules import SourceRefBinding
 from eneo.flows.source_identity import without_runtime_source_identity_draft_fields
 
@@ -98,6 +99,7 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
             compiled_step = _with_compose_source_refs(
                 step=compiled_step,
                 prior_steps=compiled_steps,
+                form_field_refs=planned_step.form_field_refs,
                 ui_language=plan.ui_language,
             )
         compiled_steps.append(compiled_step)
@@ -166,6 +168,7 @@ def _with_compose_source_refs(
     *,
     step: StepSpec,
     prior_steps: list[StepSpec],
+    form_field_refs: tuple[str, ...],
     ui_language: str | None,
 ) -> StepSpec:
     section_step, section_array = _find_compose_section_source(prior_steps)
@@ -181,10 +184,19 @@ def _with_compose_source_refs(
         ).binding_payload()
     ]
     overview_step = _find_compose_overview_source(prior_steps)
-    question = _compose_report_title_question(
-        overview_step=overview_step,
-        ui_language=ui_language,
-    )
+    question_parts = [
+        _compose_report_title_question(
+            overview_step=overview_step,
+            ui_language=ui_language,
+        )
+    ]
+    if form_field_refs:
+        question_parts.append(
+            "\n".join(
+                f"{field_name}: {form_field_reference_expression(field_name)}"
+                for field_name in form_field_refs
+            )
+        )
     if overview_step is not None:
         source_refs.append(
             SourceRefBinding(
@@ -197,7 +209,7 @@ def _with_compose_source_refs(
     return step.model_copy(
         update={
             "input_bindings": {
-                "question": question,
+                "question": "\n\n".join(question_parts),
                 "source_refs": source_refs,
             },
             "input_contract": None,
