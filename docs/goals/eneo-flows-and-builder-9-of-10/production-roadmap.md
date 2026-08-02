@@ -42,7 +42,8 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
-| 2026-08-02 | **Precise Builder source-material dataflow**: explicit structured Underlag now compiles to exact field projections whose schema and lineage are shared by Builder compilation, publish validation, and runtime resolution; form fields remain at their declared consumers, post-transcription steps describe the text they actually receive, and blanket raw-plus-structured repair plus whole-object coverage heuristics are deleted. Compiler-to-runtime parity and large-transcript regressions protect the contract (`this change`; Codex and Claude gates green 8/10, no blockers) |
+| 2026-08-02 | **Language-neutral Builder discovery ownership**: `PlanningState` and typed input/output intent remain the semantic truth while the parallel phrase-derived `case_like_flow` flag, the unused document-category question and synonym inventory, and the behavior-locking specialty recognizer are deleted; runtime-metadata values are neutral direct contracts with no compatibility aliases, and generic `underlag` no longer invents a domain or minimum viable purpose (`this change`) |
+| 2026-08-02 | **Precise Builder source-material dataflow**: explicit structured Underlag now compiles to exact field projections whose schema and lineage are shared by Builder compilation, publish validation, and runtime resolution; form fields remain at their declared consumers, post-transcription steps describe the text they actually receive, and blanket raw-plus-structured repair plus whole-object coverage heuristics are deleted. Compiler-to-runtime parity and large-transcript regressions protect the contract (`732c7cffb`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Explicit Builder source-reference failures**: typed source references now remain typed through the shared create/edit compilation boundary; every candidate is validated before deduplication, contract-invalid references fail with named target-correct Builder feedback instead of being flattened into a plausible free-text Underlag question, and the shared input-binding contract remains the validator (`b02529d5d`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Exact Builder runtime-field consumers**: confirmed runtime fields now reach proposal drafting with their exact server-owned names, types, required state, labels, and options; `uses_form_fields` is the sole semantic consumer contract, confirmed definitions override model redeclarations, missing consumers return named repairable feedback, and the compiler no longer hides unused fields by attaching them to the final step; behavior tests pin comparison, report, audio, template, and JSON-input placement (`7ffaf5f6b`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Directional Builder JSON contract compilation**: resolved input-schema evidence now reaches the first Flow-input JSON consumer while independently resolved output evidence remains on the terminal JSON contract; compiler-owned raw JSON bindings are removed only at that typed boundary, downstream step contracts remain independent, composite JSON/form input fails explicitly without futile model-repair turns, and a real JSON golden proves both declared contracts survive canonical authoring materialization (`f465e9a6d`; Codex and Claude gates green 8/10, no blockers) |
@@ -83,9 +84,10 @@ replayable terminal outcome, and versioned proposal snapshots are bounded and
 canonical on hydration). **C is obsolete** under the no-compat
 pre-release policy (no data preflight, no tolerant reader). **D is done**
 (typed discriminated rerun-revision contract + repository reads + multi-rerun
-DB proof). Vocabulary neutrality is NOT fully landed: `case_documents`,
-`basic_case_metadata`, `case_like_flow` persist in builder discovery
-(item 8). M6.6 stays measurement-gated; M6.7 is superseded by item 2 except
+DB proof). Vocabulary neutrality is complete: the unused document-category
+contract is deleted, runtime-metadata values are domain-neutral, and the
+parallel phrase-owned `case_like_flow` truth is deleted (item 8). M6.6 stays
+measurement-gated; M6.7 is superseded by item 2 except
 transport (deferred); M2.9 code exists but the deployment inventory is an
 external release gate (item 10); BM0.2 is external (item 10).
 
@@ -190,10 +192,11 @@ external release gate (item 10); BM0.2 is external (item 10).
    of explicit-answer metadata; preserve the user-question budget through a
    typed response-only lifecycle marker, and delete the weaker matcher,
    adjudicator, and dead follow-up paths behind the focused evaluation gate in
-   B7. (c) project typed resolved slots into discovery before text fallback,
-   then correct `case_documents`, `basic_case_metadata`, and `case_like_flow`,
-   including the false use of generic `underlag` as a case-domain marker — no
-   tolerant readers. (d) serve RAG policy ceilings through the existing settings
+   B7. (c) **LANDED in this change** — typed resolved slots are projected before
+   text fallback; the unused document-category contract is deleted and
+   runtime-metadata values are domain-neutral; phrase-owned domain inference, including generic
+   `underlag`, is deleted with no tolerant readers. (d) serve RAG policy ceilings
+   through the existing settings
    response and delete the duplicated admin-page TS constants — no generic
    constraints-discovery API. (e) narrow architecture-impact commitment to
    explicit, flow-default, requirements-summary, or cited high-confidence model
@@ -399,9 +402,11 @@ plan above controls all other ordering.
   the Flow's contract, topology, quality, or governance; the confirmation surface
   exposes consequential assumptions instead of hiding them. (b) **LANDED
   `65af265bb`** — typed resolved slots are canonical in the discovery profile and raw
-  text resolves only missing dimensions. (c) correct the known neutral
-  vocabulary defects and delete `case_like_flow` phrase ownership with pinned
-  before/after question-topology behavior. (d) architecture-impact dimensions
+  text resolves only missing dimensions. (c) **LANDED in this change** — correct
+  the known neutral vocabulary defects, delete `case_like_flow` and the unused
+  deterministic document-category question, and pin the resulting question topology; generic
+  source-material wording no longer invents a domain or purpose. (d)
+  architecture-impact dimensions
   never commit from policy defaults or heuristics; confirmation bucketing stays
   unchanged. (e) aggregate classifier transcript admission joins the existing
   model-aware/admin budget owner while source-count and structured-value bounds
@@ -413,7 +418,7 @@ plan above controls all other ordering.
   DOCX remains DOCX through compilation, attachment-only classification cannot
   own the terminal choice, and schema evidence remains available for the
   directional owner without misleading confirmation or proposal instructions;
-  (b) **LANDED in this change** — rename the already-neutral evidence value to
+  (b) **LANDED `8f78a04fc`** — rename the already-neutral evidence value to
   `SchemaEvidence` and let `PlanningState.schema_resolution` retain at most two
   canonical shapes plus independent input and output assignment evidence, so the
   same near-limit schema is persisted once when both boundaries use it and no

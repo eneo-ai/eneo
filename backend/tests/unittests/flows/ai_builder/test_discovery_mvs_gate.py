@@ -26,7 +26,6 @@ _EXPECTED_QUESTION_LEVELS: dict[str, str] = {
     "case_scope": "high_value",
     "input_material_mode": "blocking",
     "flow_input_architecture": "blocking",
-    "document_kind": "high_value",
     "document_material_scope": "high_value",
     "comparison_scope": "blocking",
     "final_output_mode": "blocking",
@@ -270,14 +269,13 @@ class TestQuestionBudget:
         assert analysis.ready_for_confirmation
         assert analysis.blocking_issues == ()
         assert {
-            "document_kind",
             "document_material_scope",
             "runtime_metadata_fields",
         }.isdisjoint(set(analysis.selected_question_ids))
 
     def test_detailed_swedish_prompt_gets_few_questions(self) -> None:
         """A detailed intermediate prompt should get max 2-3 blocking questions,
-        not 4+ including high_value ones like processing_scope and document_kind."""
+        not 4+ including high-value discovery questions."""
         conversation = [
             ConversationMessage(
                 role="user",
@@ -300,7 +298,7 @@ class TestQuestionBudget:
 
         blocking = analysis.blocking_issues
         # Budget should suppress high_value questions (case_scope,
-        # document_kind, document_material_scope, runtime_metadata_fields)
+        # document_material_scope, runtime_metadata_fields)
         # Only blocking-level questions should remain
         high_value_count = sum(1 for i in blocking if i.question_level == "high_value")
         assert high_value_count == 0, (

@@ -66,7 +66,7 @@ CLASSIFIER_MERGE_CONTRACT_CASES = (
             "Bygg ett flöde som tar ljud och användaren ska ange ärendenummer "
             "och handläggare vid körning."
         ),
-        {"runtime_metadata_fields": "detailed_case_metadata"},
+        {"runtime_metadata_fields": "detailed_runtime_metadata"},
         {"runtime_metadata_fields"},
         id="runtime-metadata-fields",
     ),
@@ -108,7 +108,7 @@ KEYWORD_OUTAGE_FALLBACK_CASES = (
             "Bygg ett flöde som tar ljud och användaren ska ange ärendenummer "
             "och handläggare vid körning."
         ),
-        {"runtime_metadata_fields": "detailed_case_metadata"},
+        {"runtime_metadata_fields": "detailed_runtime_metadata"},
         {"runtime_metadata_fields"},
         id="runtime-metadata-fields",
     ),

@@ -327,7 +327,6 @@ def _input_family_changed(
         for key in (
             "primary_runtime_input",
             "flow_input_architecture",
-            "document_kind",
             "document_material_scope",
             "comparison_scope",
         )

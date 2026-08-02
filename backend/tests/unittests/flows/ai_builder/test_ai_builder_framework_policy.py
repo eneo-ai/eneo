@@ -570,7 +570,6 @@ def test_audio_to_word_report_prompt_infers_audio_input_not_document_input() -> 
     )
 
     assert signals.get("primary_runtime_input") == {"audio"}
-    assert "document_kind" not in signals
     assert "document_material_scope" not in signals
 
     state = build_planning_state_from_conversation(
@@ -953,25 +952,6 @@ def test_structured_answer_signals_use_canonical_value_not_display_label(
     assert extract_answer_signals(conversation)["report_disposition"] == {"both"}
 
 
-def test_structured_answer_signals_preserve_explicit_custom_value() -> None:
-    conversation = [
-        {
-            "role": "user",
-            "content": "Visible custom-answer presentation",
-            "metadata": {
-                "question_answer": {
-                    "question_id": "document_kind",
-                    "custom_value": "Use the board-report template",
-                }
-            },
-        }
-    ]
-
-    assert extract_answer_signals(conversation)["document_kind"] == {
-        "use the board-report template"
-    }
-
-
 def test_latest_pending_structured_question_reads_backend_question_payload() -> None:
     question = latest_pending_structured_question(
         [
@@ -1002,9 +982,7 @@ def test_latest_pending_structured_question_reads_backend_question_payload() -> 
     assert question["question_id"] == "terminal_output"
 
 
-def test_extract_answer_signals_infers_freeform_document_signals_without_metadata() -> (
-    None
-):
+def test_extract_answer_signals_preserves_document_input_structure() -> None:
     signals = extract_answer_signals(
         [
             {
@@ -1017,7 +995,6 @@ def test_extract_answer_signals_infers_freeform_document_signals_without_metadat
         ]
     )
 
-    assert "contracts_agreements" in signals["document_kind"]
     assert "multiple_documents_case" in signals["document_material_scope"]
     assert "documents" in signals["primary_runtime_input"]
 
@@ -1068,7 +1045,7 @@ def test_extract_answer_signals_infers_metadata_needs_without_structured_slot() 
     )
 
     assert "structured_analysis_need" not in signals
-    assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
+    assert "detailed_runtime_metadata" in signals["runtime_metadata_fields"]
 
 
 def test_extract_answer_signals_does_not_emit_structured_analysis_slot() -> None:
@@ -1260,7 +1237,7 @@ def test_extract_answer_signals_infers_common_runtime_metadata_field_names() -> 
         ]
     )
 
-    assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
+    assert "detailed_runtime_metadata" in signals["runtime_metadata_fields"]
 
 
 def test_extract_answer_signals_does_not_infer_runtime_metadata_from_output_fields() -> (
@@ -2063,7 +2040,6 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
     non_slot_policy_ids = frozenset(
         {
             "comparison_scope",
-            "document_kind",
             "final_pdf_type",
             "final_output_scope",
             "flow_input_architecture",
@@ -2089,7 +2065,6 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
         "final_pdf_type",
         "post_processing_goal",
         "processing_scope",
-        "document_kind",
         "comparison_scope",
         "output_reader",
         "schema_direction",

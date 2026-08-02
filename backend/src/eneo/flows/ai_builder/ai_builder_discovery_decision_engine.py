@@ -54,8 +54,6 @@ _NON_SLOT_QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "case_scope": "quality",
     # Cross-input architecture conflict; deciding wrong changes the flow shape.
     "flow_input_architecture": "architecture",
-    # Source-document kind refinement; improves reader quality.
-    "document_kind": "quality",
     # Reference-source comparison gate; deciding wrong changes the flow shape.
     "comparison_scope": "architecture",
     # Reader/audience style refinement, so it stays non-blocking polish.
@@ -91,7 +89,6 @@ _BUDGET_EXHAUSTION_DISPOSITION: Mapping[str, _BudgetExhaustionDisposition] = (
     MappingProxyType(
         {
             "case_scope": "reject",
-            "document_kind": "reject",
             "document_material_scope": "reject",
             "final_pdf_type": "reject",
             "post_processing_goal": "ask",
@@ -270,16 +267,10 @@ def _dynamic_issue_priority_offset(
         issue.issue_id == "terminal_output"
         and profile.output_intent.terminal_output is None
         and profile.input_intent.primary_runtime_input != "unknown"
-        and not profile.case_like_flow
         and not profile.comparison_requested
         and len(profile.text.split()) <= 7
     ):
         return -20
-    if issue.issue_id == "document_kind" and (
-        profile.output_intent.terminal_output is not None
-        or profile.comparison_requested
-    ):
-        return 20
     return 0
 
 
@@ -363,8 +354,6 @@ def heuristic_confidence(issue_id: str, profile: DiscoveryProfile) -> str | None
         and implies_structured_report_pdf(profile.text)
     ):
         return "analytical-report phrasing suggests a structured report"
-    if issue_id == "document_kind" and looks_like_case_document_family(profile.text):
-        return "formal-document phrasing suggests reports and official material"
     return None
 
 
@@ -389,8 +378,6 @@ def candidate_assumption_safe(issue_id: str, profile: DiscoveryProfile) -> bool:
         if profile.output_intent.terminal_output != "pdf_document":
             return False
         return implies_structured_report_pdf(profile.text)
-    if issue_id == "document_kind":
-        return looks_like_case_document_family(profile.text)
     if issue_id == "runtime_metadata_fields":
         return mentions_runtime_metadata(profile.text)
     return True
@@ -425,14 +412,6 @@ def assumption_for_candidate(
             language,
             "Antar att slut-PDF:n ska vara en strukturerad rapport snarare än en kort punktlista.",
             "Assuming the final PDF should be a structured report rather than a short bullet list.",
-        )
-    if candidate.issue_id == "document_kind" and looks_like_case_document_family(
-        profile.text
-    ):
-        return localized_text(
-            language,
-            "Antar att flödet främst ska arbeta med rapporter, beslut och formella dokument.",
-            "Assuming the flow primarily handles reports, decisions, and formal documents.",
         )
     return None
 
@@ -555,21 +534,5 @@ def implies_structured_report_pdf(text: str) -> bool:
             "recommendations",
             "opportunities",
             "risks",
-        ),
-    )
-
-
-def looks_like_case_document_family(text: str) -> bool:
-    return contains_any_phrase(
-        text,
-        (
-            "underlag",
-            "case material",
-            "case files",
-            "official material",
-            "kommunärende",
-            "municipal case",
-            "tjänsteskrivelse",
-            "remiss",
         ),
     )

@@ -26,7 +26,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    DETAILED_CASE_METADATA,
+    DETAILED_RUNTIME_METADATA,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import build_schema_evidence
 from eneo.flows.ai_builder.ai_builder_session_turn import (
@@ -265,7 +265,7 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     )
     state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
         name="runtime_metadata_fields",
-        value=DETAILED_CASE_METADATA,
+        value=DETAILED_RUNTIME_METADATA,
         source="structured_answer",
         confidence="high",
     )
@@ -400,7 +400,7 @@ async def test_outline_processing_uses_confirmed_planning_state_field() -> None:
     state.resolved_slots = {
         "runtime_metadata_fields": ResolvedSlot(
             name="runtime_metadata_fields",
-            value=DETAILED_CASE_METADATA,
+            value=DETAILED_RUNTIME_METADATA,
             source="structured_answer",
             confidence="high",
         ),
@@ -470,7 +470,7 @@ async def test_server_owned_json_input_without_consumer_returns_model_feedback()
         ),
         "runtime_metadata_fields": ResolvedSlot(
             name="runtime_metadata_fields",
-            value=DETAILED_CASE_METADATA,
+            value=DETAILED_RUNTIME_METADATA,
             source="structured_answer",
             confidence="high",
         ),
@@ -524,7 +524,7 @@ async def test_unstructured_field_text_does_not_create_hidden_server_contract() 
     state = PlanningState.empty()
     state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
         name="runtime_metadata_fields",
-        value=DETAILED_CASE_METADATA,
+        value=DETAILED_RUNTIME_METADATA,
         source="heuristic",
         confidence="high",
     )

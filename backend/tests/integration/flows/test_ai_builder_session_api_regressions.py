@@ -7304,7 +7304,6 @@ async def test_ai_builder_api_create_mode_can_generate_approve_apply_and_publish
                 structured_answers={
                     "input_material_mode": "documents",
                     "flow_input_architecture": "document_primary_input",
-                    "document_kind": "case_documents",
                     "terminal_output": "pdf_document",
                     "post_processing_goal": "summarize_or_overview",
                     "runtime_metadata_fields": "no_extra_metadata",
@@ -7738,7 +7737,6 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
                     "dokumentsteget och behåll resten."
                 ),
                 structured_answers={
-                    "document_kind": "case_documents",
                     "input_material_mode": "audio",
                     "flow_input_architecture": "audio_primary_input",
                 },

@@ -16,8 +16,6 @@ _NON_SLOT_DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
     "external_delivery_unsupported": 15,
     # Cross-input architecture conflict; wider than the primary input slot.
     "flow_input_architecture": 25,
-    # Source-document kind refinement; currently lives in discovery rules.
-    "document_kind": 40,
     # Reference-source comparison gate; no single slot owns it yet.
     "comparison_scope": 60,
     # PDF style refinement after terminal output is already known.

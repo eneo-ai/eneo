@@ -93,7 +93,6 @@ from eneo.flows.ai_builder.ai_builder_service import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_QUESTION,
-    SSE_EVENT_STATUS,
     SSE_EVENT_TEXT,
     AIBuilderService,
     PreparedMessageContext,
@@ -1684,7 +1683,7 @@ class TestSendMessage:
 
 class TestSendMessageToolCall:
     @pytest.mark.anyio
-    async def test_backend_discovery_commits_explicit_flexible_pdf_docx_flow_after_slot_classification(
+    async def test_backend_discovery_asks_for_unresolved_runtime_fields_after_slot_classification(
         self,
     ):
         user = _make_user()
@@ -1749,12 +1748,10 @@ class TestSendMessageToolCall:
 
         assert mock_litellm.acompletion.await_count == 1
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
-        assert question_events == []
-        status_events = [e for e in events if e["event"] == SSE_EVENT_STATUS]
-        assert status_events
-        assert json.loads(status_events[0]["data"]) == {
-            "status": "architecture_committed"
-        }
+        assert len(question_events) == 1
+        assert json.loads(question_events[0]["data"])["question_id"] == (
+            "runtime_metadata_fields"
+        )
 
     @pytest.mark.anyio
     async def test_conversation_replay_preserves_tool_calls(self):
@@ -2198,7 +2195,7 @@ class TestSendMessageStructuredQuestion:
                 ),
                 _requirement_answer_message(
                     question_id="runtime_metadata_fields",
-                    value="basic_case_metadata",
+                    value="basic_runtime_metadata",
                     content="Grundläggande metadata",
                 ),
             ],
@@ -2384,8 +2381,8 @@ class TestSendMessageStructuredQuestion:
                     metadata={
                         "question_answer": {
                             "question_id": "runtime_metadata_fields",
-                            "selected_option_ids": ["basic_case_metadata"],
-                            "selected_values": ["basic_case_metadata"],
+                            "selected_option_ids": ["basic_runtime_metadata"],
+                            "selected_values": ["basic_runtime_metadata"],
                         },
                         "ui_language": "sv",
                     },
@@ -2517,7 +2514,6 @@ class TestSendMessageStructuredQuestion:
         data = json.loads(question_events[0]["data"])
         assert data["question_id"] in {
             "processing_scope",
-            "document_kind",
             "document_material_scope",
             "terminal_output",
         }

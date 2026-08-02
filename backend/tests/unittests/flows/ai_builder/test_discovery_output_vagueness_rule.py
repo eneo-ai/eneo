@@ -2,8 +2,8 @@
 
 The detector `terminal_output_is_vague` decides whether a user message should
 block on the `final_output_mode` question. It fires whenever the flow carries a
-structural signal that the output format matters (document/audio/case-like
-input, or a text/docx default), the user mentions an output artifact explicitly,
+structural signal that the output format matters (document or audio input, or a
+text/docx default), the user mentions an output artifact explicitly,
 or the user asks for a workflow whose output dimension is still missing. Generic
 build words without task intent should not fire it.
 """
@@ -75,12 +75,11 @@ def test_document_like_flow_without_output_keyword_triggers_vagueness() -> None:
     assert terminal_output_is_vague(profile) is True
 
 
-def test_case_like_flow_without_output_keyword_triggers_vagueness() -> None:
-    """Case-like flows (ärende / case material) without output nouns also fire.
+def test_document_task_without_output_keyword_triggers_vagueness() -> None:
+    """Document-processing tasks without output nouns still ask for the output.
 
-    Covers the IBIC-shaped conversation: the user describes a case-handling
-    flow in Swedish without ever naming the output artifact, and the planner
-    previously silently committed to JSON. The detector now asks instead.
+    The user describes a document-processing flow in Swedish without naming the
+    output artifact. The detector asks instead of silently committing to JSON.
     """
     profile = _profile_for(
         "Jag vill skapa ett ärendeflöde i flera steg som hjälper mig bedöma "

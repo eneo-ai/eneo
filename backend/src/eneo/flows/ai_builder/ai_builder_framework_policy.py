@@ -57,6 +57,8 @@ from eneo.flows.ai_builder.ai_builder_keywords import (
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
+    normalize_runtime_metadata_state,
+    runtime_metadata_allows_input_fields,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -1215,7 +1217,8 @@ def mentions_runtime_metadata(text: str) -> bool:
 def runtime_metadata_requested(answer_signals: dict[str, set[str]]) -> bool:
     values = answer_signals.get("runtime_metadata_fields", set())
     return any(
-        value in {"basic_case_metadata", "detailed_case_metadata"} for value in values
+        runtime_metadata_allows_input_fields(normalize_runtime_metadata_state(value))
+        for value in values
     )
 
 

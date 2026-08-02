@@ -906,7 +906,7 @@ def test_quality_feedback_from_context_keeps_semantic_issues() -> None:
             "metadata": {
                 "question_answer": {
                     "question_id": "runtime_metadata_fields",
-                    "selected_values": ["basic_case_metadata"],
+                    "selected_values": ["basic_runtime_metadata"],
                 }
             },
         }
@@ -972,7 +972,7 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
             "metadata": {
                 "question_answer": {
                     "question_id": "runtime_metadata_fields",
-                    "selected_values": ["basic_case_metadata"],
+                    "selected_values": ["basic_runtime_metadata"],
                 }
             },
         }

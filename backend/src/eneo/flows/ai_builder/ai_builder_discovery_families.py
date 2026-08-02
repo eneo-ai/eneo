@@ -15,8 +15,6 @@ _NON_SLOT_QUESTION_FAMILY: dict[str, DiscoveryFamily] = {
     "comparison_scope": "case_scope",
     # Cross-input architecture conflict; wider than the primary input slot.
     "flow_input_architecture": "input_shape",
-    # Source-document kind refinement; currently lives in discovery rules.
-    "document_kind": "input_shape",
     # PDF style refinement after terminal output is already known.
     "final_pdf_type": "output_style",
     # Reader/audience style refinement, not an output artifact slot.

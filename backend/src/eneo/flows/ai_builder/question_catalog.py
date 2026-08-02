@@ -717,15 +717,15 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
             value="no_extra_metadata",
         ),
         _option(
-            id="basic_case_metadata",
+            id="basic_runtime_metadata",
             label_sv="Lägg till grundläggande metadata",
             label_en="Add basic metadata",
             description_sv="Låt användaren ange några enkla återanvändbara fält.",
             description_en="Let the user enter a few simple reusable fields.",
-            value="basic_case_metadata",
+            value="basic_runtime_metadata",
         ),
         _option(
-            id="detailed_case_metadata",
+            id="detailed_runtime_metadata",
             label_sv="Lägg till rikare metadatafält",
             label_en="Add richer metadata fields",
             description_sv=(
@@ -736,7 +736,7 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
                 "Collect several reusable inputs such as references, "
                 "language, focus, dates, or responsible department."
             ),
-            value="detailed_case_metadata",
+            value="detailed_runtime_metadata",
         ),
     ),
     worked_examples_sv=(

@@ -504,7 +504,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
                 "slots": [
                     {
                         "slot_name": "runtime_metadata_fields",
-                        "value": "basic_case_metadata",
+                        "value": "basic_runtime_metadata",
                         "confidence": "high",
                         "reason": "runtime fields requested",
                         "evidence": [
@@ -538,7 +538,8 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
 
     assert state.resolved_slots["runtime_metadata_fields"].source == "model"
     assert (
-        state.resolved_slots["runtime_metadata_fields"].value == "basic_case_metadata"
+        state.resolved_slots["runtime_metadata_fields"].value
+        == "basic_runtime_metadata"
     )
 
 

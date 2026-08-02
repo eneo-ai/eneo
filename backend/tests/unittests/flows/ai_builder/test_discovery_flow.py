@@ -1401,7 +1401,6 @@ class TestExtendedClarificationHints:
 
         assert "terminal_output" not in question_ids
         assert "runtime_metadata_fields" not in question_ids
-        assert "document_kind" not in question_ids
         assert "output_reader" not in question_ids
         assert "final_output_scope" not in question_ids
 
@@ -1454,73 +1453,7 @@ class TestExtendedClarificationHints:
         assert next_issue.suggestion is not None
         assert next_issue.suggestion.question_id == "flow_input_architecture"
 
-    def test_simple_single_document_flow_does_not_block_on_document_kind(self) -> None:
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content="Jag vill bygga ett enkelt PDF-flöde.",
-                metadata={"ui_language": "sv"},
-            ),
-            ConversationMessage(
-                role="user",
-                content="Ett ärende åt gången",
-                metadata={
-                    "question_answer": {
-                        "question_id": "processing_scope",
-                        "selected_option_id": "single_case",
-                        "answer": "single_case",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="Dokument",
-                metadata={
-                    "question_answer": {
-                        "question_id": "primary_runtime_input",
-                        "selected_option_id": "documents",
-                        "answer": "documents",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="Ett huvuddokument per ärende",
-                metadata={
-                    "question_answer": {
-                        "question_id": "document_material_scope",
-                        "selected_option_id": "single_document_case",
-                        "answer": "single_document_case",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-            ConversationMessage(
-                role="user",
-                content="PDF-dokument",
-                metadata={
-                    "question_answer": {
-                        "question_id": "terminal_output",
-                        "selected_option_id": "pdf_document",
-                        "answer": "pdf_document",
-                    },
-                    "ui_language": "sv",
-                },
-            ),
-        ]
-
-        analysis = analyze_discovery(conversation)
-        question_ids = [
-            issue.suggestion.question_id
-            for issue in analysis.blocking_issues
-            if issue.suggestion is not None
-        ]
-
-        assert "document_kind" not in question_ids
-
-    def test_specific_uploaded_pdf_text_summary_prompt_skips_document_kind_and_pdf_type(
+    def test_specific_uploaded_pdf_text_summary_prompt_skips_pdf_type(
         self,
     ) -> None:
         conversation = [
@@ -1540,7 +1473,6 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "document_kind" not in question_ids
         assert "final_pdf_type" not in question_ids
 
     def test_swedish_uploaded_pdf_prompt_resolves_runtime_document_input(
@@ -1591,7 +1523,6 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id == "runtime_metadata_fields"
         assert "runtime_metadata_fields" in question_ids
-        assert "document_kind" not in question_ids
         assert "docx_output_mode" not in question_ids
 
     def test_audio_docx_extraction_asks_runtime_metadata_without_structured_analysis_slot(
@@ -2108,7 +2039,7 @@ class TestExtendedClarificationHints:
                 metadata={
                     "question_answer": {
                         "question_id": "runtime_metadata_fields",
-                        "selected_values": ["basic_case_metadata"],
+                        "selected_values": ["basic_runtime_metadata"],
                     },
                     "ui_language": "sv",
                 },
@@ -2377,7 +2308,7 @@ class TestExtendedClarificationHints:
             issue.issue_id for issue in analysis.issues
         }
 
-    def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
+    def test_complex_multi_document_compare_prompt_avoids_redundant_questions(
         self,
     ) -> None:
         conversation = [
@@ -2399,7 +2330,8 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert "document_kind" not in question_ids
+        assert "runtime_metadata_fields" in question_ids
+        assert "document_material_scope" not in question_ids
         assert "comparison_scope" not in question_ids
 
     def test_multi_source_contradiction_prompt_skips_comparison_scope(
@@ -2833,7 +2765,7 @@ class TestExtendedClarificationHints:
 
         assert "runtime_metadata_fields" in question_ids
 
-    def test_case_like_flow_with_spent_question_budget_surfaces_runtime_metadata_assumption(
+    def test_document_flow_with_spent_question_budget_surfaces_runtime_metadata_assumption(
         self,
     ) -> None:
         conversation = [
@@ -2918,7 +2850,7 @@ class TestExtendedClarificationHints:
             "du kan lägga till dem innan du bekräftar.",
         )
 
-    def test_case_like_flow_with_explicit_runtime_metadata_does_not_reask_runtime_metadata_fields(
+    def test_explicit_runtime_metadata_does_not_reask_runtime_metadata_fields(
         self,
     ) -> None:
         conversation = [
@@ -2981,8 +2913,8 @@ class TestExtendedClarificationHints:
                 metadata={
                     "question_answer": {
                         "question_id": "runtime_metadata_fields",
-                        "selected_option_id": "basic_case_metadata",
-                        "answer": "basic_case_metadata",
+                        "selected_option_id": "basic_runtime_metadata",
+                        "answer": "basic_runtime_metadata",
                     },
                     "ui_language": "sv",
                 },

@@ -181,7 +181,7 @@ def test_confirmed_runtime_field_set_rejects_model_proposed_addition() -> None:
         compile_create_intent_to_spec(
             intent,
             context=CreateCompileContext(
-                runtime_metadata_state="detailed_case_metadata",
+                runtime_metadata_state="detailed_runtime_metadata",
                 runtime_input_field_hints=(
                     RuntimeInputFieldHint(
                         variable_name="case_type",
@@ -1421,7 +1421,7 @@ def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
         context=CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.TEXT,
-            runtime_metadata_state="detailed_case_metadata",
+            runtime_metadata_state="detailed_runtime_metadata",
             runtime_input_field_hints=(
                 RuntimeInputFieldHint(
                     "checklista",
@@ -1709,7 +1709,7 @@ def test_inferred_primary_input_shadow_drop_emits_typed_diagnostic() -> None:
         intent,
         context=CreateCompileContext(
             runtime_input_type=InputType.AUDIO,
-            runtime_metadata_state="detailed_case_metadata",
+            runtime_metadata_state="detailed_runtime_metadata",
             runtime_input_field_hints=(
                 RuntimeInputFieldHint(
                     "audio",
@@ -1771,7 +1771,7 @@ def test_assembly_places_explicit_server_owned_runtime_field_consumers() -> None
         context=CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.TEXT,
-            runtime_metadata_state="detailed_case_metadata",
+            runtime_metadata_state="detailed_runtime_metadata",
             runtime_input_field_hints=(
                 RuntimeInputFieldHint("arendenummer", "ärendenummer", required=True),
                 RuntimeInputFieldHint("kommun", "kommun", required=True),
@@ -1825,7 +1825,7 @@ def test_confirmed_field_definition_overrides_model_redeclaration() -> None:
     compiled = compile_create_intent_to_spec(
         intent,
         context=CreateCompileContext(
-            runtime_metadata_state="detailed_case_metadata",
+            runtime_metadata_state="detailed_runtime_metadata",
             runtime_input_field_hints=(
                 RuntimeInputFieldHint(
                     "case_type",
@@ -2239,7 +2239,7 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
         "terminal_output": _slot("terminal_output", "docx_document"),
         "runtime_metadata_fields": _slot(
             "runtime_metadata_fields",
-            "detailed_case_metadata",
+            "detailed_runtime_metadata",
         ),
     }
     state.input_fields = [
@@ -2473,7 +2473,7 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
         ),
         "runtime_metadata_fields": _slot(
             "runtime_metadata_fields",
-            "detailed_case_metadata",
+            "detailed_runtime_metadata",
         ),
     }
     state.file_roles = [
@@ -3118,7 +3118,7 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
             aggregation_intent=cast(AggregationIntent, "aggregate"),
             ui_language="sv",
             report_disposition="both",
-            runtime_metadata_state="detailed_case_metadata",
+            runtime_metadata_state="detailed_runtime_metadata",
             runtime_input_field_hints=(
                 RuntimeInputFieldHint(
                     "case_number",

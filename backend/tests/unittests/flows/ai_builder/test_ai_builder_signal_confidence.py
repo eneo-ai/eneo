@@ -116,23 +116,28 @@ class TestSignalConfidence:
         conversation = [
             ConversationMessage(
                 role="user",
-                content="Avtal och kontrakt",
+                content="Uploaded documents",
                 metadata={
                     "question_answer": {
-                        "question_id": "document_kind",
-                        "selected_option_ids": ["contracts_agreements"],
-                        "selected_values": ["contracts_agreements"],
+                        "question_id": "primary_runtime_input",
+                        "selected_option_ids": ["documents"],
+                        "selected_values": ["documents"],
                     },
                 },
             ),
         ]
         signals = score_conversation_signals(
             conversation,
-            freeform_text="avtal och kontrakt",
+            freeform_text="paste text",
         )
-        # Should only have high-confidence structured answer, not duplicate text inference
-        doc_kind = [s for s in signals if s.question_id == "document_kind"]
-        assert all(s.source == "structured_answer" for s in doc_kind)
+        runtime_input = [
+            signal
+            for signal in signals
+            if signal.question_id == "primary_runtime_input"
+        ]
+        assert runtime_input
+        assert all(signal.source == "structured_answer" for signal in runtime_input)
+        assert {signal.value for signal in runtime_input} == {"documents"}
 
     def test_has_low_confidence_detects_weak_signals(self):
         signals = score_conversation_signals([], freeform_text="klistra in")

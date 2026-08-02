@@ -42,15 +42,11 @@ OPTION_ID_ALIASES: dict[str, dict[str, str]] = {
         "single_file_per_run": "single_document_case",
         "one_per_run": "single_document_case",
     },
-    "runtime_metadata_fields": {
-        "add_basic_metadata": "basic_case_metadata",
-    },
 }
 
 _NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
     {
         "processing_scope",
-        "document_kind",
         "comparison_scope",
         "final_pdf_type",
         "flow_input_architecture",

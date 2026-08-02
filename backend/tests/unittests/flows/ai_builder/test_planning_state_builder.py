@@ -1318,7 +1318,7 @@ class TestPolicyDefaults:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
+        assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "heuristic"
         assert slot.confidence == "high"
 
@@ -1341,7 +1341,7 @@ class TestPolicyDefaults:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
+        assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "heuristic"
         assert slot.confidence == "high"
         assert slot.is_commit_grade
@@ -1369,7 +1369,7 @@ class TestPolicyDefaults:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
+        assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "heuristic"
 
     def test_swedish_audio_prompt_with_terminal_word_file_resolves_core_slots(
@@ -1625,7 +1625,7 @@ class TestRuntimeMetadataClassificationBoundaries:
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
-                        "detailed_case_metadata",
+                        "detailed_runtime_metadata",
                         "high",
                     ),
                 )
@@ -1662,7 +1662,7 @@ class TestRuntimeMetadataClassificationBoundaries:
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
-                        "detailed_case_metadata",
+                        "detailed_runtime_metadata",
                         "high",
                     ),
                 )
@@ -1672,7 +1672,7 @@ class TestRuntimeMetadataClassificationBoundaries:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
+        assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "model"
 
     def test_classifier_runtime_metadata_acceptance_does_not_require_phrase_duplication(
@@ -1704,7 +1704,7 @@ class TestRuntimeMetadataClassificationBoundaries:
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
-                        "detailed_case_metadata",
+                        "detailed_runtime_metadata",
                         "high",
                     ),
                 )
@@ -1714,7 +1714,7 @@ class TestRuntimeMetadataClassificationBoundaries:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
+        assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "model"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
         assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
@@ -1736,7 +1736,7 @@ class TestRuntimeMetadataClassificationBoundaries:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
+        assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "heuristic"
 
 
@@ -1757,7 +1757,7 @@ class TestSlotClassificationMetadataReplay:
                         _classified("terminal_output", "structured_text", "high"),
                         _classified(
                             "runtime_metadata_fields",
-                            "detailed_case_metadata",
+                            "detailed_runtime_metadata",
                             "high",
                         ),
                     ),
@@ -1768,7 +1768,7 @@ class TestSlotClassificationMetadataReplay:
         assert state.resolved_slots["terminal_output"].value == "structured_text"
         assert state.resolved_slots["terminal_output"].source == "model"
         assert state.resolved_slots["runtime_metadata_fields"].value == (
-            "detailed_case_metadata"
+            "detailed_runtime_metadata"
         )
         assert state.signals == []
         commit = derive_architecture_commit_draft(state)
@@ -2148,7 +2148,7 @@ class TestModelSlotMerge:
                     _classified("terminal_output", "pdf_document", "high"),
                     _classified(
                         "runtime_metadata_fields",
-                        "detailed_case_metadata",
+                        "detailed_runtime_metadata",
                         "high",
                     ),
                 )
@@ -2372,7 +2372,7 @@ class TestModelSlotMerge:
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
-                        "detailed_case_metadata",
+                        "detailed_runtime_metadata",
                         "high",
                     ),
                 )
@@ -2384,7 +2384,7 @@ class TestModelSlotMerge:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
+        assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "model"
         assert slot.evidence == [
             "model:runtime_metadata_fields:" + "b" * 64,
@@ -2409,7 +2409,7 @@ class TestModelSlotMerge:
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
-                        "detailed_case_metadata",
+                        "detailed_runtime_metadata",
                         "high",
                     ),
                 )
@@ -2422,7 +2422,7 @@ class TestModelSlotMerge:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
+        assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "model"
 
     def test_medium_model_output_does_not_replace_policy_default(self) -> None:
@@ -2441,7 +2441,7 @@ class TestModelSlotMerge:
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
-                        "detailed_case_metadata",
+                        "detailed_runtime_metadata",
                         "medium",
                     ),
                 )
@@ -2461,7 +2461,7 @@ class TestModelSlotMerge:
         state.resolved_slots = {
             "runtime_metadata_fields": _slot(
                 name="runtime_metadata_fields",
-                value="detailed_case_metadata",
+                value="detailed_runtime_metadata",
                 source="heuristic",
                 confidence="high",
             )
@@ -2473,7 +2473,7 @@ class TestModelSlotMerge:
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
-                        "basic_case_metadata",
+                        "basic_runtime_metadata",
                         "medium",
                     ),
                 )
@@ -2486,7 +2486,7 @@ class TestModelSlotMerge:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "basic_case_metadata"
+        assert slot.value == "basic_runtime_metadata"
         assert slot.source == "model"
         assert slot.confidence == "medium"
 

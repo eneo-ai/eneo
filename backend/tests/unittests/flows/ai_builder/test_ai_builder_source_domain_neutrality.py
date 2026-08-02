@@ -29,7 +29,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
 from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
     comparison_scope_question,
-    document_kind_question,
     document_material_scope_question,
     docx_output_mode_question,
     final_output_scope_question,
@@ -95,7 +94,6 @@ class TestDiscoveryQuestionsRenderNeutrality:
             ("processing_scope", processing_scope_question),
             ("primary_runtime_input", primary_runtime_input_question),
             ("flow_input_architecture", flow_input_architecture_question),
-            ("document_kind", document_kind_question),
             ("document_material_scope", document_material_scope_question),
             ("post_processing_goal", post_processing_goal_question),
             ("comparison_scope_conflict", comparison_scope_conflict_question),

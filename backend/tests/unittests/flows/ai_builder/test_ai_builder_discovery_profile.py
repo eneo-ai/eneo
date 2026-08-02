@@ -160,6 +160,9 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
     assert profile.final_output_type == "docx"
     assert profile.final_output_mode == "docx_document"
     assert profile.final_output_generation_mode == "template_fill"
+    assert profile.to_signal_defaults()["runtime_metadata_fields"] == {
+        "basic_runtime_metadata"
+    }
     assert profile.citation_step_orders == (1,)
     assert profile.contract_step_orders == (2,)
     assert profile.variable_binding_step_orders == (2, 4)

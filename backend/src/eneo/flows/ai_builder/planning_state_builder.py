@@ -55,7 +55,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    DETAILED_CASE_METADATA,
+    DETAILED_RUNTIME_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     extract_runtime_input_field_hints,
     infer_runtime_metadata_slot,
@@ -1359,8 +1359,9 @@ def _heuristic_slot_confidence(
             and inferred_runtime_metadata == NO_EXTRA_RUNTIME_METADATA
         ):
             return "high"
-        if slot_value == DETAILED_CASE_METADATA and extract_runtime_input_field_hints(
-            freeform_text
+        if (
+            slot_value == DETAILED_RUNTIME_METADATA
+            and extract_runtime_input_field_hints(freeform_text)
         ):
             return "high"
     if question_id == "post_processing_goal":

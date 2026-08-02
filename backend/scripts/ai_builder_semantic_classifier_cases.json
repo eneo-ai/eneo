@@ -597,7 +597,7 @@
           "id": "sv-runtime-metadata-paraphrase-case-number-date",
           "kind": "paraphrase",
           "source_texts": ["Vid start ska användaren fylla i ärendenummer och datum tillsammans med underlaget."],
-          "expected_value": "basic_case_metadata",
+          "expected_value": "basic_runtime_metadata",
           "chronology_subtype": null,
           "citation_source_index": 0
         },
@@ -632,7 +632,7 @@
             "Körningen behöver inga extra uppgifter utöver själva underlaget.",
             "Vi behöver ändå samla in flera uppgifter, bland annat ansvarig enhet, ärendetyp och sista svarsdag."
           ],
-          "expected_value": "detailed_case_metadata",
+          "expected_value": "detailed_runtime_metadata",
           "chronology_subtype": "later_correction",
           "citation_source_index": 1
         }
@@ -646,7 +646,7 @@
           "id": "en-runtime-metadata-paraphrase-rich-case-details",
           "kind": "paraphrase",
           "source_texts": ["Before processing, collect department, case category, responsible officer, due date, and confidentiality level."],
-          "expected_value": "detailed_case_metadata",
+          "expected_value": "detailed_runtime_metadata",
           "chronology_subtype": null,
           "citation_source_index": 0
         },
@@ -681,7 +681,7 @@
             "Ask for a case identifier and date when a run starts.",
             "The help text should be concise and suitable for occasional users."
           ],
-          "expected_value": "basic_case_metadata",
+          "expected_value": "basic_runtime_metadata",
           "chronology_subtype": "unrelated_topic_change",
           "citation_source_index": 0
         }

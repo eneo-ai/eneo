@@ -279,8 +279,8 @@ class TestRoundTrip:
             builder_schema_version=BUILDER_SCHEMA_VERSION,
             signals=[
                 PlanningSignal(
-                    question_id="document_kind",
-                    value="case_documents",
+                    question_id="runtime_metadata_fields",
+                    value="basic_runtime_metadata",
                     confidence="high",
                     source="structured_answer",
                     provenance=["msg_1"],
@@ -294,9 +294,9 @@ class TestRoundTrip:
                 ),
             ],
             resolved_slots={
-                "document_kind": ResolvedSlot(
-                    name="document_kind",
-                    value="case_documents",
+                "runtime_metadata_fields": ResolvedSlot(
+                    name="runtime_metadata_fields",
+                    value="basic_runtime_metadata",
                     source="structured_answer",
                     evidence=["msg_1"],
                     confidence="high",
@@ -388,8 +388,8 @@ class TestSignalValidation:
     def test_invalid_confidence_rejected(self) -> None:
         with pytest.raises(ValidationError):
             PlanningSignal(
-                question_id="document_kind",
-                value="case_documents",
+                question_id="runtime_metadata_fields",
+                value="basic_runtime_metadata",
                 confidence="absolute",  # type: ignore[arg-type]
                 source="structured_answer",
             )
@@ -397,8 +397,8 @@ class TestSignalValidation:
     def test_invalid_source_rejected(self) -> None:
         with pytest.raises(ValidationError):
             PlanningSignal(
-                question_id="document_kind",
-                value="case_documents",
+                question_id="runtime_metadata_fields",
+                value="basic_runtime_metadata",
                 confidence="high",
                 source="invented_source",  # type: ignore[arg-type]
             )
@@ -535,8 +535,8 @@ class TestFileRoleEvidenceValidation:
 class TestResolvedSlotValidation:
     def test_resolved_slot_accepts_low_confidence_for_model_resolution(self) -> None:
         slot = ResolvedSlot(
-            name="document_kind",
-            value="case_documents",
+            name="runtime_metadata_fields",
+            value="basic_runtime_metadata",
             source="model",
             evidence=["msg_1"],
             confidence="low",
@@ -800,8 +800,8 @@ class TestContainerMutationDiscipline:
         state = PlanningState.empty()
         state.signals.append(
             PlanningSignal(
-                question_id="document_kind",
-                value="case_documents",
+                question_id="runtime_metadata_fields",
+                value="basic_runtime_metadata",
                 confidence="high",
                 source="structured_answer",
             )
@@ -810,14 +810,14 @@ class TestContainerMutationDiscipline:
 
     def test_resolved_slots_can_be_added(self) -> None:
         state = PlanningState.empty()
-        state.resolved_slots["document_kind"] = ResolvedSlot(
-            name="document_kind",
-            value="case_documents",
+        state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+            name="runtime_metadata_fields",
+            value="basic_runtime_metadata",
             source="structured_answer",
             evidence=["msg_1"],
             confidence="high",
         )
-        assert "document_kind" in state.resolved_slots
+        assert "runtime_metadata_fields" in state.resolved_slots
 
     def test_validated_snapshot_roundtrips_clean_state(self) -> None:
         state = PlanningState.empty()
