@@ -257,6 +257,25 @@ external release gate (item 10); BM0.2 is external (item 10).
     unchanged pre-fix build to decide whether a full pre-fix v2 baseline is worth
     its cost; otherwise use deterministic acceptance tests plus an absolute
     post-fix floor and claim no numeric before/after lift.
+    The locked 12-case v2 smoke completed on 2026-08-02 against the unchanged
+    Luna route. Harness and transport integrity were green (12 runs, zero case
+    errors, skips, or identity failures), but product quality was not: 10 runs
+    failed quality checks, including all five selected required cases. Only
+    three runs produced plans, all after repair; there were no first-pass
+    successes. The journeys recorded 23 questions (15 resolved, seven left
+    unanswered because no approved case/profile answer covered the selected
+    question, three forbidden, and 11 unclassified), 39 model calls, five
+    repair attempts, and 157,763 authoring tokens. Evidence includes document
+    questions in the audio journey, an unrelated comparison question in a JSON
+    handoff, unnecessary questions for otherwise complete requests, missing
+    expected JSON leaves, and one terminal document-report topology rejection.
+    This makes a full pre-fix 120-case v2 run both noisy and disproportionately
+    expensive. Preserve this smoke as the pre-fix floor, correct corpus answer
+    closure only for questions the journey is meant to continue through, fix
+    the general question-selection and first-proposal defects without adding
+    phrase matching, then rerun the identical 12-case cohort before the full
+    120-case release evaluation. Do not claim numeric lift from the earlier
+    truncated 120-case receipt.
     Question review also records whether the question is answerable from the
     user's perspective, non-leading, offers sufficient option coverage or a
     usable custom-answer path, resolves after its answer, and avoids reopening
