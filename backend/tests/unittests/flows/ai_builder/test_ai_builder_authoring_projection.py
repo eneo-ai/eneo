@@ -6,6 +6,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     MaterializedAddStep as AddStep,
 )
@@ -696,23 +699,53 @@ def test_step_input_bindings_keep_non_immediate_structured_source_ref() -> None:
     )
 
 
-def test_step_input_bindings_fall_back_to_question_for_template_labels() -> None:
-    bindings = compile_step_input_bindings(
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.TEXT,
-        uses_form_fields=[],
-        uses_previous_fields=[
-            PreviousFieldRef(
-                from_step=1,
-                field_path="answer",
-                label="{{ bad }}",
-            )
-        ],
-        uses_previous_outputs=[],
-        prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
-    )
+def test_step_input_bindings_reject_invalid_typed_source_ref() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_step_input_bindings(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.TEXT,
+            uses_form_fields=[],
+            uses_previous_fields=[
+                PreviousFieldRef(
+                    from_step=1,
+                    field_path="answer",
+                    label="{{ bad }}",
+                )
+            ],
+            uses_previous_outputs=[],
+            prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
+        )
 
-    assert bindings == {"question": "{{ bad }}: {{ step_a.output.structured.answer }}"}
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == "invalid_source_refs"
+    assert "label must not contain templates" in exc_info.value.detail
+    assert "{{ bad }}" in exc_info.value.detail
+
+
+def test_step_input_bindings_validate_source_refs_before_deduplication() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_step_input_bindings(
+            input_source=InputSource.FLOW_INPUT,
+            input_type=InputType.TEXT,
+            uses_form_fields=[],
+            uses_previous_fields=[
+                PreviousFieldRef(
+                    from_step=1,
+                    field_path="answer",
+                    label="Answer",
+                ),
+                PreviousFieldRef(
+                    from_step=1,
+                    field_path="answer",
+                    label="{{ invalid duplicate }}",
+                ),
+            ],
+            uses_previous_outputs=[],
+            prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
+        )
+
+    assert exc_info.value.log_context["failure_code"] == "invalid_source_refs"
+    assert "{{ invalid duplicate }}" in exc_info.value.detail
 
 
 def test_edit_overlay_add_step_rejects_unresolvable_previous_output_ref() -> None:

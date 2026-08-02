@@ -442,6 +442,32 @@ def test_closed_unknown_form_field_retry_uses_confirmed_contract() -> None:
     assert "top-level input_fields[]" not in feedback
 
 
+def test_invalid_source_ref_retry_preserves_typed_reference_contract() -> None:
+    feedback = proposal_retry_module._build_retry_feedback(
+        target_kind=TargetKind.EDIT,
+        feedback="A typed source-reference label must not contain templates.",
+        failure_codes=frozenset({"invalid_source_refs"}),
+    )
+
+    assert "uses_previous_fields or uses_previous_outputs" in feedback
+    assert "Labels must be plain text" in feedback
+    assert "do not replace typed references with a free-text question" in feedback
+
+
+def test_create_invalid_source_ref_retry_uses_create_contract() -> None:
+    feedback = proposal_retry_module._build_retry_feedback(
+        target_kind=TargetKind.CREATE,
+        feedback="A derived typed source reference is invalid.",
+        failure_codes=frozenset({"invalid_source_refs", "duplicate_step_name"}),
+    )
+
+    assert "output_fields[].name" in feedback
+    assert "backend owns typed source references" in feedback
+    assert "Every steps[] name must be unique" in feedback
+    assert "uses_previous_fields" not in feedback
+    assert "uses_previous_outputs" not in feedback
+
+
 def test_unconfirmed_form_field_retry_uses_closed_server_contract() -> None:
     feedback = proposal_retry_module._build_retry_feedback(
         target_kind=TargetKind.CREATE,

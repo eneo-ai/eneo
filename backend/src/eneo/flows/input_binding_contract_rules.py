@@ -316,6 +316,10 @@ def _field_path(value: object, *, index: int) -> tuple[str, ...]:
         raise InputBindingContractError(
             f"input_bindings.source_refs[{index}].field_path contains an empty segment."
         )
+    if "{{" in value or "}}" in value:
+        raise InputBindingContractError(
+            f"input_bindings.source_refs[{index}].field_path must not contain templates."
+        )
     return parts
 
 

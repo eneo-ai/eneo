@@ -5,6 +5,9 @@ import string
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -37,7 +40,7 @@ from eneo.flows.input_binding_contract_rules import (
     SourceRefBinding,
     dedupe_source_refs,
     field_refs_cover_whole_structured_object,
-    lower_source_refs_to_question_binding,
+    validate_source_refs_binding,
 )
 
 logger = logging.getLogger(__name__)
@@ -400,11 +403,15 @@ def compile_step_input_bindings(
             for field_name in uses_form_fields
         ]
         section_parts.append("\n".join(form_field_lines))
+    source_ref_candidates = [
+        part for part in section_parts if isinstance(part, SourceRefBinding)
+    ]
+    _validate_source_ref_candidates(source_ref_candidates)
     sections, source_refs = _render_deduped_input_sections(section_parts)
     if not sections:
         return None
-    source_ref_payloads = _source_ref_payloads_if_valid(source_refs)
-    if source_ref_payloads is not None:
+    source_ref_payloads = [ref.binding_payload() for ref in source_refs]
+    if source_ref_payloads:
         string_sections = [
             part for part in section_parts if not isinstance(part, SourceRefBinding)
         ]
@@ -891,27 +898,24 @@ def _compile_previous_output_source_refs(
     return refs
 
 
-def _source_ref_payloads_if_valid(
+def _validate_source_ref_candidates(
     source_refs: list[SourceRefBinding],
-) -> list[dict[str, object]] | None:
-    if not source_refs:
-        return None
-    payloads = [ref.binding_payload() for ref in source_refs]
-    try:
-        lower_source_refs_to_question_binding({"source_refs": payloads})
-    except InputBindingContractError as exc:
-        logger.warning(
-            "ai_builder_source_refs_degraded_to_question_binding",
-            extra={
-                "source_ref_count": len(source_refs),
-                "source_ref_expressions": [
-                    ref.template_expression() for ref in source_refs
-                ],
-                "error": str(exc),
-            },
-        )
-        return None
-    return payloads
+) -> None:
+    for source_ref in source_refs:
+        payload = source_ref.binding_payload()
+        try:
+            validate_source_refs_binding({"source_refs": [payload]})
+        except InputBindingContractError as exc:
+            raise AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                detail=f"Typed source reference {payload!r} is invalid: {exc}",
+                log_context={
+                    "failure_code": "invalid_source_refs",
+                    "source_ref": repr(payload),
+                    "source_ref_count": len(source_refs),
+                    "contract_error": str(exc),
+                },
+            ) from exc
 
 
 def default_previous_field_label(field_path: str) -> str:

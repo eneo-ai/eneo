@@ -253,6 +253,15 @@ def test_source_refs_empty_list_lowers_to_absent_binding() -> None:
                 {
                     "step_ref": "step_a",
                     "output": "structured",
+                    "field_path": "summary.{{ bad }}",
+                }
+            ]
+        },
+        {
+            "source_refs": [
+                {
+                    "step_ref": "step_a",
+                    "output": "structured",
                     "item_template": "{{ bad }}",
                 }
             ]

@@ -551,7 +551,15 @@ def _build_retry_feedback(
         "Keep valid parts and fix only the listed issues. Return one complete "
         f"{PROPOSE_FLOW_TOOL_NAME} call."
     )
-    if target_kind == TargetKind.CREATE:
+    if target_kind == TargetKind.EDIT and "invalid_source_refs" in failure_codes:
+        suffix = (
+            "Keep source references typed through uses_previous_fields or "
+            "uses_previous_outputs. Labels must be plain text without template "
+            "expressions; do not replace typed references with a free-text question. "
+            "Keep valid parts and return one complete "
+            f"{PROPOSE_FLOW_TOOL_NAME} call."
+        )
+    elif target_kind == TargetKind.CREATE:
         intent_rules = [
             "Every steps[] item must be one complete semantic intent step with at least name and instructions.",
         ]
@@ -578,6 +586,10 @@ def _build_retry_feedback(
         if "json_output_no_contract" in failure_codes:
             intent_rules.append(
                 "For every JSON semantic step that feeds later steps, set output_fields with named fields that match the step's extracted data."
+            )
+        if "invalid_source_refs" in failure_codes:
+            intent_rules.append(
+                "The backend owns typed source references in create mode. Correct each malformed output_fields[].name to a plain ASCII JSON key without template syntax; do not add edit-only source-reference fields."
             )
         if "duplicate_step_name" in failure_codes:
             intent_rules.append(

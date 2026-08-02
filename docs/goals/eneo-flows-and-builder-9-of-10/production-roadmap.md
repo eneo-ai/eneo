@@ -42,6 +42,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-02 | **Explicit Builder source-reference failures**: typed source references now remain typed through the shared create/edit compilation boundary; every candidate is validated before deduplication, contract-invalid references fail with named target-correct Builder feedback instead of being flattened into a plausible free-text Underlag question, and the shared input-binding contract remains the validator (`this change`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Exact Builder runtime-field consumers**: confirmed runtime fields now reach proposal drafting with their exact server-owned names, types, required state, labels, and options; `uses_form_fields` is the sole semantic consumer contract, confirmed definitions override model redeclarations, missing consumers return named repairable feedback, and the compiler no longer hides unused fields by attaching them to the final step; behavior tests pin comparison, report, audio, template, and JSON-input placement (this change; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Directional Builder JSON contract compilation**: resolved input-schema evidence now reaches the first Flow-input JSON consumer while independently resolved output evidence remains on the terminal JSON contract; compiler-owned raw JSON bindings are removed only at that typed boundary, downstream step contracts remain independent, composite JSON/form input fails explicitly without futile model-repair turns, and a real JSON golden proves both declared contracts survive canonical authoring materialization (this change; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-01 | **Explicit Builder schema direction**: one neutral schema-evidence owner now retains bounded JSON Schema candidates with complete provenance, while `PlanningState` stores independently selected input and output evidence; explicit structured answers or citation-backed user intent can assign the same or different candidates to either boundary, a replay-safe bilingual multi-select question resolves genuine ambiguity, and reference-only schemas remain unassigned; attachment-only evidence cannot choose direction, schemas do not reopen the terminal output, and the public overflow error plus generated client use one direction-neutral contract (this change) |
@@ -425,20 +426,32 @@ plan above controls all other ordering.
   canonical authoring, and unsupported composite bindings fail without entering
   model repair. One parser, one evidence type, and one bounded in-state resolution
   aggregate—not a reusable schema registry or second ledger. *(M)*
-- **B10** (precise semantic dataflow, three ordered slices): (a) **LANDED in this
-  change** — project exact confirmed form-field names/types from `PlanningState`
+- **B10** (precise semantic dataflow, three ordered slices): (a) **LANDED
+  `7ffaf5f6b`** — project exact confirmed form-field names/types from `PlanningState`
   into proposal context, keep existing `uses_form_fields` as the semantic
   consumer contract, delete the final-step auto-placement fallback, and fail
-  with structured feedback when a field has no actual consumer; (b) make invalid
-  typed source refs a Builder
-  compile error instead of degrading to rendered strings; (c) compile an input
+  with structured feedback when a field has no actual consumer; (b) **LANDED in
+  this change** — validate compiled typed source refs through the shared binding
+  contract and return a named repairable Builder compile error instead of
+  degrading an invalid ref to rendered strings; (c) compile an input
   schema for explicit structured Underlag projections and remove broad
   `all_previous_steps` fan-in where declared dependencies are sufficient. The
   model names semantic obligations; only the compiler creates bindings and refs.
   Generated prompt/instructions describe the task and result; compiled Underlag
   owns the selected material. Behavior tests prove that prompts do not duplicate
   Underlag or unrelated prior outputs and that form variables appear only at
-  their declared consumers. No generic dataflow DSL. *(M)*
+  their declared consumers. A 2026-08-02 live audio-to-PDF baseline used five
+  steps and three completion calls (6,353 input plus 5,337 output tokens); its
+  later semantic steps received overlapping raw and structured transcript
+  material. Treat those calls as potentially quality-bearing: acceptance is
+  narrower declared dependencies with output-quality parity, not call deletion
+  for its own sake. A second large-audio run exposed the correctness failure:
+  backend transcription produced 57,768 characters, but the next text-input
+  step was still instructed to transcribe an unavailable audio file and emitted
+  a schema-valid refusal; later steps recovered only because they also reread
+  the raw transcript, spending 52,640 completion-input and 10,301 output tokens.
+  Fix the topology and actual-input instructions at the compiler boundary; do
+  not add language-specific refusal matching. No generic dataflow DSL. *(M)*
 - **B11** (exact-template workflow topology): after B4's checkpoint-intent owner
   is available, allow justified analysis/validation/review stages before the
   existing deterministic TEMPLATE_FILL terminal step. Preserve the exact selected

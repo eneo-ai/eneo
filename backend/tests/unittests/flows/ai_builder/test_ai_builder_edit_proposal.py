@@ -119,6 +119,54 @@ async def test_english_edit_compiles_input_reference_hint_in_english() -> None:
 
 
 @pytest.mark.asyncio
+async def test_edit_rejects_invalid_typed_source_ref_without_text_fallback() -> None:
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extract source facts",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Use the source summary",
+            input_source="previous_step",
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Use the typed source summary.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "summary",
+                            "label": "{{ invalid }}",
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({"invalid_source_refs"})
+    assert result.feedback is not None
+    assert "label must not contain templates" in result.feedback
+    assert "{{ invalid }}" in result.feedback
+
+
+@pytest.mark.asyncio
 async def test_edit_inserting_non_writer_between_body_writer_and_renderer_is_advisory() -> (
     None
 ):
