@@ -371,9 +371,7 @@ def resolve_reference_source(
 
     comparison_scope = answers.get("comparison_scope", set())
     if comparison_scope:
-        if comparison_scope.intersection(
-            {"same_run_compare", "same_run_multiple_documents"}
-        ):
+        if comparison_scope.intersection({"same_run_compare"}):
             return ReferenceSourceResolution(
                 status="same_run_sources",
                 reason="comparison_scope_answer_same_run",

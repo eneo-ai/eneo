@@ -45,8 +45,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_ten(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 10
+    def test_builder_schema_version_is_eleven(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 11
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024

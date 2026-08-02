@@ -25,6 +25,8 @@ benchmark cases are free to reference specialty vocabulary.
 
 from __future__ import annotations
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
 from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
@@ -117,6 +119,16 @@ class TestDiscoveryQuestionsRenderNeutrality:
                     parts.append(option.description)
                 rendered.append((name, locale, "\n".join(parts)))
         return rendered
+
+    @pytest.mark.parametrize("locale", ["sv", "en"])
+    def test_comparison_conflict_reuses_canonical_options(
+        self, locale: DiscoveryLanguage
+    ) -> None:
+        canonical = comparison_scope_question(locale)
+        conflict = comparison_scope_conflict_question(locale)
+
+        assert conflict.options == canonical.options
+        assert conflict.exposure == canonical.exposure
 
     def test_no_specialty_framing_in_default_discovery_questions(self) -> None:
         offenders: list[tuple[str, str, str]] = []

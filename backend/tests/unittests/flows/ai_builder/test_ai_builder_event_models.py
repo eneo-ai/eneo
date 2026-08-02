@@ -1,6 +1,13 @@
+import pytest
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
+    ResolvedRequirementPayload,
+)
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
+    KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 
 
@@ -59,3 +66,53 @@ def test_requirements_summary_preserves_distinct_decisions_in_order() -> None:
         "Slutresultat",
         "Planerad bearbetning",
     ]
+
+
+def test_requirements_summary_keeps_first_resolved_value_per_requirement() -> None:
+    summary = _summary([]).model_copy(
+        update={
+            "resolved_requirements": [
+                ResolvedRequirementPayload(
+                    requirement_id="terminal_output",
+                    selected_value="structured_text",
+                ),
+                ResolvedRequirementPayload(
+                    requirement_id="terminal_output",
+                    selected_value="pdf_document",
+                ),
+                ResolvedRequirementPayload(
+                    requirement_id="runtime_metadata_fields",
+                    selected_value="no_extra_metadata",
+                ),
+            ]
+        }
+    )
+
+    restored = RequirementsSummaryPayload.model_validate(
+        summary.model_dump(mode="json")
+    )
+
+    assert [
+        (requirement.requirement_id, requirement.selected_value)
+        for requirement in restored.resolved_requirements
+    ] == [
+        ("terminal_output", "structured_text"),
+        ("runtime_metadata_fields", "no_extra_metadata"),
+    ]
+
+
+def test_requirements_summary_bounds_resolved_requirement_projection() -> None:
+    with pytest.raises(ValidationError):
+        RequirementsSummaryPayload(
+            summary="Checkpoint ready.",
+            key_decisions=[],
+            input_description="Input confirmed.",
+            output_description="Output confirmed.",
+            resolved_requirements=[
+                ResolvedRequirementPayload(
+                    requirement_id=f"slot_{index}",
+                    selected_value="value",
+                )
+                for index in range(len(KNOWN_REQUIREMENT_SLOT_NAMES) + 1)
+            ],
+        )

@@ -35,6 +35,7 @@ class TestSlotVocabularyShape:
                 "docx_output_mode",
                 "pdf_generation_mode",
                 "document_material_scope",
+                "comparison_scope",
                 "report_disposition",
                 "post_processing_goal",
                 "structured_io_contract",

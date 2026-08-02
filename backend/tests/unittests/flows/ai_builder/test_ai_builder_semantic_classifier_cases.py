@@ -140,7 +140,7 @@ class SemanticCorpus(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     schema_version: Literal[CORPUS_SCHEMA_VERSION]
-    bundles: list[SemanticBundle] = Field(min_length=14, max_length=14)
+    bundles: list[SemanticBundle] = Field(min_length=16, max_length=16)
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,7 +315,7 @@ def test_semantic_corpus_schema_and_coverage_are_frozen() -> None:
                     1 if scenario.chronology_subtype == "later_correction" else 0
                 )
 
-    assert len(scenario_ids) == 70
+    assert len(scenario_ids) == 80
     assert len(scenario_ids) == len(set(scenario_ids))
     assert len(source_texts) == len({text.casefold() for text in source_texts})
     assert all(0 < len(text) <= MAX_SOURCE_TEXT_LENGTH for text in source_texts)
@@ -326,12 +326,12 @@ def test_semantic_corpus_schema_and_coverage_are_frozen() -> None:
 
 
 def test_exact_label_matrix_covers_every_catalog_option_in_both_locales() -> None:
-    assert len(LLM_RESOLVABLE_SLOT_NAMES) == 7
+    assert len(LLM_RESOLVABLE_SLOT_NAMES) == 8
     assert (
-        len({(case.slot_name, case.option_value) for case in EXACT_LABEL_CASES}) == 32
+        len({(case.slot_name, case.option_value) for case in EXACT_LABEL_CASES}) == 35
     )
-    assert len(EXACT_LABEL_CASES) == 64
-    assert len({case.id for case in EXACT_LABEL_CASES}) == 64
+    assert len(EXACT_LABEL_CASES) == 70
+    assert len({case.id for case in EXACT_LABEL_CASES}) == 70
     assert {
         (case.slot_name, case.locale, case.option_value, case.label)
         for case in EXACT_LABEL_CASES

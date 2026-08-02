@@ -97,6 +97,7 @@ LLMResolvableSlotName: TypeAlias = Literal[
     "primary_runtime_input",
     "terminal_output",
     "document_material_scope",
+    "comparison_scope",
     "report_disposition",
     "post_processing_goal",
     "structured_io_contract",

@@ -578,7 +578,17 @@ def test_plan_proposal_prompt_projects_confirmed_runtime_field_contract() -> Non
 
 
 def test_plan_proposal_prompt_omits_primary_input_shadow_field() -> None:
-    state = _state_with_slot("primary_runtime_input", "text")
+    state = _state_with_slot(
+        "primary_runtime_input",
+        "text",
+        state=_planning_state_with_architecture(
+            StepTriple(
+                input_type="text",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ),
+    )
     state.input_fields = [
         FlowInputFieldIntent(
             variable_name="text",

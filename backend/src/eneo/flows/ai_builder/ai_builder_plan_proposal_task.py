@@ -260,6 +260,8 @@ def _resolved_slot_prompt_status(slot: ResolvedSlot) -> str:
             return "confirmed"
         case "flow_default":
             return "from existing flow"
+        case "attachment_structure":
+            return "confirmed from attachment structure"
         case "policy_default":
             return "policy default assumption"
         case "heuristic":

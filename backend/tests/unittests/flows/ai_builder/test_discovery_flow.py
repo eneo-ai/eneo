@@ -654,7 +654,7 @@ class TestExtendedClarificationHints:
     def test_conflicting_single_file_and_same_run_compare_resolved_by_answer(
         self,
     ) -> None:
-        """Answering comparison_scope with same_run_multiple_documents clears the
+        """Answering comparison_scope with same_run_compare clears the
         contradiction block. Other unresolved families (e.g. the final output
         format, which is still ambiguous here) can still block — the guarantee
         is only that the comparison-contradiction question no longer blocks.
@@ -669,7 +669,7 @@ class TestExtendedClarificationHints:
                 metadata={
                     "question_answer": {
                         "question_id": "comparison_scope",
-                        "selected_values": ["same_run_multiple_documents"],
+                        "selected_values": ["same_run_compare"],
                     }
                 },
             )
@@ -753,8 +753,8 @@ class TestExtendedClarificationHints:
                 metadata={
                     "question_answer": {
                         "question_id": "comparison_scope",
-                        "selected_option_ids": ["same_run_multiple_documents"],
-                        "selected_values": ["same_run_multiple_documents"],
+                        "selected_option_ids": ["same_run_compare"],
+                        "selected_values": ["same_run_compare"],
                     }
                 },
             ),
@@ -782,8 +782,8 @@ class TestExtendedClarificationHints:
                 metadata={
                     "question_answer": {
                         "question_id": "comparison_scope",
-                        "selected_option_id": "same_run_multiple_documents",
-                        "answer": "same_run_multiple_documents",
+                        "selected_option_id": "same_run_compare",
+                        "answer": "same_run_compare",
                     }
                 },
             ),
@@ -3183,7 +3183,7 @@ class TestPlannerDiscoveryQuestionDispatch:
         repo.commit_turn.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_audio_docx_extraction_asks_runtime_metadata_before_proposal(
+    async def test_audio_docx_extraction_requires_core_input_evidence_before_proposal(
         self,
     ) -> None:
         repo = AsyncMock()
@@ -3244,9 +3244,7 @@ class TestPlannerDiscoveryQuestionDispatch:
                 events.append(encode_ai_builder_stream_event(event))
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
-        assert json.loads(events[1]["data"])["question_id"] == (
-            "runtime_metadata_fields"
-        )
+        assert json.loads(events[1]["data"])["question_id"] == ("primary_runtime_input")
         repo.commit_turn.assert_awaited_once()
 
 

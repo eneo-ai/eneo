@@ -42,7 +42,8 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
-| 2026-08-02 | **Language-neutral Builder discovery ownership**: `PlanningState` and typed input/output intent remain the semantic truth while the parallel phrase-derived `case_like_flow` flag, the unused document-category question and synonym inventory, and the behavior-locking specialty recognizer are deleted; runtime-metadata values are neutral direct contracts with no compatibility aliases, and generic `underlag` no longer invents a domain or minimum viable purpose (`this change`) |
+| 2026-08-02 | **Evidence-backed Builder architecture admission**: architecture-changing slots now commit only from explicit answers, existing-flow defaults, a typed confirmed-requirements projection, deterministic attachment structure, or citation-backed high-confidence model evidence; policy defaults and heuristics remain visible assumptions but cannot silently shape topology. The create compiler consumes only the persisted architecture commit, and the language-specific requirements-summary parser and draft/raw-slot compiler fallbacks are deleted (`this change`) |
+| 2026-08-02 | **Language-neutral Builder discovery ownership**: `PlanningState` and typed input/output intent remain the semantic truth while the parallel phrase-derived `case_like_flow` flag, the unused document-category question and synonym inventory, and the behavior-locking specialty recognizer are deleted; runtime-metadata values are neutral direct contracts with no compatibility aliases, and generic `underlag` no longer invents a domain or minimum viable purpose (`3409a8409`) |
 | 2026-08-02 | **Precise Builder source-material dataflow**: explicit structured Underlag now compiles to exact field projections whose schema and lineage are shared by Builder compilation, publish validation, and runtime resolution; form fields remain at their declared consumers, post-transcription steps describe the text they actually receive, and blanket raw-plus-structured repair plus whole-object coverage heuristics are deleted. Compiler-to-runtime parity and large-transcript regressions protect the contract (`732c7cffb`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Explicit Builder source-reference failures**: typed source references now remain typed through the shared create/edit compilation boundary; every candidate is validated before deduplication, contract-invalid references fail with named target-correct Builder feedback instead of being flattened into a plausible free-text Underlag question, and the shared input-binding contract remains the validator (`b02529d5d`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Exact Builder runtime-field consumers**: confirmed runtime fields now reach proposal drafting with their exact server-owned names, types, required state, labels, and options; `uses_form_fields` is the sole semantic consumer contract, confirmed definitions override model redeclarations, missing consumers return named repairable feedback, and the compiler no longer hides unused fields by attaching them to the final step; behavior tests pin comparison, report, audio, template, and JSON-input placement (`7ffaf5f6b`; Codex and Claude gates green 8/10, no blockers) |
@@ -192,7 +193,7 @@ external release gate (item 10); BM0.2 is external (item 10).
    of explicit-answer metadata; preserve the user-question budget through a
    typed response-only lifecycle marker, and delete the weaker matcher,
    adjudicator, and dead follow-up paths behind the focused evaluation gate in
-   B7. (c) **LANDED in this change** — typed resolved slots are projected before
+   B7. (c) **LANDED `3409a8409`** — typed resolved slots are projected before
    text fallback; the unused document-category contract is deleted and
    runtime-metadata values are domain-neutral; phrase-owned domain inference, including generic
    `underlag`, is deleted with no tolerant readers. (d) serve RAG policy ceilings
@@ -200,7 +201,8 @@ external release gate (item 10); BM0.2 is external (item 10).
    response and delete the duplicated admin-page TS constants — no generic
    constraints-discovery API. (e) narrow architecture-impact commitment to
    explicit, flow-default, requirements-summary, or cited high-confidence model
-   evidence without changing the already-honest confirmation buckets. (f) move
+   evidence without changing the already-honest confirmation buckets. **LANDED
+   in this change.** (f) move
    aggregate classifier transcript admission into the existing model-aware/admin
    budget owner; keep named per-source parser-shape invariants fixed until item
    10 benchmarks them. (g) keep ask/progress/plan/diagram as typed server events
@@ -402,13 +404,13 @@ plan above controls all other ordering.
   the Flow's contract, topology, quality, or governance; the confirmation surface
   exposes consequential assumptions instead of hiding them. (b) **LANDED
   `65af265bb`** — typed resolved slots are canonical in the discovery profile and raw
-  text resolves only missing dimensions. (c) **LANDED in this change** — correct
+  text resolves only missing dimensions. (c) **LANDED `3409a8409`** — correct
   the known neutral vocabulary defects, delete `case_like_flow` and the unused
   deterministic document-category question, and pin the resulting question topology; generic
   source-material wording no longer invents a domain or purpose. (d)
   architecture-impact dimensions
   never commit from policy defaults or heuristics; confirmation bucketing stays
-  unchanged. (e) aggregate classifier transcript admission joins the existing
+  unchanged. **LANDED in this change.** (e) aggregate classifier transcript admission joins the existing
   model-aware/admin budget owner while source-count and structured-value bounds
   remain named parser-shape invariants pending item 10. No classifier expansion
   for intentionally structured-only lanes. *(L)*
@@ -439,7 +441,7 @@ plan above controls all other ordering.
   with structured feedback when a field has no actual consumer; (b) **LANDED
   `b02529d5d`** — validate compiled typed source refs through the shared binding
   contract and return a named repairable Builder compile error instead of
-  degrading an invalid ref to rendered strings; (c) **LANDED in this change** —
+  degrading an invalid ref to rendered strings; (c) **LANDED `732c7cffb`** —
   compile exact input schemas for explicit structured Underlag projections,
   validate and resolve them through one shared contract, and remove broad
   `all_previous_steps` fan-in where declared dependencies are sufficient;

@@ -12,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
     extract_answer_signals,
@@ -34,6 +35,9 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from eneo.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    build_requirements_version,
+)
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
@@ -828,8 +832,8 @@ def test_extract_answer_signals_reads_singular_structured_answer_fields() -> Non
                 "metadata": {
                     "question_answer": {
                         "question_id": "comparison_scope",
-                        "selected_option_id": "same_run_multiple_documents",
-                        "answer": "same_run_multiple_documents",
+                        "selected_option_id": "same_run_compare",
+                        "answer": "same_run_compare",
                     }
                 },
             }
@@ -837,7 +841,7 @@ def test_extract_answer_signals_reads_singular_structured_answer_fields() -> Non
     )
 
     assert "comparison_scope" in signals
-    assert "same_run_multiple_documents" in signals["comparison_scope"]
+    assert "same_run_compare" in signals["comparison_scope"]
 
 
 def test_extract_answer_signals_prefers_latest_structured_answer_for_same_question() -> (
@@ -1492,6 +1496,12 @@ def test_planning_state_uses_existing_audio_input_when_edit_summary_drifts() -> 
                         "output_description": (
                             "Huvudsakligt slutresultat: DOCX-dokument."
                         ),
+                        "resolved_requirements": [
+                            {
+                                "requirement_id": "primary_runtime_input",
+                                "selected_value": "documents",
+                            }
+                        ],
                     },
                     "attachment_evidence_fingerprint": (
                         "4f53cda18c2baa0c0354bb5f9a3ecbe5"
@@ -1509,28 +1519,47 @@ def test_planning_state_uses_existing_audio_input_when_edit_summary_drifts() -> 
 
 
 def test_planning_state_uses_requirements_summary_without_flow_default() -> None:
+    payload = RequirementsSummaryPayload.model_validate(
+        {
+            "summary": "Skapa en DOCX-rapport.",
+            "key_decisions": [{"topic": "Output", "decision": "DOCX-dokument."}],
+            "input_description": "Primär indata vid körning: text.",
+            "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
+            "resolved_requirements": [
+                {
+                    "requirement_id": "primary_runtime_input",
+                    "selected_value": "text",
+                },
+                {
+                    "requirement_id": "terminal_output",
+                    "selected_value": "docx_document",
+                },
+            ],
+        }
+    )
+    version = build_requirements_version(payload)
     state = build_planning_state_from_conversation(
         [
             ConversationMessage(
                 role="tool",
                 content="Requirements presented to user.",
                 metadata={
-                    "requirements_summary": {
-                        "summary": "Skapa en DOCX-rapport.",
-                        "key_decisions": [
-                            {"topic": "Output", "decision": "DOCX-dokument."}
-                        ],
-                        "input_description": "Primär indata vid körning: text.",
-                        "output_description": (
-                            "Huvudsakligt slutresultat: DOCX-dokument."
-                        ),
-                    },
+                    "requirements_summary": payload.model_dump(mode="json"),
+                    "requirements_version": version,
                     "attachment_evidence_fingerprint": (
                         "4f53cda18c2baa0c0354bb5f9a3ecbe5"
                         "ed12ab4d8e11ba873c2f11161202b945"
                     ),
                 },
-            )
+            ),
+            ConversationMessage(
+                role="user",
+                content="Confirmed.",
+                metadata={
+                    "requirements_confirmed": True,
+                    "requirements_version": version,
+                },
+            ),
         ],
     )
 
@@ -2039,7 +2068,6 @@ def test_slot_name_answer_signals_drive_input_and_output_resolution() -> None:
 def test_supported_structured_question_ids_partition_catalog_and_policy_ids() -> None:
     non_slot_policy_ids = frozenset(
         {
-            "comparison_scope",
             "final_pdf_type",
             "final_output_scope",
             "flow_input_architecture",

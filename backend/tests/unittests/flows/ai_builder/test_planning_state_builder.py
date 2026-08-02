@@ -27,6 +27,13 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+    ResolvedRequirementPayload,
+)
+from eneo.flows.ai_builder.ai_builder_requirements_state import (
+    build_requirements_version,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
     derive_freeform_schema_candidates,
@@ -83,6 +90,113 @@ def _state(
         builder_schema_version=BUILDER_SCHEMA_VERSION,
         architecture_commit=architecture_commit,
     )
+
+
+def test_rebuild_restores_typed_requirements_without_reading_display_copy() -> None:
+    payload = RequirementsSummaryPayload(
+        summary="Checkpoint ready.",
+        key_decisions=[],
+        input_description="Input confirmed.",
+        output_description="Output confirmed.",
+        resolved_requirements=[
+            ResolvedRequirementPayload(
+                requirement_id="primary_runtime_input",
+                selected_value="documents",
+            ),
+            ResolvedRequirementPayload(
+                requirement_id="terminal_output",
+                selected_value="structured_text",
+            ),
+            ResolvedRequirementPayload(
+                requirement_id="document_material_scope",
+                selected_value="flexible_document_case",
+            ),
+            ResolvedRequirementPayload(
+                requirement_id="runtime_metadata_fields",
+                selected_value="no_extra_metadata",
+            ),
+        ],
+    )
+    version = build_requirements_version(payload)
+
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="assistant",
+                content="Requirements presented to user.",
+                metadata={
+                    "requirements_summary": payload.model_dump(mode="json"),
+                    "requirements_version": version,
+                    "attachment_evidence_fingerprint": "f" * 64,
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Confirmed.",
+                metadata={
+                    "requirements_confirmed": True,
+                    "requirements_version": version,
+                },
+            ),
+        ]
+    )
+
+    assert {
+        name: (slot.value, slot.source, slot.confidence)
+        for name, slot in state.resolved_slots.items()
+    } == {
+        "document_material_scope": (
+            "flexible_document_case",
+            "requirements_summary",
+            "high",
+        ),
+        "primary_runtime_input": ("documents", "requirements_summary", "high"),
+        "runtime_metadata_fields": (
+            "no_extra_metadata",
+            "requirements_summary",
+            "high",
+        ),
+        "terminal_output": ("structured_text", "requirements_summary", "high"),
+    }
+
+
+def test_rebuild_does_not_admit_unconfirmed_requirements_projection() -> None:
+    payload = RequirementsSummaryPayload(
+        summary="Checkpoint ready.",
+        key_decisions=[],
+        input_description="Input pending confirmation.",
+        output_description="Output pending confirmation.",
+        resolved_requirements=[
+            ResolvedRequirementPayload(
+                requirement_id="primary_runtime_input",
+                selected_value="documents",
+            ),
+            ResolvedRequirementPayload(
+                requirement_id="terminal_output",
+                selected_value="structured_text",
+            ),
+        ],
+    )
+    version = build_requirements_version(payload)
+
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="assistant",
+                content="Requirements presented to user.",
+                metadata={
+                    "requirements_summary": payload.model_dump(mode="json"),
+                    "requirements_version": version,
+                    "attachment_evidence_fingerprint": "f" * 64,
+                },
+            )
+        ]
+    )
+
+    assert all(
+        slot.source != "requirements_summary" for slot in state.resolved_slots.values()
+    )
+    assert not any(slot.is_commit_grade for slot in state.resolved_slots.values())
 
 
 def _output_schema_evidence() -> SchemaEvidence:
@@ -1322,7 +1436,7 @@ class TestPolicyDefaults:
         assert slot.source == "heuristic"
         assert slot.confidence == "high"
 
-    def test_optional_checklist_or_rule_runtime_fields_are_commit_grade(
+    def test_optional_checklist_or_rule_runtime_fields_require_admissible_evidence(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1344,13 +1458,13 @@ class TestPolicyDefaults:
         assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "heuristic"
         assert slot.confidence == "high"
-        assert slot.is_commit_grade
+        assert not slot.is_commit_grade
 
         policy = build_planner_action_policy(
             session_state=state,
             selected_discovery_question_ids=("runtime_metadata_fields",),
         )
-        assert "runtime_metadata_fields" not in policy.allowed_ask_question_targets
+        assert "runtime_metadata_fields" in policy.allowed_ask_question_targets
 
     def test_user_supplies_prompt_resolves_detailed_runtime_metadata(
         self,
@@ -1535,14 +1649,6 @@ class TestPolicyDefaults:
         apply_policy_defaults_from_resolved_slots(state, freeform_text="")
 
         assert "structured_analysis_need" not in state.resolved_slots
-
-        policy = build_planner_action_policy(
-            session_state=state,
-            selected_discovery_question_ids=(),
-        )
-
-        assert policy.allowed_action_kinds == ("commit_architecture",)
-        assert policy.allowed_ask_question_targets == ()
 
     def test_transcript_only_goal_does_not_derive_structured_analysis(self) -> None:
         state = build_planning_state_from_conversation(
@@ -2012,6 +2118,33 @@ class TestSlotClassificationMetadataReplay:
 
 
 class TestModelSlotMerge:
+    def test_comparison_scope_is_classified_only_until_input_is_known_non_document(
+        self,
+    ) -> None:
+        state = _state()
+        assert "comparison_scope" in llm_resolvable_slot_values_for_state(state)
+
+        state.resolved_slots["primary_runtime_input"] = _slot(
+            name="primary_runtime_input",
+            value="audio",
+            source="structured_answer",
+        )
+        assert "comparison_scope" not in llm_resolvable_slot_values_for_state(state)
+
+        state.resolved_slots["primary_runtime_input"] = _slot(
+            name="primary_runtime_input",
+            value="documents",
+            source="structured_answer",
+        )
+        assert "comparison_scope" in llm_resolvable_slot_values_for_state(state)
+
+        state.resolved_slots["primary_runtime_input"] = _slot(
+            name="primary_runtime_input",
+            value="audio",
+            source="heuristic",
+        )
+        assert "comparison_scope" in llm_resolvable_slot_values_for_state(state)
+
     def test_report_disposition_is_classified_only_for_multi_source_documents(
         self,
     ) -> None:

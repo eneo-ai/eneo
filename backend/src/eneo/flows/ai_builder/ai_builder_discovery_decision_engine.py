@@ -54,8 +54,6 @@ _NON_SLOT_QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "case_scope": "quality",
     # Cross-input architecture conflict; deciding wrong changes the flow shape.
     "flow_input_architecture": "architecture",
-    # Reference-source comparison gate; deciding wrong changes the flow shape.
-    "comparison_scope": "architecture",
     # Reader/audience style refinement, so it stays non-blocking polish.
     "output_reader": "polish",
     # Output-scope style refinement, so it stays non-blocking polish.

@@ -385,7 +385,7 @@ def runtime_metadata_disables_declared_input_fields(
             return True
         case "heuristic" | "model":
             return confidence == "high"
-        case "flow_default" | "policy_default":
+        case "flow_default" | "attachment_structure" | "policy_default":
             return False
     return assert_never(source)
 

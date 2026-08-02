@@ -423,6 +423,44 @@ def _architecture_commit() -> ArchitectureCommit:
     )
 
 
+def _document_architecture_state() -> PlanningState:
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["document_to_structured_report"],
+        required_capabilities=["input_document", "output_mode_pass_through"],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "document_material_scope": ResolvedSlot(
+            name="document_material_scope",
+            value="single_document_case",
+            source="requirements_summary",
+            confidence="high",
+        ),
+    }
+    return state
+
+
 def _budget_policy() -> AIBuilderBudgetPolicy:
     return AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=128,
@@ -1048,20 +1086,7 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
     discovery_analysis = _discovery_analysis()
-    state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state = _document_architecture_state()
     state.file_roles = [
         FileRoleEvidence(
             file_id=UUID(int=index + 1),
@@ -1160,6 +1185,20 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
         selected_question_ids=("primary_runtime_input",),
     )
     planning_state = build_planning_state_from_conversation(conversation)
+    planning_state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="requirements_summary",
+            confidence="high",
+        ),
+    }
 
     with (
         patch(
@@ -1216,8 +1255,8 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
         "primary_runtime_input": ResolvedSlot(
             name="primary_runtime_input",
             value="audio",
-            source="heuristic",
-            evidence=["heuristic:role-aware freeform analysis"],
+            source="requirements_summary",
+            evidence=["requirements_summary:primary_runtime_input"],
             confidence="high",
         ),
         "terminal_output": ResolvedSlot(
@@ -1361,20 +1400,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build from this file")]
     discovery_analysis = _discovery_analysis()
-    state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state = _document_architecture_state()
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build from this file.",
@@ -1458,20 +1484,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
     discovery_analysis = _discovery_analysis()
-    state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state = _document_architecture_state()
     state.input_fields = [
         FlowInputFieldIntent(
             variable_name="case_id",
@@ -1637,6 +1650,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
 
 def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
     state = PlanningState.empty()
+    state.architecture_commit = _architecture_commit()
     state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
         name="primary_runtime_input",
         value="text",
@@ -1691,20 +1705,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
     discovery_analysis = _discovery_analysis()
-    state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state = _document_architecture_state()
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build a report flow.",

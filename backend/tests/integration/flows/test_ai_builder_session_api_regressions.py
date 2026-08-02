@@ -6694,6 +6694,23 @@ async def _get_latest_plan_id(*, client, bearer_token: str, session_id: str) -> 
     return plans[0]["plan_id"]
 
 
+def _builder_event_outline(
+    events: list[dict[str, object]],
+) -> list[tuple[object, object | None, object | None]]:
+    outline: list[tuple[object, object | None, object | None]] = []
+    for builder_event in events:
+        data = builder_event.get("data")
+        event_data = data if isinstance(data, dict) else {}
+        outline.append(
+            (
+                builder_event.get("event"),
+                event_data.get("question_id"),
+                event_data.get("code"),
+            )
+        )
+    return outline
+
+
 async def _progress_builder_session_to_plan(
     *,
     client,
@@ -6735,11 +6752,14 @@ async def _progress_builder_session_to_plan(
         question_event = next(
             (event for event in events if event["event"] == "question"), None
         )
-        assert question_event is not None, events
+        assert question_event is not None, _builder_event_outline(events)
 
         question_id = question_event["data"]["question_id"]
         selected_option_id = answers.get(question_id)
-        assert selected_option_id is not None, events
+        assert selected_option_id is not None, (
+            question_id,
+            _builder_event_outline(events),
+        )
 
         selected_option = next(
             (
@@ -6901,11 +6921,11 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
             client=client,
             bearer_token=bearer_token,
             session_id=session_id,
-            message="Inga extra fält",
+            message="Vanlig genererad PDF",
             question_answer={
-                "question_id": "runtime_metadata_fields",
-                "selected_option_ids": ["no_extra_metadata"],
-                "selected_values": ["no_extra_metadata"],
+                "question_id": "pdf_generation_mode",
+                "selected_option_ids": ["generated_pdf"],
+                "selected_values": ["generated_pdf"],
                 "ui_language": "sv",
             },
         )
@@ -6921,7 +6941,6 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
                 "ui_language": "sv",
             },
         )
-
     assert any(
         event["event"] == "question"
         and cast(dict[str, object], event["data"]).get("question_id")
@@ -6931,7 +6950,7 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
     assert any(
         event["event"] == "question"
         and cast(dict[str, object], event["data"]).get("question_id")
-        == "runtime_metadata_fields"
+        == "pdf_generation_mode"
         for event in second_events
     ), [
         (
@@ -6945,7 +6964,7 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
         and cast(dict[str, object], event["data"]).get("question_id")
         == "report_disposition"
         for event in third_events
-    )
+    ), _builder_event_outline(third_events)
     assert not any(event["event"] == "error" for event in fourth_events), fourth_events
     assert not any(
         event["event"] == "question"
@@ -7088,9 +7107,15 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
         space_name="AI Builder API recovery exhaustion",
     )
 
-    with patch(
-        "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
-        new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            new=AsyncMock(return_value=SlotClassificationResult()),
+        ),
     ):
         session_id = await _create_ai_builder_session(
             client=client,
@@ -7119,22 +7144,10 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
                     ),
                     ConversationMessage(
                         role="user",
-                        content="Ett ärende åt gången",
-                        metadata={
-                            "question_answer": {
-                                "question_id": "processing_scope",
-                                "selected_option_id": "single_case",
-                                "answer": "single_case",
-                            },
-                            "ui_language": "sv",
-                        },
-                    ),
-                    ConversationMessage(
-                        role="user",
                         content="Dokument",
                         metadata={
                             "question_answer": {
-                                "question_id": "input_material_mode",
+                                "question_id": "primary_runtime_input",
                                 "selected_option_id": "documents",
                                 "answer": "documents",
                             },
@@ -7158,7 +7171,7 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
                         content="PDF-dokument",
                         metadata={
                             "question_answer": {
-                                "question_id": "final_output_mode",
+                                "question_id": "terminal_output",
                                 "selected_option_id": "pdf_document",
                                 "answer": "pdf_document",
                             },
@@ -7167,12 +7180,12 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
                     ),
                     ConversationMessage(
                         role="user",
-                        content="Strukturerad rapport",
+                        content="Vanlig genererad PDF",
                         metadata={
                             "question_answer": {
-                                "question_id": "final_pdf_type",
-                                "selected_option_id": "structured_report_pdf",
-                                "answer": "structured_report_pdf",
+                                "question_id": "pdf_generation_mode",
+                                "selected_option_id": "generated_pdf",
+                                "answer": "generated_pdf",
                             },
                             "ui_language": "sv",
                         },
@@ -7229,8 +7242,12 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
             message="Bygg vidare",
         )
 
-    assert not any(event["event"] == "error" for event in second_events), second_events
-    assert any(event["event"] == "requirements_summary" for event in second_events)
+    assert not any(event["event"] == "error" for event in second_events), (
+        _builder_event_outline(second_events)
+    )
+    assert any(event["event"] == "requirements_summary" for event in second_events), (
+        _builder_event_outline(second_events)
+    )
 
 
 @pytest.mark.asyncio
@@ -7280,9 +7297,59 @@ async def test_ai_builder_api_create_mode_can_generate_approve_apply_and_publish
         return_value=_make_llm_response(tool_calls=[outline_flow])
     )
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=mock_completion,
+    async def classify_create_request(**kwargs: object) -> SlotClassificationResult:
+        classification_input = kwargs.get("classification_input")
+        assert isinstance(classification_input, SlotClassificationInput)
+        source = classification_input.sources[-1]
+        evidence = (ClassifiedEvidence(source_id=source.source_id, quote=source.text),)
+        return SlotClassificationResult(
+            slots=tuple(
+                ClassifiedSlot(
+                    slot_name=slot_name,
+                    value=value,
+                    confidence="high",
+                    reason=reason,
+                    evidence=evidence,
+                )
+                for slot_name, value, reason in (
+                    (
+                        "primary_runtime_input",
+                        "documents",
+                        "The request explicitly uploads documents.",
+                    ),
+                    (
+                        "document_material_scope",
+                        "multiple_documents_case",
+                        "The request explicitly refers to uploaded documents.",
+                    ),
+                    (
+                        "terminal_output",
+                        "pdf_document",
+                        "The requested result is a PDF report.",
+                    ),
+                    (
+                        "post_processing_goal",
+                        "summarize_or_overview",
+                        "The requested processing is summarization.",
+                    ),
+                    (
+                        "output_reader",
+                        "human_reader",
+                        "The request names a human reader.",
+                    ),
+                )
+            )
+        )
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=mock_completion,
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            new=AsyncMock(side_effect=classify_create_request),
+        ),
     ):
         with patch(
             "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
@@ -7302,11 +7369,9 @@ async def test_ai_builder_api_create_mode_can_generate_approve_apply_and_publish
                     "PDF-rapport för en mänsklig läsare."
                 ),
                 structured_answers={
-                    "input_material_mode": "documents",
-                    "flow_input_architecture": "document_primary_input",
-                    "terminal_output": "pdf_document",
-                    "post_processing_goal": "summarize_or_overview",
+                    "pdf_generation_mode": "generated_pdf",
                     "runtime_metadata_fields": "no_extra_metadata",
+                    "report_disposition": "synthesized_overview",
                 },
             )
 
@@ -7468,6 +7533,7 @@ async def test_ai_builder_api_edit_apply_replays_committed_output_change_once(
                 session_id=session_id,
                 initial_message="Byt slutformat till DOCX men behåll resten av flödet.",
                 structured_answers={
+                    "document_material_scope": "single_document_case",
                     "terminal_output": "docx_document",
                     "docx_output_mode": "generated_docx",
                     "report_disposition": "synthesized_overview",
@@ -7737,8 +7803,7 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
                     "dokumentsteget och behåll resten."
                 ),
                 structured_answers={
-                    "input_material_mode": "audio",
-                    "flow_input_architecture": "audio_primary_input",
+                    "primary_runtime_input": "audio",
                 },
             )
     assert any(event["event"] == "plan" for event in plan_events)
@@ -7851,9 +7916,9 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
                     "sammanfattar innehållet för en mänsklig läsare."
                 ),
                 structured_answers={
-                    "input_material_mode": "audio",
-                    "flow_input_architecture": "audio_primary_input",
+                    "primary_runtime_input": "audio",
                     "terminal_output": "pdf_document",
+                    "pdf_generation_mode": "generated_pdf",
                     "post_processing_goal": "summarize_or_overview",
                     "runtime_metadata_fields": "no_extra_metadata",
                 },
@@ -8057,7 +8122,7 @@ async def test_ai_builder_api_rejects_persisted_legacy_mcp_plan_before_create_ef
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_after_runtime_metadata_question(
+async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_metadata(
     client,
     bearer_token,
     completion_model_factory,
@@ -8088,10 +8153,40 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_a
         },
     )
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=AsyncMock(
-            return_value=_make_llm_response(tool_calls=[requirements_summary])
+    async def classify_audio_request(**kwargs: object) -> SlotClassificationResult:
+        classification_input = kwargs.get("classification_input")
+        assert isinstance(classification_input, SlotClassificationInput)
+        source = classification_input.sources[-1]
+        evidence = (ClassifiedEvidence(source_id=source.source_id, quote=source.text),)
+        return SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="primary_runtime_input",
+                    value="audio",
+                    confidence="high",
+                    reason="The user explicitly says an audio file is uploaded.",
+                    evidence=evidence,
+                ),
+                ClassifiedSlot(
+                    slot_name="post_processing_goal",
+                    value="structure_key_information",
+                    confidence="high",
+                    reason="The request explicitly names the report fields to extract.",
+                    evidence=evidence,
+                ),
+            )
+        )
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=AsyncMock(
+                return_value=_make_llm_response(tool_calls=[requirements_summary])
+            ),
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            new=AsyncMock(side_effect=classify_audio_request),
         ),
     ):
         with patch(
@@ -8119,6 +8214,18 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_a
                 client=client,
                 bearer_token=bearer_token,
                 session_id=session_id,
+                message="Strukturerat textresultat",
+                question_answer={
+                    "question_id": "terminal_output",
+                    "selected_option_ids": ["structured_text"],
+                    "selected_values": ["structured_text"],
+                    "ui_language": "sv",
+                },
+            )
+            third_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
                 message="Inga extra fält",
                 question_answer={
                     "question_id": "runtime_metadata_fields",
@@ -8133,8 +8240,16 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_a
         for event in first_events
         if event["event"] == "question"
     ]
-    assert question_ids == ["runtime_metadata_fields"]
-    assert any(event["event"] == "requirements_summary" for event in second_events)
+    assert question_ids == ["terminal_output"]
+    assert any(
+        event["event"] == "question"
+        and cast(dict[str, object], event["data"]).get("question_id")
+        == "runtime_metadata_fields"
+        for event in second_events
+    ), _builder_event_outline(second_events)
+    assert any(event["event"] == "requirements_summary" for event in third_events), (
+        _builder_event_outline(third_events)
+    )
 
 
 @pytest.mark.integration

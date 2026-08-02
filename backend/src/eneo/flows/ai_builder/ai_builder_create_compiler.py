@@ -8,13 +8,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import cast
 
-from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
-    derive_aggregation_intent_from_slots,
-)
-from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
-    derive_architecture_commit_draft,
-    flow_input_type_from_primary_runtime_input_value,
-)
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
@@ -52,7 +45,6 @@ from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommit,
-    ArchitectureCommitDraft,
     PlanningState,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -71,8 +63,6 @@ from eneo.flows.flow_variable_definitions import (
 from eneo.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
-_COMPARISON_FAN_IN_PATTERN_IDS = frozenset({"comparison"})
-ArchitectureEnvelope = ArchitectureCommit | ArchitectureCommitDraft
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,13 +473,9 @@ def create_compile_context_from_planning_state(
             template_placeholder_field_hints=template_placeholder_field_hints,
             selected_template_count=None,
         )
-    architecture = _architecture_envelope_from_planning_state(planning_state)
-    runtime_input_type = _runtime_input_type_from_architecture(
-        architecture
-    ) or _runtime_input_type_from_planning_state(planning_state)
-    final_output_type = _final_output_type_from_architecture(
-        architecture
-    ) or _final_output_type_from_planning_state(planning_state)
+    architecture = planning_state.architecture_commit
+    runtime_input_type = _runtime_input_type_from_architecture(architecture)
+    final_output_type = _final_output_type_from_architecture(architecture)
     return CreateCompileContext(
         runtime_input_type=runtime_input_type,
         runtime_max_files=planning_state.mapped_file_limit.accepted_value,
@@ -512,7 +498,6 @@ def create_compile_context_from_planning_state(
             else None
         ),
         aggregation_intent=_aggregation_intent_for_compile_context(
-            planning_state,
             architecture,
         ),
         flow_input_schema=_flow_input_schema_from_planning_state(
@@ -533,15 +518,10 @@ def create_compile_context_from_planning_state(
                 ui_language=ui_language,
             )
         ),
-        report_disposition=_report_disposition_from_planning_state(planning_state),
+        report_disposition=(
+            architecture.report_disposition if architecture is not None else None
+        ),
     )
-
-
-def _report_disposition_from_planning_state(
-    planning_state: PlanningState,
-) -> str | None:
-    slot = planning_state.resolved_slots.get("report_disposition")
-    return slot.value if slot is not None else None
 
 
 def _source_reader_required_fields_from_planning_state(
@@ -664,7 +644,9 @@ def _runtime_metadata_state_from_planning_state(
     if planning_state is None:
         return None
     slot = planning_state.resolved_slots.get("runtime_metadata_fields")
-    return normalize_runtime_metadata_state(slot.value if slot is not None else None)
+    return normalize_runtime_metadata_state(
+        slot.value if slot is not None and slot.is_commit_grade else None
+    )
 
 
 def _runtime_metadata_disables_declared_input_fields_from_planning_state(
@@ -673,7 +655,7 @@ def _runtime_metadata_disables_declared_input_fields_from_planning_state(
     if planning_state is None:
         return False
     slot = planning_state.resolved_slots.get("runtime_metadata_fields")
-    if slot is None:
+    if slot is None or not slot.is_commit_grade:
         return False
     return runtime_metadata_disables_declared_input_fields(
         state=normalize_runtime_metadata_state(slot.value),
@@ -739,24 +721,8 @@ def _template_placeholder_field_hints_from_planning_state(
     return tuple(hints)
 
 
-def _runtime_input_type_from_planning_state(state: PlanningState) -> InputType | None:
-    slot = state.resolved_slots.get("primary_runtime_input")
-    if slot is None:
-        return None
-    flow_input_type = flow_input_type_from_primary_runtime_input_value(slot.value)
-    if flow_input_type is None:
-        return None
-    return InputType(flow_input_type.value)
-
-
-def _architecture_envelope_from_planning_state(
-    state: PlanningState,
-) -> ArchitectureEnvelope | None:
-    return state.architecture_commit or derive_architecture_commit_draft(state)
-
-
 def _runtime_input_type_from_architecture(
-    architecture: ArchitectureEnvelope | None,
+    architecture: ArchitectureCommit | None,
 ) -> InputType | None:
     if architecture is None or not architecture.tuples_chain:
         return None
@@ -768,22 +734,6 @@ def _runtime_input_type_from_architecture(
         # ANY is a capability envelope, not a concrete compile input type.
         return None
     return runtime_input_type
-
-
-def _final_output_type_from_planning_state(state: PlanningState) -> OutputType | None:
-    slot = state.resolved_slots.get("terminal_output")
-    if slot is None:
-        return None
-    return {
-        "docx": OutputType.DOCX,
-        "docx_document": OutputType.DOCX,
-        "json": OutputType.JSON,
-        "pdf": OutputType.PDF,
-        "pdf_document": OutputType.PDF,
-        "structured_json": OutputType.JSON,
-        "structured_text": OutputType.TEXT,
-        "text": OutputType.TEXT,
-    }.get(slot.value)
 
 
 def _terminal_output_schema_from_planning_state(
@@ -813,7 +763,7 @@ def _flow_input_schema_from_planning_state(
 
 
 def _final_output_type_from_architecture(
-    architecture: ArchitectureEnvelope | None,
+    architecture: ArchitectureCommit | None,
 ) -> OutputType | None:
     if architecture is None or not architecture.tuples_chain:
         return None
@@ -824,7 +774,7 @@ def _final_output_type_from_architecture(
 
 
 def _final_output_mode_from_architecture(
-    architecture: ArchitectureEnvelope | None,
+    architecture: ArchitectureCommit | None,
 ) -> OutputMode | None:
     if architecture is None or not architecture.tuples_chain:
         return None
@@ -835,7 +785,7 @@ def _final_output_mode_from_architecture(
 
 
 def _pattern_chain_steps_from_architecture(
-    architecture: ArchitectureEnvelope | None,
+    architecture: ArchitectureCommit | None,
 ) -> tuple[str, ...]:
     if architecture is None:
         return ()
@@ -853,7 +803,7 @@ def _pattern_chain_steps_from_architecture(
 
 
 def _pattern_ids_from_architecture(
-    architecture: ArchitectureEnvelope | None,
+    architecture: ArchitectureCommit | None,
 ) -> tuple[str, ...]:
     if architecture is None:
         return ()
@@ -861,8 +811,7 @@ def _pattern_ids_from_architecture(
 
 
 def _aggregation_intent_for_compile_context(
-    state: PlanningState,
-    architecture: ArchitectureEnvelope | None,
+    architecture: ArchitectureCommit | None,
 ) -> AggregationIntent:
     """Return the server-owned aggregate/compare policy for dataflow.
 
@@ -870,23 +819,7 @@ def _aggregation_intent_for_compile_context(
     not have to know when Eneo Flow should use `all_previous_steps`.
     """
 
-    runtime_input_type = _runtime_input_type_from_architecture(
-        architecture
-    ) or _runtime_input_type_from_planning_state(state)
-    if architecture is not None:
-        if architecture.aggregation_intent != "linear":
-            return architecture.aggregation_intent
-        if _COMPARISON_FAN_IN_PATTERN_IDS & set(architecture.chosen_patterns):
-            return "compare"
-
-    return derive_aggregation_intent_from_slots(
-        state,
-        document_material_input=runtime_input_type
-        in (
-            InputType.DOCUMENT,
-            InputType.FILE,
-        ),
-    )
+    return architecture.aggregation_intent if architecture is not None else "linear"
 
 
 def _compile_form_fields(

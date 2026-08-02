@@ -268,9 +268,7 @@ def _make_repo_mock() -> AsyncMock:
 
 
 def _text_architecture_commit() -> ArchitectureCommit:
-    state = build_planning_state_from_conversation(
-        [ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST)]
-    )
+    state = build_planning_state_from_conversation(_architecture_messages())
     draft = derive_architecture_commit_draft(state)
     assert draft is not None
     return finalize_architecture_commit(draft)
@@ -278,17 +276,53 @@ def _text_architecture_commit() -> ArchitectureCommit:
 
 def _pdf_architecture_commit() -> ArchitectureCommit:
     state = build_planning_state_from_conversation(
-        [
-            ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST),
-            ConversationMessage(
-                role="user",
-                content="Ändra slutresultatet till PDF istället.",
-            ),
-        ]
+        _architecture_messages(terminal_output="pdf_document")
     )
     draft = derive_architecture_commit_draft(state)
     assert draft is not None
     return finalize_architecture_commit(draft)
+
+
+def _architecture_messages(
+    *,
+    terminal_output: str = "structured_text",
+) -> list[ConversationMessage]:
+    messages = [
+        ConversationMessage(
+            role="user",
+            content=_TEXT_SUMMARY_REQUEST,
+            metadata={
+                "question_answer": {
+                    "question_id": "primary_runtime_input",
+                    "selected_values": ["text"],
+                }
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content=terminal_output,
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_values": [terminal_output],
+                }
+            },
+        ),
+    ]
+    if terminal_output == "pdf_document":
+        messages.append(
+            ConversationMessage(
+                role="user",
+                content="generated_pdf",
+                metadata={
+                    "question_answer": {
+                        "question_id": "pdf_generation_mode",
+                        "selected_values": ["generated_pdf"],
+                    }
+                },
+            )
+        )
+    return messages
 
 
 def _make_turn_spec() -> FlowDraftSpecCore:
@@ -390,16 +424,7 @@ async def test_store_plan_rejects_proposal_when_current_slots_drift_from_commit(
     None
 ):
     repo = _make_repo_mock()
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content=_TEXT_SUMMARY_REQUEST,
-        ),
-        ConversationMessage(
-            role="user",
-            content="Ändra slutresultatet till PDF istället.",
-        ),
-    ]
+    conversation = _architecture_messages(terminal_output="pdf_document")
     prior_state = PlanningState.empty()
     prior_state.architecture_commit = _text_architecture_commit()
     repo.load_planning_state.return_value = prior_state
@@ -429,13 +454,9 @@ async def test_commit_turn_rejects_non_plan_conversation_drift_before_state_save
     prior_state = PlanningState.empty()
     prior_state.architecture_commit = _text_architecture_commit()
     repo.load_planning_state.return_value = prior_state
-    repo.append_session_messages.return_value = [
-        ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST),
-        ConversationMessage(
-            role="user",
-            content="Ändra slutresultatet till PDF istället.",
-        ),
-    ]
+    repo.append_session_messages.return_value = _architecture_messages(
+        terminal_output="pdf_document"
+    )
 
     with pytest.raises(CommitDriftError, match="draft mutated"):
         await AIBuilderRepository.commit_turn(
@@ -474,13 +495,9 @@ async def test_commit_turn_accepts_explicit_architecture_revision() -> None:
     prior_state = PlanningState.empty()
     prior_state.architecture_commit = _text_architecture_commit()
     repo.load_planning_state.return_value = prior_state
-    repo.append_session_messages.return_value = [
-        ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST),
-        ConversationMessage(
-            role="user",
-            content="Ändra slutresultatet till PDF istället.",
-        ),
-    ]
+    repo.append_session_messages.return_value = _architecture_messages(
+        terminal_output="pdf_document"
+    )
     revised_commit = _pdf_architecture_commit()
 
     await AIBuilderRepository.commit_turn(
@@ -499,12 +516,7 @@ async def test_commit_turn_accepts_explicit_architecture_revision() -> None:
 @pytest.mark.asyncio
 async def test_store_plan_preserves_proposal_when_current_slots_match_commit() -> None:
     repo = _make_repo_mock()
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content=_TEXT_SUMMARY_REQUEST,
-        )
-    ]
+    conversation = _architecture_messages()
     prior_state = PlanningState.empty()
     prior_state.architecture_commit = _text_architecture_commit()
     repo.load_planning_state.return_value = prior_state

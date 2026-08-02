@@ -62,6 +62,12 @@ CLASSIFIER_MERGE_CONTRACT_CASES = (
         id="json-field-extraction",
     ),
     pytest.param(
+        "Jämför alla uppladdade dokument med varandra i samma körning.",
+        {"comparison_scope": "same_run_compare"},
+        {"comparison_scope"},
+        id="same-run-document-comparison",
+    ),
+    pytest.param(
         (
             "Bygg ett flöde som tar ljud och användaren ska ange ärendenummer "
             "och handläggare vid körning."
@@ -209,7 +215,7 @@ async def test_classifier_outage_keeps_deterministic_slot_fallbacks(
 
 
 @pytest.mark.asyncio
-async def test_classifier_outage_asks_report_disposition_instead_of_keyword_guess(
+async def test_classifier_outage_reopens_heuristic_architecture_slots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def classifier_outage(**_: object) -> None:
@@ -257,7 +263,11 @@ async def test_classifier_outage_asks_report_disposition_instead_of_keyword_gues
         selected_discovery_question_ids=(),
     )
 
-    assert "report_disposition" in policy.allowed_ask_question_targets
+    assert policy.allowed_ask_question_targets == (
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+    )
 
 
 @pytest.mark.asyncio

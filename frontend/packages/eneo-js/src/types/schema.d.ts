@@ -26556,6 +26556,8 @@ export interface components {
       assumptions?: string[];
       /** Manual Setup Notes */
       manual_setup_notes?: string[];
+      /** Resolved Requirements */
+      resolved_requirements?: components["schemas"]["ResolvedRequirementPayload"][];
     };
     /**
      * RerunDependencyKind
@@ -26574,6 +26576,13 @@ export interface components {
       | "output_config.bindings"
       | "assistant_snapshot.instructions"
       | "runtime_alias.previous_step";
+    /** ResolvedRequirementPayload */
+    ResolvedRequirementPayload: {
+      /** Requirement Id */
+      requirement_id: string;
+      /** Selected Value */
+      selected_value: string;
+    };
     /**
      * ResourcePermission
      * @enum {string}

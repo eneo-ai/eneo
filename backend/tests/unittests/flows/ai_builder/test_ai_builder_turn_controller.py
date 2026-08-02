@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     CommitArchitecture,
     ConfirmRequirements,
     ReviseArchitecture,
+    _slot_is_key_decision,
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -283,6 +284,7 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         terminal_output="docx_document",
         document_material_scope="flexible_document_case",
         docx_output_mode="generated_docx",
+        report_disposition="combined_report",
         runtime_metadata_fields="no_extra_metadata",
     )
     state.architecture_commit = _finalized_commit_for_state(state)
@@ -310,6 +312,42 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     }
     assert "Docx Output Mode" not in {
         decision.topic for decision in payload.key_decisions
+    }
+    assert {
+        item.requirement_id: item.selected_value
+        for item in payload.resolved_requirements
+    } == {
+        "document_material_scope": "flexible_document_case",
+        "docx_output_mode": "generated_docx",
+        "primary_runtime_input": "documents",
+        "report_disposition": "combined_report",
+        "runtime_metadata_fields": "no_extra_metadata",
+        "terminal_output": "docx_document",
+    }
+
+
+def test_server_does_not_project_attachment_structure_as_confirmed_requirement() -> (
+    None
+):
+    state = _state(
+        primary_runtime_input="documents",
+        terminal_output="docx_document",
+        document_material_scope="single_document_case",
+        docx_output_mode="template_fill_docx",
+        runtime_metadata_fields="no_extra_metadata",
+    )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "template_fill_docx",
+        source="attachment_structure",
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language="sv")
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert "docx_output_mode" not in {
+        item.requirement_id for item in decision.payload.resolved_requirements
     }
 
 
@@ -885,25 +923,26 @@ def test_server_confirmation_separates_decisions_from_assumptions() -> None:
             "terminal_output",
             "structured_text",
             source="model",
-            confidence="medium",
+            confidence="high",
         ),
         "runtime_metadata_fields": _slot(
             "runtime_metadata_fields",
             "no_extra_metadata",
-            source="policy_default",
-            confidence="medium",
+            source="flow_default",
         ),
         "post_processing_goal": _slot(
             "post_processing_goal",
             "summarize_or_overview",
-            source="heuristic",
-        ),
-        "docx_output_mode": _slot(
-            "docx_output_mode",
-            "generated_docx",
-            source="flow_default",
+            source="model",
+            confidence="high",
         ),
     }
+    state.resolved_slots["terminal_output"].evidence = [
+        "quote:user_message:structured_text"
+    ]
+    state.resolved_slots["post_processing_goal"].evidence = [
+        "quote:user_message:summarize_or_overview"
+    ]
     state.architecture_commit = _finalized_commit_for_state(state)
 
     decision = _decision(state=state, ui_language="sv")
@@ -913,13 +952,11 @@ def test_server_confirmation_separates_decisions_from_assumptions() -> None:
         decision.topic: decision.decision for decision in decision.payload.key_decisions
     }
     assert "Indata vid körning" in decisions
-    assert "DOCX-resultat" in decisions
+    assert "Metadata vid körning" in decisions
     assert "Planerad bearbetning" in decisions
     assert "Slutresultat" not in decisions
-    assert "Metadata vid körning" not in decisions
     assert "Syfte med bearbetningen" not in decisions
     assert "Slutresultat: Strukturerat textresultat" in decision.payload.assumptions
-    assert "Metadata vid körning: Inga extra fält" in decision.payload.assumptions
     assert "Syfte med bearbetningen: Sammanfatta eller ge överblick" in (
         decision.payload.assumptions
     )
@@ -935,6 +972,10 @@ def test_server_confirmation_includes_discovery_assumptions() -> None:
             "multiple_documents_case",
         ),
         "pdf_generation_mode": _slot("pdf_generation_mode", "generated_pdf"),
+        "report_disposition": _slot(
+            "report_disposition",
+            "per_source_sections",
+        ),
         "runtime_metadata_fields": _slot(
             "runtime_metadata_fields",
             "no_extra_metadata",
@@ -953,41 +994,31 @@ def test_server_confirmation_includes_discovery_assumptions() -> None:
 
 
 def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:
-    source_to_slot = {
+    source_to_slot: dict[SlotSource, tuple[str, str]] = {
         "structured_answer": ("primary_runtime_input", "audio"),
         "requirements_summary": ("terminal_output", "structured_text"),
         "flow_default": ("docx_output_mode", "generated_docx"),
+        "attachment_structure": ("docx_output_mode", "template_fill_docx"),
         "policy_default": ("runtime_metadata_fields", "no_extra_metadata"),
         "heuristic": ("post_processing_goal", "summarize_or_overview"),
         "model": ("document_material_scope", "single_uploaded_document"),
     }
-    state = PlanningState.empty()
-    state.resolved_slots = {
-        slot_name: _slot(slot_name, value, source=source)
+    bucket_by_source = {
+        source: (
+            "decision"
+            if _slot_is_key_decision(_slot(slot_name, value, source=source))
+            else "assumption"
+        )
         for source, (slot_name, value) in source_to_slot.items()
     }
-    state.architecture_commit = _finalized_commit_for_state(state)
 
-    decision = _decision(state=state, ui_language="sv")
-
-    assert isinstance(decision, ConfirmRequirements)
     assert set(source_to_slot) == set(get_args(SlotSource))
-    decision_topics = {
-        key_decision.topic for key_decision in decision.payload.key_decisions
-    } - {"Planerad bearbetning"}
-    assumption_topics = {
-        assumption.split(":", 1)[0]
-        for assumption in decision.payload.assumptions
-        if ":" in assumption
+    assert bucket_by_source == {
+        "structured_answer": "decision",
+        "requirements_summary": "decision",
+        "flow_default": "decision",
+        "attachment_structure": "assumption",
+        "policy_default": "assumption",
+        "heuristic": "assumption",
+        "model": "assumption",
     }
-    assert decision_topics == {
-        "Indata vid körning",
-        "Slutresultat",
-        "DOCX-resultat",
-    }
-    assert assumption_topics == {
-        "Dokumentunderlag",
-        "Metadata vid körning",
-        "Syfte med bearbetningen",
-    }
-    assert decision_topics.isdisjoint(assumption_topics)

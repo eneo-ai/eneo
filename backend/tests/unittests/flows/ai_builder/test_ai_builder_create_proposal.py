@@ -206,11 +206,18 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
 @pytest.mark.asyncio
 async def test_outline_assembly_rejection_returns_validation_failure_code() -> None:
     state = PlanningState.empty()
-    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
-        name="primary_runtime_input",
-        value="documents",
-        source="structured_answer",
-        confidence="high",
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="document",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["document_to_structured_report"],
+            required_capabilities=["input_document", "output_mode_pass_through"],
+        )
     )
 
     result = await process_create_intent_arguments(

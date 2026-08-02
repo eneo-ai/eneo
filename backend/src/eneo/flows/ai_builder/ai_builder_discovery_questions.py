@@ -174,85 +174,23 @@ def mapped_file_limit_question(
 def comparison_scope_conflict_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
+    base = _catalog_question("comparison_scope", language=language)
     return DiscoveryQuestionSuggestion(
-        question_id="comparison_scope",
+        question_id=base.question_id,
         question=localized_text(
             language,
             "Du valde en fil per körning men vill också jämföra dokument. Vilken jämförelsearkitektur vill du ha?",
             "You chose one file per run but also want document comparison. Which comparison architecture do you want?",
         ),
-        options=(
-            _option(
-                language=language,
-                id="same_run_multiple_documents",
-                swedish_label="Flera dokument i samma körning",
-                english_label="Several documents in the same run",
-                swedish_description="Ladda upp flera dokument tillsammans och jämför dem direkt.",
-                english_description="Upload multiple documents together and compare them directly.",
-                value="same_run_multiple_documents",
-            ),
-            _option(
-                language=language,
-                id="single_document_against_previous",
-                swedish_label="Ett dokument per körning, jämför mot tidigare material",
-                english_label="One document per run, compare against earlier saved material",
-                swedish_description="Ladda upp ett dokument och jämför det mot tidigare sparat material.",
-                english_description="Upload one document and compare it against previous material.",
-                value="single_document_against_previous",
-            ),
-            _option(
-                language=language,
-                id="remove_direct_comparison",
-                swedish_label="Ingen direkt jämförelse behövs",
-                english_label="No direct comparison needed",
-                swedish_description="Behåll en fil per körning och ta bort kravet på direkt jämförelse.",
-                english_description="Keep one file per run and remove the comparison requirement.",
-                value="remove_direct_comparison",
-            ),
-        ),
+        options=base.options,
+        exposure=base.exposure,
     )
 
 
 def comparison_scope_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="comparison_scope",
-        question=localized_text(
-            language,
-            "När ska flödet jämföra dokument?",
-            "When should the flow compare documents?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="same_run_compare",
-                swedish_label="Jämför dokument i samma körning",
-                english_label="Compare documents in the same run",
-                swedish_description="Ladda upp flera dokument tillsammans och jämför dem direkt.",
-                english_description="Upload several documents together and compare them directly.",
-                value="same_run_compare",
-            ),
-            _option(
-                language=language,
-                id="compare_previous_material",
-                swedish_label="Jämför mot tidigare sparat material",
-                english_label="Compare against earlier saved material",
-                swedish_description="Ladda upp ett dokument och jämför det mot tidigare material.",
-                english_description="Upload one document and compare it to stored earlier material.",
-                value="compare_previous_material",
-            ),
-            _option(
-                language=language,
-                id="no_direct_compare",
-                swedish_label="Ingen direkt jämförelse behövs",
-                english_label="No direct comparison needed",
-                swedish_description="Analysera ett dokument i taget utan uttrycklig jämförelse.",
-                english_description="Analyze one document at a time without explicit comparison.",
-                value="no_direct_compare",
-            ),
-        ),
-    )
+    return _catalog_question("comparison_scope", language=language)
 
 
 def terminal_output_question(

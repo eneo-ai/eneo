@@ -365,13 +365,11 @@ def has_same_run_comparison_contradiction(
     if contains_any_phrase(
         answer_texts,
         (
-            "same_run_multiple_documents",
             "same_run_compare",
             "multiple_documents_case",
             "flexible_document_case",
-            "multiple_pdfs_same_run",
-            "single_document_against_previous",
-            "remove_direct_comparison",
+            "compare_previous_material",
+            "no_direct_compare",
         ),
     ):
         return False

@@ -398,6 +398,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
         "primary_runtime_input": "documents",
         "terminal_output": "structured_text",
         "document_material_scope": "flexible_document_case",
+        "comparison_scope": "same_run_compare",
         "report_disposition": "per_source_sections",
         "post_processing_goal": "summarize_or_overview",
         "structured_io_contract": "extract_or_compute_fields",

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
@@ -77,17 +81,46 @@ def _slot(name: str, value: str) -> ResolvedSlot:
     )
 
 
+def _commit_architecture(state: PlanningState) -> None:
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+
+
 def test_compile_context_bridges_flow_input_type_to_authoring_input_type() -> None:
     state = PlanningState.empty()
     state.resolved_slots["primary_runtime_input"] = _slot(
         "primary_runtime_input",
         "documents",
     )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+    _commit_architecture(state)
 
     context = create_compile_context_from_planning_state(state)
 
     assert context is not None
     assert context.runtime_input_type == InputType.DOCUMENT
+
+
+def test_compile_context_does_not_derive_uncommitted_architecture() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "structured_text"),
+    }
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_input_type is None
+    assert context.final_output_type is None
+    assert context.pattern_ids == ()
 
 
 def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_schema() -> (
@@ -98,6 +131,19 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
         "terminal_output",
         "docx_document",
     )
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "single_document_case",
+    )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "template_fill_docx",
+    )
+    _commit_architecture(state)
     state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
@@ -117,6 +163,31 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
     assert [
         hint.variable_name for hint in context.template_placeholder_field_hints
     ] == ["kundnamn"]
+
+
+def test_compile_context_ignores_non_commit_grade_runtime_metadata() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "structured_text"),
+        "document_material_scope": _slot(
+            "document_material_scope",
+            "single_document_case",
+        ),
+    }
+    _commit_architecture(state)
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value="no_extra_metadata",
+        source="model",
+        confidence="medium",
+        evidence=["quote:user_message:example:no extra fields were mentioned"],
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_metadata_state is None
 
 
 def test_policy_default_does_not_override_confirmed_runtime_fields() -> None:
@@ -234,10 +305,15 @@ def test_compile_context_keeps_distinct_long_template_placeholder_names() -> Non
 
 def test_compile_context_binds_declared_output_schema_to_json_terminal() -> None:
     state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "text",
+    )
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
         "structured_json",
     )
+    _commit_architecture(state)
     schema: JsonObject = {
         "type": "object",
         "properties": {"decision": {"type": "string"}},
@@ -264,6 +340,11 @@ def test_compile_context_binds_declared_input_schema_to_json_flow_input() -> Non
         "primary_runtime_input",
         "json",
     )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_json",
+    )
+    _commit_architecture(state)
     schema: JsonObject = {
         "type": "object",
         "properties": {"case_id": {"type": "string"}},
@@ -304,6 +385,7 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
         "terminal_output",
         "structured_json",
     )
+    _commit_architecture(state)
     state.input_schema_evidence = build_schema_evidence(
         json_schema=input_schema,
         source="declared_schema",
@@ -418,10 +500,14 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
         {
             **dict(PlanningState.empty()),
             "resolved_slots": {
+                "primary_runtime_input": _slot(
+                    "primary_runtime_input",
+                    "text",
+                ),
                 "terminal_output": _slot(
                     "terminal_output",
                     "structured_json",
-                )
+                ),
             },
             "file_roles": [
                 FileRoleEvidence(
@@ -470,6 +556,7 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
             ),
         }
     )
+    _commit_architecture(state)
 
     context = create_compile_context_from_planning_state(state)
 
@@ -481,10 +568,19 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
 
 def test_compile_context_keeps_input_schema_out_of_docx_terminal() -> None:
     state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "json",
+    )
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
         "docx_document",
     )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "generated_docx",
+    )
+    _commit_architecture(state)
     state.input_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
@@ -590,8 +686,29 @@ def test_compile_context_derives_analysis_fields_from_result_obligations() -> No
     assert context.source_reader_required_fields == ()
 
 
-def test_compile_context_carries_report_disposition() -> None:
+def test_compile_context_reads_report_disposition_only_from_commit() -> None:
     state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "per_source_sections",
+    )
+    _commit_architecture(state)
     state.resolved_slots["report_disposition"] = _slot(
         "report_disposition",
         "both",
@@ -600,7 +717,7 @@ def test_compile_context_carries_report_disposition() -> None:
     context = create_compile_context_from_planning_state(state)
 
     assert context is not None
-    assert context.report_disposition == "both"
+    assert context.report_disposition == "per_source_sections"
 
 
 def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
@@ -2261,6 +2378,7 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
         "audio_to_artifact_report",
         "form_field_runtime_inputs",
     ]
+    _commit_architecture(state)
 
     context = create_compile_context_from_planning_state(
         state,
@@ -2500,6 +2618,7 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
             provenance="user_confirmed",
         )
     ]
+    _commit_architecture(state)
     context = create_compile_context_from_planning_state(
         state,
         ui_language="sv",

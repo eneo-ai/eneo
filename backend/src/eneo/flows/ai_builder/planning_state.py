@@ -54,7 +54,7 @@ from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 10
+BUILDER_SCHEMA_VERSION: int = 11
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -78,6 +78,7 @@ SlotSource = Literal[
     "structured_answer",
     "requirements_summary",
     "flow_default",
+    "attachment_structure",
     "policy_default",
     "heuristic",
     "model",
@@ -138,6 +139,7 @@ TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX = "content:template_placeholder:"
 TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX = ":template_placeholder_source"
 
 AggregationIntent = Literal["linear", "aggregate", "compare"]
+ReportDisposition = Literal["per_source_sections", "synthesized_overview", "both"]
 
 
 class PlanningStatePayloadTooLargeError(ValueError):
@@ -204,12 +206,19 @@ class ResolvedSlot(_PlanningModel):
         """Whether this slot can drive irreversible planner decisions."""
 
         match self.source:
-            case "structured_answer" | "requirements_summary" | "flow_default":
+            case (
+                "structured_answer"
+                | "requirements_summary"
+                | "flow_default"
+                | "attachment_structure"
+            ):
                 return True
-            case "policy_default":
-                return True
-            case "heuristic" | "model":
-                return self.confidence == "high"
+            case "policy_default" | "heuristic":
+                return False
+            case "model":
+                return self.confidence == "high" and any(
+                    item.startswith("quote:") for item in self.evidence
+                )
         return assert_never(self.source)
 
 
@@ -235,6 +244,7 @@ class ArchitectureCommitDraft(_PlanningModel):
     chosen_patterns: list[str]
     required_capabilities: list[str] = Field(default_factory=list[str])
     aggregation_intent: AggregationIntent = "linear"
+    report_disposition: ReportDisposition | None = None
 
     @model_validator(mode="after")
     def _validate_chosen_patterns(self) -> "ArchitectureCommitDraft":

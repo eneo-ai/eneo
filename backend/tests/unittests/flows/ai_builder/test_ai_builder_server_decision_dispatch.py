@@ -120,6 +120,7 @@ def _confirmed_state() -> PlanningState:
             "runtime_metadata_fields",
             "no_extra_metadata",
         ),
+        "report_disposition": _slot("report_disposition", "both"),
     }
     state.architecture_commit = _finalized_commit_for_state(state)
     return state

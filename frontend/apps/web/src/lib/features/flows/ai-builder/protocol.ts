@@ -410,7 +410,15 @@ const requirementsSummaryEventDataSchema = z.object({
   input_description: z.string(),
   output_description: z.string(),
   assumptions: stringArraySchema.optional(),
-  manual_setup_notes: stringArraySchema.optional()
+  manual_setup_notes: stringArraySchema.optional(),
+  resolved_requirements: z
+    .array(
+      z.object({
+        requirement_id: z.string(),
+        selected_value: z.string()
+      })
+    )
+    .optional()
 }) satisfies z.ZodType<RequirementsSummary>;
 
 const planEventDataSchema = z.strictObject({

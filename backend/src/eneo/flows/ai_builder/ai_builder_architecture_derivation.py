@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     derive_aggregation_intent_from_slots,
+    report_disposition_is_relevant,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import derive_output_mode
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
+    ReportDisposition,
     StepTriple,
 )
 from eneo.flows.enums import (
@@ -87,14 +89,15 @@ def derive_architecture_commit_draft(
             document_material_input=input_type
             in {FlowInputType.DOCUMENT, FlowInputType.FILE},
         ),
+        report_disposition=_report_disposition_from_state(state),
     )
 
 
 def _input_type_from_state(state: PlanningState) -> FlowInputType | None:
-    slot = state.resolved_slots.get("primary_runtime_input")
-    if slot is None:
+    value = _commit_grade_slot_value(state, "primary_runtime_input")
+    if value is None:
         return None
-    return flow_input_type_from_primary_runtime_input_value(slot.value)
+    return flow_input_type_from_primary_runtime_input_value(value)
 
 
 def flow_input_type_from_primary_runtime_input_value(
@@ -116,8 +119,8 @@ def flow_input_type_from_primary_runtime_input_value(
 
 
 def _output_type_from_state(state: PlanningState) -> FlowOutputType | None:
-    slot = state.resolved_slots.get("terminal_output")
-    if slot is None:
+    value = _commit_grade_slot_value(state, "terminal_output")
+    if value is None:
         return None
     return {
         "docx": FlowOutputType.DOCX,
@@ -128,7 +131,7 @@ def _output_type_from_state(state: PlanningState) -> FlowOutputType | None:
         "text": FlowOutputType.TEXT,
         "structured_json": FlowOutputType.JSON,
         "structured_text": FlowOutputType.TEXT,
-    }.get(slot.value)
+    }.get(value)
 
 
 def _output_mode_from_state(
@@ -136,12 +139,10 @@ def _output_mode_from_state(
     input_type: FlowInputType,
     output_type: FlowOutputType,
 ) -> FlowOutputMode:
-    docx_mode = state.resolved_slots.get("docx_output_mode")
+    docx_mode = _commit_grade_slot_value(state, "docx_output_mode")
     document_delivery_mode = (
         "template_fill"
-        if output_type is FlowOutputType.DOCX
-        and docx_mode is not None
-        and docx_mode.value == "template_fill_docx"
+        if output_type is FlowOutputType.DOCX and docx_mode == "template_fill_docx"
         else "generated"
     )
     return FlowOutputMode(
@@ -166,10 +167,10 @@ def _chosen_patterns_for_state(
         return []
     pattern_ids.append(primary)
 
-    runtime_metadata = state.resolved_slots.get("runtime_metadata_fields")
+    runtime_metadata = _commit_grade_slot_value(state, "runtime_metadata_fields")
     if (
         runtime_metadata is not None
-        and runtime_metadata.value != "no_extra_metadata"
+        and runtime_metadata != "no_extra_metadata"
         and "form_field_runtime_inputs" not in pattern_ids
     ):
         pattern_ids.append("form_field_runtime_inputs")
@@ -217,6 +218,36 @@ def _primary_pattern_id(
     if input_type is FlowInputType.TEXT and output_type is FlowOutputType.TEXT:
         return "summarize_text"
     return None
+
+
+def _commit_grade_slot_value(state: PlanningState, slot_name: str) -> str | None:
+    slot = state.resolved_slots.get(slot_name)
+    if slot is None or not slot.is_commit_grade:
+        return None
+    return slot.value
+
+
+def _report_disposition_from_state(state: PlanningState) -> ReportDisposition | None:
+    value = _commit_grade_slot_value(state, "report_disposition")
+    if not report_disposition_is_relevant(
+        primary_runtime_input=_commit_grade_slot_value(
+            state,
+            "primary_runtime_input",
+        ),
+        terminal_output=_commit_grade_slot_value(state, "terminal_output"),
+        document_material_scope=_commit_grade_slot_value(
+            state,
+            "document_material_scope",
+        ),
+        docx_output_mode=_commit_grade_slot_value(state, "docx_output_mode"),
+        unresolved_values_are_relevant=False,
+    ):
+        return None
+    match value:
+        case "per_source_sections" | "synthesized_overview" | "both":
+            return value
+        case _:
+            return None
 
 
 def _step_output_mode_value(
