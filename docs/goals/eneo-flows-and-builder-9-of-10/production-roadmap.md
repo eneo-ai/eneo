@@ -199,13 +199,22 @@ external release gate (item 10); BM0.2 is external (item 10).
    `underlag`, is deleted with no tolerant readers. (d) serve RAG policy ceilings
    through the existing settings
    response and delete the duplicated admin-page TS constants — no generic
-   constraints-discovery API. (e) narrow architecture-impact commitment to
-   explicit, flow-default, requirements-summary, or cited high-confidence model
-   evidence without changing the already-honest confirmation buckets. **LANDED
-   in this change.** (f) move
-   aggregate classifier transcript admission into the existing model-aware/admin
-   budget owner; keep named per-source parser-shape invariants fixed until item
-   10 benchmarks them. (g) keep ask/progress/plan/diagram as typed server events
+   constraints-discovery API. (e) **LANDED `7fa0c6a16`** — architecture-impact
+   commitment admits only explicit, flow-default, requirements-summary, or cited
+   high-confidence model evidence without changing the honest confirmation
+   buckets. A 2026-08-02 live run then exposed a separate action-policy defect:
+   neutral defaults and heuristics were deliberately non-commit-grade but every
+   such architecture slot was forced back into the ask set. Land the bounded
+   journey receipt in item 10, then delete that forced-ask path, freeze confirmed
+   visible slot decisions as typed requirements-summary evidence, make catalog
+   custom-answer support honest, and route first-question order through the
+   existing discovery-priority owner. No new assumption ledger, state taxonomy,
+   or phrase family. (f) persist every classifier attempt with a closed
+   resolved/no-content/parse-failed/skipped-no-resolvable-slots outcome; add no
+   retry policy. (g) move aggregate classifier transcript admission into the
+   existing model-aware/admin budget owner only after those attempt outcomes are
+   measurable; keep named per-source parser-shape invariants fixed until item 10
+   benchmarks them. (h) keep ask/progress/plan/diagram as typed server events
    and frontend projections, delete the dead Builder MCP label-resolver path, and
    add no model-visible presentation tools; an end-result preview is a later
    plan-bound structural projection only if user-value evidence justifies it.
@@ -217,7 +226,7 @@ external release gate (item 10); BM0.2 is external (item 10).
    four source-owned synchronous export guards, distinguishes retained-byte
    preflight from the additional carried-text check, and prohibits
    material-influence wording through executable contract tests.
-10. **Release proof** *(external gates, tracked not implemented here)* —
+10. **Release proof** *(tracked harness plus external live gates)* —
     The durable live evaluation owner is
     `backend/scripts/ai_builder_api_battle_cases.json`: currently 120 unique
     prompts across 46 municipal domains, including vague first turns,
@@ -234,8 +243,19 @@ external release gate (item 10); BM0.2 is external (item 10).
     assumptions, first-proposal outcome, repair rounds/codes, plan topology,
     directional input/output contract use, review moments, and authoring
     token/call/latency usage. Report true first-pass success separately from
-    repaired success and terminal failure; include p50/p95 values rather than
-    averages alone.
+    repaired success and terminal failure. Raw per-run facts are canonical;
+    compute p50/p95 only for the frozen three-repetition formal baseline, not in
+    single-repetition exploratory receipts.
+    The 2026-08-02 120-case run is diagnostic, not a numeric comparison baseline:
+    its harness stopped at an unconfigured question and refused a repeated
+    question id, so the observed 72/74 plan-ready stops and 321,408 tokens mix
+    product over-questioning with evaluator truncation. Source inspection still
+    proves the forced-ask defects. The v2 journey contract first records ordered
+    question occurrences, exact configured answers, reopening, termination, and
+    first-pass versus repaired outcome. Run the locked 12-case smoke against the
+    unchanged pre-fix build to decide whether a full pre-fix v2 baseline is worth
+    its cost; otherwise use deterministic acceptance tests plus an absolute
+    post-fix floor and claim no numeric before/after lift.
     Question review also records whether the question is answerable from the
     user's perspective, non-leading, offers sufficient option coverage or a
     usable custom-answer path, resolves after its answer, and avoids reopening
@@ -407,13 +427,17 @@ plan above controls all other ordering.
   text resolves only missing dimensions. (c) **LANDED `3409a8409`** — correct
   the known neutral vocabulary defects, delete `case_like_flow` and the unused
   deterministic document-category question, and pin the resulting question topology; generic
-  source-material wording no longer invents a domain or purpose. (d)
-  architecture-impact dimensions
-  never commit from policy defaults or heuristics; confirmation bucketing stays
-  unchanged. **LANDED in this change.** (e) aggregate classifier transcript admission joins the existing
-  model-aware/admin budget owner while source-count and structured-value bounds
-  remain named parser-shape invariants pending item 10. No classifier expansion
-  for intentionally structured-only lanes. *(L)*
+  source-material wording no longer invents a domain or purpose. (d) **LANDED
+  `7fa0c6a16`** — architecture-impact dimensions do not commit from policy
+  defaults or heuristics and confirmation buckets remain honest. (e) current
+  corrective series: the v2 journey receipt lands first; then delete the
+  action-policy forced-ask path, project confirmed assumptions into typed
+  requirements-summary evidence, close custom-answer emission/validation, and
+  reuse discovery priority for the first question. (f) persist typed classifier
+  attempt outcomes. (g) only then join aggregate classifier transcript admission
+  to the existing model-aware/admin budget owner while source-count and
+  structured-value bounds remain named parser-shape invariants pending item 10.
+  No classifier expansion for intentionally structured-only lanes. *(L)*
 - **B9** (directional JSON contracts, three ordered slices): (a) **LANDED
   `0b7a450df`** — schema presence no longer changes terminal output before
   output direction is owned; a runtime-input schema plus requested generated
