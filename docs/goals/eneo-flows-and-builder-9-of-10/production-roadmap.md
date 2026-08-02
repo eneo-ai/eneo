@@ -42,6 +42,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-02 | **Directional Builder JSON contract compilation**: resolved input-schema evidence now reaches the first Flow-input JSON consumer while independently resolved output evidence remains on the terminal JSON contract; compiler-owned raw JSON bindings are removed only at that typed boundary, downstream step contracts remain independent, composite JSON/form input fails explicitly without futile model-repair turns, and a real JSON golden proves both declared contracts survive canonical authoring materialization (this change; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-01 | **Explicit Builder schema direction**: one neutral schema-evidence owner now retains bounded JSON Schema candidates with complete provenance, while `PlanningState` stores independently selected input and output evidence; explicit structured answers or citation-backed user intent can assign the same or different candidates to either boundary, a replay-safe bilingual multi-select question resolves genuine ambiguity, and reference-only schemas remain unassigned; attachment-only evidence cannot choose direction, schemas do not reopen the terminal output, and the public overflow error plus generated client use one direction-neutral contract (this change) |
 | 2026-08-01 | **Canonical Builder discovery evidence**: free-text replies now reach one cited classifier instead of deterministic option matching, and accepted typed planning slots replace conflicting raw signals in the discovery profile while raw text still fills genuinely missing input, output, and output-submode dimensions; a resolved primary input projects one coherent architecture and cannot reopen a stale mixed-input question (`cbc1132e2`, `65af265bb`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-01 | **Explicit Builder question exhaustion**: architecture candidates and quality questions with an explicit `ask` policy remain askable after the normal user-question budget; every registered quality question has a terminal policy if it reaches the budget decision—to ask, surface a no-runtime-fields assumption, or reject an irrelevant refinement; rejected candidates still do not consume a question family, now pinned by a behavior test, and the assumption survives the public confirmation and persisted requirements contract (`414177328..631f2504e`, Codex and Claude gates green 8/10, no blockers) |
@@ -387,11 +388,12 @@ plan above controls all other ordering.
   parsing proves schema shape, while explicit or cited user evidence assigns a
   boundary direction and one typed question resolves genuine ambiguity; a schema
   may remain validation/reference material; provenance and candidate ceilings
-  refuse explicitly instead of truncating; (c) compile input evidence onto the
-  first Flow-input JSON consumer and output evidence onto the terminal JSON
-  contract, then extend the real JSON golden to assert both contracts. One parser,
-  one evidence type, and one bounded in-state resolution aggregate—not a reusable
-  schema registry or second ledger. *(M)*
+  refuse explicitly instead of truncating; (c) **LANDED in this change** — compile
+  input evidence onto the first Flow-input JSON consumer and output evidence onto
+  the terminal JSON contract; the real JSON golden asserts both contracts through
+  canonical authoring, and unsupported composite bindings fail without entering
+  model repair. One parser, one evidence type, and one bounded in-state resolution
+  aggregate—not a reusable schema registry or second ledger. *(M)*
 - **B10** (precise semantic dataflow, three ordered slices): (a) project exact
   confirmed form-field names/types from `PlanningState` into proposal context,
   keep existing `uses_form_fields` as the semantic consumer contract, delete the

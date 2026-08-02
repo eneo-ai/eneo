@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     DETAILED_CASE_METADATA,
 )
+from eneo.flows.ai_builder.ai_builder_schema_evidence import build_schema_evidence
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -426,6 +427,73 @@ async def test_outline_processing_uses_runtime_hint_source_from_conversation() -
     assert spec.steps[0].input_bindings is not None
     assert "{{ flow_input.malgrupp }}" in spec.steps[0].input_bindings["question"]
     await assert_create_spec_prepares_through_authoring_command_async(spec)
+
+
+@pytest.mark.asyncio
+async def test_server_owned_json_input_conflict_skips_model_repair() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="json",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=DETAILED_CASE_METADATA,
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+    state.input_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"case_id": {"type": "string"}},
+        },
+        source="declared_schema",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
+        confidence="high",
+        evidence=["file:00000000-0000-0000-0000-000000000701:input_schema"],
+    )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="case_type",
+            label="Case type",
+            provenance="runtime_inferred",
+        )
+    ]
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        await process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[],
+            arguments={
+                "flow_name": "Normalize case JSON",
+                "plan_rationale": "Normalize the submitted case.",
+                "steps": [
+                    {
+                        "name": "Normalize case",
+                        "instructions": "Normalize the submitted case.",
+                        "output_type": "json",
+                    }
+                ],
+            },
+            tool_call_id="call-json-input-schema-with-server-fields",
+            available_model_refs=None,
+            available_kb_refs=None,
+            planning_state=state,
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "flow_input_schema_composite_bindings_unsupported"
+    )
 
 
 @pytest.mark.asyncio

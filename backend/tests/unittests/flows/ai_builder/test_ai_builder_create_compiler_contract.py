@@ -178,6 +178,156 @@ def test_compile_context_binds_declared_output_schema_to_json_terminal() -> None
     assert context.terminal_output_schema == schema
 
 
+def test_compile_context_binds_declared_input_schema_to_json_flow_input() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "json",
+    )
+    schema: JsonObject = {
+        "type": "object",
+        "properties": {"case_id": {"type": "string"}},
+        "required": ["case_id"],
+    }
+    state.input_schema_evidence = build_schema_evidence(
+        json_schema=schema,
+        source="declared_schema",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
+        confidence="high",
+        evidence=["file:00000000-0000-0000-0000-000000000701:json_schema_attachment"],
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_input_type == InputType.JSON
+    assert context.flow_input_schema == schema
+
+
+def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
+    input_schema: JsonObject = {
+        "type": "object",
+        "properties": {"case_id": {"type": "string"}},
+        "required": ["case_id"],
+    }
+    output_schema: JsonObject = {
+        "type": "object",
+        "properties": {"decision": {"type": "string"}},
+        "required": ["decision"],
+    }
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "json",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_json",
+    )
+    state.input_schema_evidence = build_schema_evidence(
+        json_schema=input_schema,
+        source="declared_schema",
+        source_file_ids=("00000000-0000-0000-0000-000000000001",),
+        confidence="high",
+        evidence=["file:00000000-0000-0000-0000-000000000701:input_schema"],
+    )
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema=output_schema,
+        source="declared_schema",
+        source_file_ids=("00000000-0000-0000-0000-000000000002",),
+        confidence="high",
+        evidence=["file:00000000-0000-0000-0000-000000000702:output_schema"],
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Normalize case JSON",
+            "plan_rationale": "Validate the input and return a decision.",
+            "steps": [
+                {
+                    "name": "Normalize case input",
+                    "instructions": "Validate the case identifier for processing.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Validated case identifier.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Decide case",
+                    "instructions": "Return the decision for the validated case.",
+                    "output_type": "json",
+                },
+            ],
+        }
+    )
+
+    context = create_compile_context_from_planning_state(state)
+    assert context is not None
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    assert len(compiled.steps) == 2
+    assert compiled.steps[0].input_contract == input_schema
+    assert compiled.steps[0].input_bindings is None
+    assert compiled.steps[1].input_source is InputSource.PREVIOUS_STEP
+    assert compiled.steps[1].input_contract == compiled.steps[0].output_contract
+    assert compiled.steps[1].input_contract != input_schema
+    assert compiled.steps[1].output_contract == output_schema
+    assert validate_spec(compiled).valid
+
+
+def test_compile_context_rejects_input_schema_for_non_json_runtime_input() -> None:
+    with pytest.raises(ValueError, match="requires JSON runtime input"):
+        CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            flow_input_schema={"type": "object"},
+        )
+
+
+def test_compiler_rejects_input_schema_with_composite_flow_input_bindings() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Normalize case JSON",
+            "plan_rationale": "Use the runtime JSON and the selected case type.",
+            "input_fields": [
+                {
+                    "variable_name": "case_type",
+                    "label": "Case type",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Normalize case",
+                    "instructions": "Validate the case for the selected case type.",
+                    "output_type": "json",
+                    "uses_form_fields": ["case_type"],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.JSON,
+                final_output_type=OutputType.JSON,
+                flow_input_schema={
+                    "type": "object",
+                    "properties": {"case_id": {"type": "string"}},
+                },
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "flow_input_schema_composite_bindings_unsupported"
+    )
+
+
 def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
     file_id = UUID("00000000-0000-0000-0000-000000000714")
     schema: JsonObject = {

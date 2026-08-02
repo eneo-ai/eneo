@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
+from typing import cast
 
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     derive_aggregation_intent_from_slots,
@@ -54,14 +56,19 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
 )
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
+    InputSource,
     InputType,
     OutputMode,
     OutputType,
 )
-from eneo.flows.flow_variable_definitions import template_placeholder_form_field_name
+from eneo.flows.flow_variable_definitions import (
+    FLOW_INPUT_JSON_ALIAS,
+    template_placeholder_form_field_name,
+)
 from eneo.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -93,6 +100,7 @@ class CreateCompileContext:
     selected_template_count: int | None = None
     selected_template_placeholders: tuple[str, ...] | None = None
     aggregation_intent: AggregationIntent = "linear"
+    flow_input_schema: JsonObject | None = None
     terminal_output_schema: JsonObject | None = None
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
     result_contract_output_fields: tuple[StructuredFieldDraft, ...] = ()
@@ -101,6 +109,13 @@ class CreateCompileContext:
     def __post_init__(self) -> None:
         if self.runtime_input_type is InputType.ANY:
             raise ValueError("CreateCompileContext.runtime_input_type cannot be ANY")
+        if (
+            self.flow_input_schema is not None
+            and self.runtime_input_type is not InputType.JSON
+        ):
+            raise ValueError(
+                "CreateCompileContext.flow_input_schema requires JSON runtime input"
+            )
         if self.runtime_max_files is not None and self.runtime_max_files < 1:
             raise ValueError("runtime_max_files must be at least 1 when provided")
 
@@ -236,6 +251,10 @@ def compile_create_intent_to_spec(
             },
         )
     else:
+        assembly_spec = _apply_flow_input_schema(
+            assembly_spec,
+            flow_input_schema=context.flow_input_schema if context else None,
+        )
         _log_dropped_primary_input_shadow_fields(
             field_names=dropped_primary_input_field_names,
             runtime_input_type=runtime_input_type,
@@ -247,6 +266,58 @@ def compile_create_intent_to_spec(
             selected_template_count=context.selected_template_count,
             placeholders=context.selected_template_placeholders,
         )
+
+
+def _apply_flow_input_schema(
+    spec: FlowDraftSpecCore,
+    *,
+    flow_input_schema: JsonObject | None,
+) -> FlowDraftSpecCore:
+    if flow_input_schema is None:
+        return spec
+
+    target_index = next(
+        (
+            index
+            for index, step in enumerate(spec.steps)
+            if step.input_source is InputSource.FLOW_INPUT
+            and step.input_type is InputType.JSON
+        ),
+        None,
+    )
+    if target_index is None:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail="The resolved JSON input schema has no Flow-input JSON consumer.",
+            log_context={"failure_code": "flow_input_schema_target_missing"},
+        )
+
+    target_step = spec.steps[target_index]
+    raw_json_binding = {"question": f"{{{{ {FLOW_INPUT_JSON_ALIAS} }}}}"}
+    if target_step.input_bindings not in (None, raw_json_binding):
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail=(
+                "The resolved JSON input schema cannot be combined with "
+                "additional Flow-input bindings."
+            ),
+            log_context={
+                "failure_code": "flow_input_schema_composite_bindings_unsupported",
+                "step_index": target_index + 1,
+            },
+        )
+
+    compiled_steps = list(spec.steps)
+    compiled_steps[target_index] = target_step.model_copy(
+        update={
+            "input_bindings": None,
+            "input_contract": cast(
+                FlowPersistedJsonObject,
+                deepcopy(flow_input_schema),
+            ),
+        }
+    )
+    return spec.model_copy(update={"steps": compiled_steps})
 
 
 def _raise_for_unplaced_create_form_fields(
@@ -404,6 +475,10 @@ def create_compile_context_from_planning_state(
         aggregation_intent=_aggregation_intent_for_compile_context(
             planning_state,
             architecture,
+        ),
+        flow_input_schema=_flow_input_schema_from_planning_state(
+            planning_state,
+            runtime_input_type=runtime_input_type,
         ),
         terminal_output_schema=_terminal_output_schema_from_planning_state(
             planning_state,
@@ -698,6 +773,17 @@ def _terminal_output_schema_from_planning_state(
     if evidence.source == "template_placeholders":
         return None
     if final_output_type != OutputType.JSON:
+        return None
+    return evidence.json_schema
+
+
+def _flow_input_schema_from_planning_state(
+    state: PlanningState,
+    *,
+    runtime_input_type: InputType | None,
+) -> JsonObject | None:
+    evidence = state.input_schema_evidence
+    if evidence is None or runtime_input_type is not InputType.JSON:
         return None
     return evidence.json_schema
 

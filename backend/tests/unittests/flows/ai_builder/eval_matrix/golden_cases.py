@@ -70,6 +70,7 @@ def _step(
     input_type: InputType = InputType.TEXT,
     output_type: OutputType = OutputType.TEXT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
+    input_contract: FlowPersistedJsonObject | None = None,
     output_contract: FlowPersistedJsonObject | None = None,
 ) -> StepSpec:
     return StepSpec(
@@ -80,6 +81,7 @@ def _step(
         input_type=input_type,
         output_type=output_type,
         output_mode=output_mode,
+        input_contract=input_contract,
         output_contract=output_contract,
     )
 
@@ -134,6 +136,25 @@ def _extract_structured_fields() -> BuildableGoldenCase:
 
 
 def _json_input_to_structured_output_with_contract() -> BuildableGoldenCase:
+    input_contract: FlowPersistedJsonObject = {
+        "type": "object",
+        "properties": {
+            "records": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "record_id": {"type": "string"},
+                        "amount": {"type": "number"},
+                    },
+                    "required": ["record_id", "amount"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["records"],
+        "additionalProperties": False,
+    }
     output_contract: FlowPersistedJsonObject = {
         "type": "object",
         "properties": {
@@ -173,6 +194,7 @@ def _json_input_to_structured_output_with_contract() -> BuildableGoldenCase:
                 "enligt det deklarerade kontraktet.",
                 input_type=InputType.JSON,
                 output_type=OutputType.JSON,
+                input_contract=input_contract,
                 output_contract=output_contract,
             )
         ],

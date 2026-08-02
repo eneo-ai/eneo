@@ -216,6 +216,7 @@ def _assert_materialized_steps_match_compiled(
         assert materialized.output_config == compiled.output_config
         assert materialized.review_policy == compiled.review_policy
         # Anchor to the declared spec; this catches compiler contract drops.
+        assert compiled.input_contract == declared.input_contract
         assert compiled.output_contract == declared.output_contract
 
 

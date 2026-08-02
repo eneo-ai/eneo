@@ -230,6 +230,7 @@ def test_matrix_contains_json_input_output_schema_golden() -> None:
         for step in case.spec.steps
         if step.input_type is InputType.JSON
         and step.output_type is OutputType.JSON
+        and step.input_contract is not None
         and step.output_contract is not None
     ]
     assert schema_steps
