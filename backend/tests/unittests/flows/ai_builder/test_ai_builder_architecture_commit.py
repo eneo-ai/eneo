@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommitDraft,
+    ReportDisposition,
     StepTriple,
 )
 
@@ -23,6 +24,7 @@ def _draft(
     chosen_patterns: list[str] | None = None,
     required_capabilities: list[str] | None = None,
     aggregation_intent: AggregationIntent = "linear",
+    report_disposition: ReportDisposition | None = None,
 ) -> ArchitectureCommitDraft:
     return ArchitectureCommitDraft(
         tuples_chain=[
@@ -37,6 +39,7 @@ def _draft(
         if required_capabilities is not None
         else ["input_text", "output_mode_pass_through"],
         aggregation_intent=aggregation_intent,
+        report_disposition=report_disposition,
     )
 
 
@@ -71,6 +74,13 @@ def test_hash_changes_when_aggregation_intent_changes() -> None:
     aggregate = _draft(aggregation_intent="aggregate")
 
     assert architecture_commit_hash(linear) != architecture_commit_hash(aggregate)
+
+
+def test_hash_changes_when_report_disposition_changes() -> None:
+    per_source = _draft(report_disposition="per_source_sections")
+    combined = _draft(report_disposition="both")
+
+    assert architecture_commit_hash(per_source) != architecture_commit_hash(combined)
 
 
 def test_finalize_normalizes_naive_clock_to_utc() -> None:

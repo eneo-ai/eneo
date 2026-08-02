@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_step_input_bindings,
     derive_input_contract,
     derive_output_mode,
+    effective_input_type_for_bindings,
     make_plan_step_ref,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
@@ -286,13 +287,19 @@ def _compile_existing_step_modification(
             prior_steps=prior_steps,
             require_declared_previous_fields=True,
         )
-        input_contract = derive_input_contract(
+        effective_input_type = effective_input_type_for_bindings(
             input_source=step.input_source,
             input_type=step.input_type,
+            input_bindings=input_bindings,
+        )
+        input_contract = derive_input_contract(
+            input_source=step.input_source,
+            input_type=effective_input_type,
             prior_steps=prior_steps,
             input_bindings=input_bindings,
         )
         updates: dict[str, object | None] = {
+            "input_type": effective_input_type,
             "input_bindings": input_bindings,
             "input_contract": input_contract,
         }

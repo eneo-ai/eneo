@@ -106,6 +106,23 @@ def _route() -> ResolvedCompletionModelRoute:
     )
 
 
+def _committed_text_planning_state() -> PlanningState:
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=[],
+        )
+    )
+    return state
+
+
 def _message_groups(
     messages: list[dict[str, object]],
 ) -> tuple[ProposalMessageGroup, ...]:
@@ -350,6 +367,49 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "planning_state",
+    [None, PlanningState.empty()],
+    ids=["missing-state", "missing-commit"],
+)
+async def test_create_propose_flow_without_committed_architecture_returns_error(
+    planning_state: PlanningState | None,
+) -> None:
+    submission = _make_submission()
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Text summary",
+            "plan_rationale": "Summarize submitted text.",
+            "steps": [{"name": "Summarize", "instructions": "Summarize the text."}],
+        },
+        tool_call_id="call-missing-architecture",
+    )
+    ctx = _make_context(
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        request_id="req-missing-architecture",
+        planning_state=planning_state,
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction"
+    ) as repair:
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx,
+            tool_call=tool_call,
+        )
+        assert dispatched is not None
+        events = _wire_events([event async for event in dispatched])
+
+    repair.assert_not_called()
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "architecture_materialization_failed"
+    assert payload["phase"] == "proposal"
+    assert payload["details"]["failure_code"] == "architecture_commit_missing"
+
+
+@pytest.mark.asyncio
 async def test_create_propose_flow_architecture_error_returns_event_without_repair() -> (
     None
 ):
@@ -486,6 +546,7 @@ async def test_create_propose_flow_ambiguous_structured_source_returns_event_wit
         usage_tracker=tracker,
         request_id="req-ambiguous-structured-source",
         text_content="",
+        planning_state=_committed_text_planning_state(),
     )
 
     async def _unexpected_repair_events(_request):
@@ -560,6 +621,7 @@ async def test_create_propose_flow_retryable_assembly_rejection_invokes_repair()
         usage_tracker=tracker,
         request_id="req-assembly-rejection",
         text_content="",
+        planning_state=_committed_text_planning_state(),
     )
     process_outline = AsyncMock(
         return_value=ToolProcessingResult(
@@ -670,7 +732,7 @@ async def test_create_propose_flow_re_raises_planning_state_payload_too_large() 
         pytest.raises(PlanningStatePayloadTooLargeError) as exc_info,
     ):
         dispatched = submission.dispatch_submission_tool_call(
-            ctx=_make_context(),
+            ctx=_make_context(planning_state=_committed_text_planning_state()),
             tool_call=tool_call,
         )
         assert dispatched is not None
@@ -704,7 +766,7 @@ async def test_create_propose_flow_keeps_unrelated_post_provider_failure_unknown
         pytest.raises(AIBuilderProviderOutcomeUnknownException),
     ):
         dispatched = submission.dispatch_submission_tool_call(
-            ctx=_make_context(),
+            ctx=_make_context(planning_state=_committed_text_planning_state()),
             tool_call=tool_call,
         )
         assert dispatched is not None
@@ -736,7 +798,8 @@ async def test_create_propose_flow_user_message_emits_text_event() -> None:
         ),
     ):
         dispatched = submission.dispatch_submission_tool_call(
-            ctx=_make_context(), tool_call=tool_call
+            ctx=_make_context(planning_state=_committed_text_planning_state()),
+            tool_call=tool_call,
         )
         assert dispatched is not None
         events = _wire_events([event async for event in dispatched])
@@ -774,7 +837,8 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
         ),
     ):
         dispatched = submission.dispatch_submission_tool_call(
-            ctx=_make_context(), tool_call=tool_call
+            ctx=_make_context(planning_state=_committed_text_planning_state()),
+            tool_call=tool_call,
         )
         assert dispatched is not None
         events = _wire_events([event async for event in dispatched])
@@ -896,6 +960,7 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
             ctx=_make_context(
                 text_content="Provider prose",
                 assistant_metadata=assistant_metadata,
+                planning_state=_committed_text_planning_state(),
             ),
             tool_call=tool_call,
         )
@@ -931,6 +996,7 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
     ctx = _make_context(
         conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
         request_id="req-outline-retry",
+        planning_state=_committed_text_planning_state(),
     )
     process_outline = AsyncMock(
         return_value=ToolProcessingResult(
@@ -1007,7 +1073,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
         target_kind=TargetKind.CREATE,
         assistant_snapshots=None,
         request_id="req-outline-retry-finalize",
-        planning_state=None,
+        planning_state=_committed_text_planning_state(),
         plan_edit_context=None,
         prior_plan_for_revision=None,
         usage_tracker=tracker,

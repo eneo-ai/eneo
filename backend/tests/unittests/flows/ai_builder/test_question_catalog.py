@@ -51,8 +51,6 @@ _NON_SLOT_PRIORITY_ISSUE_IDS = frozenset(
         "case_scope",
         "external_delivery_unsupported",
         "flow_input_architecture",
-        "document_kind",
-        "comparison_scope",
         "final_pdf_type",
         "output_reader",
         "final_output_scope",
@@ -64,8 +62,6 @@ _NON_SLOT_FAMILY_ISSUE_IDS = frozenset(
         "comparison_scope_conflict",
         "case_scope",
         "flow_input_architecture",
-        "document_kind",
-        "comparison_scope",
         "final_pdf_type",
         "output_reader",
         "final_output_scope",
@@ -797,6 +793,60 @@ class TestDomainNeutrality:
 
 
 _SLOT_BACKED_DISCOVERY_GOLDEN = {
+    ("comparison_scope", "sv"): {
+        "question_id": "comparison_scope",
+        "question": "När ska flödet jämföra dokument?",
+        "options": (
+            (
+                "same_run_compare",
+                "Jämför dokument i samma körning",
+                "Ladda upp flera dokument tillsammans och jämför dem direkt.",
+                "same_run_compare",
+            ),
+            (
+                "compare_previous_material",
+                "Jämför mot tidigare sparat material",
+                "Ladda upp ett dokument och jämför det mot tidigare material.",
+                "compare_previous_material",
+            ),
+            (
+                "no_direct_compare",
+                "Ingen direkt jämförelse behövs",
+                "Analysera ett dokument i taget utan uttrycklig jämförelse.",
+                "no_direct_compare",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("comparison_scope", "en"): {
+        "question_id": "comparison_scope",
+        "question": "When should the flow compare documents?",
+        "options": (
+            (
+                "same_run_compare",
+                "Compare documents in the same run",
+                "Upload several documents together and compare them directly.",
+                "same_run_compare",
+            ),
+            (
+                "compare_previous_material",
+                "Compare against earlier saved material",
+                "Upload one document and compare it to stored earlier material.",
+                "compare_previous_material",
+            ),
+            (
+                "no_direct_compare",
+                "No direct comparison needed",
+                "Analyze one document at a time without explicit comparison.",
+                "no_direct_compare",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
     ("primary_runtime_input", "sv"): {
         "question_id": "primary_runtime_input",
         "question": "Vilket material ska flödet ta emot vid körning?",
@@ -1365,17 +1415,17 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
                 "no_extra_metadata",
             ),
             (
-                "basic_case_metadata",
+                "basic_runtime_metadata",
                 "Lägg till grundläggande metadata",
                 "Låt användaren ange några enkla återanvändbara fält.",
-                "basic_case_metadata",
+                "basic_runtime_metadata",
             ),
             (
-                "detailed_case_metadata",
+                "detailed_runtime_metadata",
                 "Lägg till rikare metadatafält",
                 "Samla flera återanvändbara fält som referenser, språk, fokus, "
                 "datum eller ansvarig avdelning.",
-                "detailed_case_metadata",
+                "detailed_runtime_metadata",
             ),
         ),
         "selection_mode": "single",
@@ -1393,17 +1443,17 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
                 "no_extra_metadata",
             ),
             (
-                "basic_case_metadata",
+                "basic_runtime_metadata",
                 "Add basic metadata",
                 "Let the user enter a few simple reusable fields.",
-                "basic_case_metadata",
+                "basic_runtime_metadata",
             ),
             (
-                "detailed_case_metadata",
+                "detailed_runtime_metadata",
                 "Add richer metadata fields",
                 "Collect several reusable inputs such as references, language, focus, "
                 "dates, or responsible department.",
-                "detailed_case_metadata",
+                "detailed_runtime_metadata",
             ),
         ),
         "selection_mode": "single",

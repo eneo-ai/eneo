@@ -14,9 +14,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     document_cardinality_is_vague as _document_cardinality_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    document_kind_is_vague as _document_kind_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     external_delivery_requested as _external_delivery_requested,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
@@ -84,7 +81,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
 from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
     comparison_scope_question,
-    document_kind_question,
     document_material_scope_question,
     docx_output_mode_question,
     external_delivery_internal_output_question,
@@ -368,26 +364,6 @@ def _build_flow_input_architecture_issue(
     )
 
 
-def _build_document_kind_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _document_kind_is_vague(profile):
-        return None
-    return DiscoveryIssue(
-        issue_id="document_kind",
-        category="input",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart vilken typ av dokument flödet främst ska arbeta med.",
-            "It is still unclear what kind of documents the flow should primarily handle.",
-        ),
-        suggestion=document_kind_question(profile.language),
-        question_level="high_value",
-    )
-
-
 def _build_document_material_scope_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
@@ -650,7 +626,6 @@ _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_case_scope_issue,
     _build_primary_runtime_input_issue,
     _build_flow_input_architecture_issue,
-    _build_document_kind_issue,
     _build_document_material_scope_issue,
     _build_comparison_scope_issue,
     _build_external_delivery_unsupported_issue,
@@ -867,11 +842,7 @@ def _has_mvs_output(profile: DiscoveryProfile) -> bool:
 
 
 def _has_mvs_purpose(profile: DiscoveryProfile) -> bool:
-    return (
-        profile.case_like_flow
-        or profile.comparison_requested
-        or _expresses_task_intent(profile.text)
-    )
+    return profile.comparison_requested or _expresses_task_intent(profile.text)
 
 
 def _apply_discovery_decision_engine(

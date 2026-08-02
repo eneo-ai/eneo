@@ -12,6 +12,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
+    comparison_scope_is_relevant,
+    report_disposition_is_relevant,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
@@ -23,7 +27,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import ArchitectureCommitDraft, PlanningState
 from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
 _CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
@@ -31,6 +35,21 @@ _CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
     "terminal_output",
 )
 _CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(_CORE_ARCHITECTURAL_SLOT_ORDER)
+_PATTERN_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
+    slot_name
+    for pattern in PATTERN_REGISTRY.values()
+    for slot_name in pattern.required_architectural_slots
+)
+_ARCHITECTURE_IMPACT_SLOT_NAMES: frozenset[str] = (
+    _PATTERN_ARCHITECTURAL_SLOTS
+    | frozenset(
+        {
+            "comparison_scope",
+            "report_disposition",
+            "runtime_metadata_fields",
+        }
+    )
+)
 
 PlannerActionKind = Literal[
     "ask_question",
@@ -67,9 +86,10 @@ def build_planner_action_policy(
     unresolved_core_slots = _compute_unresolved_core_slots(session_state)
     derived_commit = derive_architecture_commit_draft(session_state)
     unresolved_commit_slots = _unresolved_slots_for_derived_commit(
+        commit=derived_commit,
         session_state=session_state,
         commit_grade_slot_names=commit_grade_slot_names,
-    )
+    ) | _non_commit_grade_architecture_slots(session_state)
     architecture_committed = session_state.architecture_commit is not None
     pinned_commit_matches_current_slots = architecture_commit_draft_matches_pinned(
         before=session_state.architecture_commit,
@@ -81,20 +101,20 @@ def build_planner_action_policy(
         and not pinned_commit_matches_current_slots
     )
     ask_targets: tuple[str, ...]
-    if architecture_drift_detected and unresolved_core_slots:
+    if unresolved_core_slots:
         ask_targets = _ordered_ask_targets(
-            selected_discovery_question_ids=(),
+            selected_discovery_question_ids=(
+                () if architecture_committed else selected_discovery_question_ids
+            ),
             architecture_required_slots=unresolved_core_slots,
-            derived_commit_required_slots=frozenset(),
+            derived_commit_required_slots=unresolved_commit_slots,
             commit_grade_slot_names=commit_grade_slot_names,
         )
-    elif (
-        architecture_drift_detected
-        and not unresolved_core_slots
-        and unresolved_commit_slots
-    ):
+    elif unresolved_commit_slots:
         ask_targets = _ordered_ask_targets(
-            selected_discovery_question_ids=(),
+            selected_discovery_question_ids=(
+                () if architecture_committed else selected_discovery_question_ids
+            ),
             architecture_required_slots=frozenset(),
             derived_commit_required_slots=unresolved_commit_slots,
             commit_grade_slot_names=commit_grade_slot_names,
@@ -160,6 +180,26 @@ def _commit_grade_slot_names(planning_state: PlanningState) -> frozenset[str]:
     )
 
 
+def _non_commit_grade_architecture_slots(
+    planning_state: PlanningState,
+) -> frozenset[str]:
+    comparison_scope_relevant = comparison_scope_is_relevant(
+        primary_runtime_input=_commit_grade_slot_value(
+            planning_state,
+            "primary_runtime_input",
+        ),
+        unresolved_values_are_relevant=True,
+    )
+    report_disposition_relevant = _report_disposition_is_required(planning_state)
+    return frozenset(
+        slot_name
+        for slot_name, slot in planning_state.resolved_slots.items()
+        if slot_name in _ARCHITECTURE_IMPACT_SLOT_NAMES and not slot.is_commit_grade
+        if slot_name != "comparison_scope" or comparison_scope_relevant
+        if slot_name != "report_disposition" or report_disposition_relevant
+    )
+
+
 def _phase_priority(candidates: list[PlannerActionKind]) -> list[PlannerActionKind]:
     """Expose one deterministic phase instead of a broad LLM action menu."""
 
@@ -182,7 +222,7 @@ def _ordered_ask_targets(
     derived_commit_required_slots: frozenset[str],
     commit_grade_slot_names: frozenset[str],
 ) -> tuple[str, ...]:
-    """Priority: discovery order, then core fallback, then derived requirements."""
+    """Prioritize core architecture before derived and quality questions."""
 
     ordered: list[str] = []
     seen: set[str] = set()
@@ -199,11 +239,11 @@ def _ordered_ask_targets(
         ordered.append(target)
         seen.add(target)
 
-    for target in selected_discovery_question_ids:
-        append_target(target)
     for target in _order_slot_names(architecture_required_slots):
         append_target(target)
     for target in _order_slot_names(derived_commit_required_slots):
+        append_target(target)
+    for target in selected_discovery_question_ids:
         append_target(target)
 
     return tuple(ordered)
@@ -221,10 +261,10 @@ def _order_slot_names(slot_names: frozenset[str]) -> tuple[str, ...]:
 
 def _unresolved_slots_for_derived_commit(
     *,
+    commit: ArchitectureCommitDraft | None,
     session_state: PlanningState,
     commit_grade_slot_names: frozenset[str],
 ) -> frozenset[str]:
-    commit = derive_architecture_commit_draft(session_state)
     if commit is None:
         return frozenset()
     required_slots = {
@@ -240,27 +280,35 @@ def _unresolved_slots_for_derived_commit(
 
 
 def _report_disposition_is_required(session_state: PlanningState) -> bool:
-    primary_runtime_input = session_state.resolved_slots.get("primary_runtime_input")
-    terminal_output = session_state.resolved_slots.get("terminal_output")
-    document_material_scope = session_state.resolved_slots.get(
-        "document_material_scope"
+    primary_runtime_input = _commit_grade_slot_value(
+        session_state,
+        "primary_runtime_input",
     )
-    docx_output_mode = session_state.resolved_slots.get("docx_output_mode")
-    return (
-        primary_runtime_input is not None
-        and primary_runtime_input.value
-        in {"document", "documents", "text_and_documents"}
-        and terminal_output is not None
-        and terminal_output.value in {"pdf_document", "docx_document"}
-        and not (
-            terminal_output.value == "docx_document"
-            and docx_output_mode is not None
-            and docx_output_mode.value == "template_fill_docx"
-        )
-        and document_material_scope is not None
-        and document_material_scope.value
-        in {"multiple_documents_case", "flexible_document_case"}
+    terminal_output = _commit_grade_slot_value(session_state, "terminal_output")
+    document_material_scope = _commit_grade_slot_value(
+        session_state,
+        "document_material_scope",
     )
+    docx_output_mode = _commit_grade_slot_value(session_state, "docx_output_mode")
+    if terminal_output == "docx_document" and docx_output_mode is None:
+        return False
+    return report_disposition_is_relevant(
+        primary_runtime_input=primary_runtime_input,
+        terminal_output=terminal_output,
+        document_material_scope=document_material_scope,
+        docx_output_mode=docx_output_mode,
+        unresolved_values_are_relevant=False,
+    )
+
+
+def _commit_grade_slot_value(
+    session_state: PlanningState,
+    slot_name: str,
+) -> str | None:
+    slot = session_state.resolved_slots.get(slot_name)
+    if slot is None or not slot.is_commit_grade:
+        return None
+    return slot.value
 
 
 def _is_user_requirement_question(slot_name: str) -> bool:

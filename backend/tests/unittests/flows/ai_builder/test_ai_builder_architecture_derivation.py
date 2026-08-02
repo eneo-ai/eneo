@@ -32,6 +32,7 @@ def _slot(
         name=name,
         value=value,
         source=source,
+        evidence=([f"quote:user_message:test:{name}"] if source == "model" else []),
         confidence=confidence,
     )
 
@@ -61,6 +62,55 @@ def test_derives_text_to_text_architecture_from_resolved_slots() -> None:
     assert draft.chosen_patterns == ["summarize_text"]
     assert "form_field_runtime_inputs" not in draft.chosen_patterns
     assert draft.required_capabilities == ["input_text", "output_mode_pass_through"]
+    assert draft.report_disposition is None
+
+
+def test_derives_relevant_report_disposition_into_architecture() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="documents",
+            terminal_output="pdf_document",
+            pdf_generation_mode="generated_pdf",
+            document_material_scope="multiple_documents_case",
+            report_disposition="both",
+        )
+    )
+
+    assert draft is not None
+    assert draft.report_disposition == "both"
+
+
+def test_excludes_irrelevant_report_disposition_from_architecture() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="text",
+            terminal_output="structured_text",
+            report_disposition="both",
+        )
+    )
+
+    assert draft is not None
+    assert draft.report_disposition is None
+
+
+def test_does_not_derive_architecture_from_heuristic_core_slots() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot(
+            "primary_runtime_input",
+            "documents",
+            source="heuristic",
+            confidence="high",
+        ),
+        "terminal_output": _slot(
+            "terminal_output",
+            "structured_text",
+            source="heuristic",
+            confidence="high",
+        ),
+    }
+
+    assert derive_architecture_commit_draft(state) is None
 
 
 def test_derives_json_to_json_architecture_from_resolved_slots() -> None:
@@ -370,6 +420,24 @@ def test_derives_aggregate_intent_for_multiple_document_scope() -> None:
     assert draft.aggregation_intent == "aggregate"
 
 
+def test_non_commit_grade_document_scope_does_not_set_aggregation() -> None:
+    state = _state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+        source="heuristic",
+        confidence="high",
+    )
+
+    draft = derive_architecture_commit_draft(state)
+
+    assert draft is not None
+    assert draft.aggregation_intent == "linear"
+
+
 def test_document_scope_does_not_make_audio_artifact_aggregate() -> None:
     draft = derive_architecture_commit_draft(
         _state_with_slots(
@@ -454,7 +522,7 @@ def test_document_comparison_scope_respects_commit_grade(
     )
     state.resolved_slots["comparison_scope"] = _slot(
         "comparison_scope",
-        "same_run_multiple_documents",
+        "same_run_compare",
         source="model",
         confidence=confidence,
     )
@@ -465,7 +533,7 @@ def test_document_comparison_scope_respects_commit_grade(
     assert draft.aggregation_intent == expected
 
 
-def test_derives_compare_intent_from_high_confidence_multi_source_prompt() -> None:
+def test_does_not_commit_architecture_from_freeform_heuristics() -> None:
     state = build_planning_state_from_conversation(
         [
             ConversationMessage(
@@ -482,8 +550,7 @@ def test_derives_compare_intent_from_high_confidence_multi_source_prompt() -> No
 
     draft = derive_architecture_commit_draft(state)
 
-    assert draft is not None
-    assert draft.aggregation_intent == "compare"
+    assert draft is None
 
 
 def test_does_not_force_multi_step_pattern_when_structured_analysis_is_rejected() -> (

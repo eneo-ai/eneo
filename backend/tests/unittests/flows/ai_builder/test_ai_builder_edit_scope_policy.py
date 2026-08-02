@@ -171,7 +171,6 @@ class TestEditScopePolicy:
 
         assert "docx_output_mode" not in question_ids
         assert "input_material_mode" not in question_ids
-        assert "document_kind" not in question_ids
         assert "document_material_scope" not in question_ids
 
     def test_word_instead_of_pdf_edit_defaults_generated_docx_without_reopening_question(
@@ -438,7 +437,6 @@ class TestEditScopePolicy:
             if issue.suggestion is not None
         }
 
-        assert "document_kind" not in question_ids
         assert "document_material_scope" not in question_ids
         assert "input_material_mode" not in question_ids
 
@@ -486,7 +484,6 @@ class TestEditScopePolicy:
             if issue.suggestion is not None
         }
 
-        assert "document_kind" not in question_ids
         assert "document_material_scope" not in question_ids
         assert "input_material_mode" not in question_ids
 

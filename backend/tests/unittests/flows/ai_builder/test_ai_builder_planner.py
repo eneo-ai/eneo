@@ -72,6 +72,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     prepare_planner_request,
     validate_preprovider_schema_gate,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalMessageGroup,
@@ -420,6 +421,44 @@ def _architecture_commit() -> ArchitectureCommit:
         committed_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
         architecture_hash="a" * 64,
     )
+
+
+def _document_architecture_state() -> PlanningState:
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["document_to_structured_report"],
+        required_capabilities=["input_document", "output_mode_pass_through"],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "document_material_scope": ResolvedSlot(
+            name="document_material_scope",
+            value="single_document_case",
+            source="requirements_summary",
+            confidence="high",
+        ),
+    }
+    return state
 
 
 def _budget_policy() -> AIBuilderBudgetPolicy:
@@ -1047,20 +1086,7 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
     discovery_analysis = _discovery_analysis()
-    state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state = _document_architecture_state()
     state.file_roles = [
         FileRoleEvidence(
             file_id=UUID(int=index + 1),
@@ -1159,6 +1185,20 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
         selected_question_ids=("primary_runtime_input",),
     )
     planning_state = build_planning_state_from_conversation(conversation)
+    planning_state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="requirements_summary",
+            confidence="high",
+        ),
+    }
 
     with (
         patch(
@@ -1215,8 +1255,8 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
         "primary_runtime_input": ResolvedSlot(
             name="primary_runtime_input",
             value="audio",
-            source="heuristic",
-            evidence=["heuristic:role-aware freeform analysis"],
+            source="requirements_summary",
+            evidence=["requirements_summary:primary_runtime_input"],
             confidence="high",
         ),
         "terminal_output": ResolvedSlot(
@@ -1360,20 +1400,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build from this file")]
     discovery_analysis = _discovery_analysis()
-    state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state = _document_architecture_state()
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build from this file.",
@@ -1457,20 +1484,15 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
     discovery_analysis = _discovery_analysis()
-    state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state = _document_architecture_state()
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="case_id",
+            label="Case ID",
+            required=True,
+            provenance="user_confirmed",
+        )
+    ]
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build a report flow.",
@@ -1527,6 +1549,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     assert isinstance(prepared, ProposalPrepared)
     assert prepared.llm_messages[0]["role"] == "system"
     assert "Call exactly one `propose_flow` tool" in prepared.llm_messages[0]["content"]
+    assert '"variable_name": "case_id"' in prepared.llm_messages[0]["content"]
 
 
 def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> None:
@@ -1625,25 +1648,64 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         )
 
 
+def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
+    state = PlanningState.empty()
+    state.architecture_commit = _architecture_commit()
+    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+        name="primary_runtime_input",
+        value="text",
+        source="structured_answer",
+        confidence="high",
+    )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="text",
+            label="Text",
+            provenance="user_confirmed",
+        )
+    ]
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        build_proposal_prepared(
+            requirements_state=RequirementsState(),
+            ui_language="en",
+            slot_classification_metadata=None,
+            conversation=[ConversationMessage(role="user", content="Summarize text")],
+            planning_state=state,
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=False,
+            resource_catalog=build_ai_builder_resource_catalog(
+                available_models=None,
+                available_kbs=None,
+            ),
+            current_steps=None,
+            plan_edit_context=None,
+            prior_plan_for_revision=None,
+            litellm_model="gpt-4o-mini",
+            max_input_tokens=4096,
+            max_output_tokens=256,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+            ),
+            attachment_file_count=0,
+            current_turn_start=0,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+    assert exc_info.value.context == {
+        "reason": "confirmed_form_field_incompatible",
+        "field_names": ["text"],
+    }
+
+
 @pytest.mark.asyncio
 async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
     discovery_analysis = _discovery_analysis()
-    state = PlanningState.empty()
-    state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="document",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    state = _document_architecture_state()
     requirements_state = _requirements_state_confirmed_for(state)
     requirements = RequirementsSummaryPayload(
         summary="Build a report flow.",

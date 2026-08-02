@@ -128,6 +128,7 @@ CreateAssemblyRejectionReason = Literal[
     "document_report_compose_topology_missing",
     "empty_steps",
     "explicit_refs_not_supported",
+    "form_field_placement_mismatch",
     "invalid_template_fill_mode",
     "plan_invariant_failed",
     "pure_audio_transcription_requires_no_reader_fields",
@@ -170,6 +171,10 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
         "Create-mode semantic steps must not author uses_previous_fields or "
         "uses_previous_outputs. Describe the data needed in instructions and "
         "output_fields instead."
+    ),
+    "form_field_placement_mismatch": (
+        "Every runtime form field must be referenced by at least one semantic "
+        "step, and every referenced field must be declared."
     ),
     "invalid_template_fill_mode": (
         "template_fill output mode is only valid for DOCX template-fill flows."
@@ -537,7 +542,7 @@ def _assemble_create_intent(
         previous_output_type = step_output_type
 
     if placed_form_fields != form_field_names:
-        return _reject("docx_template_form_fields_mismatch")
+        return _reject("form_field_placement_mismatch")
     if document_artifact_requested:
         renderer_step = render_verbatim_step(
             output_type=final_output_type,
@@ -1521,7 +1526,10 @@ def _ensure_document_report_section_writer(
         )
         return (
             *planned_steps[: reader_index + 1],
-            section_step,
+            replace(
+                section_step,
+                form_field_refs=planned_steps[replaced_index].form_field_refs,
+            ),
             *planned_steps[replaced_index + 1 :],
         )
     return (
@@ -1827,6 +1835,7 @@ def _replace_document_report_body_writer_with_compose(
         output_type=OutputType.TEXT,
         output_mode=OutputMode.COMPOSE_TEXT,
         underlag_channel="whole_object",
+        form_field_refs=body_writer_step.form_field_refs,
     )
     return (*updated_steps, compose_step, renderer_step)
 

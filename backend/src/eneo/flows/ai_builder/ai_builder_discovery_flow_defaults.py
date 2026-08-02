@@ -7,6 +7,11 @@ from typing import cast
 from eneo.flows.ai_builder.ai_builder_discovery_families import (
     DiscoveryFamily,
 )
+from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
+    BASIC_RUNTIME_METADATA,
+    NO_EXTRA_RUNTIME_METADATA,
+    RuntimeMetadataState,
+)
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from eneo.flows.enums import (
     FlowInputSource,
@@ -41,7 +46,7 @@ class FlowCapabilityProfile:
     final_output_type: str | None = None
     final_output_mode: str | None = None
     final_output_generation_mode: str | None = None
-    runtime_metadata_state: str | None = None
+    runtime_metadata_state: RuntimeMetadataState | None = None
     knowledge_base_step_orders: tuple[int, ...] = ()
     citation_step_orders: tuple[int, ...] = ()
     contract_step_orders: tuple[int, ...] = ()
@@ -219,11 +224,11 @@ def _derive_document_scope(
     return "single_document_case", "single_pdf"
 
 
-def _derive_runtime_metadata_state(flow: Flow) -> str | None:
+def _derive_runtime_metadata_state(flow: Flow) -> RuntimeMetadataState | None:
     if _has_form_fields(flow):
-        return "basic_case_metadata"
+        return BASIC_RUNTIME_METADATA
     if flow.metadata_json is not None:
-        return "no_extra_metadata"
+        return NO_EXTRA_RUNTIME_METADATA
     return None
 
 

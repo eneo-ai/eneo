@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
+    _ARCHITECTURE_IMPACT_SLOT_NAMES,
     build_planner_action_policy,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
@@ -20,6 +21,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
+    KNOWN_REQUIREMENT_SLOT_NAMES,
+)
 from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
@@ -27,6 +31,7 @@ from eneo.flows.ai_builder.planning_state import (
     SlotSource,
 )
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
+from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
 
 def _slot_value(slot_name: str) -> str:
@@ -43,12 +48,23 @@ def _slot(
     *,
     source: SlotSource = "structured_answer",
     confidence: SlotConfidence = "high",
+    evidence: list[str] | None = None,
 ) -> ResolvedSlot:
     return ResolvedSlot(
         name=slot_name,
         value=value or _slot_value(slot_name),
         source=source,
-        evidence=[f"{source}:{slot_name}"],
+        evidence=(
+            [
+                (
+                    f"quote:user_message:test:{slot_name}"
+                    if source == "model"
+                    else f"{source}:{slot_name}"
+                )
+            ]
+            if evidence is None
+            else evidence
+        ),
         confidence=confidence,
     )
 
@@ -61,7 +77,11 @@ def _state_with_resolved_slots(*slot_names: str) -> PlanningState:
 
 
 def _state_with_architecture_commit() -> PlanningState:
-    state = _state_with_resolved_slots("primary_runtime_input", "terminal_output")
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+    )
     draft = derive_architecture_commit_draft(state)
     assert draft is not None
     state.architecture_commit = finalize_architecture_commit(
@@ -79,9 +99,9 @@ def test_policy_blocks_commit_and_plan_until_core_architecture_is_resolved() -> 
 
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == (
-        "document_material_scope",
         "primary_runtime_input",
         "terminal_output",
+        "document_material_scope",
     )
 
 
@@ -105,7 +125,10 @@ def test_policy_asks_for_model_medium_core_slot_before_commit() -> None:
     )
 
     assert policy.allowed_action_kinds == ("ask_question",)
-    assert policy.allowed_ask_question_targets == ("terminal_output",)
+    assert policy.allowed_ask_question_targets == (
+        "primary_runtime_input",
+        "terminal_output",
+    )
 
 
 def test_policy_blocks_model_medium_pattern_required_slot() -> None:
@@ -138,6 +161,15 @@ def test_policy_blocks_model_medium_pattern_required_slot() -> None:
     ("slot", "expected"),
     [
         (_slot("terminal_output", "structured_text", source="model"), True),
+        (
+            _slot(
+                "terminal_output",
+                "structured_text",
+                source="model",
+                evidence=[],
+            ),
+            False,
+        ),
         (
             _slot(
                 "terminal_output",
@@ -190,7 +222,7 @@ def test_policy_blocks_model_medium_pattern_required_slot() -> None:
                 source="heuristic",
                 confidence="high",
             ),
-            True,
+            False,
         ),
         (
             _slot(
@@ -199,7 +231,7 @@ def test_policy_blocks_model_medium_pattern_required_slot() -> None:
                 source="policy_default",
                 confidence="medium",
             ),
-            True,
+            False,
         ),
         (_slot("terminal_output", "docx_document", source="flow_default"), True),
     ],
@@ -208,7 +240,7 @@ def test_commit_grade_truth_table(slot: ResolvedSlot, expected: bool) -> None:
     assert slot.is_commit_grade is expected
 
 
-def test_policy_appends_missing_core_slots_after_selected_discovery_targets() -> None:
+def test_policy_prioritizes_missing_core_slots_before_discovery_targets() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),
         selected_discovery_question_ids=("document_material_scope",),
@@ -216,10 +248,145 @@ def test_policy_appends_missing_core_slots_after_selected_discovery_targets() ->
 
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == (
-        "document_material_scope",
         "primary_runtime_input",
         "terminal_output",
+        "document_material_scope",
     )
+
+
+def test_policy_asks_for_inferred_no_metadata_before_commit() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+    )
+    state.resolved_slots["runtime_metadata_fields"] = _slot(
+        "runtime_metadata_fields",
+        "no_extra_metadata",
+        source="model",
+        confidence="medium",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("runtime_metadata_fields",)
+
+
+def test_every_architecture_impact_slot_is_an_askable_user_requirement() -> None:
+    assert _ARCHITECTURE_IMPACT_SLOT_NAMES <= KNOWN_REQUIREMENT_SLOT_NAMES
+    assert all(
+        QUESTION_CATALOG[slot_name].exposure == "user_requirement"
+        for slot_name in _ARCHITECTURE_IMPACT_SLOT_NAMES
+    )
+
+
+def test_policy_reopens_heuristic_comparison_scope_before_commit() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+    )
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope",
+        "same_run_compare",
+        source="heuristic",
+        confidence="high",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("comparison_scope",)
+
+
+@pytest.mark.parametrize("primary_runtime_input", ["audio", "text", "json"])
+def test_policy_ignores_weak_comparison_for_non_document_input(
+    primary_runtime_input: str,
+) -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        primary_runtime_input,
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope",
+        "same_run_compare",
+        source="heuristic",
+        confidence="high",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
+@pytest.mark.parametrize("primary_runtime_input", ["audio", "text", "json"])
+def test_policy_ignores_weak_report_disposition_for_non_document_input(
+    primary_runtime_input: str,
+) -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        primary_runtime_input,
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "both",
+        source="model",
+        confidence="medium",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
+def test_policy_asks_for_policy_default_docx_mode_before_commit() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "document_material_scope",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "docx_document",
+    )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "generated_docx",
+        source="policy_default",
+        confidence="medium",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("docx_output_mode",)
 
 
 def test_policy_allows_commit_after_core_slots_and_selected_questions_resolve() -> None:
@@ -389,7 +556,10 @@ def test_policy_can_ask_output_after_classifier_uncertainty_clears_guess() -> No
 
     assert "terminal_output" not in state.resolved_slots
     assert policy.allowed_action_kinds == ("ask_question",)
-    assert policy.allowed_ask_question_targets == ("terminal_output",)
+    assert policy.allowed_ask_question_targets == (
+        "primary_runtime_input",
+        "terminal_output",
+    )
 
 
 @pytest.mark.parametrize("source", ["structured_answer", "flow_default"])
@@ -458,8 +628,8 @@ def test_policy_normalizes_legacy_discovery_question_ids_to_slot_targets() -> No
     )
 
     assert policy.allowed_ask_question_targets == (
-        "terminal_output",
         "primary_runtime_input",
+        "terminal_output",
     )
 
 
@@ -500,6 +670,45 @@ def test_policy_revises_committed_architecture_when_commit_grade_slots_drift() -
     assert policy.allowed_ask_question_targets == ()
 
 
+def test_policy_revises_commit_when_report_disposition_changes() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "per_source_sections",
+    )
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(draft)
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "both",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("revise_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
 def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -> None:
     state = _state_with_architecture_commit()
     state.resolved_slots["terminal_output"] = _slot(
@@ -517,6 +726,35 @@ def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -
 
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == ("terminal_output",)
+
+
+def test_policy_ignores_stale_weak_report_disposition_after_commit() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "text",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(draft)
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "both",
+        source="heuristic",
+        confidence="high",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("confirm_requirements",)
+    assert policy.allowed_ask_question_targets == ()
 
 
 def test_policy_allows_plan_after_architecture_and_requirements_confirmation() -> None:

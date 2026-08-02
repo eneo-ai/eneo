@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from eneo.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposalContent
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorEvent
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
+    KNOWN_REQUIREMENT_SLOT_NAMES,
+)
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
@@ -54,6 +57,11 @@ class KeyDecisionPayload(BaseModel):
     decision: str
 
 
+class ResolvedRequirementPayload(BaseModel):
+    requirement_id: str
+    selected_value: str
+
+
 class RequirementsSummaryPayload(BaseModel):
     requirements_version: str | None = None
     summary: str
@@ -62,6 +70,11 @@ class RequirementsSummaryPayload(BaseModel):
     output_description: str
     assumptions: list[str] = Field(default_factory=list)
     manual_setup_notes: list[str] = Field(default_factory=list)
+    resolved_requirements: list[ResolvedRequirementPayload] = Field(
+        default_factory=list,
+        max_length=len(KNOWN_REQUIREMENT_SLOT_NAMES),
+        exclude_if=lambda value: not value,
+    )
 
     @field_validator("key_decisions", mode="after")
     @classmethod
@@ -78,6 +91,20 @@ class RequirementsSummaryPayload(BaseModel):
                 continue
             seen.add(decision.topic)
             unique.append(decision)
+        return unique
+
+    @field_validator("resolved_requirements", mode="after")
+    @classmethod
+    def _one_value_per_requirement(
+        cls, requirements: list[ResolvedRequirementPayload]
+    ) -> list[ResolvedRequirementPayload]:
+        seen: set[str] = set()
+        unique: list[ResolvedRequirementPayload] = []
+        for requirement in requirements:
+            if requirement.requirement_id in seen:
+                continue
+            seen.add(requirement.requirement_id)
+            unique.append(requirement)
         return unique
 
 
@@ -187,6 +214,7 @@ AI_BUILDER_SCHEMA_HOIST_MODELS: tuple[type[BaseModel], ...] = (
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
     KeyDecisionPayload,
+    ResolvedRequirementPayload,
     RequirementsSummaryPayload,
     AIBuilderPlanEventData,
     SessionTelemetrySummary,
@@ -219,6 +247,7 @@ __all__ = [
     "AIBuilderTextEvent",
     "AIBuilderUsageEvent",
     "KeyDecisionPayload",
+    "ResolvedRequirementPayload",
     "RequirementsSummaryPayload",
     "SSE_EVENT_DONE",
     "SSE_EVENT_ERROR",

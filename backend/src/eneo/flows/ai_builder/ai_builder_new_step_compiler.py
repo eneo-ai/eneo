@@ -5,6 +5,9 @@ import string
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -36,8 +39,10 @@ from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     SourceRefBinding,
     dedupe_source_refs,
-    field_refs_cover_whole_structured_object,
-    lower_source_refs_to_question_binding,
+    derive_structured_projection_contract,
+    question_binding,
+    source_ref_bindings,
+    validate_source_refs_binding,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,17 +109,29 @@ def compile_new_step_draft(
         step_index=len(prior_steps),
     )
     input_source = require_resolved_input_source(step_draft)
-    output_mode = derive_new_step_output_mode(step_draft)
     output_contract = compile_output_contract(step_draft.output_fields)
     input_config = compile_runtime_input_overrides(
         step_draft,
         previous_item_map_max_items=_previous_runtime_max_files(prior_steps),
     )
+    binding_draft = (
+        step_draft.model_copy(update={"uses_form_fields": []})
+        if step_draft.previous_item_map_enabled
+        else step_draft
+    )
     input_bindings = compile_input_bindings(
-        step_draft,
+        binding_draft,
         prior_steps,
         require_declared_previous_fields=require_declared_previous_fields,
     )
+    effective_input_type = effective_input_type_for_bindings(
+        input_source=input_source,
+        input_type=step_draft.input_type,
+        input_bindings=input_bindings,
+    )
+    if effective_input_type != step_draft.input_type:
+        step_draft = step_draft.model_copy(update={"input_type": effective_input_type})
+    output_mode = derive_new_step_output_mode(step_draft)
     input_contract = derive_input_contract(
         input_source=input_source,
         input_type=step_draft.input_type,
@@ -123,6 +140,7 @@ def compile_new_step_draft(
     )
     assistant_instructions = compile_assistant_instructions(
         step_draft=step_draft,
+        prior_steps=prior_steps,
         input_bindings=input_bindings,
         source_capture_fields=source_capture_fields,
         assistant_output_fields=assistant_output_fields,
@@ -158,6 +176,29 @@ def compile_new_step_draft(
         source="draft",
     )
     return step
+
+
+def effective_input_type_for_bindings(
+    *,
+    input_source: InputSource,
+    input_type: InputType,
+    input_bindings: dict[str, Any] | None,
+) -> InputType:
+    """Describe the value delivered after applying explicit previous-step bindings."""
+
+    if (
+        input_source == InputSource.PREVIOUS_STEP
+        and input_type == InputType.JSON
+        and question_binding(input_bindings) is not None
+    ):
+        # Form fields plus structured Underlag are rendered into one textual
+        # prompt. A JSON input type would falsely promise a structured value and
+        # could not carry a meaningful input contract.
+        return InputType.TEXT
+    # A flow-input JSON type describes the run-entry contract. Rewriting it
+    # would discard that declared boundary, so unsupported mixed bindings fail
+    # compilation instead of silently changing the flow's public input shape.
+    return input_type
 
 
 def require_resolved_input_source(step_draft: NewStepDraft) -> InputSource:
@@ -382,10 +423,6 @@ def compile_step_input_bindings(
     explicit_previous_sections = [*explicit_previous_fields, *explicit_previous_outputs]
     section_parts: list[str | SourceRefBinding] = []
     if source_reference is not None and not _should_suppress_source_reference(
-        input_source=input_source,
-        uses_previous_fields=uses_previous_fields,
-        prior_steps=prior_steps,
-        source_reference=source_reference,
         explicit_previous_sections=explicit_previous_sections,
     ):
         if source_ref_binding is not None:
@@ -400,11 +437,15 @@ def compile_step_input_bindings(
             for field_name in uses_form_fields
         ]
         section_parts.append("\n".join(form_field_lines))
+    source_ref_candidates = [
+        part for part in section_parts if isinstance(part, SourceRefBinding)
+    ]
+    _validate_source_ref_candidates(source_ref_candidates)
     sections, source_refs = _render_deduped_input_sections(section_parts)
     if not sections:
         return None
-    source_ref_payloads = _source_ref_payloads_if_valid(source_refs)
-    if source_ref_payloads is not None:
+    source_ref_payloads = [ref.binding_payload() for ref in source_refs]
+    if source_ref_payloads:
         string_sections = [
             part for part in section_parts if not isinstance(part, SourceRefBinding)
         ]
@@ -446,60 +487,40 @@ def _render_deduped_input_sections(
 
 def _should_suppress_source_reference(
     *,
-    input_source: InputSource,
-    uses_previous_fields: list[PreviousFieldRef],
-    prior_steps: list[StepSpec],
-    source_reference: str,
     explicit_previous_sections: list[str],
 ) -> bool:
-    if not explicit_previous_sections:
-        return False
-    if not _is_immediate_structured_source_reference(
-        input_source=input_source,
-        prior_steps=prior_steps,
-        source_reference=source_reference,
-    ):
-        return False
-    immediate_previous_order = len(prior_steps)
-    # A targeted field ref to the immediate JSON predecessor is enough to drop
-    # the broad structured source blob.
-    return any(
-        field_ref.from_step == immediate_previous_order
-        for field_ref in uses_previous_fields
-    )
-
-
-def _is_immediate_structured_source_reference(
-    *,
-    input_source: InputSource,
-    prior_steps: list[StepSpec],
-    source_reference: str,
-) -> bool:
-    if input_source.value != "previous_step":
-        return False
-    if not prior_steps:
-        return False
-    previous_step = prior_steps[-1]
-    if previous_step.output_type != OutputType.JSON:
-        return False
-    return (
-        source_reference == f"{{{{ {previous_step.plan_step_ref}.output.structured }}}}"
-    )
+    # Explicit refs are the complete declared dependency set. Keeping the
+    # implicit predecessor beside them silently broadens Underlag and causes
+    # section writers to reread unrelated prior output.
+    return bool(explicit_previous_sections)
 
 
 def compile_assistant_instructions(
     *,
     step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
     input_bindings: dict[str, Any] | None,
     source_capture_fields: tuple[SourceCaptureField, ...] = (),
     assistant_output_fields: list[StructuredFieldDraft] | None = None,
     ui_language: str | None = None,
 ) -> str:
     instructions = step_draft.instructions
-    if input_bindings is None:
+    actual_input_guidance = _actual_input_guidance(
+        step_draft=step_draft,
+        prior_steps=prior_steps,
+        input_bindings=input_bindings,
+        ui_language=ui_language,
+    )
+    if actual_input_guidance:
+        instructions = f"{actual_input_guidance}\n\n{instructions}"
+    hint_previous_fields = (
+        step_draft.uses_previous_fields if input_bindings is None else []
+    )
+    hint_form_fields = step_draft.uses_form_fields if input_bindings is None else []
+    if hint_previous_fields or hint_form_fields:
         hint = compile_input_reference_instruction_hint(
-            uses_previous_fields=step_draft.uses_previous_fields,
-            uses_form_fields=step_draft.uses_form_fields,
+            uses_previous_fields=hint_previous_fields,
+            uses_form_fields=hint_form_fields,
             ui_language=ui_language,
         )
         if hint:
@@ -517,6 +538,41 @@ def compile_assistant_instructions(
             if assistant_output_fields is not None
             else step_draft.output_fields
         ),
+    )
+
+
+def _actual_input_guidance(
+    *,
+    step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
+    input_bindings: dict[str, Any] | None,
+    ui_language: str | None,
+) -> str | None:
+    if (
+        require_resolved_input_source(step_draft) != InputSource.PREVIOUS_STEP
+        or not prior_steps
+        or prior_steps[-1].output_mode != OutputMode.TRANSCRIBE_ONLY
+    ):
+        return None
+    if input_bindings is not None:
+        refs = source_ref_bindings(input_bindings)
+        previous_step_ref = prior_steps[-1].plan_step_ref
+        if not any(
+            ref.step_ref == previous_step_ref and ref.output == "text" for ref in refs
+        ):
+            return None
+    if _uses_english(ui_language):
+        return (
+            "Actual input: This step receives the complete text transcript produced "
+            "by the preceding transcription step. Upstream transcription is complete; "
+            "the original audio is not available to this step. Apply the task and "
+            "result instructions below to the transcript."
+        )
+    return (
+        "Faktiskt underlag: Det här steget får den fullständiga texttranskriberingen "
+        "från föregående transkriberingssteg. Transkriberingen är redan klar; "
+        "originalljudet är inte tillgängligt i det här steget. Tillämpa uppgiften "
+        "och resultatkraven nedan på transkriberingen."
     )
 
 
@@ -691,12 +747,49 @@ def derive_input_contract(
     if input_type != InputType.JSON:
         return None
     if input_bindings is not None:
-        # Explicit underlag replaces the implicit previous-step JSON input, so a
-        # contract copied from the previous step would validate the wrong shape.
-        return None
+        return _derive_structured_projection_contract(
+            input_bindings=input_bindings,
+            prior_steps=prior_steps,
+        )
     if input_source != InputSource.PREVIOUS_STEP or not prior_steps:
         return None
     return prior_steps[-1].output_contract
+
+
+def _derive_structured_projection_contract(
+    *,
+    input_bindings: dict[str, Any],
+    prior_steps: list[StepSpec],
+) -> dict[str, Any] | None:
+    try:
+        refs = source_ref_bindings(input_bindings)
+    except InputBindingContractError as exc:
+        raise _structured_projection_error(str(exc)) from exc
+    if not refs:
+        return None
+    source_contracts_by_step_ref = {
+        step.plan_step_ref: step.output_contract
+        for step in prior_steps
+        if step.output_contract is not None
+    }
+    try:
+        return derive_structured_projection_contract(
+            input_bindings=input_bindings,
+            source_contracts_by_step_ref=source_contracts_by_step_ref,
+        )
+    except InputBindingContractError as exc:
+        raise _structured_projection_error(str(exc)) from exc
+
+
+def _structured_projection_error(detail: str) -> AIBuilderArchitectureError:
+    return AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail=f"Structured Underlag projection is invalid: {detail}",
+        log_context={
+            "failure_code": "invalid_structured_underlag_projection",
+            "detail": detail,
+        },
+    )
 
 
 def _resolve_source_reference(
@@ -756,23 +849,8 @@ def _compile_previous_field_source_refs(
     prior_steps: list[StepSpec],
 ) -> list[SourceRefBinding]:
     refs: list[SourceRefBinding] = []
-    collapsed_steps = _collapsible_previous_field_ref_steps(
-        uses_previous_fields,
-        prior_steps,
-    )
-    emitted_collapsed_steps: set[int] = set()
     for field_ref in uses_previous_fields:
         source_step = prior_steps[field_ref.from_step - 1]
-        if field_ref.from_step in collapsed_steps:
-            if field_ref.from_step not in emitted_collapsed_steps:
-                refs.append(
-                    SourceRefBinding(
-                        step_ref=source_step.plan_step_ref,
-                        output="structured",
-                    )
-                )
-                emitted_collapsed_steps.add(field_ref.from_step)
-            continue
         label = field_ref.label or default_previous_field_label(field_ref.field_path)
         refs.append(
             SourceRefBinding(
@@ -836,43 +914,6 @@ def _require_resolvable_previous_refs(
             )
 
 
-def _collapsible_previous_field_ref_steps(
-    uses_previous_fields: list[PreviousFieldRef],
-    prior_steps: list[StepSpec],
-) -> set[int]:
-    fields_by_step: dict[int, set[str]] = {}
-    for field_ref in uses_previous_fields:
-        if "." in field_ref.field_path:
-            continue
-        fields_by_step.setdefault(field_ref.from_step, set()).add(field_ref.field_path)
-
-    collapsed_steps: set[int] = set()
-    for from_step, field_names in fields_by_step.items():
-        source_step = prior_steps[from_step - 1]
-        if source_step.output_type != OutputType.JSON:
-            continue
-        property_names = _output_contract_top_level_property_names(source_step)
-        if not property_names:
-            continue
-        if field_refs_cover_whole_structured_object(
-            field_paths=field_names,
-            property_names=property_names,
-        ):
-            collapsed_steps.add(from_step)
-    return collapsed_steps
-
-
-def _output_contract_top_level_property_names(step: StepSpec) -> set[str]:
-    output_contract = step.output_contract
-    if not isinstance(output_contract, Mapping):
-        return set()
-    properties = output_contract.get("properties")
-    if not isinstance(properties, Mapping):
-        return set()
-    typed_properties = cast(Mapping[object, object], properties)
-    return {key for key in typed_properties if isinstance(key, str)}
-
-
 def _compile_previous_output_source_refs(
     uses_previous_outputs: list[PreviousOutputRef],
     prior_steps: list[StepSpec],
@@ -891,27 +932,24 @@ def _compile_previous_output_source_refs(
     return refs
 
 
-def _source_ref_payloads_if_valid(
+def _validate_source_ref_candidates(
     source_refs: list[SourceRefBinding],
-) -> list[dict[str, object]] | None:
-    if not source_refs:
-        return None
-    payloads = [ref.binding_payload() for ref in source_refs]
-    try:
-        lower_source_refs_to_question_binding({"source_refs": payloads})
-    except InputBindingContractError as exc:
-        logger.warning(
-            "ai_builder_source_refs_degraded_to_question_binding",
-            extra={
-                "source_ref_count": len(source_refs),
-                "source_ref_expressions": [
-                    ref.template_expression() for ref in source_refs
-                ],
-                "error": str(exc),
-            },
-        )
-        return None
-    return payloads
+) -> None:
+    for source_ref in source_refs:
+        payload = source_ref.binding_payload()
+        try:
+            validate_source_refs_binding({"source_refs": [payload]})
+        except InputBindingContractError as exc:
+            raise AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                detail=f"Typed source reference {payload!r} is invalid: {exc}",
+                log_context={
+                    "failure_code": "invalid_source_refs",
+                    "source_ref": repr(payload),
+                    "source_ref_count": len(source_refs),
+                    "contract_error": str(exc),
+                },
+            ) from exc
 
 
 def default_previous_field_label(field_path: str) -> str:

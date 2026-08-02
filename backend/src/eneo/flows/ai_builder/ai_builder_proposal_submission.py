@@ -420,6 +420,15 @@ class ProposalSubmissionOwner:
         metadata_tool_call: RuntimeToolCall | None = None,
     ) -> ToolProcessingResult:
         if target_kind == TargetKind.CREATE:
+            if planning_state is None or planning_state.architecture_commit is None:
+                raise AIBuilderArchitectureError(
+                    public_code="architecture_materialization_failed",
+                    detail="Create proposal requires a committed architecture.",
+                    log_context={
+                        "failure_code": "architecture_commit_missing",
+                        "reason": "architecture_commit_missing",
+                    },
+                )
             result = await process_create_intent_arguments(
                 turn=invocation.turn,
                 conversation=invocation.conversation,

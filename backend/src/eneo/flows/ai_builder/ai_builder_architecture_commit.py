@@ -33,6 +33,7 @@ def canonical_architecture_commit_payload(
         "chosen_patterns": sorted(commit.chosen_patterns),
         "required_capabilities": sorted(commit.required_capabilities),
         "aggregation_intent": commit.aggregation_intent,
+        "report_disposition": commit.report_disposition,
     }
 
 

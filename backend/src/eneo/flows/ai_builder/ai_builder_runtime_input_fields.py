@@ -17,23 +17,23 @@ from eneo.flows.ai_builder.planning_state import SlotConfidence, SlotSource
 
 RuntimeMetadataState: TypeAlias = Literal[
     "no_extra_metadata",
-    "basic_case_metadata",
-    "detailed_case_metadata",
+    "basic_runtime_metadata",
+    "detailed_runtime_metadata",
 ]
 NO_EXTRA_RUNTIME_METADATA: RuntimeMetadataState = "no_extra_metadata"
-BASIC_CASE_METADATA: RuntimeMetadataState = "basic_case_metadata"
-DETAILED_CASE_METADATA: RuntimeMetadataState = "detailed_case_metadata"
+BASIC_RUNTIME_METADATA: RuntimeMetadataState = "basic_runtime_metadata"
+DETAILED_RUNTIME_METADATA: RuntimeMetadataState = "detailed_runtime_metadata"
 _RUNTIME_METADATA_STATES: frozenset[RuntimeMetadataState] = frozenset(
     (
         NO_EXTRA_RUNTIME_METADATA,
-        BASIC_CASE_METADATA,
-        DETAILED_CASE_METADATA,
+        BASIC_RUNTIME_METADATA,
+        DETAILED_RUNTIME_METADATA,
     )
 )
 _RUNTIME_METADATA_STATES_ALLOWING_FIELDS: frozenset[RuntimeMetadataState] = frozenset(
     (
-        BASIC_CASE_METADATA,
-        DETAILED_CASE_METADATA,
+        BASIC_RUNTIME_METADATA,
+        DETAILED_RUNTIME_METADATA,
     )
 )
 
@@ -385,7 +385,7 @@ def runtime_metadata_disables_declared_input_fields(
             return True
         case "heuristic" | "model":
             return confidence == "high"
-        case "flow_default" | "policy_default":
+        case "flow_default" | "attachment_structure" | "policy_default":
             return False
     return assert_never(source)
 
@@ -394,9 +394,9 @@ def infer_runtime_metadata_slot(text: str) -> RuntimeMetadataState | None:
     if runtime_input_fields_declared_absent(text):
         return NO_EXTRA_RUNTIME_METADATA
     if extract_runtime_input_field_hints(text):
-        return DETAILED_CASE_METADATA
+        return DETAILED_RUNTIME_METADATA
     if runtime_input_fields_requested(text):
-        return BASIC_CASE_METADATA
+        return BASIC_RUNTIME_METADATA
     return None
 
 

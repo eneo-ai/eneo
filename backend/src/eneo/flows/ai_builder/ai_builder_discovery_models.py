@@ -136,7 +136,6 @@ class DiscoveryProfile:
     comparison_requested: bool
     reference_source: ReferenceSourceResolution
     document_like_input: bool
-    case_like_flow: bool
     audio_like_input: bool
     final_output_text_or_docx: bool
     prefer_structured_intermediate: bool = False

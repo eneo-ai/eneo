@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 4,
   "description": "Focused Flow AI Builder evidence cases for source-context balance, runtime fields, structured questions, and under/over-building. These are review/evidence cases, not golden outputs.",
   "cases": [
     {
@@ -7,8 +7,10 @@
       "complexity": "medium",
       "domain": "municipality_records",
       "prompt": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer, vilket du kommer läsa innehållet och vad filen handlar om och baserat på det så kommer du att dokumentera ner vilken typ av dokument det är, vad den handlar om, kategori av dokument (sociologi, psykologi, IT m.m) och vad slutsatserna av dokumentet innebär samt datumet som dokumentet är skrivet och om möjligt av vem det är skrivet. Slutrapporten ska vara en pdf fil där det ska finnas titel på dokumentet, år, kategori osv och en koncis sammanfattning om vad den handlar om.",
-      "scripted_question_answers": {
-        "report_disposition": "both"
+      "question_answer_overrides": {
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
       },
       "expected": {
         "terminal_output_type": "pdf",

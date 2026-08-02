@@ -430,7 +430,6 @@ async def _progress_session_to_plan(
         "primary_runtime_input": "documents",
         "input_material_mode": "documents",
         "flow_input_architecture": "document_primary_input",
-        "document_kind": "case_documents",
         "terminal_output": "pdf_document",
         "post_processing_goal": "summarize_or_overview",
         "runtime_metadata_fields": "no_extra_metadata",

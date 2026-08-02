@@ -93,7 +93,6 @@ from eneo.flows.ai_builder.ai_builder_service import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_QUESTION,
-    SSE_EVENT_STATUS,
     SSE_EVENT_TEXT,
     AIBuilderService,
     PreparedMessageContext,
@@ -411,14 +410,14 @@ def _make_committed_planning_state() -> PlanningState:
         "document_material_scope": ResolvedSlot(
             name="document_material_scope",
             value="flexible_document_case",
-            source="policy_default",
-            confidence="medium",
+            source="requirements_summary",
+            confidence="high",
         ),
         "runtime_metadata_fields": ResolvedSlot(
             name="runtime_metadata_fields",
             value="no_extra_metadata",
-            source="policy_default",
-            confidence="medium",
+            source="requirements_summary",
+            confidence="high",
         ),
     }
     architecture_draft = derive_architecture_commit_draft(state)
@@ -1684,7 +1683,7 @@ class TestSendMessage:
 
 class TestSendMessageToolCall:
     @pytest.mark.anyio
-    async def test_backend_discovery_commits_explicit_flexible_pdf_docx_flow_after_slot_classification(
+    async def test_backend_discovery_prioritizes_unresolved_core_input_after_partial_classification(
         self,
     ):
         user = _make_user()
@@ -1709,6 +1708,19 @@ class TestSendMessageToolCall:
                     {
                         "slots": [
                             {
+                                "slot_name": "comparison_scope",
+                                "value": "same_run_compare",
+                                "confidence": "high",
+                                "reason": "The user wants a same-run comparison.",
+                                "evidence": [
+                                    {
+                                        "source_id": source_id,
+                                        "quote": "jämföra dem",
+                                    }
+                                ],
+                                "evidence_level": "explicit",
+                            },
+                            {
                                 "slot_name": "report_disposition",
                                 "value": "synthesized_overview",
                                 "confidence": "high",
@@ -1720,7 +1732,7 @@ class TestSendMessageToolCall:
                                     }
                                 ],
                                 "evidence_level": "explicit",
-                            }
+                            },
                         ],
                         "assumptions": [],
                         "contradictions": [],
@@ -1749,12 +1761,10 @@ class TestSendMessageToolCall:
 
         assert mock_litellm.acompletion.await_count == 1
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
-        assert question_events == []
-        status_events = [e for e in events if e["event"] == SSE_EVENT_STATUS]
-        assert status_events
-        assert json.loads(status_events[0]["data"]) == {
-            "status": "architecture_committed"
-        }
+        assert len(question_events) == 1
+        assert json.loads(question_events[0]["data"])["question_id"] == (
+            "primary_runtime_input"
+        )
 
     @pytest.mark.anyio
     async def test_conversation_replay_preserves_tool_calls(self):
@@ -2169,7 +2179,7 @@ class TestRevisePlan:
 
 class TestSendMessageStructuredQuestion:
     @pytest.mark.anyio
-    async def test_spent_budget_emits_unresolved_processing_goal_question(self):
+    async def test_spent_budget_emits_required_report_disposition_question(self):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -2197,8 +2207,18 @@ class TestSendMessageStructuredQuestion:
                     content="Flera relaterade dokument för samma ärende",
                 ),
                 _requirement_answer_message(
+                    question_id="terminal_output",
+                    value="docx_document",
+                    content="DOCX-dokument",
+                ),
+                _requirement_answer_message(
+                    question_id="docx_output_mode",
+                    value="generated_docx",
+                    content="Genererad DOCX utan mall",
+                ),
+                _requirement_answer_message(
                     question_id="runtime_metadata_fields",
-                    value="basic_case_metadata",
+                    value="basic_runtime_metadata",
                     content="Grundläggande metadata",
                 ),
             ],
@@ -2215,15 +2235,9 @@ class TestSendMessageStructuredQuestion:
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("DOCX utan mall"),
-                    message="DOCX utan mall",
-                    question_answer={
-                        "question_id": "final_output_format",
-                        "selected_option_ids": ["docx_generated"],
-                        "selected_values": ["docx_generated"],
-                        "answer": "docx_generated",
-                        "ui_language": "sv",
-                    },
+                    request_snapshot=_test_request_snapshot("Fortsätt"),
+                    message="Fortsätt",
+                    question_answer=None,
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
@@ -2233,7 +2247,7 @@ class TestSendMessageStructuredQuestion:
         ]
         assert len(question_events) == 1
         assert json.loads(question_events[0]["data"])["question_id"] == (
-            "post_processing_goal"
+            "report_disposition"
         )
 
     @pytest.mark.anyio
@@ -2378,14 +2392,19 @@ class TestSendMessageStructuredQuestion:
                         "ui_language": "sv",
                     },
                 ),
+                _requirement_answer_message(
+                    question_id="terminal_output",
+                    value="docx_document",
+                    content="DOCX-dokument",
+                ),
                 ConversationMessage(
                     role="user",
                     content="Grundläggande metadata",
                     metadata={
                         "question_answer": {
                             "question_id": "runtime_metadata_fields",
-                            "selected_option_ids": ["basic_case_metadata"],
-                            "selected_values": ["basic_case_metadata"],
+                            "selected_option_ids": ["basic_runtime_metadata"],
+                            "selected_values": ["basic_runtime_metadata"],
                         },
                         "ui_language": "sv",
                     },
@@ -2441,13 +2460,13 @@ class TestSendMessageStructuredQuestion:
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("DOCX utan mall"),
-                    message="DOCX utan mall",
+                    request_snapshot=_test_request_snapshot("Genererad DOCX utan mall"),
+                    message="Genererad DOCX utan mall",
                     question_answer={
-                        "question_id": "final_output_format",
-                        "selected_option_ids": ["docx_generated"],
-                        "selected_values": ["docx_generated"],
-                        "answer": "docx_generated",
+                        "question_id": "docx_output_mode",
+                        "selected_option_ids": ["generated_docx"],
+                        "selected_values": ["generated_docx"],
+                        "answer": "generated_docx",
                         "ui_language": "sv",
                     },
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
@@ -2516,8 +2535,7 @@ class TestSendMessageStructuredQuestion:
         assert len(question_events) == 1
         data = json.loads(question_events[0]["data"])
         assert data["question_id"] in {
-            "processing_scope",
-            "document_kind",
+            "primary_runtime_input",
             "document_material_scope",
             "terminal_output",
         }

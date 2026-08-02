@@ -471,6 +471,58 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
 )
 
 
+_COMPARISON_SCOPE = QuestionTemplate(
+    id="comparison_scope",
+    question_sv="När ska flödet jämföra dokument?",
+    question_en="When should the flow compare documents?",
+    help_sv=(
+        "Valet avgör om dokument ska jämföras inom samma körning, mot tidigare "
+        "sparat material eller inte alls."
+    ),
+    help_en=(
+        "This decides whether documents are compared within the same run, "
+        "against previously stored material, or not at all."
+    ),
+    options=(
+        _option(
+            id="same_run_compare",
+            label_sv="Jämför dokument i samma körning",
+            label_en="Compare documents in the same run",
+            description_sv="Ladda upp flera dokument tillsammans och jämför dem direkt.",
+            description_en="Upload several documents together and compare them directly.",
+            value="same_run_compare",
+        ),
+        _option(
+            id="compare_previous_material",
+            label_sv="Jämför mot tidigare sparat material",
+            label_en="Compare against earlier saved material",
+            description_sv="Ladda upp ett dokument och jämför det mot tidigare material.",
+            description_en="Upload one document and compare it to stored earlier material.",
+            value="compare_previous_material",
+        ),
+        _option(
+            id="no_direct_compare",
+            label_sv="Ingen direkt jämförelse behövs",
+            label_en="No direct comparison needed",
+            description_sv="Analysera ett dokument i taget utan uttrycklig jämförelse.",
+            description_en="Analyze one document at a time without explicit comparison.",
+            value="no_direct_compare",
+        ),
+    ),
+    worked_examples_sv=(
+        "Jämför alla uppladdade anbud i samma körning.",
+        "Bedöm ett nytt dokument mot tidigare sparade riktlinjer.",
+    ),
+    worked_examples_en=(
+        "Compare all uploaded tenders in the same run.",
+        "Assess a new document against previously stored guidance.",
+    ),
+    family="case_scope",
+    priority_base=60,
+    impact="architecture",
+)
+
+
 _REPORT_DISPOSITION = QuestionTemplate(
     id="report_disposition",
     question_sv="Hur ska rapporten hantera flera källdokument?",
@@ -717,15 +769,15 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
             value="no_extra_metadata",
         ),
         _option(
-            id="basic_case_metadata",
+            id="basic_runtime_metadata",
             label_sv="Lägg till grundläggande metadata",
             label_en="Add basic metadata",
             description_sv="Låt användaren ange några enkla återanvändbara fält.",
             description_en="Let the user enter a few simple reusable fields.",
-            value="basic_case_metadata",
+            value="basic_runtime_metadata",
         ),
         _option(
-            id="detailed_case_metadata",
+            id="detailed_runtime_metadata",
             label_sv="Lägg till rikare metadatafält",
             label_en="Add richer metadata fields",
             description_sv=(
@@ -736,7 +788,7 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
                 "Collect several reusable inputs such as references, "
                 "language, focus, dates, or responsible department."
             ),
-            value="detailed_case_metadata",
+            value="detailed_runtime_metadata",
         ),
     ),
     worked_examples_sv=(
@@ -788,6 +840,7 @@ _ALL_TEMPLATES: tuple[QuestionTemplate, ...] = (
     _DOCX_OUTPUT_MODE,
     _PDF_GENERATION_MODE,
     _DOCUMENT_MATERIAL_SCOPE,
+    _COMPARISON_SCOPE,
     _REPORT_DISPOSITION,
     _POST_PROCESSING_GOAL,
     _STRUCTURED_IO_CONTRACT,

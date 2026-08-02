@@ -6,6 +6,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     MaterializedAddStep as AddStep,
 )
@@ -21,7 +24,10 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
+    compile_assistant_instructions,
+    compile_new_step_draft,
     compile_step_input_bindings,
+    derive_input_contract,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
@@ -39,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     OrderedEditProposal as IntentOrderedEditProposal,
 )
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.application.flow_authoring_snapshot import (
     current_flow_authoring_spec,
     flow_step_to_authoring_spec,
@@ -635,7 +642,9 @@ def test_step_input_bindings_keep_immediate_field_suppression() -> None:
     )
 
 
-def test_step_input_bindings_collapse_broad_field_refs_to_structured_ref() -> None:
+def test_step_input_bindings_keep_declared_fields_without_whole_object_expansion() -> (
+    None
+):
     bindings = compile_step_input_bindings(
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
@@ -662,8 +671,234 @@ def test_step_input_bindings_collapse_broad_field_refs_to_structured_ref() -> No
         ],
     )
 
-    assert bindings == {"source_refs": [{"step_ref": "step_a", "output": "structured"}]}
-    assert _lowered_question(bindings) == "{{ step_a.output.structured }}"
+    assert bindings == {
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "summary",
+                "label": "summary",
+            },
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "details",
+                "label": "details",
+            },
+        ]
+    }
+
+
+def test_json_source_refs_compile_exact_projection_contract() -> None:
+    prior_steps = [
+        _step(
+            "step_a",
+            None,
+            "Extract",
+            output_type=OutputType.JSON,
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "details": {"type": "string"},
+                    "unused": {"type": "string"},
+                },
+                "required": ["summary", "details", "unused"],
+                "additionalProperties": False,
+            },
+        )
+    ]
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        uses_form_fields=[],
+        uses_previous_fields=[
+            PreviousFieldRef(from_step=1, field_path="summary"),
+            PreviousFieldRef(from_step=1, field_path="details"),
+        ],
+        uses_previous_outputs=[],
+        prior_steps=prior_steps,
+    )
+
+    assert derive_input_contract(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        prior_steps=prior_steps,
+        input_bindings=bindings,
+    ) == {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "details": {"type": "string"},
+        },
+        "required": ["summary", "details"],
+        "additionalProperties": False,
+    }
+
+
+def test_json_source_refs_reject_colliding_projection_paths() -> None:
+    prior_steps = [
+        _step(
+            step_ref,
+            None,
+            f"Extract {step_ref}",
+            output_type=OutputType.JSON,
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+                "required": ["summary"],
+                "additionalProperties": False,
+            },
+        )
+        for step_ref in ("step_a", "step_b")
+    ]
+
+    with pytest.raises(
+        AIBuilderArchitectureError,
+        match="source_ref path collision at 'summary'",
+    ):
+        derive_input_contract(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.JSON,
+            prior_steps=prior_steps,
+            input_bindings={
+                "source_refs": [
+                    {
+                        "step_ref": "step_a",
+                        "output": "structured",
+                        "field_path": "summary",
+                    },
+                    {
+                        "step_ref": "step_b",
+                        "output": "structured",
+                        "field_path": "summary",
+                    },
+                ]
+            },
+        )
+
+
+def test_json_source_refs_reject_question_and_projection_composite() -> None:
+    prior_steps = [
+        _step(
+            "step_a",
+            None,
+            "Extract",
+            output_type=OutputType.JSON,
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        )
+    ]
+
+    with pytest.raises(
+        AIBuilderArchitectureError,
+        match="cannot be combined with input_bindings.question",
+    ):
+        derive_input_contract(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.JSON,
+            prior_steps=prior_steps,
+            input_bindings={
+                "question": "case_id: {{ flow_input.case_id }}",
+                "source_refs": [
+                    {
+                        "step_ref": "step_a",
+                        "output": "structured",
+                        "field_path": "summary",
+                    }
+                ],
+            },
+        )
+
+
+def test_json_source_refs_reject_unbounded_whole_object_projection() -> None:
+    prior_steps = [
+        _step(
+            "step_a",
+            None,
+            "Extract",
+            output_type=OutputType.JSON,
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        )
+    ]
+
+    with pytest.raises(
+        AIBuilderArchitectureError,
+        match="must select an explicit field_path",
+    ):
+        derive_input_contract(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.JSON,
+            prior_steps=prior_steps,
+            input_bindings={
+                "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+            },
+        )
+
+
+def test_transcript_guidance_requires_the_transcript_in_actual_underlag() -> None:
+    prior_steps = [
+        _step("step_a", None, "Earlier material"),
+        _step(
+            "step_b",
+            None,
+            "Transcribe",
+            input_type=InputType.AUDIO,
+            output_mode=OutputMode.TRANSCRIBE_ONLY,
+        ),
+    ]
+    draft = _new_step("Analyze")
+
+    instructions = compile_assistant_instructions(
+        step_draft=draft,
+        prior_steps=prior_steps,
+        input_bindings={
+            "source_refs": [
+                {"step_ref": "step_a", "output": "text", "label": "Earlier"}
+            ]
+        },
+        ui_language="en",
+    )
+
+    assert instructions == "New prompt"
+
+
+def test_binding_input_type_recomputes_document_output_mode() -> None:
+    prior_step = _step(
+        "step_a",
+        None,
+        "Extract",
+        output_type=OutputType.JSON,
+        output_contract={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+        },
+    )
+    compiled = compile_new_step_draft(
+        step_draft=_new_step(
+            "Render",
+            input_type=InputType.JSON,
+            output_type=OutputType.DOCX,
+            uses_form_fields=["case_id"],
+        ),
+        plan_step_ref="step_b",
+        prior_steps=[prior_step],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Case document",
+        flow_description="Render a case document.",
+        steps=[prior_step, compiled],
+        form_fields=[FormFieldSpec(name="case_id", type="text", label="Case ID")],
+    )
+
+    assert compiled.input_type == InputType.TEXT
+    assert compiled.output_mode == OutputMode.RENDER_VERBATIM
+    assert validate_spec(spec).valid
 
 
 def test_step_input_bindings_keep_non_immediate_structured_source_ref() -> None:
@@ -681,7 +916,6 @@ def test_step_input_bindings_keep_non_immediate_structured_source_ref() -> None:
 
     assert bindings == {
         "source_refs": [
-            {"step_ref": "step_b", "output": "structured"},
             {
                 "step_ref": "step_a",
                 "output": "structured",
@@ -691,28 +925,57 @@ def test_step_input_bindings_keep_non_immediate_structured_source_ref() -> None:
         ]
     }
     assert _lowered_question(bindings) == (
-        "{{ step_b.output.structured }}\n\n"
         "answer: {{ step_a.output.structured.answer }}"
     )
 
 
-def test_step_input_bindings_fall_back_to_question_for_template_labels() -> None:
-    bindings = compile_step_input_bindings(
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.TEXT,
-        uses_form_fields=[],
-        uses_previous_fields=[
-            PreviousFieldRef(
-                from_step=1,
-                field_path="answer",
-                label="{{ bad }}",
-            )
-        ],
-        uses_previous_outputs=[],
-        prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
-    )
+def test_step_input_bindings_reject_invalid_typed_source_ref() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_step_input_bindings(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.TEXT,
+            uses_form_fields=[],
+            uses_previous_fields=[
+                PreviousFieldRef(
+                    from_step=1,
+                    field_path="answer",
+                    label="{{ bad }}",
+                )
+            ],
+            uses_previous_outputs=[],
+            prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
+        )
 
-    assert bindings == {"question": "{{ bad }}: {{ step_a.output.structured.answer }}"}
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.log_context["failure_code"] == "invalid_source_refs"
+    assert "label must not contain templates" in exc_info.value.detail
+    assert "{{ bad }}" in exc_info.value.detail
+
+
+def test_step_input_bindings_validate_source_refs_before_deduplication() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_step_input_bindings(
+            input_source=InputSource.FLOW_INPUT,
+            input_type=InputType.TEXT,
+            uses_form_fields=[],
+            uses_previous_fields=[
+                PreviousFieldRef(
+                    from_step=1,
+                    field_path="answer",
+                    label="Answer",
+                ),
+                PreviousFieldRef(
+                    from_step=1,
+                    field_path="answer",
+                    label="{{ invalid duplicate }}",
+                ),
+            ],
+            uses_previous_outputs=[],
+            prior_steps=[_step("step_a", None, "Extract", output_type=OutputType.JSON)],
+        )
+
+    assert exc_info.value.log_context["failure_code"] == "invalid_source_refs"
+    assert "{{ invalid duplicate }}" in exc_info.value.detail
 
 
 def test_edit_overlay_add_step_rejects_unresolvable_previous_output_ref() -> None:

@@ -36,7 +36,6 @@ def infer_answer_signals_from_text(text: str) -> dict[str, set[str]]:
     input_intent = resolve_input_intent(normalized, {})
     primary_runtime_input = _infer_primary_runtime_input(normalized, input_intent)
     if _document_signals_apply(input_intent, primary_runtime_input):
-        _add_signal(signals, "document_kind", _infer_document_kind(normalized))
         _add_signal(
             signals,
             "document_material_scope",
@@ -129,70 +128,6 @@ def is_high_confidence_source_to_source_comparison(text: str) -> bool:
 
 def _has_source_to_source_comparison_evidence(text: str) -> bool:
     return _contains_any(text, _SOURCE_TO_SOURCE_COMPARISON_PHRASES)
-
-
-def _infer_document_kind(text: str) -> str | None:
-    if _contains_any(
-        text,
-        (
-            "blandat dokumentpaket",
-            "mixed document package",
-            "mixed documents",
-            "olika dokumenttyper",
-            "several different document types",
-        ),
-    ):
-        return "mixed_documents"
-    if _contains_any(
-        text,
-        (
-            "leverantörsavtal",
-            "ramavtal",
-            "kommersiella villkor",
-            "appendix",
-            "bilagor",
-            "avtal",
-            "contract",
-            "contracts",
-            "agreement",
-            "agreements",
-        ),
-    ):
-        return "contracts_agreements"
-    if _contains_any(
-        text,
-        (
-            "news article",
-            "news articles",
-            "article like",
-            "editorial",
-            "artikelmaterial",
-            "nyhetsartikel",
-            "nyhetsartiklar",
-            "artiklar",
-        ),
-    ):
-        return "news_articles"
-    if _contains_any(
-        text,
-        (
-            "officiellt underlag",
-            "official material",
-            "official case files",
-            "case material",
-            "case files",
-            "case package",
-            "underlag",
-            "kommunärende",
-            "municipal case",
-            "tjänsteskrivelse",
-            "tjänsteskrivelser",
-            "remiss",
-            "remisser",
-        ),
-    ):
-        return "case_documents"
-    return None
 
 
 def _infer_document_material_scope(text: str) -> str | None:

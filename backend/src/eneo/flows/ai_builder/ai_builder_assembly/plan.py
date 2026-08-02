@@ -35,9 +35,6 @@ from eneo.flows.flow_capability_manifest import (
     resolve_capability_for_tuple,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
-from eneo.flows.input_binding_contract_rules import (
-    field_refs_cover_whole_structured_object,
-)
 from eneo.json_types import JsonObject
 
 PlannedStepRole = Literal[
@@ -205,15 +202,6 @@ def derive_underlag_channel(
     if input_source == InputSource.ALL_PREVIOUS_STEPS:
         return "fan_in"
     if previous_field_refs:
-        if (
-            previous_step is not None
-            and previous_step.output_type == OutputType.JSON
-            and field_refs_cover_whole_structured_object(
-                field_paths=(ref.field_path for ref in previous_field_refs),
-                property_names=(field.name for field in previous_step.output_fields),
-            )
-        ):
-            return "whole_object"
         return "field_refs"
     if (
         previous_step is not None

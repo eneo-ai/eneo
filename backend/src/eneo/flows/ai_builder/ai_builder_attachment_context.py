@@ -348,7 +348,7 @@ def _apply_structural_template_docx_mode(
     state.resolved_slots["docx_output_mode"] = ResolvedSlot(
         name="docx_output_mode",
         value="template_fill_docx",
-        source="heuristic",
+        source="attachment_structure",
         evidence=evidence[:3],
         confidence="high",
     )

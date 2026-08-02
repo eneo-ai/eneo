@@ -6,6 +6,9 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
@@ -16,8 +19,10 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
 from eneo.flows.ai_builder.planning_state import (
+    ArchitectureCommitDraft,
     PlanningState,
     ResolvedSlot,
+    StepTriple,
 )
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
@@ -116,6 +121,54 @@ async def test_english_edit_compiles_input_reference_hint_in_english() -> None:
     assert (
         "Beakta särskilt följande strukturerade fält i underlaget:" not in instructions
     )
+
+
+@pytest.mark.asyncio
+async def test_edit_rejects_invalid_typed_source_ref_without_text_fallback() -> None:
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extract source facts",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Use the source summary",
+            input_source="previous_step",
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Use the typed source summary.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "uses_previous_fields": [
+                        {
+                            "from_step": 1,
+                            "field_path": "summary",
+                            "label": "{{ invalid }}",
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({"invalid_source_refs"})
+    assert result.feedback is not None
+    assert "label must not contain templates" in result.feedback
+    assert "{{ invalid }}" in result.feedback
 
 
 @pytest.mark.asyncio
@@ -329,10 +382,7 @@ async def test_edit_removing_compare_aggregation_target_is_rejected() -> None:
 
     result = await _process(
         flow=flow,
-        planning_state=_planning_state_with_slots(
-            primary_runtime_input="documents",
-            comparison_scope="same_run_compare",
-        ),
+        planning_state=_comparison_planning_state(),
         arguments={
             "plan_rationale": "Use only the immediately preceding analysis.",
             "steps": [
@@ -358,10 +408,7 @@ async def test_edit_preserving_compare_aggregation_target_is_accepted() -> None:
 
     result = await _process(
         flow=flow,
-        planning_state=_planning_state_with_slots(
-            primary_runtime_input="documents",
-            comparison_scope="same_run_compare",
-        ),
+        planning_state=_comparison_planning_state(),
         arguments={
             "plan_rationale": "Clarify the comparison step name.",
             "steps": [
@@ -384,10 +431,7 @@ async def test_edit_preserving_compare_aggregation_target_is_accepted() -> None:
 async def test_edit_preserving_targeted_compare_source_refs_is_accepted() -> None:
     result = await _process(
         flow=_comparison_flow(targeted=True),
-        planning_state=_planning_state_with_slots(
-            primary_runtime_input="documents",
-            comparison_scope="same_run_compare",
-        ),
+        planning_state=_comparison_planning_state(),
         arguments={
             "plan_rationale": "Clarify the targeted comparison name.",
             "steps": [
@@ -1479,7 +1523,20 @@ def _flow_step(
 
 
 def _planning_state_with_primary_input(value: str) -> PlanningState:
-    return _planning_state_with_slots(primary_runtime_input=value)
+    state = _planning_state_with_slots(primary_runtime_input=value)
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type=InputType(value),
+                    output_type=OutputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                )
+            ],
+            chosen_patterns=["audio_transcription"],
+        )
+    )
+    return state
 
 
 def _planning_state_with_slots(**values: str) -> PlanningState:
@@ -1537,6 +1594,29 @@ def _comparison_flow(*, targeted: bool = False) -> SimpleNamespace:
             ),
         ),
     )
+
+
+def _comparison_planning_state() -> PlanningState:
+    state = _planning_state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="structured_text",
+        document_material_scope="multiple_documents_case",
+        comparison_scope="same_run_compare",
+    )
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                )
+            ],
+            chosen_patterns=["document_to_structured_report", "comparison"],
+            aggregation_intent="compare",
+        )
+    )
+    return state
 
 
 def _source_reader_flow() -> SimpleNamespace:
@@ -1600,6 +1680,18 @@ def _terminal_schema_planning_state() -> PlanningState:
         source="declared_schema",
         confidence="high",
         evidence=["message:source_case_id"],
+    )
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_mode=OutputMode.PASS_THROUGH,
+                )
+            ],
+            chosen_patterns=["document_to_structured_report"],
+        )
     )
     return state
 

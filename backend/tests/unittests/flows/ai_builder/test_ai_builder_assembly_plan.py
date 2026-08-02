@@ -314,7 +314,7 @@ def test_plan_requires_whole_object_channel_for_json_previous_text_input() -> No
     assert plan.steps[-1].underlag_channel == "whole_object"
 
 
-def test_plan_requires_whole_object_channel_for_broad_previous_field_refs() -> None:
+def test_plan_keeps_declared_field_refs_even_when_they_cover_all_fields() -> None:
     first_step = _text_step(
         name="Extract facts",
         output_type=OutputType.JSON,
@@ -332,10 +332,11 @@ def test_plan_requires_whole_object_channel_for_broad_previous_field_refs() -> N
         previous_field_refs=broad_field_refs,
     )
 
-    with pytest.raises(ValueError, match="expected 'whole_object'"):
-        _plan(steps=(first_step, field_ref_step))
+    plan = _plan(steps=(first_step, field_ref_step))
 
-    whole_object_step = _text_step(
+    assert plan.steps[-1].underlag_channel == "field_refs"
+
+    incorrect_whole_object_step = _text_step(
         name="Write from all facts",
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.TEXT,
@@ -343,9 +344,8 @@ def test_plan_requires_whole_object_channel_for_broad_previous_field_refs() -> N
         previous_field_refs=broad_field_refs,
     )
 
-    plan = _plan(steps=(first_step, whole_object_step))
-
-    assert plan.steps[-1].underlag_channel == "whole_object"
+    with pytest.raises(ValueError, match="expected 'field_refs'"):
+        _plan(steps=(first_step, incorrect_whole_object_step))
 
 
 def test_plan_rejects_linear_fan_in() -> None:

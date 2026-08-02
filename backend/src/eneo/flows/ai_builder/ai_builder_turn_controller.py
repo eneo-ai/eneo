@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
+    ResolvedRequirementPayload,
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
@@ -402,6 +403,15 @@ def _confirm_requirements_payload(
         key_decisions=key_decisions,
         input_description=input_description,
         output_description=output_description,
+        resolved_requirements=[
+            ResolvedRequirementPayload(
+                requirement_id=slot_name,
+                selected_value=resolved[slot_name].value,
+            )
+            for slot_name in sorted(resolved)
+            if resolved[slot_name].is_commit_grade
+            and resolved[slot_name].source != "attachment_structure"
+        ],
         assumptions=[
             *[
                 _slot_assumption(slot_name, resolved[slot_name], locale)
@@ -708,7 +718,7 @@ def _slot_is_key_decision(slot: ResolvedSlot) -> bool:
     match slot.source:
         case "structured_answer" | "requirements_summary" | "flow_default":
             return True
-        case "policy_default" | "heuristic" | "model":
+        case "attachment_structure" | "policy_default" | "heuristic" | "model":
             return False
     return assert_never(slot.source)
 

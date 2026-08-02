@@ -29,6 +29,9 @@ from uuid import uuid4
 JsonObject = dict[str, Any]
 DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json")
 DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
+MAX_INTERACTIONS_PER_CASE = 6
+SUPPORTED_CASES_FILE_VERSION = 4
+SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v2"
 
 
 def _local_app_version() -> str:
@@ -84,13 +87,26 @@ class BattleCase:
     file_ids: tuple[str, ...] = ()
     file_id_envs: tuple[str, ...] = ()
     runtime_file_path_envs: tuple[str, ...] = ()
-    scripted_question_answers: JsonObject | None = None
+    synthetic_user_profile: str | None = None
+    cohorts: tuple[str, ...] = ()
+    configured_question_answers: JsonObject | None = None
+    question_answer_sources: JsonObject | None = None
+
+
+def _case_identity(case: BattleCase) -> JsonObject:
+    return {
+        "id": case.case_id,
+        "required": case.required,
+        "complexity": case.complexity,
+        "domain": case.domain,
+        "cohorts": list(case.cohorts),
+    }
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseThresholds:
-    max_case_errors: int
-    max_quality_failures: int
+    max_required_case_errors: int
+    max_required_quality_failures: int
     max_required_skips: int
 
 
@@ -98,8 +114,16 @@ class ReleaseThresholds:
 class ReleaseGate:
     required_case_ids: tuple[str, ...]
     thresholds: ReleaseThresholds
-    artifact_schema_version: str = "ai-builder-live-release.v1"
+    artifact_schema_version: str = SUPPORTED_RECEIPT_ARTIFACT_VERSION
     require_clean_source: bool = False
+
+    def __post_init__(self) -> None:
+        if self.artifact_schema_version != SUPPORTED_RECEIPT_ARTIFACT_VERSION:
+            raise ValueError(
+                "release_gate.artifact_schema_version must be "
+                f"{SUPPORTED_RECEIPT_ARTIFACT_VERSION}; got "
+                f"{self.artifact_schema_version!r}."
+            )
 
 
 def main() -> int:
@@ -141,11 +165,13 @@ def main() -> int:
                 ),
             )
         case = cases[0]
+        cases_path = _cases_path_from_args(args)
         if missing_envs := _missing_file_id_envs(case, args):
             skipped = _skipped_case_bundle(
                 case=case,
                 repetition=None,
                 missing_envs=missing_envs,
+                cases_path=cases_path,
             )
             skipped_path = _write_bundle(
                 output_dir,
@@ -161,6 +187,7 @@ def main() -> int:
             args=args,
             existing_session_id=args.session_id,
             artifact_output_dir=output_dir,
+            cases_path=cases_path,
         )
         bundle_path = _write_bundle(output_dir, bundle, suffix=case.case_id)
         _print_summary(bundle["plan_summary"], bundle_path)
@@ -313,8 +340,8 @@ def _read_prompt(args: argparse.Namespace) -> str:
 
 
 def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
-    if args.run_suite or args.cases_file or args.case_id:
-        cases_file = Path(args.cases_file) if args.cases_file else DEFAULT_CASES_FILE
+    cases_file = _cases_path_from_args(args)
+    if cases_file is not None:
         cases = _read_cases_file(cases_file)
         selected = set(args.case_id or ())
         if selected:
@@ -337,6 +364,17 @@ def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
             file_ids=tuple(args.file_ids or ()),
         )
     ]
+
+
+def _cases_path_from_args(args: argparse.Namespace) -> Path | None:
+    cases_file = getattr(args, "cases_file", None)
+    if (
+        getattr(args, "run_suite", False)
+        or cases_file
+        or getattr(args, "case_id", None)
+    ):
+        return Path(cases_file) if cases_file else DEFAULT_CASES_FILE
+    return None
 
 
 _CLASSIFIER_SLOT_EXPECTATION_KEYS = frozenset(
@@ -419,7 +457,9 @@ _CASE_KEYS = frozenset(
         "file_ids",
         "file_id_envs",
         "runtime_file_path_envs",
-        "scripted_question_answers",
+        "synthetic_user_profile",
+        "question_answer_overrides",
+        "cohorts",
     }
 )
 _EXPECTATION_KEYS = frozenset(
@@ -428,10 +468,14 @@ _EXPECTATION_KEYS = frozenset(
         "expected_classifier_slots",
         "expected_file_roles",
         "expected_form_field_groups",
+        "expected_input_contract_schema",
         "expected_leaf_output_field_groups",
+        "expected_output_contract_schema",
         "expected_output_modes",
         "expected_question_event_count",
         "expected_question_event_ids",
+        "preferred_question_event_ids",
+        "allowed_question_event_ids",
         "expected_first_pass_authoring",
         "expected_review_policy",
         "expected_runtime_evidence",
@@ -445,9 +489,11 @@ _EXPECTATION_KEYS = frozenset(
         "max_all_previous_steps",
         "max_post_json_text_cleanup_steps",
         "max_question_event_count",
+        "max_reopened_question_count",
         "max_steps",
         "min_form_field_count",
         "min_json_steps",
+        "min_question_event_count",
         "min_source_ref_steps",
         "min_steps",
         "terminal_document_output_mode",
@@ -494,11 +540,21 @@ _RUNTIME_EVIDENCE_EXPECTATION_KEYS = frozenset(
 
 def _read_cases_file(path: Path) -> list[BattleCase]:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{path} must contain a top-level JSON object.")
+    version = payload.get("version")
+    if version != SUPPORTED_CASES_FILE_VERSION:
+        raise ValueError(
+            f"{path} version must be {SUPPORTED_CASES_FILE_VERSION}; got {version!r}."
+        )
     raw_cases = payload.get("cases") if isinstance(payload, Mapping) else None
     if not isinstance(raw_cases, list):
         raise ValueError(f"{path} must contain a top-level 'cases' list.")
+    profiles = _synthetic_user_profiles(path, payload)
 
     cases: list[BattleCase] = []
+    seen_case_ids: set[str] = set()
+    seen_prompts: set[str] = set()
     for index, raw_case in enumerate(raw_cases):
         if not isinstance(raw_case, Mapping):
             raise ValueError(f"{path} cases[{index}] must be an object.")
@@ -512,6 +568,12 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
         prompt = _required_string(raw_case, "prompt").strip()
         if not prompt:
             raise ValueError(f"{path} case {case_id} has an empty prompt.")
+        if case_id in seen_case_ids:
+            raise ValueError(f"{path} contains duplicate case id: {case_id}")
+        if prompt in seen_prompts:
+            raise ValueError(f"{path} contains duplicate prompt in case: {case_id}")
+        seen_case_ids.add(case_id)
+        seen_prompts.add(prompt)
         file_ids = raw_case.get("file_ids")
         if file_ids is None:
             file_ids = []
@@ -547,17 +609,68 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             raise ValueError(
                 f"{path} case {case_id}.release_dimensions must be a string list."
             )
+        cohorts = raw_case.get("cohorts")
+        if cohorts is None:
+            cohorts = []
+        if (
+            not isinstance(cohorts, list)
+            or not all(isinstance(cohort, str) and cohort.strip() for cohort in cohorts)
+            or len(set(cohorts)) != len(cohorts)
+        ):
+            raise ValueError(f"{path} case {case_id}.cohorts must be unique strings.")
         expected = raw_case.get("expected")
         if expected is not None and not isinstance(expected, Mapping):
             raise ValueError(f"{path} case {case_id}.expected must be an object.")
         if isinstance(expected, Mapping):
             _validate_classifier_expectations(path, case_id, expected)
             _validate_release_expectations(path, case_id, expected)
-        scripted_answers = raw_case.get("scripted_question_answers")
-        if scripted_answers is not None and not isinstance(scripted_answers, Mapping):
+        profile_name = raw_case.get("synthetic_user_profile")
+        if profile_name is not None and (
+            not isinstance(profile_name, str) or profile_name not in profiles
+        ):
             raise ValueError(
-                f"{path} case {case_id}.scripted_question_answers must be an object."
+                f"{path} case {case_id}.synthetic_user_profile is unknown."
             )
+        overrides = raw_case.get("question_answer_overrides")
+        if overrides is None:
+            overrides = {}
+        _validate_question_answers(
+            path=path,
+            owner=f"case {case_id}.question_answer_overrides",
+            value=overrides,
+        )
+        profile_answers = (
+            profiles[profile_name]["question_answers"]
+            if isinstance(profile_name, str)
+            else {}
+        )
+        configured_answers = {
+            **dict(profile_answers),
+            **dict(overrides),
+        }
+        answer_sources = {
+            **{question_id: "profile" for question_id in profile_answers},
+            **{question_id: "case_override" for question_id in overrides},
+        }
+        if (
+            isinstance(expected, Mapping)
+            and expected.get("allow_question_instead_of_plan") is not True
+        ):
+            answered_question_ids = set(configured_answers)
+            required_answer_ids = {
+                question_id
+                for key in (
+                    "preferred_question_event_ids",
+                    "allowed_question_event_ids",
+                )
+                for question_id in _string_list(expected.get(key))
+            }
+            missing_answer_ids = required_answer_ids - answered_question_ids
+            if missing_answer_ids:
+                raise ValueError(
+                    f"{path} case {case_id} requires configured answers for: "
+                    + ", ".join(sorted(missing_answer_ids))
+                )
         case = BattleCase(
             case_id=case_id,
             prompt=prompt,
@@ -571,11 +684,12 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             file_ids=tuple(file_ids),
             file_id_envs=tuple(file_id_envs),
             runtime_file_path_envs=tuple(runtime_file_path_envs),
-            scripted_question_answers=(
-                dict(scripted_answers)
-                if isinstance(scripted_answers, Mapping)
-                else None
+            synthetic_user_profile=(
+                profile_name if isinstance(profile_name, str) else None
             ),
+            cohorts=tuple(cohorts),
+            configured_question_answers=configured_answers,
+            question_answer_sources=answer_sources,
         )
         if case.execute_flow and not case.apply_plan:
             raise ValueError(
@@ -587,6 +701,88 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             )
         cases.append(case)
     return cases
+
+
+def _synthetic_user_profiles(
+    path: Path,
+    payload: object,
+) -> dict[str, JsonObject]:
+    raw_profiles = (
+        payload.get("synthetic_user_profiles") if isinstance(payload, Mapping) else None
+    )
+    if raw_profiles is None:
+        return {}
+    if not isinstance(raw_profiles, Mapping):
+        raise ValueError(f"{path} synthetic_user_profiles must be an object.")
+    profiles: dict[str, JsonObject] = {}
+    for raw_name, raw_profile in raw_profiles.items():
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise ValueError(f"{path} synthetic user profile names must be strings.")
+        if not isinstance(raw_profile, Mapping) or set(raw_profile) != {
+            "description",
+            "question_answers",
+        }:
+            raise ValueError(
+                f"{path} synthetic user profile {raw_name} has an invalid shape."
+            )
+        description = raw_profile.get("description")
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError(
+                f"{path} synthetic user profile {raw_name} needs a description."
+            )
+        answers = raw_profile.get("question_answers")
+        _validate_question_answers(
+            path=path,
+            owner=f"synthetic user profile {raw_name}.question_answers",
+            value=answers,
+        )
+        profiles[raw_name] = {
+            "description": description.strip(),
+            "question_answers": dict(answers),
+        }
+    return profiles
+
+
+def _validate_question_answers(
+    *,
+    path: Path,
+    owner: str,
+    value: object,
+) -> None:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{path} {owner} must be an object.")
+    for question_id, answer in value.items():
+        if not isinstance(question_id, str) or not question_id.strip():
+            raise ValueError(f"{path} {owner} has an invalid question id.")
+        if not isinstance(answer, Mapping):
+            raise ValueError(f"{path} {owner}.{question_id} must be an object.")
+        answer_keys = set(answer)
+        valid_shapes = (
+            (
+                answer_keys == {"selected_option_id"}
+                and isinstance(answer.get("selected_option_id"), str)
+                and bool(str(answer["selected_option_id"]).strip())
+            )
+            or (
+                answer_keys == {"selected_option_ids"}
+                and isinstance(answer.get("selected_option_ids"), list)
+                and bool(answer["selected_option_ids"])
+                and all(
+                    isinstance(option_id, str) and bool(option_id.strip())
+                    for option_id in answer["selected_option_ids"]
+                )
+            )
+            or (
+                answer_keys == {"custom_value"}
+                and isinstance(answer.get("custom_value"), str)
+                and bool(str(answer["custom_value"]).strip())
+            )
+        )
+        if not valid_shapes:
+            raise ValueError(
+                f"{path} {owner}.{question_id} must contain exactly one valid "
+                "answer mode."
+            )
 
 
 def _release_gate_from_args(args: argparse.Namespace) -> ReleaseGate:
@@ -602,7 +798,6 @@ def _read_release_gate(path: Path, *, cases: list[BattleCase]) -> ReleaseGate:
     expected_gate_keys = {
         "artifact_schema_version",
         "require_clean_source",
-        "required_case_ids",
         "thresholds",
     }
     if set(raw_gate) != expected_gate_keys:
@@ -618,22 +813,13 @@ def _read_release_gate(path: Path, *, cases: list[BattleCase]) -> ReleaseGate:
     require_clean_source = raw_gate.get("require_clean_source")
     if not isinstance(require_clean_source, bool):
         raise ValueError(f"{path} release_gate.require_clean_source must be a boolean.")
-    raw_required_ids = raw_gate.get("required_case_ids")
-    if (
-        not isinstance(raw_required_ids, list)
-        or not raw_required_ids
-        or not all(
-            isinstance(case_id, str) and case_id.strip() for case_id in raw_required_ids
-        )
-    ):
-        raise ValueError(f"{path} release_gate.required_case_ids is invalid.")
-    required_case_ids = tuple(raw_required_ids)
-    if len(set(required_case_ids)) != len(required_case_ids):
-        raise ValueError(f"{path} release_gate.required_case_ids contains duplicates.")
+    required_case_ids = tuple(case.case_id for case in cases if case.required)
+    if not required_case_ids:
+        raise ValueError(f"{path} must mark at least one case as required.")
     raw_thresholds = raw_gate.get("thresholds")
     expected_threshold_keys = {
-        "max_case_errors",
-        "max_quality_failures",
+        "max_required_case_errors",
+        "max_required_quality_failures",
         "max_required_skips",
     }
     if not isinstance(raw_thresholds, Mapping) or set(raw_thresholds) != (
@@ -651,21 +837,6 @@ def _read_release_gate(path: Path, *, cases: list[BattleCase]) -> ReleaseGate:
                 f"{path} release_gate.thresholds.{key} must be a non-negative integer."
             )
         threshold_values[key] = value
-    by_id = {case.case_id: case for case in cases}
-    missing_case_ids = set(required_case_ids) - set(by_id)
-    if missing_case_ids:
-        raise ValueError(
-            f"{path} release gate references unknown required case(s): "
-            + ", ".join(sorted(missing_case_ids))
-        )
-    not_required = [
-        case_id for case_id in required_case_ids if not by_id[case_id].required
-    ]
-    if not_required:
-        raise ValueError(
-            f"{path} release gate case(s) are not marked required: "
-            + ", ".join(not_required)
-        )
     return ReleaseGate(
         required_case_ids=required_case_ids,
         thresholds=ReleaseThresholds(**threshold_values),
@@ -685,6 +856,54 @@ def _validate_release_expectations(
             f"{path} case {case_id}.expected has unknown expectation keys: "
             + ", ".join(sorted(str(key) for key in unknown_keys))
         )
+    relevance_sets: dict[str, set[str]] = {}
+    for key in (
+        "preferred_question_event_ids",
+        "allowed_question_event_ids",
+        "forbidden_question_event_ids",
+    ):
+        raw_ids = expected.get(key)
+        if raw_ids is None:
+            relevance_sets[key] = set()
+            continue
+        if (
+            not isinstance(raw_ids, list)
+            or not all(isinstance(item, str) and item.strip() for item in raw_ids)
+            or len(set(raw_ids)) != len(raw_ids)
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.{key} must be a list of unique, "
+                "non-empty strings."
+            )
+        relevance_sets[key] = set(raw_ids)
+    overlapping_relevance_ids = (
+        (
+            relevance_sets["preferred_question_event_ids"]
+            & relevance_sets["allowed_question_event_ids"]
+        )
+        | (
+            relevance_sets["preferred_question_event_ids"]
+            & relevance_sets["forbidden_question_event_ids"]
+        )
+        | (
+            relevance_sets["allowed_question_event_ids"]
+            & relevance_sets["forbidden_question_event_ids"]
+        )
+    )
+    if overlapping_relevance_ids:
+        raise ValueError(
+            f"{path} case {case_id} question relevance sets overlap: "
+            + ", ".join(sorted(overlapping_relevance_ids))
+        )
+    for schema_key in (
+        "expected_input_contract_schema",
+        "expected_output_contract_schema",
+    ):
+        schema = expected.get(schema_key)
+        if schema is not None and not isinstance(schema, Mapping):
+            raise ValueError(
+                f"{path} case {case_id}.{schema_key} must be a JSON object."
+            )
     first_pass = expected.get("expected_first_pass_authoring")
     if first_pass is not None:
         _validate_first_pass_authoring_expectation(path, case_id, first_pass)
@@ -976,8 +1195,8 @@ def _run_suite(
     release_gate = release_gate or ReleaseGate(
         required_case_ids=tuple(case.case_id for case in cases if case.required),
         thresholds=ReleaseThresholds(
-            max_case_errors=0,
-            max_quality_failures=0,
+            max_required_case_errors=0,
+            max_required_quality_failures=0,
             max_required_skips=0,
         ),
     )
@@ -988,7 +1207,7 @@ def _run_suite(
             "Release suite omitted required case(s): "
             + ", ".join(sorted(missing_required_cases))
         )
-    cases_path = Path(getattr(args, "cases_file", None) or DEFAULT_CASES_FILE)
+    cases_path = _cases_path_from_args(args) or DEFAULT_CASES_FILE
     requested_model_id = getattr(args, "model_id", None)
     release_identity = _release_run_identity(
         cases=cases,
@@ -1009,14 +1228,17 @@ def _run_suite(
             "release_identity": release_identity,
             "required_case_ids": list(release_gate.required_case_ids),
             "thresholds": {
-                "max_case_errors": release_gate.thresholds.max_case_errors,
-                "max_quality_failures": (release_gate.thresholds.max_quality_failures),
+                "max_required_case_errors": (
+                    release_gate.thresholds.max_required_case_errors
+                ),
+                "max_required_quality_failures": (
+                    release_gate.thresholds.max_required_quality_failures
+                ),
                 "max_required_skips": release_gate.thresholds.max_required_skips,
             },
             "selected_cases": [
                 {
-                    "id": case.case_id,
-                    "required": case.required,
+                    "case_identity": _case_identity(case),
                     "release_dimensions": list(case.release_dimensions),
                     "prompt_sha256": hashlib.sha256(
                         case.prompt.encode("utf-8")
@@ -1029,6 +1251,8 @@ def _run_suite(
     results: list[JsonObject] = []
     case_error_count = 0
     quality_failure_run_count = 0
+    required_case_error_count = 0
+    required_quality_failure_run_count = 0
     skipped_run_count = 0
     required_skipped_run_count = 0
     total_runs = len(cases) * args.repetitions
@@ -1053,6 +1277,7 @@ def _run_suite(
                     case=case,
                     repetition=repetition,
                     missing_envs=missing_envs,
+                    cases_path=cases_path,
                 )
                 skipped["artifact_schema_version"] = (
                     release_gate.artifact_schema_version
@@ -1074,7 +1299,9 @@ def _run_suite(
                     args=args,
                     existing_session_id=None,
                     artifact_output_dir=suite_dir,
+                    cases_path=cases_path,
                 )
+                bundle["case_identity"] = _case_identity(case)
                 bundle["artifact_schema_version"] = release_gate.artifact_schema_version
                 bundle["repetition"] = repetition
                 if case.required:
@@ -1109,6 +1336,8 @@ def _run_suite(
                 results.append(result)
                 if (_int_value(result.get("failed_check_count")) or 0) > 0:
                     quality_failure_run_count += 1
+                    if case.required:
+                        required_quality_failure_run_count += 1
                     failed_names = _failed_check_names(result)
                     print(
                         "case quality checks failed: "
@@ -1117,14 +1346,14 @@ def _run_suite(
                     )
             except (HTTPError, URLError, TimeoutError, ValueError) as error:
                 case_error_count += 1
+                if case.required:
+                    required_case_error_count += 1
                 failure = {
                     "artifact_schema_version": release_gate.artifact_schema_version,
                     "artifact_mode": "live_execution_failure",
                     "created_at": time.strftime("%Y%m%dT%H%M%S"),
                     "app_version": LOCAL_APP_VERSION,
-                    "case_id": case.case_id,
-                    "complexity": case.complexity,
-                    "domain": case.domain,
+                    "case_identity": _case_identity(case),
                     "repetition": repetition,
                     **_failure_error_fields(error),
                     "release_identity": release_identity,
@@ -1136,7 +1365,7 @@ def _run_suite(
                 )
                 print(f"case failed: {error}", file=sys.stderr)
                 print(f"failure bundle: {failure_path}", file=sys.stderr)
-                results.append({**failure, "bundle_path": str(failure_path)})
+                results.append(_suite_result(failure, failure_path))
 
     try:
         release_identity_recheck = _release_run_identity(
@@ -1167,8 +1396,8 @@ def _run_suite(
     )
     threshold_checks = _evaluate_release_thresholds(
         release_gate.thresholds,
-        case_error_count=case_error_count,
-        quality_failure_run_count=quality_failure_run_count,
+        required_case_error_count=required_case_error_count,
+        required_quality_failure_run_count=required_quality_failure_run_count,
         required_skipped_run_count=required_skipped_run_count,
     )
     suite_summary: JsonObject = {
@@ -1189,6 +1418,8 @@ def _run_suite(
         ),
         "case_error_count": case_error_count,
         "quality_failure_run_count": quality_failure_run_count,
+        "required_case_error_count": required_case_error_count,
+        "required_quality_failure_run_count": required_quality_failure_run_count,
         "skipped_run_count": skipped_run_count,
         "required_skipped_run_count": required_skipped_run_count,
         "suite_identity_failure_count": suite_identity_failure_count,
@@ -1386,22 +1617,25 @@ def _release_identity_recheck_checks(
 def _evaluate_release_thresholds(
     thresholds: ReleaseThresholds,
     *,
-    case_error_count: int,
-    quality_failure_run_count: int,
+    required_case_error_count: int,
+    required_quality_failure_run_count: int,
     required_skipped_run_count: int,
 ) -> list[JsonObject]:
     return [
         {
-            "name": "max_case_errors",
-            "passed": case_error_count <= thresholds.max_case_errors,
-            "actual": case_error_count,
-            "threshold": thresholds.max_case_errors,
+            "name": "max_required_case_errors",
+            "passed": (
+                required_case_error_count <= thresholds.max_required_case_errors
+            ),
+            "actual": required_case_error_count,
+            "threshold": thresholds.max_required_case_errors,
         },
         {
-            "name": "max_quality_failures",
-            "passed": quality_failure_run_count <= thresholds.max_quality_failures,
-            "actual": quality_failure_run_count,
-            "threshold": thresholds.max_quality_failures,
+            "name": "max_required_quality_failures",
+            "passed": required_quality_failure_run_count
+            <= thresholds.max_required_quality_failures,
+            "actual": required_quality_failure_run_count,
+            "threshold": thresholds.max_required_quality_failures,
         },
         {
             "name": "max_required_skips",
@@ -1419,6 +1653,7 @@ def _run_case(
     args: argparse.Namespace,
     existing_session_id: str | None,
     artifact_output_dir: Path,
+    cases_path: Path | None = DEFAULT_CASES_FILE,
 ) -> JsonObject:
     started_at = time.strftime("%Y%m%dT%H%M%S")
     if existing_session_id:
@@ -1451,9 +1686,11 @@ def _run_case(
     )
     interactions.append(first)
 
-    answered_questions: set[str] = set()
     confirmed_requirement_versions: set[str] = set()
-    while interactions[-1].get("plan_id") is None and len(interactions) < 6:
+    while (
+        interactions[-1].get("plan_id") is None
+        and len(interactions) < MAX_INTERACTIONS_PER_CASE
+    ):
         current = interactions[-1]
         if (
             args.auto_confirm_requirements
@@ -1480,28 +1717,23 @@ def _run_case(
                 continue
 
         if (question := _latest_structured_question(current)) is not None:
-            answer = _scripted_question_answer(
+            answer = _configured_question_answer(
                 question=question,
-                scripted_answers=case.scripted_question_answers or {},
+                configured_answers=case.configured_question_answers or {},
+                answer_sources=case.question_answer_sources or {},
             )
-            question_id = _optional_string(question, "question_id")
-            if (
-                answer is not None
-                and question_id is not None
-                and question_id not in answered_questions
-            ):
-                answered_questions.add(question_id)
-                interactions.append(
-                    _send_and_fetch(
-                        config=config,
-                        session_id=session_id,
-                        message=answer["message"],
-                        model_id=args.model_id,
-                        file_ids=(),
-                        ui_language=args.ui_language,
-                        question_answer=answer["question_answer"],
-                    )
+            if answer is not None:
+                response = _send_and_fetch(
+                    config=config,
+                    session_id=session_id,
+                    message=answer["message"],
+                    model_id=args.model_id,
+                    file_ids=(),
+                    ui_language=args.ui_language,
+                    question_answer=answer["question_answer"],
                 )
+                response["configured_answer_source"] = answer["answer_source"]
+                interactions.append(response)
                 continue
         break
 
@@ -1532,6 +1764,11 @@ def _run_case(
             case_id=case.case_id,
         )
     event_summary = _interaction_event_summary(interactions)
+    journey = _journey_summary(
+        interactions,
+        expected=case.expected or {},
+        interaction_limit=MAX_INTERACTIONS_PER_CASE,
+    )
     failure_summary = _failure_summary(event_summary)
     classifier_diagnostics = _request_json(
         config=config,
@@ -1543,6 +1780,7 @@ def _run_case(
         summary=plan_summary,
         expected=case.expected or {},
         event_summary=event_summary,
+        journey=journey,
         classifier_diagnostics=classifier_diagnostics,
         attached_file_ids=file_ids,
         applied_flow=(
@@ -1555,6 +1793,7 @@ def _run_case(
     )
     live_execution_provenance = _live_execution_provenance(
         case=case,
+        cases_path=cases_path,
         latest_session=(
             final_interaction.get("latest_session")
             if isinstance(final_interaction.get("latest_session"), Mapping)
@@ -1576,6 +1815,7 @@ def _run_case(
 
     return {
         "artifact_mode": "live_execution",
+        "case_identity": _case_identity(case),
         "live_execution_provenance": live_execution_provenance,
         "created_at": started_at,
         "app_version": LOCAL_APP_VERSION,
@@ -1593,7 +1833,10 @@ def _run_case(
             "file_ids": list(file_ids),
             "file_id_envs": list(case.file_id_envs),
             "runtime_file_path_envs": list(case.runtime_file_path_envs),
-            "scripted_question_answers": case.scripted_question_answers or {},
+            "synthetic_user_profile": case.synthetic_user_profile,
+            "cohorts": list(case.cohorts),
+            "configured_question_answers": case.configured_question_answers or {},
+            "question_answer_sources": case.question_answer_sources or {},
         },
         "session_id": session_id,
         "plan_id": final_interaction.get("plan_id"),
@@ -1603,6 +1846,7 @@ def _run_case(
         "plan": plan,
         "plan_summary": plan_summary,
         "event_summary": event_summary,
+        "journey": journey,
         "failure_summary": failure_summary,
         "classifier_diagnostics": classifier_diagnostics,
         "applied_flow_evidence": applied_flow_evidence,
@@ -1930,25 +2174,30 @@ def _latest_structured_question(interaction: Mapping[str, Any]) -> JsonObject | 
     return None
 
 
-def _scripted_question_answer(
+def _configured_question_answer(
     *,
     question: Mapping[str, Any],
-    scripted_answers: Mapping[str, Any],
+    configured_answers: Mapping[str, Any],
+    answer_sources: Mapping[str, Any],
 ) -> JsonObject | None:
     question_id = _optional_string(question, "question_id")
-    if question_id is None or question_id not in scripted_answers:
+    if question_id is None or question_id not in configured_answers:
         return None
-    answer_config = scripted_answers[question_id]
-    if isinstance(answer_config, str):
-        answer_config = {"selected_option_ids": [answer_config]}
+    answer_config = configured_answers[question_id]
     if not isinstance(answer_config, Mapping):
-        raise ValueError(f"Scripted answer for {question_id} must be a string/object.")
+        raise ValueError(f"Configured answer for {question_id} must be an object.")
+    answer_source = answer_sources.get(question_id)
+    if answer_source not in {"profile", "case_override"}:
+        raise ValueError(f"Configured answer for {question_id} has no valid source.")
 
     custom_value = answer_config.get("custom_value")
     if isinstance(custom_value, str) and custom_value.strip():
+        if question.get("allow_custom") is not True:
+            raise ValueError(f"Question {question_id} does not allow a custom answer.")
         custom_text = custom_value.strip()
         return {
             "message": custom_text,
+            "answer_source": answer_source,
             "question_answer": {
                 "kind": "structured_question_answer",
                 "question_id": question_id,
@@ -1956,14 +2205,14 @@ def _scripted_question_answer(
             },
         }
 
-    selected_ids = _scripted_selected_option_ids(answer_config)
+    selected_ids = _configured_selected_option_ids(answer_config)
     if not selected_ids:
         return None
     options = _question_options_by_key(question)
     missing = [option_id for option_id in selected_ids if option_id not in options]
     if missing:
         raise ValueError(
-            f"Scripted answer for {question_id} references unknown option(s): "
+            f"Configured answer for {question_id} references unknown option(s): "
             + ", ".join(missing)
         )
     selected_options = [options[option_id] for option_id in selected_ids]
@@ -1977,6 +2226,7 @@ def _scripted_question_answer(
     )
     return {
         "message": message,
+        "answer_source": answer_source,
         "question_answer": {
             "kind": "structured_question_answer",
             "question_id": question_id,
@@ -1986,15 +2236,15 @@ def _scripted_question_answer(
     }
 
 
-def _scripted_selected_option_ids(answer_config: Mapping[str, Any]) -> list[str]:
-    for key in ("selected_option_ids", "option_ids"):
-        value = answer_config.get(key)
-        if isinstance(value, list) and all(isinstance(item, str) for item in value):
-            return value
-    for key in ("selected_option_id", "option_id"):
-        value = answer_config.get(key)
-        if isinstance(value, str) and value:
-            return [value]
+def _configured_selected_option_ids(answer_config: Mapping[str, Any]) -> list[str]:
+    selected_option_ids = answer_config.get("selected_option_ids")
+    if isinstance(selected_option_ids, list) and all(
+        isinstance(item, str) for item in selected_option_ids
+    ):
+        return selected_option_ids
+    selected_option_id = answer_config.get("selected_option_id")
+    if isinstance(selected_option_id, str) and selected_option_id:
+        return [selected_option_id]
     return []
 
 
@@ -2008,10 +2258,9 @@ def _question_options_by_key(
     for raw_option in raw_options:
         if not isinstance(raw_option, Mapping):
             continue
-        for key in ("id", "value", "label"):
-            value = raw_option.get(key)
-            if isinstance(value, str) and value:
-                options[value] = raw_option
+        option_id = raw_option.get("id")
+        if isinstance(option_id, str) and option_id:
+            options[option_id] = raw_option
     return options
 
 
@@ -2083,11 +2332,14 @@ def _skipped_case_bundle(
     case: BattleCase,
     repetition: int | None,
     missing_envs: tuple[str, ...],
+    cases_path: Path | None = DEFAULT_CASES_FILE,
 ) -> JsonObject:
     return {
         "artifact_mode": "live_execution",
+        "case_identity": _case_identity(case),
         "live_execution_provenance": _live_execution_provenance(
             case=case,
+            cases_path=cases_path,
             latest_session=None,
             classifier_diagnostics=None,
             requested_model_id=None,
@@ -2121,6 +2373,7 @@ def _write_bundle(output_dir: Path, bundle: JsonObject, *, suffix: str) -> Path:
 def _live_execution_provenance(
     *,
     case: BattleCase,
+    cases_path: Path | None = DEFAULT_CASES_FILE,
     latest_session: Mapping[str, object] | None,
     classifier_diagnostics: Mapping[str, object] | None,
     requested_model_id: str | None,
@@ -2130,7 +2383,11 @@ def _live_execution_provenance(
     tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
     source_revision_sha256 = hashlib.sha256(source_revision.encode("utf-8")).hexdigest()
     harness_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-    cases_sha256 = hashlib.sha256(DEFAULT_CASES_FILE.read_bytes()).hexdigest()
+    cases_sha256 = (
+        hashlib.sha256(cases_path.read_bytes()).hexdigest()
+        if cases_path is not None
+        else None
+    )
     build_payload = {
         "app_version": LOCAL_APP_VERSION,
         "source_revision": source_revision,
@@ -2313,6 +2570,9 @@ def _live_execution_provenance(
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
             "model_calls": model_calls,
+            "repair_attempts": repair_attempts,
+            "parse_repair_attempts": parse_repair_attempts,
+            "elapsed_ms": elapsed_ms,
             "raw_reads": _classifier_raw_read_metrics(classifier_diagnostics),
         },
     }
@@ -2649,19 +2909,38 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
     metrics = report.get("metrics") if isinstance(report, Mapping) else {}
     event_summary = bundle.get("event_summary")
     event_summary = event_summary if isinstance(event_summary, Mapping) else {}
+    case_identity = bundle.get("case_identity")
+    case_identity = dict(case_identity) if isinstance(case_identity, Mapping) else {}
+    provenance = bundle.get("live_execution_provenance")
+    usage = (
+        provenance.get("usage")
+        if isinstance(provenance, Mapping)
+        and isinstance(provenance.get("usage"), Mapping)
+        else {}
+    )
     failed_checks = [
         check
         for check in checks
         if isinstance(check, Mapping) and check.get("passed") is not True
     ]
     return {
-        "case_id": bundle.get("case", {}).get("id")
-        if isinstance(bundle.get("case"), Mapping)
-        else None,
+        "artifact_mode": bundle.get("artifact_mode"),
+        "case_identity": case_identity,
+        "case_id": case_identity.get("id"),
+        "required": case_identity.get("required") is True,
+        "complexity": case_identity.get("complexity"),
+        "domain": case_identity.get("domain"),
+        "cohorts": _string_list(case_identity.get("cohorts")),
         "session_id": bundle.get("session_id"),
         "plan_id": bundle.get("plan_id"),
         "repetition": bundle.get("repetition"),
         "bundle_path": str(bundle_path),
+        "error": bundle.get("error") if isinstance(bundle.get("error"), str) else None,
+        "client_turn_id": (
+            bundle.get("client_turn_id")
+            if isinstance(bundle.get("client_turn_id"), str)
+            else None
+        ),
         "skipped": bundle.get("skipped") is True,
         "skip_reason": bundle.get("skip_reason")
         if isinstance(bundle.get("skip_reason"), str)
@@ -2675,6 +2954,12 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         "warnings": warnings if isinstance(warnings, list) else [],
         "metrics": metrics if isinstance(metrics, Mapping) else {},
         "event_summary": dict(event_summary),
+        "journey": (
+            dict(bundle["journey"])
+            if isinstance(bundle.get("journey"), Mapping)
+            else {}
+        ),
+        "authoring_usage": dict(usage),
         "assumptions": _string_list(event_summary.get("assumptions")),
         "failure_summary": bundle.get("failure_summary")
         if isinstance(bundle.get("failure_summary"), Mapping)
@@ -2782,11 +3067,19 @@ def _reanalyze_bundles(
                 if isinstance(bundle.get("interactions"), list)
                 else []
             )
+            journey = _journey_summary(
+                bundle.get("interactions")
+                if isinstance(bundle.get("interactions"), list)
+                else [],
+                expected=expected,
+                interaction_limit=MAX_INTERACTIONS_PER_CASE,
+            )
             report = _quality_report(
                 plan=plan,
                 summary=summary,
                 expected=expected,
                 event_summary=event_summary,
+                journey=journey,
                 classifier_diagnostics=(
                     bundle.get("classifier_diagnostics")
                     if isinstance(bundle.get("classifier_diagnostics"), Mapping)
@@ -2823,6 +3116,7 @@ def _reanalyze_bundles(
                 },
                 "plan_summary": summary,
                 "event_summary": event_summary,
+                "journey": journey,
                 "failure_summary": _failure_summary(event_summary),
                 "runtime_metrics": _runtime_metrics_from_quality_report(report),
                 "quality_report": report,
@@ -3103,6 +3397,118 @@ def _plan_spec(plan: JsonObject) -> JsonObject:
     return dict(spec) if isinstance(spec, Mapping) else {}
 
 
+def _plan_contract(
+    plan: JsonObject | None,
+    contract_key: str,
+) -> tuple[int, JsonObject] | None:
+    if plan is None:
+        return None
+    steps = _plan_spec(plan).get("steps")
+    if not isinstance(steps, list):
+        return None
+    return _directional_contract(steps, contract_key)
+
+
+def _applied_flow_contract(
+    flow: Mapping[str, object] | None,
+    contract_key: str,
+) -> tuple[int, JsonObject] | None:
+    if not isinstance(flow, Mapping):
+        return None
+    raw_steps = flow.get("steps")
+    if not isinstance(raw_steps, list):
+        return None
+    steps = [step for step in raw_steps if isinstance(step, Mapping)]
+    steps.sort(key=lambda step: _int_value(step.get("step_order")) or 0)
+    return _directional_contract(steps, contract_key)
+
+
+def _directional_contract(
+    steps: list[object] | list[Mapping[str, object]],
+    contract_key: str,
+) -> tuple[int, JsonObject] | None:
+    indexed_steps = [
+        (step_index, step)
+        for step_index, step in enumerate(steps, start=1)
+        if isinstance(step, Mapping)
+    ]
+    if contract_key == "input_contract":
+        candidates = [
+            (step_index, step)
+            for step_index, step in indexed_steps
+            if step.get("input_source") == "flow_input"
+            and step.get("input_type") == "json"
+        ]
+    else:
+        candidates = [
+            (step_index, step)
+            for step_index, step in indexed_steps
+            if step.get("output_type") == "json"
+        ]
+        candidates.reverse()
+    if not candidates:
+        return None
+    step_index, step = candidates[0]
+    contract = step.get(contract_key)
+    return (step_index, dict(contract)) if isinstance(contract, Mapping) else None
+
+
+def _json_subset_matches(
+    expected: object,
+    actual: object,
+    *,
+    schema_keyword: str | None = None,
+) -> bool:
+    if schema_keyword == "type":
+        return _json_schema_types(expected) == _json_schema_types(actual)
+    if schema_keyword == "required":
+        return (
+            isinstance(expected, list)
+            and isinstance(actual, list)
+            and set(_string_list(expected)).issubset(_string_list(actual))
+        )
+    if schema_keyword == "additionalProperties" and expected is True:
+        return actual is not False
+    if isinstance(expected, Mapping):
+        return isinstance(actual, Mapping) and all(
+            (
+                key == "additionalProperties"
+                and value is True
+                and _json_subset_matches(
+                    value,
+                    actual.get(key),
+                    schema_keyword=key,
+                )
+            )
+            or (
+                key in actual
+                and _json_subset_matches(
+                    value,
+                    actual[key],
+                    schema_keyword=key,
+                )
+            )
+            for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return isinstance(actual, list) and all(
+            any(
+                _json_subset_matches(expected_item, actual_item)
+                for actual_item in actual
+            )
+            for expected_item in expected
+        )
+    return expected == actual
+
+
+def _json_schema_types(value: object) -> frozenset[str] | None:
+    if isinstance(value, str):
+        return frozenset({value})
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return frozenset(value)
+    return None
+
+
 def _source_refs(input_bindings: object) -> list[JsonObject]:
     if not isinstance(input_bindings, Mapping):
         return []
@@ -3272,7 +3678,11 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
     return {
         "event_counts": event_counts,
         "question_event_count": len(question_event_ids),
-        "question_event_ids": list(dict.fromkeys(question_event_ids)),
+        "question_event_ids": question_event_ids,
+        "unique_question_event_ids": list(dict.fromkeys(question_event_ids)),
+        "repeated_question_event_count": (
+            len(question_event_ids) - len(set(question_event_ids))
+        ),
         "question_like_text_event_count": len(question_like_text_events),
         "question_like_text_events": question_like_text_events[:5],
         "server_ask_question_text_only_count": server_ask_question_text_only_count,
@@ -3286,6 +3696,252 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
         "critic_issue_ids": critic_issue_ids,
         "repair_feedback_texts": repair_feedback_texts[:5],
     }
+
+
+def _journey_summary(
+    interactions: object,
+    *,
+    expected: Mapping[str, Any],
+    interaction_limit: int,
+) -> JsonObject:
+    if not isinstance(interactions, list):
+        interactions = []
+    preferred_ids = set(_string_list(expected.get("preferred_question_event_ids")))
+    allowed_ids = set(_string_list(expected.get("allowed_question_event_ids")))
+    forbidden_ids = set(_string_list(expected.get("forbidden_question_event_ids")))
+    occurrences: list[tuple[int, JsonObject]] = []
+    for interaction_index, interaction in enumerate(interactions):
+        if not isinstance(interaction, Mapping):
+            continue
+        events = interaction.get("events")
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if not isinstance(event, Mapping) or event.get("event") != "question":
+                continue
+            data = event.get("data")
+            if isinstance(data, Mapping):
+                occurrences.append((interaction_index, dict(data)))
+
+    question_ids = [
+        question_id
+        for _interaction_index, question in occurrences
+        for question_id in [_optional_string(question, "question_id")]
+        if question_id is not None
+    ]
+    questions: list[JsonObject] = []
+    for ordinal, (interaction_index, question) in enumerate(occurrences, start=1):
+        question_id = _optional_string(question, "question_id")
+        if question_id is None:
+            continue
+        relevance = _question_relevance(
+            question_id,
+            preferred_ids=preferred_ids,
+            allowed_ids=allowed_ids,
+            forbidden_ids=forbidden_ids,
+        )
+        answer_interaction = (
+            interactions[interaction_index + 1]
+            if interaction_index + 1 < len(interactions)
+            and isinstance(interactions[interaction_index + 1], Mapping)
+            else None
+        )
+        answer = (
+            answer_interaction.get("question_answer")
+            if isinstance(answer_interaction, Mapping)
+            and isinstance(answer_interaction.get("question_answer"), Mapping)
+            and answer_interaction["question_answer"].get("question_id") == question_id
+            else None
+        )
+        reopened = answer is not None and any(
+            later_question_id == question_id
+            for later_question_id in question_ids[ordinal:]
+        )
+        if answer is None:
+            resolution = (
+                "indeterminate"
+                if len(interactions) >= interaction_limit
+                else "unanswered"
+            )
+        else:
+            resolution = "reopened" if reopened else "resolved"
+        selected_option_ids = (
+            _string_list(answer.get("selected_option_ids"))
+            if isinstance(answer, Mapping)
+            else []
+        )
+        custom_value = (
+            _optional_string(answer, "custom_value")
+            if isinstance(answer, Mapping)
+            else None
+        )
+        next_question = (
+            _latest_structured_question(answer_interaction)
+            if isinstance(answer_interaction, Mapping)
+            else None
+        )
+        if answer is None or not isinstance(answer_interaction, Mapping):
+            next_outcome = None
+        elif answer_interaction.get("plan_id") is not None:
+            next_outcome = "plan_created"
+        elif next_question is not None:
+            next_outcome = "next_question"
+        elif _latest_requirements_summary(answer_interaction) is not None:
+            next_outcome = "requirements_summary"
+        elif _interaction_has_error(answer_interaction):
+            next_outcome = "error"
+        else:
+            next_outcome = "no_terminal_event"
+        questions.append(
+            {
+                "ordinal": ordinal,
+                "turn": interaction_index + 1,
+                "question_id": question_id,
+                "question": _optional_string(question, "question"),
+                "option_ids": [
+                    option_id
+                    for option in _mapping_list(question.get("options"))
+                    for option_id in [_optional_string(option, "id")]
+                    if option_id is not None
+                ],
+                "selection_mode": _optional_string(question, "selection_mode"),
+                "allow_custom": question.get("allow_custom") is True,
+                "relevance": relevance,
+                "answerable": answer is not None,
+                "answer_turn": interaction_index + 2 if answer is not None else None,
+                "answer_source": (
+                    answer_interaction.get("configured_answer_source")
+                    if isinstance(answer_interaction, Mapping)
+                    else None
+                ),
+                "answer_mode": (
+                    "custom"
+                    if custom_value is not None
+                    else ("option" if selected_option_ids else None)
+                ),
+                "selected_option_ids": selected_option_ids,
+                "custom_value": custom_value,
+                "next_outcome": next_outcome,
+                "next_question_id": (
+                    _optional_string(next_question, "question_id")
+                    if next_question is not None
+                    else None
+                ),
+                "resolution": resolution,
+            }
+        )
+
+    has_plan = any(
+        isinstance(interaction, Mapping) and interaction.get("plan_id") is not None
+        for interaction in interactions
+    )
+    event_summary = _interaction_event_summary(interactions)
+    if has_plan:
+        termination = "plan_created"
+    elif _string_list(event_summary.get("error_codes")):
+        termination = "turn_error"
+    elif questions and questions[-1]["resolution"] == "unanswered":
+        termination = "unanswered_question"
+    elif len(interactions) >= interaction_limit:
+        termination = "interaction_limit"
+    else:
+        termination = "requirements_unconfirmed"
+
+    telemetry = _latest_telemetry(interactions)
+    repair_attempts = _int_value(telemetry.get("repair_attempts_total")) or 0
+    parse_repair_attempts = (
+        _int_value(telemetry.get("parse_repair_attempts_total")) or 0
+    )
+    if not has_plan:
+        plan_outcome_kind = "terminal_failure"
+    elif (
+        repair_attempts
+        or parse_repair_attempts
+        or _string_list(event_summary.get("error_codes"))
+    ):
+        plan_outcome_kind = "repaired_success"
+    else:
+        plan_outcome_kind = "first_pass_success"
+    reopened_ids = list(
+        dict.fromkeys(
+            str(question["question_id"])
+            for question in questions
+            if question.get("resolution") == "reopened"
+        )
+    )
+    resolved_count = sum(
+        question.get("resolution") == "resolved" for question in questions
+    )
+    return {
+        "termination": termination,
+        "turn_count": len(interactions),
+        "question_event_count": len(questions),
+        "question_event_ids": [question["question_id"] for question in questions],
+        "unique_question_event_ids": list(
+            dict.fromkeys(str(question["question_id"]) for question in questions)
+        ),
+        "reopened_question_ids": reopened_ids,
+        "reopened_question_count": len(reopened_ids),
+        "answerable_question_count": sum(
+            question.get("answerable") is True for question in questions
+        ),
+        "resolved_question_count": resolved_count,
+        "unanswered_question_count": sum(
+            question.get("resolution") == "unanswered" for question in questions
+        ),
+        "indeterminate_question_count": sum(
+            question.get("resolution") == "indeterminate" for question in questions
+        ),
+        "first_question_relevance": (questions[0]["relevance"] if questions else None),
+        "question_relevance_counts": {
+            relevance: sum(
+                question.get("relevance") == relevance for question in questions
+            )
+            for relevance in ("preferred", "allowed", "forbidden", "unclassified")
+        },
+        "questions": questions,
+        "plan_outcome": {
+            "kind": plan_outcome_kind,
+            "repair_attempts": repair_attempts,
+            "parse_repair_attempts": parse_repair_attempts,
+            "failure_codes": _string_list(event_summary.get("failure_codes")),
+        },
+    }
+
+
+def _question_relevance(
+    question_id: str,
+    *,
+    preferred_ids: set[str],
+    allowed_ids: set[str],
+    forbidden_ids: set[str],
+) -> str:
+    if question_id in preferred_ids:
+        return "preferred"
+    if question_id in allowed_ids:
+        return "allowed"
+    if question_id in forbidden_ids:
+        return "forbidden"
+    return "unclassified"
+
+
+def _latest_telemetry(interactions: list[object]) -> Mapping[str, object]:
+    for interaction in reversed(interactions):
+        if not isinstance(interaction, Mapping):
+            continue
+        session = interaction.get("latest_session")
+        if isinstance(session, Mapping) and isinstance(
+            session.get("telemetry"), Mapping
+        ):
+            return session["telemetry"]
+    return {}
+
+
+def _interaction_has_error(interaction: Mapping[str, object]) -> bool:
+    events = interaction.get("events")
+    return isinstance(events, list) and any(
+        isinstance(event, Mapping) and event.get("event") == "error" for event in events
+    )
 
 
 def _error_event_detail(data: Mapping[str, Any]) -> JsonObject:
@@ -3595,6 +4251,7 @@ def _quality_report(
     summary: JsonObject,
     expected: Mapping[str, Any],
     event_summary: Mapping[str, Any] | None = None,
+    journey: Mapping[str, Any] | None = None,
     classifier_diagnostics: Mapping[str, object] | None = None,
     attached_file_ids: tuple[str, ...] = (),
     applied_flow: Mapping[str, object] | None = None,
@@ -3603,6 +4260,7 @@ def _quality_report(
     checks: list[JsonObject] = []
     warnings: list[str] = []
     event_summary = event_summary or {}
+    journey = journey or {}
 
     def add_check(
         name: str, passed: bool, actual: object, expected_value: object
@@ -3665,6 +4323,29 @@ def _quality_report(
             matched_forbidden,
             sorted(forbidden_question_ids),
         )
+    preferred_question_ids = set(
+        _string_list(expected.get("preferred_question_event_ids"))
+    )
+    allowed_question_ids = set(_string_list(expected.get("allowed_question_event_ids")))
+    if preferred_question_ids or allowed_question_ids or forbidden_question_ids:
+        relevance_counts = journey.get("question_relevance_counts")
+        relevance_counts = (
+            relevance_counts if isinstance(relevance_counts, Mapping) else {}
+        )
+        if preferred_question_ids:
+            add_check(
+                "first_question_relevance",
+                not question_event_ids
+                or journey.get("first_question_relevance") == "preferred",
+                journey.get("first_question_relevance"),
+                "preferred",
+            )
+        add_check(
+            "question_relevance_complete",
+            (_int_value(relevance_counts.get("unclassified")) or 0) == 0,
+            relevance_counts,
+            {"unclassified": 0},
+        )
     if (
         expected_question_count := _int_value(
             expected.get("expected_question_event_count")
@@ -3684,6 +4365,29 @@ def _quality_report(
             question_event_count <= max_question_count,
             question_event_count,
             max_question_count,
+        )
+    if (
+        min_question_count := _int_value(expected.get("min_question_event_count"))
+    ) is not None:
+        add_check(
+            "min_question_event_count",
+            question_event_count >= min_question_count,
+            question_event_count,
+            min_question_count,
+        )
+    if (
+        max_reopened_question_count := _int_value(
+            expected.get("max_reopened_question_count")
+        )
+    ) is not None:
+        reopened_question_count = (
+            _int_value(journey.get("reopened_question_count")) or 0
+        )
+        add_check(
+            "max_reopened_question_count",
+            reopened_question_count <= max_reopened_question_count,
+            reopened_question_count,
+            max_reopened_question_count,
         )
 
     diagnostic_expectation_keys = {
@@ -3997,6 +4701,51 @@ def _quality_report(
         template_steps,
         [],
     )
+
+    for expectation_key, contract_key in (
+        ("expected_input_contract_schema", "input_contract"),
+        ("expected_output_contract_schema", "output_contract"),
+    ):
+        expected_schema = expected.get(expectation_key)
+        if not isinstance(expected_schema, Mapping):
+            continue
+        contract_target = _plan_contract(plan, contract_key)
+        matching_step = (
+            contract_target[0]
+            if contract_target is not None
+            and _json_subset_matches(expected_schema, contract_target[1])
+            else None
+        )
+        add_check(
+            expectation_key,
+            matching_step is not None,
+            {
+                "matching_step_index": matching_step,
+                "target": contract_target[1] if contract_target is not None else None,
+            },
+            dict(expected_schema),
+        )
+        applied_target = _applied_flow_contract(applied_flow, contract_key)
+        if applied_flow is not None:
+            applied_matches = applied_target is not None and _json_subset_matches(
+                expected_schema,
+                applied_target[1] if applied_target is not None else None,
+            )
+            add_check(
+                f"applied_{expectation_key}",
+                applied_matches,
+                {
+                    "matching_step_index": (
+                        applied_target[0]
+                        if applied_matches and applied_target is not None
+                        else None
+                    ),
+                    "target": (
+                        applied_target[1] if applied_target is not None else None
+                    ),
+                },
+                dict(expected_schema),
+            )
 
     expected_leaf_fields = _field_expectation_groups(expected)
     if expected_leaf_fields:

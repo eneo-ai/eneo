@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    BASIC_CASE_METADATA,
-    DETAILED_CASE_METADATA,
+    BASIC_RUNTIME_METADATA,
+    DETAILED_RUNTIME_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     extract_runtime_input_field_hints,
     infer_runtime_metadata_slot,
@@ -20,15 +20,15 @@ from eneo.flows.ai_builder.question_catalog import legal_slot_values
 def test_runtime_metadata_state_constants_match_question_catalog() -> None:
     assert {
         NO_EXTRA_RUNTIME_METADATA,
-        BASIC_CASE_METADATA,
-        DETAILED_CASE_METADATA,
+        BASIC_RUNTIME_METADATA,
+        DETAILED_RUNTIME_METADATA,
     } == legal_slot_values("runtime_metadata_fields")
 
 
 def test_runtime_metadata_policy_allows_fields_only_for_metadata_states() -> None:
     assert not runtime_metadata_allows_input_fields(NO_EXTRA_RUNTIME_METADATA)
-    assert runtime_metadata_allows_input_fields(BASIC_CASE_METADATA)
-    assert runtime_metadata_allows_input_fields(DETAILED_CASE_METADATA)
+    assert runtime_metadata_allows_input_fields(BASIC_RUNTIME_METADATA)
+    assert runtime_metadata_allows_input_fields(DETAILED_RUNTIME_METADATA)
     assert normalize_runtime_metadata_state("unknown") is None
 
 
@@ -64,12 +64,12 @@ def test_runtime_metadata_declared_field_suppression_is_source_aware(
         is expected
     )
     assert not runtime_metadata_disables_declared_input_fields(
-        state=BASIC_CASE_METADATA,
+        state=BASIC_RUNTIME_METADATA,
         source=source,
         confidence=confidence,
     )
     assert not runtime_metadata_disables_declared_input_fields(
-        state=DETAILED_CASE_METADATA,
+        state=DETAILED_RUNTIME_METADATA,
         source=source,
         confidence=confidence,
     )
@@ -254,7 +254,7 @@ def test_runtime_input_field_extraction_preserves_runtime_fields_with_source_rep
         (hint.variable_name, hint.label)
         for hint in extract_runtime_input_field_hints(text)
     ] == [("arendenummer", "ärendenummer")]
-    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+    assert infer_runtime_metadata_slot(text) == DETAILED_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_preserves_real_swedish_runtime_fields() -> None:
@@ -271,7 +271,7 @@ def test_runtime_input_field_extraction_preserves_real_swedish_runtime_fields() 
         ("arendenummer", "ärendenummer"),
         ("ansvarig_enhet", "ansvarig enhet"),
     ]
-    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+    assert infer_runtime_metadata_slot(text) == DETAILED_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_understands_bare_metadata_absence() -> None:
@@ -311,7 +311,7 @@ def test_runtime_input_field_extraction_keeps_explicit_secondary_fields() -> Non
         infer_runtime_metadata_slot(
             "Använd inmatningsfält för målgrupp och rapportnivå vid körning."
         )
-        == DETAILED_CASE_METADATA
+        == DETAILED_RUNTIME_METADATA
     )
 
 
@@ -328,7 +328,7 @@ def test_runtime_input_field_extraction_handles_optional_checklist_or_rule() -> 
         ("checklista", "checklista"),
         ("regel", "regel"),
     ]
-    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+    assert infer_runtime_metadata_slot(text) == DETAILED_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_stops_before_report_writing_clause() -> None:
@@ -358,14 +358,14 @@ def test_runtime_input_field_extraction_understands_user_provided_metadata() -> 
         ("roll", "roll"),
         ("nuvarande_lon", "nuvarande lön"),
     ]
-    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+    assert infer_runtime_metadata_slot(text) == DETAILED_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_keeps_bare_metadata_as_basic_intent() -> None:
     text = "Skapa ett rapportflöde med grundläggande metadata vid körning."
 
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == BASIC_CASE_METADATA
+    assert infer_runtime_metadata_slot(text) == BASIC_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_keeps_required_not_optional_positive() -> None:
@@ -426,7 +426,7 @@ def test_runtime_input_field_extraction_accepts_uppercase_english_i_actor() -> N
         ("name", "name"),
         ("salary", "salary"),
     ]
-    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+    assert infer_runtime_metadata_slot(text) == DETAILED_RUNTIME_METADATA
 
 
 @pytest.mark.parametrize(
@@ -470,7 +470,7 @@ def test_runtime_input_field_extraction_understands_english_action_inflections(
     observed = [(hint.variable_name, hint.label) for hint in hints]
     for expected in expected_fields:
         assert expected in observed
-    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+    assert infer_runtime_metadata_slot(text) == DETAILED_RUNTIME_METADATA
 
 
 @pytest.mark.parametrize(
@@ -498,7 +498,7 @@ def test_runtime_input_field_extraction_ignores_user_actor_non_input_actions(
     ],
 )
 def test_detailed_runtime_metadata_always_has_field_hints(text: str) -> None:
-    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+    assert infer_runtime_metadata_slot(text) == DETAILED_RUNTIME_METADATA
     assert extract_runtime_input_field_hints(text)
 
 
@@ -551,9 +551,9 @@ def test_runtime_metadata_state_normalizes_catalog_values() -> None:
     assert normalize_runtime_metadata_state("no_extra_metadata") == (
         NO_EXTRA_RUNTIME_METADATA
     )
-    assert normalize_runtime_metadata_state("basic_case_metadata") == (
-        BASIC_CASE_METADATA
+    assert normalize_runtime_metadata_state("basic_runtime_metadata") == (
+        BASIC_RUNTIME_METADATA
     )
-    assert normalize_runtime_metadata_state("detailed_case_metadata") == (
-        DETAILED_CASE_METADATA
+    assert normalize_runtime_metadata_state("detailed_runtime_metadata") == (
+        DETAILED_RUNTIME_METADATA
     )

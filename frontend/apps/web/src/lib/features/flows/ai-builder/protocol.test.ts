@@ -35,7 +35,13 @@ const validEvents: AIBuilderStreamEvent[] = [
       summary: "Create a report",
       key_decisions: [{ topic: "Output", decision: "Word" }],
       input_description: "Uploaded documents",
-      output_description: "One Word report"
+      output_description: "One Word report",
+      resolved_requirements: [
+        {
+          requirement_id: "terminal_output",
+          selected_value: "docx_document"
+        }
+      ]
     })
   },
   {
@@ -171,6 +177,22 @@ function planEventWithStep(step: unknown): AIBuilderStreamEvent {
 describe("AI Builder stream protocol", () => {
   it.each(validEvents)("accepts a valid $event event", (rawEvent) => {
     expect(parseAIBuilderStreamEvent(rawEvent).event).toBe(rawEvent.event);
+  });
+
+  it("preserves typed resolved requirements in confirmation events", () => {
+    const rawEvent = validEvents.find((event) => event.event === "requirements_summary");
+    if (!rawEvent) throw new Error("Requirements summary fixture is missing.");
+
+    const parsed = parseAIBuilderStreamEvent(rawEvent);
+
+    expect(parsed.event).toBe("requirements_summary");
+    if (parsed.event !== "requirements_summary") return;
+    expect(parsed.data.resolved_requirements).toEqual([
+      {
+        requirement_id: "terminal_output",
+        selected_value: "docx_document"
+      }
+    ]);
   });
 
   it.each(invalidPayloads)("rejects an invalid $event payload", (rawEvent) => {

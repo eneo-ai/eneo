@@ -1,21 +1,47 @@
 {
-  "version": 1,
-  "description": "Municipality-oriented Flow AI Builder API battle-test prompts across municipal administrations, schools, care, support functions, crisis work, and municipal companies. These cases are not golden outputs; they are pressure prompts for plan shape, source-context logic, schemas, runtime input fields, questions, and token-efficient dataflow.",
+  "version": 4,
+  "description": "A 120-case Flow AI Builder benchmark for Swedish municipal work. It preserves the original 40 release and architecture cases and adds 80 curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue. The added cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, and a small applied human-review cohort. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
+  "synthetic_user_profiles": {
+    "audio_source": {
+      "description": "Audio is uploaded as the primary runtime source and no extra metadata fields are entered.",
+      "question_answers": {
+        "primary_runtime_input": {
+          "selected_option_id": "audio"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    "document_source": {
+      "description": "Documents are uploaded as the primary runtime source and no extra metadata fields are entered.",
+      "question_answers": {
+        "primary_runtime_input": {
+          "selected_option_id": "documents"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    "structured_json_source": {
+      "description": "JSON is supplied as the primary runtime source and no extra metadata fields are entered.",
+      "question_answers": {
+        "primary_runtime_input": {
+          "selected_option_id": "json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    }
+  },
   "release_gate": {
-    "artifact_schema_version": "ai-builder-live-release.v1",
+    "artifact_schema_version": "ai-builder-live-release.v2",
     "require_clean_source": true,
-    "required_case_ids": [
-      "simple_document_metadata_json",
-      "ambiguous_report_without_attachment_asks_one_question",
-      "attachment_example_report_infers_disposition",
-      "hard_many_source_documents_exhaustive_pdf",
-      "ordinary_language_human_review_policy",
-      "six_file_document_report_release_gate",
-      "complex_authoring_spec_first_pass"
-    ],
     "thresholds": {
-      "max_case_errors": 0,
-      "max_quality_failures": 0,
+      "max_required_case_errors": 0,
+      "max_required_quality_failures": 0,
       "max_required_skips": 0
     }
   },
@@ -25,7 +51,9 @@
       "complexity": "easy",
       "domain": "municipality_records",
       "required": true,
-      "release_dimensions": ["positive"],
+      "release_dimensions": [
+        "positive"
+      ],
       "prompt": "Jag vill skapa ett flöde för kommunen där jag laddar upp ett dokument och får tillbaka JSON med dokumenttyp, titel, datum, avsändare, mottagare, ärendenummer om det finns, en kort sammanfattning och vilka uppgifter som saknas eller är osäkra.",
       "expected": {
         "min_steps": 1,
@@ -35,15 +63,45 @@
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["dokumenttyp", "document_type", "type"],
-          ["titel", "title"],
-          ["datum", "date", "date_or_year"],
-          ["avsandare", "sender", "author_or_sender"],
-          ["mottagare", "recipient", "receiver"],
-          ["arendenummer", "case_number", "reference_number"],
-          ["sammanfattning", "summary"]
+          [
+            "dokumenttyp",
+            "document_type",
+            "type"
+          ],
+          [
+            "titel",
+            "title"
+          ],
+          [
+            "datum",
+            "date",
+            "date_or_year"
+          ],
+          [
+            "avsandare",
+            "sender",
+            "author_or_sender"
+          ],
+          [
+            "mottagare",
+            "recipient",
+            "receiver"
+          ],
+          [
+            "arendenummer",
+            "case_number",
+            "reference_number"
+          ],
+          [
+            "sammanfattning",
+            "summary"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "simple_audio_minutes_actions",
@@ -59,13 +117,36 @@
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["beslut", "decision", "decisions"],
-          ["atgarder", "actions", "next_steps"],
-          ["ansvarig", "owner", "responsible"],
-          ["deadline", "due_date"],
-          ["oppna_fragor", "open_questions"]
+          [
+            "beslut",
+            "decision",
+            "decisions"
+          ],
+          [
+            "atgarder",
+            "actions",
+            "next_steps"
+          ],
+          [
+            "ansvarig",
+            "owner",
+            "responsible"
+          ],
+          [
+            "deadline",
+            "due_date"
+          ],
+          [
+            "oppna_fragor",
+            "open_questions"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "audio",
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "easy_email_reply_with_case_metadata",
@@ -75,22 +156,56 @@
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "min_form_field_count": 2,
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_form_field_groups": [
-          ["forvaltning", "department", "handlaggande_forvaltning"],
-          ["ton", "tone", "svarston", "onskad_svarston"]
+          [
+            "forvaltning",
+            "department",
+            "handlaggande_forvaltning"
+          ],
+          [
+            "ton",
+            "tone",
+            "svarston",
+            "onskad_svarston"
+          ]
         ],
         "expected_leaf_output_field_groups": [
-          ["arendekategori", "case_category", "case_classification", "category"],
-          ["bradska", "urgency", "urgency_level", "urgency_reason", "priority", "urgency_assessment"],
-          ["saknade_uppgifter", "missing_information", "missing_facts", "open_questions"]
+          [
+            "arendekategori",
+            "case_category",
+            "case_classification",
+            "category"
+          ],
+          [
+            "bradska",
+            "urgency",
+            "urgency_level",
+            "urgency_reason",
+            "priority",
+            "urgency_assessment"
+          ],
+          [
+            "saknade_uppgifter",
+            "missing_information",
+            "missing_facts",
+            "open_questions"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "form_fields",
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "easy_spreadsheet_case_statistics_json",
@@ -105,13 +220,33 @@
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["kategori", "category", "cases_by_category"],
-          ["status", "cases_by_status"],
-          ["aldsta_oppna_arende", "oldest_open_case"],
-          ["genomsnittlig_handlaggningstid", "average_handling_time"],
-          ["sammanfattning", "summary"]
+          [
+            "kategori",
+            "category",
+            "cases_by_category"
+          ],
+          [
+            "status",
+            "cases_by_status"
+          ],
+          [
+            "aldsta_oppna_arende",
+            "oldest_open_case"
+          ],
+          [
+            "genomsnittlig_handlaggningstid",
+            "average_handling_time"
+          ],
+          [
+            "sammanfattning",
+            "summary"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "easy_single_document_plain_language_summary",
@@ -124,16 +259,16 @@
         "terminal_output_type": "text",
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "medium_document_analysis_pdf",
       "complexity": "medium",
       "domain": "municipality_records",
       "prompt": "Jag vill bygga ett flöde där jag kommer att skicka in en eller flera filer. Flödet ska läsa innehållet och avgöra vad filen handlar om. För varje dokument ska det dokumentera dokumenttyp, titel, datum eller år, eventuell författare eller avsändare, kategori som sociologi, psykologi, IT, ekonomi eller juridik, centrala slutsatser och en koncis sammanfattning. Slutrapporten ska vara en PDF.",
-      "scripted_question_answers": {
-        "report_disposition": "both"
-      },
       "expected": {
         "min_steps": 3,
         "max_steps": 7,
@@ -146,18 +281,39 @@
           "compose_text",
           "render_verbatim"
         ],
-        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 1,
         "max_post_json_text_cleanup_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["dokumenttyp", "document_type", "type"],
-          ["titel", "title"],
-          ["datum", "date", "date_or_year", "year"],
-          ["forfattare", "author", "author_or_sender"],
-          ["kategori", "category"],
+          [
+            "dokumenttyp",
+            "document_type",
+            "type"
+          ],
+          [
+            "titel",
+            "title"
+          ],
+          [
+            "datum",
+            "date",
+            "date_or_year",
+            "year"
+          ],
+          [
+            "forfattare",
+            "author",
+            "author_or_sender"
+          ],
+          [
+            "kategori",
+            "category"
+          ],
           [
             "slutsatser",
             "conclusion",
@@ -165,36 +321,98 @@
             "key_conclusions",
             "central_conclusions"
           ],
-          ["sammanfattning", "summary", "short_summary"]
+          [
+            "sammanfattning",
+            "summary",
+            "short_summary"
+          ]
         ]
-      }
+      },
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      },
+      "cohorts": [
+        "foundation",
+        "pdf"
+      ],
+      "synthetic_user_profile": "document_source"
     },
     {
       "id": "medium_citizen_request_triage",
       "complexity": "medium",
       "domain": "municipality_service_center",
       "prompt": "Jag vill skapa ett flöde för inkomna medborgarärenden. Jag klistrar in texten från ett mejl eller meddelande och flödet ska identifiera ärendekategori, brådskandegrad, berörd förvaltning, vilka fakta som behövs för handläggning, om personuppgifter verkar förekomma och ett förslag på kort svar till medborgaren. Output ska vara både strukturerad JSON och en kort text för handläggaren.",
-      "scripted_question_answers": {
-        "post_processing_goal": {
-          "selected_option_id": "extract_key_information"
-        }
-      },
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["arendekategori", "case_category", "category"],
-          ["bradskandegrad", "urgency", "priority"],
-          ["forvaltning", "department", "administration"],
-          ["saknade_fakta", "missing_facts", "missing_information"],
-          ["personuppgifter", "personal_data", "pii"]
+          [
+            "arendekategori",
+            "case_category",
+            "category"
+          ],
+          [
+            "bradskandegrad",
+            "urgency",
+            "priority"
+          ],
+          [
+            "forvaltning",
+            "department",
+            "administration"
+          ],
+          [
+            "saknade_fakta",
+            "missing_facts",
+            "missing_information"
+          ],
+          [
+            "personuppgifter",
+            "personal_data",
+            "pii"
+          ]
         ]
-      }
+      },
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "medium_permit_checklist_validation",
@@ -210,13 +428,35 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["krav", "requirement", "requirements"],
-          ["status", "result"],
-          ["saknas", "missing", "gap"],
-          ["osakerhet", "uncertainty", "uncertain"],
-          ["rekommenderad_atgard", "recommended_action", "next_action"]
+          [
+            "krav",
+            "requirement",
+            "requirements"
+          ],
+          [
+            "status",
+            "result"
+          ],
+          [
+            "saknas",
+            "missing",
+            "gap"
+          ],
+          [
+            "osakerhet",
+            "uncertainty",
+            "uncertain"
+          ],
+          [
+            "rekommenderad_atgard",
+            "recommended_action",
+            "next_action"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "medium_audio_to_protocol_pdf_with_metadata",
@@ -234,17 +474,49 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_form_field_groups": [
-          ["motesdatum", "meeting_date", "datum"],
-          ["namnd", "arbetsgrupp", "committee"],
-          ["ordforande", "chair"]
+          [
+            "motesdatum",
+            "meeting_date",
+            "datum"
+          ],
+          [
+            "namnd",
+            "arbetsgrupp",
+            "committee"
+          ],
+          [
+            "ordforande",
+            "chair"
+          ]
         ],
         "expected_leaf_output_field_groups": [
-          ["beslut", "decision", "decisions"],
-          ["atgarder", "actions", "next_steps"],
-          ["ansvarig", "owner", "responsible"],
-          ["oppna_fragor", "open_questions"]
+          [
+            "beslut",
+            "decision",
+            "decisions"
+          ],
+          [
+            "atgarder",
+            "actions",
+            "next_steps"
+          ],
+          [
+            "ansvarig",
+            "owner",
+            "responsible"
+          ],
+          [
+            "oppna_fragor",
+            "open_questions"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "audio",
+        "form_fields",
+        "foundation",
+        "pdf"
+      ]
     },
     {
       "id": "medium_public_records_redaction_package",
@@ -254,19 +526,46 @@
       "expected": {
         "min_steps": 2,
         "max_steps": 6,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["personuppgifter", "personal_data", "pii"],
-          ["sekretess", "confidentiality", "secrecy"],
-          ["maskering", "redaction", "redactions"],
-          ["motivering", "reason", "justification"],
-          ["registrator", "registrar_note", "note"]
+          [
+            "personuppgifter",
+            "personal_data",
+            "pii"
+          ],
+          [
+            "sekretess",
+            "confidentiality",
+            "secrecy"
+          ],
+          [
+            "maskering",
+            "redaction",
+            "redactions"
+          ],
+          [
+            "motivering",
+            "reason",
+            "justification"
+          ],
+          [
+            "registrator",
+            "registrar_note",
+            "note"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "medium_school_absence_followup_json",
@@ -281,20 +580,45 @@
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["elev", "student", "student_id"],
-          ["monster", "pattern", "absence_pattern"],
-          ["riskniva", "risk", "risk_level"],
-          ["saknade_uppgifter", "missing_information"],
-          ["uppfoljning", "follow_up", "recommended_action"]
+          [
+            "elev",
+            "student",
+            "student_id"
+          ],
+          [
+            "monster",
+            "pattern",
+            "absence_pattern"
+          ],
+          [
+            "riskniva",
+            "risk",
+            "risk_level"
+          ],
+          [
+            "saknade_uppgifter",
+            "missing_information"
+          ],
+          [
+            "uppfoljning",
+            "follow_up",
+            "recommended_action"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "medium_decision_letter_template_attachment",
       "complexity": "medium",
       "domain": "municipality_templates",
       "prompt": "Jag vill bygga ett flöde som fyller i kommunens beslutsbrevsmall. Vid körning laddar jag upp ärendeunderlag och fyller i handläggare, beslutsdatum och diarienummer. Flödet ska hämta rätt motivering, beslut, eventuella villkor och överklagandehänvisning från underlaget och returnera en ifylld DOCX.",
-      "file_id_envs": ["ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_FILE_ID"],
+      "file_id_envs": [
+        "ENEO_AI_BUILDER_DECISION_LETTER_TEMPLATE_FILE_ID"
+      ],
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
@@ -303,21 +627,54 @@
         "min_json_steps": 1,
         "min_form_field_count": 3,
         "expected_form_field_groups": [
-          ["handlaggare", "case_worker"],
-          ["beslutsdatum", "decision_date"],
-          ["diarienummer", "case_number", "reference_number"]
+          [
+            "handlaggare",
+            "case_worker"
+          ],
+          [
+            "beslutsdatum",
+            "decision_date"
+          ],
+          [
+            "diarienummer",
+            "case_number",
+            "reference_number"
+          ]
         ],
-        "forbidden_question_event_ids": ["docx_output_mode"],
+        "forbidden_question_event_ids": [
+          "docx_output_mode"
+        ],
         "max_all_previous_steps": 0,
-        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["beslut", "decision"],
-          ["motivering", "reason", "justification"],
-          ["villkor", "conditions"],
-          ["overklagande", "appeal", "appeal_instruction"]
+          [
+            "beslut",
+            "decision"
+          ],
+          [
+            "motivering",
+            "reason",
+            "justification"
+          ],
+          [
+            "villkor",
+            "conditions"
+          ],
+          [
+            "overklagande",
+            "appeal",
+            "appeal_instruction"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "form_fields",
+        "foundation"
+      ]
     },
     {
       "id": "easy_preschool_incident_note_json",
@@ -333,18 +690,58 @@
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_form_field_groups": [
-          ["forskola", "preschool"],
-          ["avdelning", "unit", "department"],
-          ["datum", "date"]
+          [
+            "forskola",
+            "preschool"
+          ],
+          [
+            "avdelning",
+            "unit",
+            "department"
+          ],
+          [
+            "datum",
+            "date"
+          ]
         ],
         "expected_leaf_output_field_groups": [
-          ["handelse", "incident", "event", "what_happened"],
-          ["roller", "roles", "involved_roles", "roles_involved"],
-          ["vardnadshavare", "guardian", "parent_contact", "parent_contact_needed", "guardian_contact_needed"],
-          ["uppfoljning", "follow_up", "recommended_action"],
-          ["osakerhet", "uncertainty", "uncertain", "uncertain_information"]
+          [
+            "handelse",
+            "incident",
+            "event",
+            "what_happened"
+          ],
+          [
+            "roller",
+            "roles",
+            "involved_roles",
+            "roles_involved"
+          ],
+          [
+            "vardnadshavare",
+            "guardian",
+            "parent_contact",
+            "parent_contact_needed",
+            "guardian_contact_needed"
+          ],
+          [
+            "uppfoljning",
+            "follow_up",
+            "recommended_action"
+          ],
+          [
+            "osakerhet",
+            "uncertainty",
+            "uncertain",
+            "uncertain_information"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "form_fields",
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "easy_library_event_copy_text",
@@ -354,17 +751,44 @@
       "expected": {
         "min_steps": 1,
         "max_steps": 3,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["rubrik", "title", "heading"],
-          ["malgrupp", "target_group", "audience"],
-          ["datum", "date", "time"],
-          ["webbtext", "web_text", "copy"],
-          ["sociala_medier", "social_media", "short_version"]
+          [
+            "rubrik",
+            "title",
+            "heading"
+          ],
+          [
+            "malgrupp",
+            "target_group",
+            "audience"
+          ],
+          [
+            "datum",
+            "date",
+            "time"
+          ],
+          [
+            "webbtext",
+            "web_text",
+            "copy"
+          ],
+          [
+            "sociala_medier",
+            "social_media",
+            "short_version"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "easy_hr_job_application_summary",
@@ -379,14 +803,38 @@
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["erfarenhet", "experience"],
-          ["utbildning", "education"],
-          ["matchning", "match", "requirements_match"],
-          ["styrkor", "strengths"],
-          ["fragetecken", "questions", "concerns"],
-          ["intervjufragor", "interview_questions"]
+          [
+            "erfarenhet",
+            "experience"
+          ],
+          [
+            "utbildning",
+            "education"
+          ],
+          [
+            "matchning",
+            "match",
+            "requirements_match"
+          ],
+          [
+            "styrkor",
+            "strengths"
+          ],
+          [
+            "fragetecken",
+            "questions",
+            "concerns"
+          ],
+          [
+            "intervjufragor",
+            "interview_questions"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "medium_elderly_care_deviation_report",
@@ -396,19 +844,45 @@
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["avvikelse", "deviation", "incident_type"],
-          ["allvarlighetsgrad", "severity"],
-          ["orsak", "root_cause", "cause"],
-          ["atgard", "action", "actions"],
-          ["ansvarig", "responsible", "owner"]
+          [
+            "avvikelse",
+            "deviation",
+            "incident_type"
+          ],
+          [
+            "allvarlighetsgrad",
+            "severity"
+          ],
+          [
+            "orsak",
+            "root_cause",
+            "cause"
+          ],
+          [
+            "atgard",
+            "action",
+            "actions"
+          ],
+          [
+            "ansvarig",
+            "responsible",
+            "owner"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "medium_water_leak_citizen_notice",
@@ -418,24 +892,62 @@
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "min_json_steps": 1,
         "min_form_field_count": 3,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_form_field_groups": [
-          ["omrade", "area"],
-          ["klartid", "estimated_resolution_time", "beraknad_klartid"],
-          ["kontakt", "contact", "kontaktvag"]
+          [
+            "omrade",
+            "area"
+          ],
+          [
+            "klartid",
+            "estimated_resolution_time",
+            "beraknad_klartid"
+          ],
+          [
+            "kontakt",
+            "contact",
+            "kontaktvag"
+          ]
         ],
         "expected_leaf_output_field_groups": [
-          ["handelse", "incident", "event", "summary", "cause_or_uncertainty"],
-          ["abonnenter", "subscribers", "affected_subscribers", "affected_residents"],
-          ["rad", "advice", "instructions", "recommendations"],
-          ["risk", "risks"]
+          [
+            "handelse",
+            "incident",
+            "event",
+            "summary",
+            "cause_or_uncertainty"
+          ],
+          [
+            "abonnenter",
+            "subscribers",
+            "affected_subscribers",
+            "affected_residents"
+          ],
+          [
+            "rad",
+            "advice",
+            "instructions",
+            "recommendations"
+          ],
+          [
+            "risk",
+            "risks"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "form_fields",
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "medium_housing_company_tenant_complaint",
@@ -445,20 +957,51 @@
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["problem", "issue", "summary"],
-          ["arendetyp", "case_type", "category"],
-          ["prioritet", "priority", "urgency"],
-          ["nasta_atgard", "next_action", "recommended_action"],
-          ["ansvarig", "owner", "responsible"],
-          ["svar", "reply", "tenant_reply"]
+          [
+            "problem",
+            "issue",
+            "summary"
+          ],
+          [
+            "arendetyp",
+            "case_type",
+            "category"
+          ],
+          [
+            "prioritet",
+            "priority",
+            "urgency"
+          ],
+          [
+            "nasta_atgard",
+            "next_action",
+            "recommended_action"
+          ],
+          [
+            "ansvarig",
+            "owner",
+            "responsible"
+          ],
+          [
+            "svar",
+            "reply",
+            "tenant_reply"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "medium_finance_invoice_anomaly_review",
@@ -473,14 +1016,37 @@
         "max_all_previous_steps": 0,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["belopp", "amount"],
-          ["referens", "reference"],
-          ["dubbeldebitering", "duplicate_charge"],
-          ["kostnadsstalle", "cost_center"],
-          ["leverantor", "supplier", "vendor"],
-          ["kontroll", "recommended_check"]
+          [
+            "belopp",
+            "amount"
+          ],
+          [
+            "referens",
+            "reference"
+          ],
+          [
+            "dubbeldebitering",
+            "duplicate_charge"
+          ],
+          [
+            "kostnadsstalle",
+            "cost_center"
+          ],
+          [
+            "leverantor",
+            "supplier",
+            "vendor"
+          ],
+          [
+            "kontroll",
+            "recommended_check"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "medium_parks_work_order_prioritization",
@@ -490,20 +1056,47 @@
       "expected": {
         "min_steps": 2,
         "max_steps": 5,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["feltyp", "issue_type", "category"],
-          ["plats", "location"],
-          ["risk", "risk_level"],
-          ["prioritet", "priority"],
-          ["utforare", "contractor", "owner"],
-          ["arbetsorder", "work_order"]
+          [
+            "feltyp",
+            "issue_type",
+            "category"
+          ],
+          [
+            "plats",
+            "location"
+          ],
+          [
+            "risk",
+            "risk_level"
+          ],
+          [
+            "prioritet",
+            "priority"
+          ],
+          [
+            "utforare",
+            "contractor",
+            "owner"
+          ],
+          [
+            "arbetsorder",
+            "work_order"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "complex_meeting_audio_policy_pdf",
@@ -559,7 +1152,12 @@
             "responsibility_candidates",
             "structured_responsibilities"
           ],
-          ["deadlines", "deadline", "due_date", "deadline_candidates"],
+          [
+            "deadlines",
+            "deadline",
+            "due_date",
+            "deadline_candidates"
+          ],
           [
             "oppna_fragor",
             "open_question",
@@ -591,7 +1189,12 @@
             "recommended_actions"
           ]
         ]
-      }
+      },
+      "cohorts": [
+        "audio",
+        "foundation",
+        "pdf"
+      ]
     },
     {
       "id": "complex_procurement_multi_document_matrix",
@@ -607,14 +1210,42 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["krav", "requirement", "requirements"],
-          ["leverantorsloften", "supplier_commitment", "supplier_promises"],
-          ["risker", "risk", "risks"],
-          ["avvikelser", "deviation", "deviations", "gap"],
-          ["sekretess", "confidentiality", "secrecy"],
-          ["fragor", "questions", "supplier_questions"]
+          [
+            "krav",
+            "requirement",
+            "requirements"
+          ],
+          [
+            "leverantorsloften",
+            "supplier_commitment",
+            "supplier_promises"
+          ],
+          [
+            "risker",
+            "risk",
+            "risks"
+          ],
+          [
+            "avvikelser",
+            "deviation",
+            "deviations",
+            "gap"
+          ],
+          [
+            "sekretess",
+            "confidentiality",
+            "secrecy"
+          ],
+          [
+            "fragor",
+            "questions",
+            "supplier_questions"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "complex_social_case_timeline_redaction",
@@ -630,26 +1261,52 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["tidslinje", "timeline"],
-          ["parter", "parties"],
-          ["handelser", "events"],
-          ["beslut", "decision", "decisions"],
-          ["rattslig_grund", "legal_basis"],
-          ["personuppgifter", "personal_data", "pii"],
-          ["risker", "risk", "risks"]
+          [
+            "tidslinje",
+            "timeline"
+          ],
+          [
+            "parter",
+            "parties"
+          ],
+          [
+            "handelser",
+            "events"
+          ],
+          [
+            "beslut",
+            "decision",
+            "decisions"
+          ],
+          [
+            "rattslig_grund",
+            "legal_basis"
+          ],
+          [
+            "personuppgifter",
+            "personal_data",
+            "pii"
+          ],
+          [
+            "risker",
+            "risk",
+            "risks"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "hard_many_source_documents_exhaustive_pdf",
       "complexity": "hard",
       "domain": "municipality_records",
       "required": true,
-      "release_dimensions": ["topology"],
+      "release_dimensions": [
+        "topology"
+      ],
       "prompt": "Jag vill bygga ett flöde för stora ärendepaket där jag ibland laddar upp 20 till 50 handlingar i samma ärende. Flödet ska läsa varje handling uttömmande, skriva ett eget avsnitt per källa med källa synlig, skapa en samlad översikt och returnera en PDF. Det får inte välja ut några dokument eller göra RAG-sökning; alla uppladdade handlingar ska behandlas.",
-      "scripted_question_answers": {
-        "report_disposition": "both"
-      },
       "expected": {
         "min_steps": 3,
         "max_steps": 7,
@@ -662,18 +1319,52 @@
           "compose_text",
           "render_verbatim"
         ],
-        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 0,
         "max_post_json_text_cleanup_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["source_label", "source_file_id"],
-          ["section_title", "title"],
-          ["section_body", "summary", "analysis"]
+          [
+            "source_label",
+            "source_file_id"
+          ],
+          [
+            "section_title",
+            "title"
+          ],
+          [
+            "section_body",
+            "summary",
+            "analysis"
+          ]
         ]
-      }
+      },
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      },
+      "cohorts": [
+        "foundation",
+        "pdf"
+      ],
+      "synthetic_user_profile": "document_source"
     },
     {
       "id": "hard_mixed_audio_documents_decision_basis",
@@ -690,13 +1381,37 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["transkription", "transcript"],
-          ["beslutsalternativ", "decision_options", "options"],
-          ["risker", "risk", "risks"],
-          ["ansvariga", "owner", "responsible"],
-          ["tidsfrist", "deadline", "due_date"]
+          [
+            "transkription",
+            "transcript"
+          ],
+          [
+            "beslutsalternativ",
+            "decision_options",
+            "options"
+          ],
+          [
+            "risker",
+            "risk",
+            "risks"
+          ],
+          [
+            "ansvariga",
+            "owner",
+            "responsible"
+          ],
+          [
+            "tidsfrist",
+            "deadline",
+            "due_date"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "audio",
+        "foundation",
+        "pdf"
+      ]
     },
     {
       "id": "hard_environment_incident_synthesis",
@@ -712,14 +1427,39 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["handelseforlopp", "timeline", "events"],
-          ["matvarden", "measurements", "sample_results"],
-          ["lagrum", "legal_basis"],
-          ["avvikelser", "deviation", "deviations"],
-          ["osakra_uppgifter", "uncertainties"],
-          ["forelaggande", "injunction", "recommended_action"]
+          [
+            "handelseforlopp",
+            "timeline",
+            "events"
+          ],
+          [
+            "matvarden",
+            "measurements",
+            "sample_results"
+          ],
+          [
+            "lagrum",
+            "legal_basis"
+          ],
+          [
+            "avvikelser",
+            "deviation",
+            "deviations"
+          ],
+          [
+            "osakra_uppgifter",
+            "uncertainties"
+          ],
+          [
+            "forelaggande",
+            "injunction",
+            "recommended_action"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "hard_procurement_scoring_with_human_review",
@@ -735,14 +1475,39 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["skallkrav", "mandatory_requirement", "must_requirement"],
-          ["borkrav", "should_requirement", "scored_requirement"],
-          ["poang", "score", "points"],
-          ["leverantor", "supplier", "vendor"],
-          ["osakerhet", "uncertainty"],
-          ["rekommendation", "recommendation"]
+          [
+            "skallkrav",
+            "mandatory_requirement",
+            "must_requirement"
+          ],
+          [
+            "borkrav",
+            "should_requirement",
+            "scored_requirement"
+          ],
+          [
+            "poang",
+            "score",
+            "points"
+          ],
+          [
+            "leverantor",
+            "supplier",
+            "vendor"
+          ],
+          [
+            "osakerhet",
+            "uncertainty"
+          ],
+          [
+            "rekommendation",
+            "recommendation"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "hard_gdpr_subject_access_package",
@@ -752,29 +1517,54 @@
       "expected": {
         "min_steps": 4,
         "max_steps": 9,
-        "terminal_output_types": ["json", "text"],
+        "terminal_output_types": [
+          "json",
+          "text"
+        ],
         "min_json_steps": 2,
         "min_source_ref_steps": 2,
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["personuppgift", "personal_data", "pii"],
-          ["registrerad", "data_subject"],
-          ["tredje_person", "third_party"],
-          ["kalla", "source", "source_label"],
-          ["sekretessprovning", "confidentiality_review"],
-          ["utlamning", "disclosure", "release_list"]
+          [
+            "personuppgift",
+            "personal_data",
+            "pii"
+          ],
+          [
+            "registrerad",
+            "data_subject"
+          ],
+          [
+            "tredje_person",
+            "third_party"
+          ],
+          [
+            "kalla",
+            "source",
+            "source_label"
+          ],
+          [
+            "sekretessprovning",
+            "confidentiality_review"
+          ],
+          [
+            "utlamning",
+            "disclosure",
+            "release_list"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "hard_crisis_situation_report_multi_unit",
       "complexity": "hard",
       "domain": "municipality_crisis_preparedness",
       "prompt": "Jag vill skapa ett flöde för kommunens krisledning. Under en väderhändelse laddar jag upp lägesrapporter från skola, äldreomsorg, VA-bolag, räddningstjänst och kommunikation. Flödet ska sammanställa påverkan per verksamhet, kritiska beroenden, beslutade åtgärder, öppna risker, kommunikationsbehov och skapa en lägesbildsrapport i PDF.",
-      "scripted_question_answers": {
-        "report_disposition": "both"
-      },
       "expected": {
         "min_steps": 4,
         "max_steps": 9,
@@ -786,14 +1576,56 @@
         "max_post_json_text_cleanup_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["verksamhet", "unit", "service_area"],
-          ["paverkan", "impact"],
-          ["beroende", "dependency"],
-          ["atgard", "action", "actions"],
-          ["risk", "risks"],
-          ["kommunikation", "communication"]
+          [
+            "verksamhet",
+            "unit",
+            "service_area"
+          ],
+          [
+            "paverkan",
+            "impact"
+          ],
+          [
+            "beroende",
+            "dependency"
+          ],
+          [
+            "atgard",
+            "action",
+            "actions"
+          ],
+          [
+            "risk",
+            "risks"
+          ],
+          [
+            "kommunikation",
+            "communication"
+          ]
         ]
-      }
+      },
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      },
+      "cohorts": [
+        "foundation",
+        "pdf"
+      ],
+      "synthetic_user_profile": "document_source"
     },
     {
       "id": "hard_school_student_support_timeline",
@@ -809,15 +1641,42 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["tidslinje", "timeline"],
-          ["insats", "support_action", "intervention"],
-          ["ansvarig", "owner", "responsible"],
-          ["riskfaktor", "risk_factor"],
-          ["skyddsfaktor", "protective_factor"],
-          ["saknade_uppgifter", "missing_information"],
-          ["personuppgifter", "personal_data", "pii"]
+          [
+            "tidslinje",
+            "timeline"
+          ],
+          [
+            "insats",
+            "support_action",
+            "intervention"
+          ],
+          [
+            "ansvarig",
+            "owner",
+            "responsible"
+          ],
+          [
+            "riskfaktor",
+            "risk_factor"
+          ],
+          [
+            "skyddsfaktor",
+            "protective_factor"
+          ],
+          [
+            "saknade_uppgifter",
+            "missing_information"
+          ],
+          [
+            "personuppgifter",
+            "personal_data",
+            "pii"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "hard_archive_retention_classification",
@@ -832,15 +1691,42 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["handlingstyp", "record_type"],
-          ["klassificering", "classification"],
-          ["gallring", "retention", "disposal"],
-          ["bevarande", "preservation"],
-          ["sekretess", "confidentiality"],
-          ["personuppgift", "personal_data"],
-          ["oklarhet", "uncertainty", "follow_up_question"]
+          [
+            "handlingstyp",
+            "record_type"
+          ],
+          [
+            "klassificering",
+            "classification"
+          ],
+          [
+            "gallring",
+            "retention",
+            "disposal"
+          ],
+          [
+            "bevarande",
+            "preservation"
+          ],
+          [
+            "sekretess",
+            "confidentiality"
+          ],
+          [
+            "personuppgift",
+            "personal_data"
+          ],
+          [
+            "oklarhet",
+            "uncertainty",
+            "follow_up_question"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "json"
+      ]
     },
     {
       "id": "hard_budget_variance_management_report",
@@ -856,14 +1742,37 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["forvaltning", "department", "administration"],
-          ["avvikelse", "variance"],
-          ["orsak", "cause"],
-          ["prognos", "forecast"],
-          ["risk", "risks"],
-          ["atgard", "action", "recommended_action"]
+          [
+            "forvaltning",
+            "department",
+            "administration"
+          ],
+          [
+            "avvikelse",
+            "variance"
+          ],
+          [
+            "orsak",
+            "cause"
+          ],
+          [
+            "prognos",
+            "forecast"
+          ],
+          [
+            "risk",
+            "risks"
+          ],
+          [
+            "atgard",
+            "action",
+            "recommended_action"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "hard_municipal_company_board_packet",
@@ -873,20 +1782,47 @@
       "expected": {
         "min_steps": 4,
         "max_steps": 9,
-        "terminal_output_types": ["docx", "pdf"],
+        "terminal_output_types": [
+          "docx",
+          "pdf"
+        ],
         "min_json_steps": 2,
         "min_source_ref_steps": 2,
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["dagordningspunkt", "agenda_item"],
-          ["beslut", "decision", "decisions"],
-          ["bordlagd", "deferred"],
-          ["uppdrag", "assignment", "action"],
-          ["vd", "ceo"],
-          ["risk", "risks"]
+          [
+            "dagordningspunkt",
+            "agenda_item"
+          ],
+          [
+            "beslut",
+            "decision",
+            "decisions"
+          ],
+          [
+            "bordlagd",
+            "deferred"
+          ],
+          [
+            "uppdrag",
+            "assignment",
+            "action"
+          ],
+          [
+            "vd",
+            "ceo"
+          ],
+          [
+            "risk",
+            "risks"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation",
+        "pdf"
+      ]
     },
     {
       "id": "hard_property_maintenance_contract_followup",
@@ -902,23 +1838,48 @@
         "max_all_previous_steps": 1,
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["avtal", "contract"],
-          ["arbetsorder", "work_order"],
-          ["aterkommande_fel", "recurring_issue"],
-          ["garanti", "warranty"],
-          ["vite", "penalty"],
-          ["rekommenderad_atgard", "recommended_action"]
+          [
+            "avtal",
+            "contract"
+          ],
+          [
+            "arbetsorder",
+            "work_order"
+          ],
+          [
+            "aterkommande_fel",
+            "recurring_issue"
+          ],
+          [
+            "garanti",
+            "warranty"
+          ],
+          [
+            "vite",
+            "penalty"
+          ],
+          [
+            "rekommenderad_atgard",
+            "recommended_action"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "attachment_example_report_infers_disposition",
       "complexity": "medium",
       "domain": "municipality_reports",
       "required": true,
-      "release_dimensions": ["file_role"],
+      "release_dimensions": [
+        "file_role"
+      ],
       "prompt": "Jag vill bygga ett flöde där jag laddar upp flera dokument och får en PDF-rapport som följer formen i den bifogade exempelrapporten. Flödet ska läsa varje källa, skriva källavsnitt och skapa en samlad rapport med samma övergripande struktur som exemplet.",
-      "file_id_envs": ["ENEO_AI_BUILDER_EXAMPLE_REPORT_FILE_ID"],
+      "file_id_envs": [
+        "ENEO_AI_BUILDER_EXAMPLE_REPORT_FILE_ID"
+      ],
       "expected": {
         "min_steps": 3,
         "max_steps": 7,
@@ -927,15 +1888,21 @@
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 0,
-        "forbid_input_sources": ["all_previous_steps"],
-        "forbidden_question_event_ids": ["report_disposition"],
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbidden_question_event_ids": [
+          "report_disposition"
+        ],
         "expected_classifier_slots": [
           {
             "slot_name": "report_disposition",
             "value": "both",
             "confidence": "high",
             "evidence_level": "explicit",
-            "required_source_kinds": ["user_message"],
+            "required_source_kinds": [
+              "user_message"
+            ],
             "evidence_contains": [
               "skriva källavsnitt och skapa en samlad rapport"
             ]
@@ -945,34 +1912,64 @@
             "value": "pdf_document",
             "confidence": "high",
             "evidence_level": "explicit",
-            "required_source_kinds": ["user_message"],
-            "evidence_contains": ["PDF-rapport"]
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "PDF-rapport"
+            ]
           }
         ],
         "expected_file_roles": [
           {
             "file_index": 0,
             "role": "example_output",
-            "confidence_in": ["high", "medium"],
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
             "evidence_level": "explicit",
-            "coverage_in": ["fully_seen", "excerpt_truncated"],
-            "required_source_kinds": ["user_message"],
-            "evidence_contains": ["bifogade exempelrapporten"]
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "bifogade exempelrapporten"
+            ]
           }
         ],
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["section_title", "rubrik", "title"],
-          ["section_body", "avsnitt", "body", "report_section"]
+          [
+            "section_title",
+            "rubrik",
+            "title"
+          ],
+          [
+            "section_body",
+            "avsnitt",
+            "body",
+            "report_section"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "foundation",
+        "pdf"
+      ]
     },
     {
       "id": "attachment_docx_template_placeholders_to_fields",
       "complexity": "medium",
       "domain": "municipality_templates",
       "prompt": "Jag vill bygga ett flöde som fyller i den bifogade DOCX-mallen. Vid körning ska jag ladda upp underlag och fylla i mallens variabler, till exempel kundnamn och case_id. Flödet ska läsa underlaget, skriva mallinnehållet och returnera en ifylld DOCX.",
-      "file_id_envs": ["ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID"],
+      "file_id_envs": [
+        "ENEO_AI_BUILDER_DOCX_TEMPLATE_FILE_ID"
+      ],
       "expected": {
         "min_steps": 2,
         "max_steps": 4,
@@ -981,42 +1978,74 @@
         "min_json_steps": 1,
         "min_form_field_count": 1,
         "expected_form_field_groups": [
-          ["kundnamn", "customer_name"],
-          ["case_id", "caseid", "arendenummer"]
+          [
+            "kundnamn",
+            "customer_name"
+          ],
+          [
+            "case_id",
+            "caseid",
+            "arendenummer"
+          ]
         ],
-        "forbidden_question_event_ids": ["docx_output_mode"],
+        "forbidden_question_event_ids": [
+          "docx_output_mode"
+        ],
         "expected_classifier_slots": [
           {
             "slot_name": "terminal_output",
             "value": "docx_document",
             "confidence": "high",
             "evidence_level": "explicit",
-            "required_source_kinds": ["user_message"],
-            "evidence_contains": ["returnera en ifylld DOCX"]
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "returnera en ifylld DOCX"
+            ]
           }
         ],
         "expected_file_roles": [
           {
             "file_index": 0,
             "role": "template",
-            "confidence_in": ["high", "medium"],
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
             "evidence_level": "explicit",
-            "coverage_in": ["fully_seen", "excerpt_truncated"],
-            "required_source_kinds": ["user_message"],
-            "evidence_contains": ["bifogade DOCX-mallen"]
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "bifogade DOCX-mallen"
+            ]
           }
         ],
         "max_all_previous_steps": 0,
-        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
         "forbid_primary_material_form_fields": true
-      }
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "form_fields",
+        "foundation"
+      ]
     },
     {
       "id": "ordinary_language_human_review_policy",
       "complexity": "hard",
       "domain": "municipality_procurement",
       "required": true,
-      "release_dimensions": ["review_policy"],
+      "release_dimensions": [
+        "review_policy"
+      ],
       "apply_plan": true,
       "prompt": "Jag vill bygga ett flöde som läser flera anbud, tar fram en JSON-matris med leverantör, krav, poäng och osäkerheter, och därefter skriver en PDF-rapport. Innan rapporten skapas vill jag själv granska och godkänna matrisen utan att redigera den. Granskningen ska gälla matrisen, inte den färdiga PDF-filen.",
       "expected": {
@@ -1027,32 +2056,66 @@
         "min_json_steps": 1,
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 0,
-        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
         "forbid_primary_material_form_fields": true,
         "expected_review_policy": {
           "mode": "view",
           "target_output_type": "json",
           "target_field_groups": [
-            ["leverantor", "supplier", "vendor"],
-            ["poang", "score", "points"],
-            ["osakerhet", "uncertainty"]
+            [
+              "leverantor",
+              "supplier",
+              "vendor"
+            ],
+            [
+              "poang",
+              "score",
+              "points"
+            ],
+            [
+              "osakerhet",
+              "uncertainty"
+            ]
           ],
           "target_must_be_non_terminal": true
         },
         "expected_leaf_output_field_groups": [
-          ["leverantor", "supplier", "vendor"],
-          ["krav", "requirement"],
-          ["poang", "score", "points"],
-          ["osakerhet", "uncertainty"]
+          [
+            "leverantor",
+            "supplier",
+            "vendor"
+          ],
+          [
+            "krav",
+            "requirement"
+          ],
+          [
+            "poang",
+            "score",
+            "points"
+          ],
+          [
+            "osakerhet",
+            "uncertainty"
+          ]
         ]
-      }
+      },
+      "cohorts": [
+        "complete_everyday",
+        "human_review",
+        "pdf"
+      ]
     },
     {
       "id": "six_file_document_report_release_gate",
       "complexity": "hard",
       "domain": "municipality_records",
       "required": true,
-      "release_dimensions": ["six_file_document_report"],
+      "release_dimensions": [
+        "six_file_document_report"
+      ],
       "apply_plan": true,
       "execute_flow": true,
       "prompt": "Bygg ett flöde för exakt de sex bifogade källdokumenten. Läs varje källa uttömmande och skapa exakt en documents-post per källfil. För varje källa ska titel, år, kategori, typ, författare, slutsatser, sammanfattning, synligt källnamn och eventuell försämrad extraktionskvalitet bevaras. Skapa sedan en samlad översikt, komponera rapporten deterministiskt direkt från documents-posterna och rendera en PDF. Slut-PDF:en ska visa alla fält med tydliga etiketter. Saknade eller försämrade uppgifter ska visas som 'framgår ej' tillsammans med synlig degraderingsinformation; de får inte döljas eller gissas.",
@@ -1087,7 +2150,9 @@
         "min_source_ref_steps": 1,
         "max_all_previous_steps": 0,
         "max_post_json_text_cleanup_steps": 1,
-        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
         "forbid_primary_material_form_fields": true,
         "forbid_generic_primary_reader_envelope": true,
         "expected_classifier_slots": [
@@ -1096,99 +2161,211 @@
             "value": "pdf_document",
             "confidence": "high",
             "evidence_level": "explicit",
-            "required_source_kinds": ["user_message"],
-            "evidence_contains": ["rendera en PDF"]
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "rendera en PDF"
+            ]
           }
         ],
         "expected_file_roles": [
           {
             "file_index": 0,
             "role": "reference_material",
-            "confidence_in": ["high", "medium"],
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
             "evidence_level": "explicit",
-            "coverage_in": ["fully_seen", "excerpt_truncated"],
-            "required_source_kinds": ["user_message"]
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
           },
           {
             "file_index": 1,
             "role": "reference_material",
-            "confidence_in": ["high", "medium"],
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
             "evidence_level": "explicit",
-            "coverage_in": ["fully_seen", "excerpt_truncated"],
-            "required_source_kinds": ["user_message"]
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
           },
           {
             "file_index": 2,
             "role": "reference_material",
-            "confidence_in": ["high", "medium"],
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
             "evidence_level": "explicit",
-            "coverage_in": ["fully_seen", "excerpt_truncated"],
-            "required_source_kinds": ["user_message"]
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
           },
           {
             "file_index": 3,
             "role": "reference_material",
-            "confidence_in": ["high", "medium"],
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
             "evidence_level": "explicit",
-            "coverage_in": ["fully_seen", "excerpt_truncated"],
-            "required_source_kinds": ["user_message"]
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
           },
           {
             "file_index": 4,
             "role": "reference_material",
-            "confidence_in": ["high", "medium"],
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
             "evidence_level": "explicit",
-            "coverage_in": ["fully_seen", "excerpt_truncated"],
-            "required_source_kinds": ["user_message"]
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
           },
           {
             "file_index": 5,
             "role": "reference_material",
-            "confidence_in": ["high", "medium"],
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
             "evidence_level": "explicit",
-            "coverage_in": ["fully_seen", "excerpt_truncated"],
-            "required_source_kinds": ["user_message"]
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ]
           }
         ],
         "expected_leaf_output_field_groups": [
-          ["titel", "title"],
-          ["ar", "year", "date_or_year"],
-          ["kategori", "category"],
-          ["typ", "type", "document_type"],
-          ["forfattare", "author", "author_or_sender"],
-          ["slutsatser", "conclusions"],
-          ["sammanfattning", "summary"],
-          ["source_label"],
-          ["source_file_id"]
+          [
+            "titel",
+            "title"
+          ],
+          [
+            "ar",
+            "year",
+            "date_or_year"
+          ],
+          [
+            "kategori",
+            "category"
+          ],
+          [
+            "typ",
+            "type",
+            "document_type"
+          ],
+          [
+            "forfattare",
+            "author",
+            "author_or_sender"
+          ],
+          [
+            "slutsatser",
+            "conclusions"
+          ],
+          [
+            "sammanfattning",
+            "summary"
+          ],
+          [
+            "source_label"
+          ],
+          [
+            "source_file_id"
+          ]
         ],
         "expected_runtime_evidence": {
           "source_file_count": 6,
           "source_record_count": 6,
           "required_final_field_label_groups": [
-            ["titel", "title"],
-            ["år", "year"],
-            ["kategori", "category"],
-            ["typ", "type"],
-            ["författare", "author"],
-            ["slutsatser", "conclusions"],
-            ["sammanfattning", "summary"]
+            [
+              "titel",
+              "title"
+            ],
+            [
+              "år",
+              "year"
+            ],
+            [
+              "kategori",
+              "category"
+            ],
+            [
+              "typ",
+              "type"
+            ],
+            [
+              "författare",
+              "author"
+            ],
+            [
+              "slutsatser",
+              "conclusions"
+            ],
+            [
+              "sammanfattning",
+              "summary"
+            ]
           ],
           "required_visible_degradation_markers": [
-            ["pdf_text_likely_reversed"],
-            ["framgår ej"]
+            [
+              "pdf_text_likely_reversed"
+            ],
+            [
+              "framgår ej"
+            ]
           ],
           "source_display_count": 6,
           "model_call_count": 7,
           "max_total_tokens": 250000
         }
-      }
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "foundation",
+        "pdf"
+      ]
     },
     {
       "id": "complex_authoring_spec_first_pass",
       "complexity": "hard",
       "domain": "municipality_meetings",
       "required": true,
-      "release_dimensions": ["first_pass_semantic"],
+      "release_dimensions": [
+        "first_pass_semantic"
+      ],
       "apply_plan": true,
       "prompt": "# Arbetsuppgift\n\n## Indata och förberedelser\nVid körning laddar användaren upp en ljudfil. Transkribera hela ljudet och låt användaren redigera transkriptionen innan analysen.\n\n## Bearbetningsregler\nAnalysera den godkända transkriptionen till stabil typad JSON med sammanfattande fakta, analys och rekommendationer.\n\n# Task specification\n\n## Processing rules\nUse exactly one document-writing model step after the typed analysis. Let the user edit that report text before delivery.\n\n## Delivery checks\nRender the approved text deterministically as a DOCX document.\n\n# Slutrapportens disposition\nDen färdiga rapporten ska ha rubrikerna Sammanfattning, Analys och Rekommendationer.",
       "expected": {
@@ -1198,15 +2375,31 @@
         "terminal_document_output_mode": "render_verbatim",
         "min_json_steps": 1,
         "max_all_previous_steps": 0,
-        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
         "forbid_primary_material_form_fields": true,
         "expected_leaf_output_field_groups": [
-          ["summary_facts", "sammanfattande_fakta"],
-          ["analysis_findings", "analys"],
-          ["recommendations", "rekommendationer"]
+          [
+            "summary_facts",
+            "sammanfattande_fakta"
+          ],
+          [
+            "analysis_findings",
+            "analys"
+          ],
+          [
+            "recommendations",
+            "rekommendationer"
+          ]
         ],
         "expected_first_pass_authoring": {
-          "expected_step_output_types": ["text", "json", "text", "docx"],
+          "expected_step_output_types": [
+            "text",
+            "json",
+            "text",
+            "docx"
+          ],
           "expected_step_output_modes": [
             "transcribe_only",
             "pass_through",
@@ -1214,17 +2407,38 @@
             "render_verbatim"
           ],
           "report_section_groups": [
-            ["Sammanfattning", "Summary"],
-            ["Analys", "Analysis"],
-            ["Rekommendationer", "Recommendations"]
+            [
+              "Sammanfattning",
+              "Summary"
+            ],
+            [
+              "Analys",
+              "Analysis"
+            ],
+            [
+              "Rekommendationer",
+              "Recommendations"
+            ]
           ],
           "forbidden_task_heading_groups": [
-            ["Arbetsuppgift"],
-            ["Indata och förberedelser"],
-            ["Bearbetningsregler"],
-            ["Task specification"],
-            ["Processing rules"],
-            ["Delivery checks"]
+            [
+              "Arbetsuppgift"
+            ],
+            [
+              "Indata och förberedelser"
+            ],
+            [
+              "Bearbetningsregler"
+            ],
+            [
+              "Task specification"
+            ],
+            [
+              "Processing rules"
+            ],
+            [
+              "Delivery checks"
+            ]
           ],
           "review_targets": [
             {
@@ -1245,28 +2459,3534 @@
           "require_progress_fingerprint": true,
           "provider_failure_status": "none"
         }
-      }
+      },
+      "cohorts": [
+        "foundation"
+      ]
     },
     {
       "id": "ambiguous_report_without_attachment_asks_one_question",
       "complexity": "easy",
       "domain": "municipality_reports",
       "required": true,
-      "release_dimensions": ["negative", "calibration"],
+      "release_dimensions": [
+        "negative",
+        "calibration"
+      ],
       "prompt": "Jag vill bygga ett flöde där jag laddar upp flera dokument och får en tydlig PDF-rapport tillbaka.",
       "expected": {
         "allow_question_instead_of_plan": true,
         "expected_question_event_count": 1,
         "max_question_event_count": 1,
-        "expected_question_event_ids": ["report_disposition"],
-        "forbid_classifier_commit_grade_slots": ["report_disposition"],
+        "expected_question_event_ids": [
+          "report_disposition"
+        ],
+        "forbid_classifier_commit_grade_slots": [
+          "report_disposition"
+        ],
         "forbidden_assumption_topics": [
           "per source",
           "per källa",
           "synthesized overview",
           "samlad översikt"
         ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "foundation"
+      ]
+    },
+    {
+      "id": "interview_open_citizen_feedback",
+      "complexity": "easy",
+      "domain": "municipality_citizen_feedback",
+      "prompt": "Vi får in synpunkter både via e-tjänsten och på andra sätt. Jag skulle vilja ha ett flöde som hjälper oss få ordning på dem och skicka dem rätt, men jag vet inte riktigt hur det borde läggas upp.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
       }
+    },
+    {
+      "id": "interview_open_building_supplements",
+      "complexity": "easy",
+      "domain": "municipality_building_permits",
+      "prompt": "Det kommer ofta in kompletteringar i byggärenden och det är lätt att tappa vad som faktiskt har besvarats. Kan vi bygga något som hjälper handläggarna med det?",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_special_diet",
+      "complexity": "easy",
+      "domain": "municipality_school_meals",
+      "prompt": "Vi hanterar många ärenden om specialkost i skola och förskola. Jag vill testa ett flöde som gör det mindre rörigt för oss.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_lss_application",
+      "complexity": "medium",
+      "domain": "municipality_social_services",
+      "prompt": "Vi behöver få bättre ordning på ansökningar om LSS-insatser innan en handläggare tar över. Jag tänker något slags flöde, men har inte bestämt exakt vad det ska göra.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_volunteer_interest",
+      "complexity": "easy",
+      "domain": "municipality_social_support",
+      "prompt": "Vi får intresseanmälningar från personer som vill göra frivilliga sociala insatser. Det vore bra om ett flöde kunde hjälpa oss hantera dem.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    {
+      "id": "interview_open_food_registration",
+      "complexity": "medium",
+      "domain": "municipality_environmental_health",
+      "prompt": "När någon registrerar en livsmedelsverksamhet behöver vi gå igenom det som kommit in. Jag undrar om vi kan få hjälp av ett flöde där.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_food_poisoning_report",
+      "complexity": "medium",
+      "domain": "municipality_environmental_health",
+      "prompt": "Vi får anmälningar om misstänkt matförgiftning och vill kunna ta hand om dem mer enhetligt. Hjälp mig bygga ett flöde för det.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    {
+      "id": "interview_open_apartment_register",
+      "complexity": "easy",
+      "domain": "municipality_property_register",
+      "prompt": "Det kommer in uppgifter om nya eller ändrade bostäder till lägenhetsregistret. Vi behöver något som hjälper oss hålla ihop underlaget.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "structured_io_contract"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "structured_json_source",
+      "question_answer_overrides": {
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "map_to_new_schema"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_event_financing",
+      "complexity": "medium",
+      "domain": "municipality_culture_and_growth",
+      "prompt": "Vi har ansökningar om kommunal medfinansiering av evenemang och möten. Jag vill bygga ett flöde som avlastar lite, men är osäker på upplägget.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      }
+    },
+    {
+      "id": "interview_open_student_device_faults",
+      "complexity": "easy",
+      "domain": "municipality_school_it",
+      "prompt": "Gymnasiet får många felanmälningar om elevdatorer. Kan vi göra ett flöde som gör det lättare för IT att ta nästa steg?",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    {
+      "id": "interview_open_school_transport",
+      "complexity": "medium",
+      "domain": "municipality_school_transport",
+      "prompt": "Vi arbetar med ansökningar om skolskjuts och elevresor och vill prova ett flöde som hjälper oss i handläggningen.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_public_records",
+      "complexity": "medium",
+      "domain": "municipality_archives",
+      "prompt": "Folk frågar efter allmänna handlingar och äldre dokument på lite olika sätt. Jag vill ha ett flöde som hjälper registraturen, men vet inte vilka delar som passar.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      }
+    },
+    {
+      "id": "interview_open_employment_certificate",
+      "complexity": "easy",
+      "domain": "municipality_hr",
+      "prompt": "Tidigare anställda hör av sig om arbetsgivarintyg. Det borde gå att få bättre ordning på den processen med ett flöde.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    {
+      "id": "interview_open_data_subject_access",
+      "complexity": "medium",
+      "domain": "municipality_privacy",
+      "prompt": "Vi behöver hantera begäran om registerutdrag på ett tryggt och enhetligt sätt. Hjälp oss tänka ut ett bra flöde.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      }
+    },
+    {
+      "id": "interview_open_open_eplatform_handoff",
+      "complexity": "medium",
+      "domain": "municipality_e_services",
+      "prompt": "Vi har flera e-tjänster i Open ePlatform och överlämningen till verksamhetssystemen blir ibland manuell. Jag vill se om ett flöde kan hjälpa oss.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "structured_io_contract"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "structured_json_source",
+      "question_answer_overrides": {
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "map_to_new_schema"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_procurement_review",
+      "complexity": "medium",
+      "domain": "municipality_procurement",
+      "prompt": "Vi sitter ofta med många anbud och mycket underlag. Jag funderar på ett flöde som hjälper oss vid genomgången utan att fatta beslut åt oss.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      }
+    },
+    {
+      "id": "interview_open_access_offboarding",
+      "complexity": "easy",
+      "domain": "municipality_identity_and_access",
+      "prompt": "När någon slutar ska behörigheter bort i flera system och ibland missas något. Jag vill bygga ett flöde runt det.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    {
+      "id": "interview_open_cyber_incident",
+      "complexity": "medium",
+      "domain": "municipality_information_security",
+      "prompt": "Vi får in säkerhetshändelser i olika format och behöver en bättre första överblick. Kan Flow AI Builder hjälpa oss skapa något användbart?",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "structured_io_contract"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "structured_json_source",
+      "question_answer_overrides": {
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "map_to_new_schema"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_meeting_audio",
+      "complexity": "easy",
+      "domain": "municipality_meetings",
+      "prompt": "Vi spelar ibland in interna möten och skulle vilja få mer nytta av inspelningarna efteråt. Hjälp mig att bygga ett flöde.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "audio",
+        "vague"
+      ],
+      "synthetic_user_profile": "audio_source",
+      "question_answer_overrides": {
+        "post_processing_goal": {
+          "selected_option_id": "action_followup"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        }
+      }
+    },
+    {
+      "id": "interview_open_environmental_complaint",
+      "complexity": "medium",
+      "domain": "municipality_environment",
+      "prompt": "Klagomål om buller, lukt och andra störningar kommer in på flera sätt. Jag vill att ett flöde hjälper oss ta hand om dem.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    {
+      "id": "interview_open_crisis_reports",
+      "complexity": "medium",
+      "domain": "municipality_crisis_management",
+      "prompt": "Under en händelse kommer lägesbilder från flera verksamheter. Vi behöver ett flöde som hjälper staben, men jag har inte spikat resultatet.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      }
+    },
+    {
+      "id": "interview_open_data_catalog",
+      "complexity": "medium",
+      "domain": "municipality_data_governance",
+      "prompt": "Vi försöker få koll på kommunens datamängder och vem som ansvarar för vad. Jag tror ett flöde skulle kunna hjälpa oss, men vet inte hur.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      }
+    },
+    {
+      "id": "interview_open_accessibility_reports",
+      "complexity": "easy",
+      "domain": "municipality_digital_accessibility",
+      "prompt": "Invånare och personal rapporterar tillgänglighetsproblem i våra digitala tjänster. Vi vill hantera dem mer systematiskt med ett flöde.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      }
+    },
+    {
+      "id": "interview_open_records_retention",
+      "complexity": "medium",
+      "domain": "municipality_records_management",
+      "prompt": "Verksamheterna frågar ofta vad som ska bevaras eller gallras. Jag vill prova ett flöde som stöd, men det får inte ersätta arkivariens bedömning.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "docx_output_mode",
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "terminal_output",
+          "document_material_scope"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      }
+    },
+    {
+      "id": "interview_input_citizen_feedback",
+      "complexity": "easy",
+      "domain": "municipality_citizen_feedback",
+      "prompt": "Jag vill sortera inkomna synpunkter efter ämne, föreslå mottagande verksamhet och lämna saknade uppgifter som strukturerad JSON. Jag har inte bestämt hur användaren ska lämna själva synpunkten när flödet körs.",
+      "expected": {
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "subject",
+            "amne",
+            "category"
+          ],
+          [
+            "suggested_service",
+            "foreslagen_verksamhet",
+            "department"
+          ],
+          [
+            "missing_information",
+            "saknade_uppgifter"
+          ]
+        ],
+        "preferred_question_event_ids": [
+          "primary_runtime_input"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "question_answer_overrides": {
+        "primary_runtime_input": {
+          "selected_option_id": "text"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        },
+        "runtime_metadata_fields": {
+          "selected_option_id": "no_extra_metadata"
+        }
+      },
+      "cohorts": [
+        "json",
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_input_building_supplement",
+      "complexity": "medium",
+      "domain": "municipality_building_permits",
+      "prompt": "Flödet ska jämföra en komplettering med kommunens tidigare begäran, visa vad som besvarats och vad som återstår och skapa en samlad PDF för handläggaren. Jag är osäker på vilken typ av material som ska lämnas in vid körning.",
+      "expected": {
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "case_reference",
+            "arendereferens",
+            "case_number"
+          ],
+          [
+            "addressed_requests",
+            "besvarade_punkter"
+          ],
+          [
+            "remaining_gaps",
+            "kvarstaende_brister"
+          ]
+        ],
+        "preferred_question_event_ids": [
+          "primary_runtime_input"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      },
+      "cohorts": [
+        "pdf",
+        "single_missing_dimension"
+      ],
+      "synthetic_user_profile": "document_source"
+    },
+    {
+      "id": "interview_input_procurement_requirements",
+      "complexity": "medium",
+      "domain": "municipality_procurement",
+      "prompt": "Jag behöver ett flöde som kontrollerar obligatoriska krav, redovisar belägg och osäkerheter och returnerar en JSON-matris. Beslutet ligger kvar hos upphandlaren. Hur underlaget ska matas in har jag inte tagit ställning till.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "primary_runtime_input"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_input_student_device",
+      "complexity": "easy",
+      "domain": "municipality_school_it",
+      "prompt": "Vid körning ska flödet hitta felbild, redan provade åtgärder och vad supporten behöver fråga om härnäst. Resultatet ska bli en kort text för servicedesk, men jag vet inte hur felanmälan ska lämnas in.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "primary_runtime_input"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_input_meeting_actions",
+      "complexity": "easy",
+      "domain": "municipality_meetings",
+      "prompt": "Jag vill få beslut, uppgifter, ansvariga, datum och öppna frågor som JSON efter varje möte. Själva sättet att ge mötesmaterialet till flödet är fortfarande öppet.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "primary_runtime_input"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "audio",
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_input_register_extract",
+      "complexity": "medium",
+      "domain": "municipality_privacy",
+      "prompt": "Flödet ska strukturera en begäran om registerutdrag, lista berörda system och markera vilken information som saknas. Jag vill ha JSON tillbaka men har inte bestämt vilken indata användaren ska ge vid körning.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "primary_runtime_input"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_input_crisis_overview",
+      "complexity": "medium",
+      "domain": "municipality_crisis_management",
+      "prompt": "Jag vill sammanställa tidslinje, bekräftade fakta, osäkerheter, behov och ansvariga i en PDF-lägesbild. Vi har inte bestämt hur rapporterna från verksamheterna ska komma in i flödet.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "primary_runtime_input"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_input_data_catalog",
+      "complexity": "medium",
+      "domain": "municipality_data_governance",
+      "prompt": "Flödet ska plocka ut datamängd, informationsägare, rättslig grund, känslighet och uppdateringsfrekvens och lämna JSON. Jag behöver hjälp att välja hur kartläggningsunderlaget ska tillföras.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "primary_runtime_input"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_contract_open_eplatform_payload",
+      "complexity": "medium",
+      "domain": "municipality_e_services",
+      "prompt": "Vid körning skickas JSON från en e-tjänst i Open ePlatform och flödet ska returnera strukturerad JSON till nästa system. Jag har ännu inte sagt vad som ska göras mellan inkommande och utgående payload.",
+      "expected": {
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "submission_reference",
+            "inskickningsreferens"
+          ],
+          [
+            "service_reference",
+            "tjanstereferens"
+          ],
+          [
+            "attachment_references",
+            "bilagereferenser"
+          ]
+        ],
+        "preferred_question_event_ids": [
+          "structured_io_contract"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "question_answer_overrides": {
+        "post_processing_goal": {
+          "selected_option_id": "compare_or_validate"
+        },
+        "structured_io_contract": {
+          "selected_option_id": "map_to_new_schema"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      },
+      "cohorts": [
+        "json",
+        "single_missing_dimension"
+      ],
+      "synthetic_user_profile": "structured_json_source"
+    },
+    {
+      "id": "interview_goal_meeting_audio",
+      "complexity": "medium",
+      "domain": "municipality_meetings",
+      "prompt": "Användaren laddar upp en ljudfil från ett arbetsmöte och slutresultatet ska vara en PDF utan dokumentmall. Jag har inte beskrivit vilken bearbetning som behövs efter transkriberingen.",
+      "expected": {
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "decisions",
+            "beslut"
+          ],
+          [
+            "actions",
+            "atgarder",
+            "next_steps"
+          ],
+          [
+            "owners",
+            "ansvariga"
+          ],
+          [
+            "deadlines",
+            "due_dates"
+          ]
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "question_answer_overrides": {
+        "post_processing_goal": {
+          "selected_option_id": "action_followup"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        }
+      },
+      "cohorts": [
+        "audio",
+        "pdf",
+        "single_missing_dimension"
+      ],
+      "synthetic_user_profile": "audio_source"
+    },
+    {
+      "id": "interview_goal_food_registration",
+      "complexity": "easy",
+      "domain": "municipality_environmental_health",
+      "prompt": "Vid körning laddar användaren upp dokument från en registrering av livsmedelsverksamhet. Slutresultatet ska vara strukturerad JSON, men vi har inte bestämt vad flödet ska göra med dokumenten.",
+      "expected": {
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "establishment_name",
+            "verksamhetsnamn"
+          ],
+          [
+            "planned_start_date",
+            "planerat_startdatum"
+          ],
+          [
+            "activities",
+            "verksamheter",
+            "aktiviteter"
+          ],
+          [
+            "missing_information",
+            "saknade_uppgifter"
+          ]
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      },
+      "cohorts": [
+        "json",
+        "single_missing_dimension"
+      ],
+      "synthetic_user_profile": "document_source"
+    },
+    {
+      "id": "interview_goal_accessibility_text",
+      "complexity": "easy",
+      "domain": "municipality_digital_accessibility",
+      "prompt": "Användaren klistrar in en rapport om ett tillgänglighetsproblem och ska få strukturerad JSON tillbaka. Vad flödet ska analysera eller plocka ut har jag inte preciserat.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_goal_economy_spreadsheet",
+      "complexity": "medium",
+      "domain": "municipality_finance",
+      "prompt": "Flödet tar emot en Excel- eller CSV-fil med månadsutfall och levererar en PDF till controllergruppen. Jag behöver hjälp att bestämma själva bearbetningen.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_goal_policy_document",
+      "complexity": "easy",
+      "domain": "municipality_governance",
+      "prompt": "Användaren laddar upp ett styrdokument och ska få en läsbar text tillbaka direkt i flödet. Jag har inte beskrivit vad texten ska innehålla.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_goal_board_audio_docx",
+      "complexity": "medium",
+      "domain": "municipal_company_governance",
+      "prompt": "Indata vid körning är ljud från ett styrelsemöte och slutleveransen ska vara en DOCX utan mall. Vad som ska hända mellan ljudet och dokumentet är inte beslutat.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "audio",
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_goal_school_transport_material",
+      "complexity": "medium",
+      "domain": "municipality_school_transport",
+      "prompt": "Flödet får både inklistrad text och uppladdade dokument för ett skolskjutsärende och ska lämna JSON. Jag vet inte ännu om det ska sammanfatta, validera eller plocka ut vissa uppgifter.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_output_food_establishment",
+      "complexity": "easy",
+      "domain": "municipality_environmental_health",
+      "prompt": "Användaren laddar upp handlingar för en livsmedelsverksamhet. Flödet ska plocka ut verksamhetsnamn, startdatum, aktiviteter och saknade uppgifter, men jag har inte bestämt hur resultatet ska levereras.",
+      "expected": {
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "establishment_name",
+            "verksamhetsnamn"
+          ],
+          [
+            "planned_start_date",
+            "planerat_startdatum"
+          ],
+          [
+            "activities",
+            "verksamheter",
+            "aktiviteter"
+          ],
+          [
+            "missing_information",
+            "saknade_uppgifter"
+          ]
+        ],
+        "preferred_question_event_ids": [
+          "terminal_output"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "single_document_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "extract_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "structured_json"
+        }
+      },
+      "cohorts": [
+        "json",
+        "single_missing_dimension"
+      ],
+      "synthetic_user_profile": "document_source"
+    },
+    {
+      "id": "interview_output_event_financing",
+      "complexity": "medium",
+      "domain": "municipality_culture_and_growth",
+      "prompt": "Användaren laddar upp ansökan och budget. Flödet ska sammanställa sökande organisation, evenemangets syfte, budgetposter, finansieringskällor och frågor för manuell bedömning. Slutformatet är inte bestämt.",
+      "expected": {
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "applicant_organization",
+            "sokande_organisation"
+          ],
+          [
+            "event_purpose",
+            "evenemangets_syfte"
+          ],
+          [
+            "budget_items",
+            "budgetposter"
+          ],
+          [
+            "review_questions",
+            "bedomningsfragor"
+          ]
+        ],
+        "preferred_question_event_ids": [
+          "terminal_output"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "summarize_or_overview"
+        },
+        "terminal_output": {
+          "selected_option_id": "pdf_document"
+        },
+        "pdf_generation_mode": {
+          "selected_option_id": "generated_pdf"
+        },
+        "report_disposition": {
+          "selected_option_id": "both"
+        }
+      },
+      "cohorts": [
+        "pdf",
+        "single_missing_dimension"
+      ],
+      "synthetic_user_profile": "document_source"
+    },
+    {
+      "id": "interview_output_building_documents",
+      "complexity": "medium",
+      "domain": "municipality_building_permits",
+      "prompt": "Vid körning laddar handläggaren upp en ansökan och en checklista. Flödet ska markera uppfyllda krav, luckor och osäkra punkter. Vi har inte valt vad användaren ska få tillbaka.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "terminal_output"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_output_meeting_audio",
+      "complexity": "easy",
+      "domain": "municipality_meetings",
+      "prompt": "Flödet ska transkribera en uppladdad ljudfil och plocka ut beslut, aktiviteter och öppna frågor. Jag är osäker på vilket slutresultat som passar bäst.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "terminal_output"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "audio",
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_output_feedback_text",
+      "complexity": "easy",
+      "domain": "municipality_citizen_feedback",
+      "prompt": "Användaren klistrar in en synpunkt. Flödet ska sammanfatta den, föreslå mottagande verksamhet och visa vilka uppgifter som behöver följas upp. Hur detta ska levereras har vi inte bestämt.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "terminal_output"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_output_case_statistics",
+      "complexity": "medium",
+      "domain": "municipality_operations",
+      "prompt": "Användaren laddar upp en CSV-fil. Flödet ska räkna ärenden per kategori och status, hitta äldsta öppna ärendet och visa avvikelser. Jag har lämnat utdataformatet öppet.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "terminal_output"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_output_privacy_documents",
+      "complexity": "medium",
+      "domain": "municipality_privacy",
+      "prompt": "Vid körning laddas dokument upp och flödet ska hitta kategorier av personuppgifter, berörda personer, lagringsplatser och osäkerheter. Jag har inte sagt hur resultatet ska se ut.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "terminal_output"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "interview_output_integration_errors",
+      "complexity": "medium",
+      "domain": "municipality_integrations",
+      "prompt": "Flödet får JSON med integrationsfel och ska gruppera felorsaker, berörda tjänster, första och senaste tidpunkt samt möjliga nästa kontroller. Vi behöver välja slutresultat.",
+      "expected": {
+        "allow_question_instead_of_plan": true,
+        "expected_question_event_count": 1,
+        "max_question_event_count": 1,
+        "preferred_question_event_ids": [
+          "terminal_output"
+        ],
+        "allowed_question_event_ids": [],
+        "max_reopened_question_count": 0
+      },
+      "cohorts": [
+        "single_missing_dimension"
+      ]
+    },
+    {
+      "id": "ordinary_json_suspected_food_poisoning",
+      "complexity": "medium",
+      "domain": "municipality_environmental_health",
+      "prompt": "Vid körning klistrar miljökontoret in texten från en anmälan om misstänkt matförgiftning. Strukturera incidenttid, misstänkta livsmedel, uppgivna symtom, antal berörda och informationsluckor som JSON. Flödet får inte ställa diagnos eller avgöra orsaken.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "incident_time",
+            "incidenttid"
+          ],
+          [
+            "suspected_foods",
+            "misstankta_livsmedel"
+          ],
+          [
+            "reported_symptoms",
+            "uppgivna_symtom"
+          ],
+          [
+            "affected_count",
+            "antal_berorda"
+          ],
+          [
+            "information_gaps",
+            "informationsluckor"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ]
+    },
+    {
+      "id": "ordinary_json_lss_completeness",
+      "complexity": "medium",
+      "domain": "municipality_social_services",
+      "prompt": "Handläggaren laddar upp en ansökan om LSS-insats och bilagor. Flödet ska lämna JSON med sökta insatser, mottagna uppgifter, mottagna bilagor och sådant som behöver kompletteras. Det ska inte bedöma rätten till insats eller föreslå beslut.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "requested_support",
+            "sokta_insatser"
+          ],
+          [
+            "submitted_information",
+            "mottagna_uppgifter"
+          ],
+          [
+            "attachments_received",
+            "mottagna_bilagor"
+          ],
+          [
+            "information_gaps",
+            "kompletteringsbehov"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ]
+    },
+    {
+      "id": "ordinary_json_special_diet",
+      "complexity": "easy",
+      "domain": "municipality_school_meals",
+      "prompt": "Användaren klistrar in uppgifter från en ansökan eller uppsägning av specialkost. Returnera JSON med typ av begäran, skolenhet, kostbehov, angivna underlag och frågor som kök eller handläggare måste följa upp. Gissa inte medicinska uppgifter.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "request_type",
+            "typ_av_begaran"
+          ],
+          [
+            "school_unit",
+            "skolenhet"
+          ],
+          [
+            "dietary_need",
+            "kostbehov"
+          ],
+          [
+            "submitted_documents",
+            "angivna_underlag"
+          ],
+          [
+            "manual_review_items",
+            "uppfoljningsfragor",
+            "follow_up_questions",
+            "fragor_att_folja_upp",
+            "fragor_for_fortsatt_kontakt",
+            "questions_for_follow_up"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ]
+    },
+    {
+      "id": "ordinary_json_apartment_register_change",
+      "complexity": "easy",
+      "domain": "municipality_property_register",
+      "prompt": "Vid körning klistrar användaren in en anmälan om nya eller ändrade bostäder. Skapa JSON med ändringstyp, fastighetsreferens, berörda lägenheter, angivna datum och valideringsluckor. Saknade värden ska vara null, inte antaganden.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "change_type",
+            "andringstyp"
+          ],
+          [
+            "property_reference",
+            "fastighetsreferens"
+          ],
+          [
+            "dwelling_changes",
+            "lagenhetsandringar"
+          ],
+          [
+            "stated_dates",
+            "angivna_datum"
+          ],
+          [
+            "validation_gaps",
+            "valideringsluckor"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ]
+    },
+    {
+      "id": "ordinary_json_volunteer_interest",
+      "complexity": "easy",
+      "domain": "municipality_social_support",
+      "prompt": "Användaren klistrar in en intresseanmälan för frivilligt socialt arbete. Strukturera önskade uppdrag, tillgänglighet, uppgiven erfarenhet, språkkunskaper och frågor för fortsatt kontakt som JSON. Matchning beslutas av en samordnare.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "interest_types",
+            "onskade_uppdrag"
+          ],
+          [
+            "availability",
+            "tillganglighet"
+          ],
+          [
+            "provided_experience",
+            "uppgiven_erfarenhet"
+          ],
+          [
+            "languages",
+            "sprakkunskaper"
+          ],
+          [
+            "follow_up_questions",
+            "fragor_for_fortsatt_kontakt"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ]
+    },
+    {
+      "id": "ordinary_json_security_incident",
+      "complexity": "medium",
+      "domain": "municipality_information_security",
+      "prompt": "Säkerhetssamordnaren klistrar in en incidentrapport. Lämna JSON med bekräftade händelser, berörda system, observerad påverkan, osäkra uppgifter och föreslagna kontroller. Flödet ska inte fastställa incidentklass eller ansvarig part.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "confirmed_events",
+            "bekraftade_handelser"
+          ],
+          [
+            "affected_systems",
+            "berorda_system"
+          ],
+          [
+            "observed_impact",
+            "observerad_paverkan"
+          ],
+          [
+            "uncertainties",
+            "osakra_uppgifter"
+          ],
+          [
+            "suggested_checks",
+            "foreslagna_kontroller"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ]
+    },
+    {
+      "id": "ordinary_json_integration_failures",
+      "complexity": "medium",
+      "domain": "municipality_integrations",
+      "prompt": "Vid körning skickas JSON med felposter från kommunens integrationer. Normalisera posterna och returnera JSON med tjänst, felkod, första och senaste tidpunkt, antal händelser och möjliga nästa kontroller. Bevara okända felkoder oförändrade.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "service",
+            "tjanst"
+          ],
+          [
+            "error_code",
+            "felkod"
+          ],
+          [
+            "first_seen",
+            "forsta_tidpunkt"
+          ],
+          [
+            "last_seen",
+            "senaste_tidpunkt"
+          ],
+          [
+            "event_count",
+            "antal_handelser"
+          ],
+          [
+            "next_checks",
+            "nasta_kontroller"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ]
+    },
+    {
+      "id": "ordinary_json_school_transport",
+      "complexity": "medium",
+      "domain": "municipality_school_transport",
+      "prompt": "Handläggaren laddar upp en ansökan om skolskjuts eller elevresa. Flödet ska skapa JSON med elevens skolenhet, angiven resväg, sökt period, bifogade underlag och informationsluckor. Ingen bedömning av rätt till transport får göras.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "school_unit",
+            "skolenhet"
+          ],
+          [
+            "stated_route",
+            "angiven_resvag"
+          ],
+          [
+            "requested_period",
+            "sokt_period"
+          ],
+          [
+            "attachments_received",
+            "bifogade_underlag"
+          ],
+          [
+            "information_gaps",
+            "informationsluckor"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "json"
+      ]
+    },
+    {
+      "id": "ordinary_report_building_supplement",
+      "complexity": "medium",
+      "domain": "municipality_building_permits",
+      "prompt": "Handläggaren laddar upp kommunens begäran om komplettering och den sökandes nya dokument. Jämför underlagen, strukturera ärendereferens, mottagna handlingar, besvarade punkter, kvarstående luckor och osäkerheter. Skapa en gemensam PDF utan mall; varje punkt ska kunna spåras till rätt underlag.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "case_reference",
+            "arendereferens"
+          ],
+          [
+            "submitted_documents",
+            "mottagna_handlingar"
+          ],
+          [
+            "addressed_requests",
+            "besvarade_punkter"
+          ],
+          [
+            "remaining_gaps",
+            "kvarstaende_luckor"
+          ],
+          [
+            "uncertainties",
+            "osakerheter"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "pdf"
+      ]
+    },
+    {
+      "id": "ordinary_report_event_financing",
+      "complexity": "medium",
+      "domain": "municipality_culture_and_growth",
+      "prompt": "Användaren laddar upp en ansökan om medfinansiering av evenemang, budget och bilagor. Sammanställ sökande organisation, syfte, målgrupp, budgetposter, andra finansieringskällor och frågor för manuell bedömning. Leverera en samlad PDF utan mall; flödet får inte besluta om stöd.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "applicant_organization",
+            "sokande_organisation"
+          ],
+          [
+            "purpose",
+            "syfte"
+          ],
+          [
+            "target_group",
+            "malgrupp"
+          ],
+          [
+            "budget_items",
+            "budgetposter"
+          ],
+          [
+            "funding_sources",
+            "finansieringskallor"
+          ],
+          [
+            "review_questions",
+            "fragor_for_manuell_bedomning"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "pdf"
+      ]
+    },
+    {
+      "id": "ordinary_report_committee_meeting",
+      "complexity": "medium",
+      "domain": "municipality_meetings",
+      "prompt": "Vid körning laddas en ljudfil från ett nämndmöte upp. Transkribera den, strukturera dagordningspunkt, uttalade beslut, uppdrag, ansvariga, tidsfrister och öppna frågor och skriv sedan exakt en protokollsliknande rapporttext. Rendera texten som PDF utan mall.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "agenda_item",
+            "dagordningspunkt"
+          ],
+          [
+            "decisions",
+            "beslut"
+          ],
+          [
+            "assignments",
+            "uppdrag"
+          ],
+          [
+            "owners",
+            "ansvariga"
+          ],
+          [
+            "deadlines",
+            "tidsfrister"
+          ],
+          [
+            "open_questions",
+            "oppna_fragor"
+          ]
+        ]
+      },
+      "cohorts": [
+        "audio",
+        "complete_everyday",
+        "pdf"
+      ]
+    },
+    {
+      "id": "ordinary_report_public_records_request",
+      "complexity": "medium",
+      "domain": "municipality_archives",
+      "prompt": "Registratorn klistrar in en begäran om allmän handling och laddar upp träfflistor från arkiv och diarier. Strukturera efterfrågade handlingar, sökavgränsningar, möjliga träffar, sekretessfrågor som måste bedömas och nästa manuella steg. Skapa en intern PDF; gör ingen sekretessbedömning.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "requested_records",
+            "efterfragade_handlingar"
+          ],
+          [
+            "search_scope",
+            "sokavgransningar"
+          ],
+          [
+            "candidate_matches",
+            "mojliga_traffar"
+          ],
+          [
+            "confidentiality_questions",
+            "sekretessfragor"
+          ],
+          [
+            "manual_next_steps",
+            "manuella_nasta_steg"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "pdf"
+      ]
+    },
+    {
+      "id": "ordinary_report_student_device_incidents",
+      "complexity": "easy",
+      "domain": "municipality_school_it",
+      "prompt": "IT laddar upp en export med felanmälningar för elevdatorer. Gruppera modell, felbild, redan provade åtgärder, återkommande mönster och rekommenderade kontroller. Skriv en gemensam rapporttext och rendera en PDF utan mall; ändra inte status i servicedesk.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "device_model",
+            "dator_model"
+          ],
+          [
+            "symptoms",
+            "felbild"
+          ],
+          [
+            "attempted_actions",
+            "provade_atgarder"
+          ],
+          [
+            "recurring_patterns",
+            "aterkommande_monster"
+          ],
+          [
+            "recommended_checks",
+            "rekommenderade_kontroller"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "pdf"
+      ]
+    },
+    {
+      "id": "ordinary_report_cyber_timeline",
+      "complexity": "hard",
+      "domain": "municipality_information_security",
+      "prompt": "Säkerhetsteamet laddar upp loggutdrag och incidentanteckningar. Bygg en tidslinje med källhänvisning, skilj bekräftade fakta från antaganden, lista berörda system, observerad påverkan och öppna utredningsfrågor. Skapa en samlad PDF utan mall; rapporten får inte slå fast angripare eller skuld.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "timeline",
+            "tidslinje"
+          ],
+          [
+            "confirmed_facts",
+            "bekraftade_fakta"
+          ],
+          [
+            "assumptions",
+            "antaganden"
+          ],
+          [
+            "affected_systems",
+            "berorda_system"
+          ],
+          [
+            "observed_impact",
+            "observerad_paverkan"
+          ],
+          [
+            "open_investigation_questions",
+            "oppna_utredningsfragor"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "pdf"
+      ]
+    },
+    {
+      "id": "ordinary_report_procurement_comparison",
+      "complexity": "hard",
+      "domain": "municipality_procurement",
+      "prompt": "Upphandlaren laddar upp kravmatris, anbud och förtydliganden. Skapa en strukturerad jämförelse med leverantör, krav, angivet belägg, avvikelse och osäkerhet. Skriv därefter exakt en neutral rapporttext och rendera den som PDF utan mall. Flödet får inte poängsätta utöver den bifogade modellen eller rekommendera vinnare.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "supplier",
+            "leverantor"
+          ],
+          [
+            "requirement",
+            "krav"
+          ],
+          [
+            "evidence",
+            "belagg"
+          ],
+          [
+            "deviation",
+            "avvikelse"
+          ],
+          [
+            "uncertainty",
+            "osakerhet"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "pdf"
+      ]
+    },
+    {
+      "id": "ordinary_report_environmental_complaints",
+      "complexity": "medium",
+      "domain": "municipality_environment",
+      "prompt": "Miljökontoret laddar upp flera klagomål om buller eller lukt. Strukturera plats, angivna tidpunkter, typ av störning, uppgiftslämnarens observationer, tidigare kontakter och informationsluckor. Skapa en samlad PDF utan mall och håll isär varje anmälan; avgör inte om en störning är en olägenhet enligt lag.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 6,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "location",
+            "plats"
+          ],
+          [
+            "reported_times",
+            "angivna_tidpunkter"
+          ],
+          [
+            "disturbance_type",
+            "typ_av_storning"
+          ],
+          [
+            "reported_observations",
+            "observationer"
+          ],
+          [
+            "previous_contacts",
+            "tidigare_kontakter"
+          ],
+          [
+            "information_gaps",
+            "informationsluckor"
+          ]
+        ]
+      },
+      "cohorts": [
+        "complete_everyday",
+        "pdf"
+      ]
+    },
+    {
+      "id": "advanced_explicit_open_eplatform_mapping",
+      "complexity": "hard",
+      "domain": "municipality_e_services",
+      "prompt": "Bygg ett JSON-till-JSON-flöde för överlämning från Open ePlatform. Inkommande payload och utgående resultat ska ha separata kontrakt. Utdata ska innehålla service_reference, submission_reference, applicant_channels, attachment_references[], submitted_fields{} och routing_issues[]. Bevara okända inskickade fält under submitted_fields, använd null för saknade skalärvärden och gissa aldrig verksamhetssystemets ärende-id.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_input_contract_schema": {
+          "type": "object"
+        },
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "service_reference": {
+              "type": "string"
+            },
+            "submission_reference": {
+              "type": "string"
+            },
+            "applicant_channels": {
+              "type": "array"
+            },
+            "attachment_references": {
+              "type": "array"
+            },
+            "submitted_fields": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "routing_issues": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "service_reference",
+            "submission_reference",
+            "applicant_channels",
+            "attachment_references",
+            "submitted_fields",
+            "routing_issues"
+          ]
+        }
+      },
+      "cohorts": [
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_incident_log_timeline",
+      "complexity": "hard",
+      "domain": "municipality_information_security",
+      "prompt": "Vid körning laddas loggfiler och analytikern fyller i run_reference, owning_unit och analysis_window. Extrahera till JSON med events[] där varje post har timestamp, source, event_type, observed_value och source_reference. Lägg dessutom confirmed_facts[], hypotheses[], evidence_gaps[] och affected_systems[] på toppnivå. Hypoteser får aldrig blandas med bekräftade fakta.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "run_reference"
+          ],
+          [
+            "owning_unit"
+          ],
+          [
+            "analysis_window"
+          ]
+        ],
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "timestamp": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "event_type": {
+                    "type": "string"
+                  },
+                  "observed_value": {
+                    "type": "string"
+                  },
+                  "source_reference": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "timestamp",
+                  "source",
+                  "event_type",
+                  "observed_value",
+                  "source_reference"
+                ]
+              }
+            },
+            "confirmed_facts": {
+              "type": "array"
+            },
+            "hypotheses": {
+              "type": "array"
+            },
+            "evidence_gaps": {
+              "type": "array"
+            },
+            "affected_systems": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "events",
+            "confirmed_facts",
+            "hypotheses",
+            "evidence_gaps",
+            "affected_systems"
+          ]
+        }
+      },
+      "cohorts": [
+        "form_fields",
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_e_service_submission",
+      "complexity": "hard",
+      "domain": "municipality_e_services",
+      "prompt": "Användaren laddar upp ett inskickat e-tjänsteärende och fyller i service_reference, owning_unit och received_date vid körning. Returnera JSON med submission_reference, applicant_contact_channels, declared_subject, attachment_inventory[], extracted_answers{} och validation_gaps[]. Primärmaterialet ska vara filindata, inte formulärfält.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "submission_reference"
+          ],
+          [
+            "applicant_contact_channels"
+          ],
+          [
+            "declared_subject"
+          ],
+          [
+            "attachment_inventory"
+          ],
+          [
+            "extracted_answers"
+          ],
+          [
+            "validation_gaps"
+          ]
+        ],
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "service_reference"
+          ],
+          [
+            "owning_unit"
+          ],
+          [
+            "received_date"
+          ]
+        ]
+      },
+      "cohorts": [
+        "form_fields",
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_retention_inventory",
+      "complexity": "hard",
+      "domain": "municipality_records_management",
+      "prompt": "Läs uppladdade informationshanteringsplaner och returnera JSON. Modellen ska ha records_series[] med series_name, owning_unit, information_type, stated_retention_rule, legal_reference och source_reference samt top-level conflicts[] och unresolved_questions[]. Flödet får bara återge regler som står i underlaget och ska lämna rättsliga tolkningar till arkivarien.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "records_series"
+          ],
+          [
+            "series_name"
+          ],
+          [
+            "owning_unit"
+          ],
+          [
+            "information_type"
+          ],
+          [
+            "stated_retention_rule"
+          ],
+          [
+            "legal_reference"
+          ],
+          [
+            "source_reference"
+          ],
+          [
+            "conflicts"
+          ],
+          [
+            "unresolved_questions"
+          ]
+        ]
+      },
+      "cohorts": [
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_procurement_matrix",
+      "complexity": "hard",
+      "domain": "municipality_procurement",
+      "prompt": "Vid körning laddas kravbilaga, utvärderingsmodell och flera anbud upp. Skapa JSON med bids[] och requirements[]. Varje bedömningspost ska bära supplier_reference, requirement_reference, stated_evidence, rubric_value, uncertainty och source_reference. Lägg manual_review_items[] separat. Beräkna inget värde som inte uttryckligen följer av utvärderingsmodellen och välj ingen leverantör.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "bids"
+          ],
+          [
+            "requirements"
+          ],
+          [
+            "supplier_reference"
+          ],
+          [
+            "requirement_reference"
+          ],
+          [
+            "stated_evidence"
+          ],
+          [
+            "rubric_value"
+          ],
+          [
+            "uncertainty"
+          ],
+          [
+            "source_reference"
+          ],
+          [
+            "manual_review_items"
+          ]
+        ]
+      },
+      "cohorts": [
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_privacy_assessment",
+      "complexity": "hard",
+      "domain": "municipality_privacy",
+      "prompt": "Dataskyddssamordnaren laddar upp projektbeskrivning, informationsklassning och biträdesavtal. Returnera JSON med processing_activities[], data_subject_groups[], personal_data_categories[], stated_legal_bases[], recipients[], retention_statements[], identified_risks[] och unanswered_questions[]. Skilj uttryckliga uppgifter från modellens förslag; dra ingen egen slutsats om rättslig grund.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "processing_activities"
+          ],
+          [
+            "data_subject_groups"
+          ],
+          [
+            "personal_data_categories"
+          ],
+          [
+            "stated_legal_bases"
+          ],
+          [
+            "recipients"
+          ],
+          [
+            "retention_statements"
+          ],
+          [
+            "identified_risks"
+          ],
+          [
+            "unanswered_questions"
+          ]
+        ]
+      },
+      "cohorts": [
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_lss_intake_contract",
+      "complexity": "hard",
+      "domain": "municipality_social_services",
+      "prompt": "Läs en LSS-ansökan och bilagor. Leverera JSON med requested_interventions[], submitted_facts[], attachment_inventory[], explicit_preferences[], information_gaps[] och source_references[]. Null används när ett väntat skalärvärde inte framgår. Resultatet är en innehållsförteckning för handläggaren, inte ett beslut, en behovsbedömning eller en rekommendation.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "requested_interventions"
+          ],
+          [
+            "submitted_facts"
+          ],
+          [
+            "attachment_inventory"
+          ],
+          [
+            "explicit_preferences"
+          ],
+          [
+            "information_gaps"
+          ],
+          [
+            "source_references"
+          ]
+        ]
+      },
+      "cohorts": [
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_school_transport_contract",
+      "complexity": "hard",
+      "domain": "municipality_school_transport",
+      "prompt": "Vid körning laddar handläggaren upp ansökan och bilagor samt fyller i owning_unit, review_date och run_reference. Returnera JSON med applicant_reference, school_unit, requested_period, stated_route{}, attachments[], submitted_reasons[] och missing_information[]. Flödet ska inte mäta avstånd, tillämpa lokala regler eller föreslå bifall eller avslag.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          [
+            "applicant_reference"
+          ],
+          [
+            "school_unit"
+          ],
+          [
+            "requested_period"
+          ],
+          [
+            "stated_route"
+          ],
+          [
+            "attachments"
+          ],
+          [
+            "submitted_reasons"
+          ],
+          [
+            "missing_information"
+          ]
+        ],
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "owning_unit"
+          ],
+          [
+            "review_date"
+          ],
+          [
+            "run_reference"
+          ]
+        ]
+      },
+      "cohorts": [
+        "form_fields",
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_integration_validation",
+      "complexity": "hard",
+      "domain": "municipality_integrations",
+      "prompt": "Flödet tar emot JSON från en kommunal integration och validerar det mot reglerna som följer med i samma körning. Returnera JSON med validation_status, violations[] och normalized_payload{}. Varje violation ska ha rule_reference, field_path, observed_value och message. Ta inte bort okända fält och ändra inte originalpayloaden om en normaliseringsregel saknas.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "validation_status": {
+              "type": "string"
+            },
+            "violations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "rule_reference": {
+                    "type": "string"
+                  },
+                  "field_path": {
+                    "type": "string"
+                  },
+                  "observed_value": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "rule_reference",
+                  "field_path",
+                  "observed_value",
+                  "message"
+                ]
+              }
+            },
+            "normalized_payload": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "validation_status",
+            "violations",
+            "normalized_payload"
+          ]
+        },
+        "expected_input_contract_schema": {
+          "type": "object"
+        }
+      },
+      "cohorts": [
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_public_record_redaction_support",
+      "complexity": "hard",
+      "domain": "municipality_archives",
+      "prompt": "Registratorn laddar upp handlingar och en beslutad maskningsanvisning. Returnera JSON med documents[]; varje dokument ska ha source_reference, candidate_passages[], stated_rule_reference och uncertainty. En candidate_passage ska innehålla page_or_section, excerpt_reference och reason_for_review. Flödet får endast peka ut granskningskandidater och får inte fatta sekretessbeslut eller producera en maskad fil.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "documents": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source_reference": {
+                    "type": "string"
+                  },
+                  "candidate_passages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "page_or_section": {
+                          "type": "string"
+                        },
+                        "excerpt_reference": {
+                          "type": "string"
+                        },
+                        "reason_for_review": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "page_or_section",
+                        "excerpt_reference",
+                        "reason_for_review"
+                      ]
+                    }
+                  },
+                  "stated_rule_reference": {
+                    "type": "string"
+                  },
+                  "uncertainty": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source_reference",
+                  "candidate_passages",
+                  "stated_rule_reference",
+                  "uncertainty"
+                ]
+              }
+            }
+          },
+          "required": [
+            "documents"
+          ]
+        }
+      },
+      "cohorts": [
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_meeting_action_register",
+      "complexity": "hard",
+      "domain": "municipality_meetings",
+      "prompt": "Ladda upp mötesljud, transkribera ordagrant och skapa därefter JSON med agenda_items[], decisions[], actions[] och open_questions[]. Varje action ska ha description, named_owner, stated_due_date, evidence_excerpt och confidence. Saknas namngiven ansvarig eller datum ska värdet vara null; modellen får inte härleda dem från roll eller sammanhang.",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "agenda_items": {
+              "type": "array"
+            },
+            "decisions": {
+              "type": "array"
+            },
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "named_owner": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "stated_due_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "evidence_excerpt": {
+                    "type": "string"
+                  },
+                  "confidence": {}
+                },
+                "required": [
+                  "description",
+                  "named_owner",
+                  "stated_due_date",
+                  "evidence_excerpt",
+                  "confidence"
+                ]
+              }
+            },
+            "open_questions": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "agenda_items",
+            "decisions",
+            "actions",
+            "open_questions"
+          ]
+        }
+      },
+      "cohorts": [
+        "audio",
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_explicit_change_log_analysis",
+      "complexity": "hard",
+      "domain": "municipality_it_operations",
+      "prompt": "IT laddar upp ändringslogg, driftslogg och incidentanteckningar. Returnera JSON med changes[], incidents[] och possible_links[]. En possible_link ska ha change_reference, incident_reference, time_relation, supporting_evidence[] och uncertainty. Korrelation får inte beskrivas som orsak utan uttryckligt belägg.",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_primary_material_form_fields": true,
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "changes": {
+              "type": "array"
+            },
+            "incidents": {
+              "type": "array"
+            },
+            "possible_links": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "change_reference": {
+                    "type": "string"
+                  },
+                  "incident_reference": {
+                    "type": "string"
+                  },
+                  "time_relation": {
+                    "type": "string"
+                  },
+                  "supporting_evidence": {
+                    "type": "array"
+                  },
+                  "uncertainty": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "change_reference",
+                  "incident_reference",
+                  "time_relation",
+                  "supporting_evidence",
+                  "uncertainty"
+                ]
+              }
+            }
+          },
+          "required": [
+            "changes",
+            "incidents",
+            "possible_links"
+          ]
+        }
+      },
+      "cohorts": [
+        "json",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_governed_procurement_report",
+      "complexity": "hard",
+      "domain": "municipality_procurement",
+      "prompt": "Upphandlaren laddar upp krav, utvärderingsmodell och anbud samt fyller i run_reference, owning_unit och report_date. Bygg först en JSON-matris med supplier_reference, requirement_reference, stated_evidence, rubric_value och uncertainty. Användaren ska granska matrisen i visningsläge innan fortsatt bearbetning. Efter godkännande ska exakt ett skrivsteg skapa en neutral rapporttext och den ska renderas som PDF utan mall. Vinnare eller tilldelningsbeslut får inte föreslås.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "run_reference"
+          ],
+          [
+            "owning_unit"
+          ],
+          [
+            "report_date"
+          ]
+        ],
+        "expected_review_policy": {
+          "mode": "view",
+          "target_output_type": "json",
+          "target_field_groups": [
+            [
+              "supplier_reference"
+            ],
+            [
+              "requirement_reference"
+            ],
+            [
+              "stated_evidence"
+            ],
+            [
+              "rubric_value"
+            ],
+            [
+              "uncertainty"
+            ]
+          ],
+          "target_must_be_non_terminal": true
+        },
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "supplier_reference": {},
+            "requirement_reference": {},
+            "stated_evidence": {},
+            "rubric_value": {},
+            "uncertainty": {}
+          },
+          "required": [
+            "supplier_reference",
+            "requirement_reference",
+            "stated_evidence",
+            "rubric_value",
+            "uncertainty"
+          ]
+        }
+      },
+      "cohorts": [
+        "form_fields",
+        "human_review",
+        "json",
+        "pdf",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_governed_open_eplatform_handoff",
+      "complexity": "hard",
+      "domain": "municipality_e_services",
+      "apply_plan": true,
+      "prompt": "Vid körning laddas ett exporterat Open ePlatform-ärende upp och användaren fyller i run_reference, owning_unit och report_date. Skapa först JSON med service_reference, submission_reference, attachment_inventory, extracted_fields och routing_issues. Användaren ska granska och få redigera JSON-resultatet innan rapporten görs. Efter godkännande ska exakt ett skrivsteg skapa överlämningsrapporten och den ska renderas som PDF utan mall.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "run_reference"
+          ],
+          [
+            "owning_unit"
+          ],
+          [
+            "report_date"
+          ]
+        ],
+        "expected_review_policy": {
+          "mode": "edit",
+          "target_output_type": "json",
+          "target_field_groups": [
+            [
+              "service_reference"
+            ],
+            [
+              "submission_reference"
+            ],
+            [
+              "attachment_inventory"
+            ],
+            [
+              "extracted_fields"
+            ],
+            [
+              "routing_issues"
+            ]
+          ],
+          "target_must_be_non_terminal": true
+        },
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "service_reference": {},
+            "submission_reference": {},
+            "attachment_inventory": {},
+            "extracted_fields": {},
+            "routing_issues": {}
+          },
+          "required": [
+            "service_reference",
+            "submission_reference",
+            "attachment_inventory",
+            "extracted_fields",
+            "routing_issues"
+          ]
+        }
+      },
+      "cohorts": [
+        "form_fields",
+        "human_review",
+        "json",
+        "pdf",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_governed_cyber_incident_report",
+      "complexity": "hard",
+      "domain": "municipality_information_security",
+      "prompt": "Säkerhetsteamet laddar upp loggar och incidentanteckningar och fyller i run_reference, owning_unit och report_date. Strukturera först JSON med timeline, confirmed_facts, hypotheses, affected_systems och evidence_gaps. En analytiker ska granska JSON i visningsläge innan rapporten skapas. Efter godkännande ska exakt ett skrivsteg skilja fakta från hypoteser i en rapporttext som renderas som PDF utan mall.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "run_reference"
+          ],
+          [
+            "owning_unit"
+          ],
+          [
+            "report_date"
+          ]
+        ],
+        "expected_review_policy": {
+          "mode": "view",
+          "target_output_type": "json",
+          "target_field_groups": [
+            [
+              "timeline"
+            ],
+            [
+              "confirmed_facts"
+            ],
+            [
+              "hypotheses"
+            ],
+            [
+              "affected_systems"
+            ],
+            [
+              "evidence_gaps"
+            ]
+          ],
+          "target_must_be_non_terminal": true
+        },
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "timeline": {},
+            "confirmed_facts": {},
+            "hypotheses": {},
+            "affected_systems": {},
+            "evidence_gaps": {}
+          },
+          "required": [
+            "timeline",
+            "confirmed_facts",
+            "hypotheses",
+            "affected_systems",
+            "evidence_gaps"
+          ]
+        }
+      },
+      "cohorts": [
+        "form_fields",
+        "human_review",
+        "json",
+        "pdf",
+        "technical_contract"
+      ]
+    },
+    {
+      "id": "advanced_governed_lss_completeness_report",
+      "complexity": "hard",
+      "domain": "municipality_social_services",
+      "prompt": "Handläggaren laddar upp en LSS-ansökan med bilagor och fyller i run_reference, owning_unit och report_date. Skapa först JSON med requested_interventions, submitted_facts, attachment_inventory och information_gaps. Handläggaren ska granska och få redigera JSON innan nästa steg. Efter godkännande ska exakt ett skrivsteg skapa en innehållsrapport som renderas som PDF utan mall. Flödet får inte bedöma behov, rätt till insats eller beslut.",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "min_form_field_count": 3,
+        "expected_form_field_groups": [
+          [
+            "run_reference"
+          ],
+          [
+            "owning_unit"
+          ],
+          [
+            "report_date"
+          ]
+        ],
+        "expected_review_policy": {
+          "mode": "edit",
+          "target_output_type": "json",
+          "target_field_groups": [
+            [
+              "requested_interventions"
+            ],
+            [
+              "submitted_facts"
+            ],
+            [
+              "attachment_inventory"
+            ],
+            [
+              "information_gaps"
+            ]
+          ],
+          "target_must_be_non_terminal": true
+        },
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "requested_interventions": {},
+            "submitted_facts": {},
+            "attachment_inventory": {},
+            "information_gaps": {}
+          },
+          "required": [
+            "requested_interventions",
+            "submitted_facts",
+            "attachment_inventory",
+            "information_gaps"
+          ]
+        }
+      },
+      "cohorts": [
+        "form_fields",
+        "human_review",
+        "json",
+        "pdf",
+        "technical_contract"
+      ]
     }
   ]
 }

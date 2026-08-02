@@ -193,6 +193,7 @@ async def process_edit_arguments(
                 "Compiled edit spec validation failed: " + "; ".join(error_messages)
             ),
             failure_kind="validation",
+            failure_codes=frozenset(error.code for error in validation.errors),
         )
 
     topology_policy = evaluate_edit_topology_policy(

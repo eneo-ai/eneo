@@ -16,6 +16,7 @@ from eneo.flows.ai_builder.ai_builder_create_proposal import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_plan_store import build_flow_builder_proposal
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     build_create_contextual_quality_feedback,
@@ -25,7 +26,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    DETAILED_CASE_METADATA,
+    DETAILED_RUNTIME_METADATA,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import build_schema_evidence
 from eneo.flows.ai_builder.ai_builder_session_turn import (
@@ -205,11 +206,18 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
 @pytest.mark.asyncio
 async def test_outline_assembly_rejection_returns_validation_failure_code() -> None:
     state = PlanningState.empty()
-    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
-        name="primary_runtime_input",
-        value="documents",
-        source="structured_answer",
-        confidence="high",
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="document",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["document_to_structured_report"],
+            required_capabilities=["input_document", "output_mode_pass_through"],
+        )
     )
 
     result = await process_create_intent_arguments(
@@ -264,10 +272,22 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     )
     state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
         name="runtime_metadata_fields",
-        value=DETAILED_CASE_METADATA,
+        value=DETAILED_RUNTIME_METADATA,
         source="structured_answer",
         confidence="high",
     )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="arendenummer",
+            label="Ärendenummer",
+            provenance="user_confirmed",
+        ),
+        FlowInputFieldIntent(
+            variable_name="handlaggare",
+            label="Handläggare",
+            provenance="user_confirmed",
+        ),
+    ]
 
     result = await process_create_intent_arguments(
         turn=_make_turn(),
@@ -300,6 +320,7 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
                 {
                     "name": "Skriv rapporten",
                     "instructions": "Skriv rapporten från sakuppgifterna.",
+                    "uses_form_fields": ["arendenummer", "handlaggare"],
                     "output_type": "text",
                 },
             ],
@@ -381,16 +402,23 @@ async def test_committed_unsupported_architecture_hints_raise_typed_error() -> N
 
 
 @pytest.mark.asyncio
-async def test_outline_processing_uses_runtime_hint_source_from_conversation() -> None:
+async def test_outline_processing_uses_confirmed_planning_state_field() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {
         "runtime_metadata_fields": ResolvedSlot(
             name="runtime_metadata_fields",
-            value=DETAILED_CASE_METADATA,
+            value=DETAILED_RUNTIME_METADATA,
             source="structured_answer",
             confidence="high",
         ),
     }
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="malgrupp",
+            label="Målgrupp",
+            provenance="user_confirmed",
+        )
+    ]
 
     result = await process_create_intent_arguments(
         turn=_make_turn(),
@@ -430,7 +458,9 @@ async def test_outline_processing_uses_runtime_hint_source_from_conversation() -
 
 
 @pytest.mark.asyncio
-async def test_server_owned_json_input_conflict_skips_model_repair() -> None:
+async def test_server_owned_json_input_without_consumer_returns_model_feedback() -> (
+    None
+):
     state = PlanningState.empty()
     state.resolved_slots = {
         "primary_runtime_input": ResolvedSlot(
@@ -447,7 +477,7 @@ async def test_server_owned_json_input_conflict_skips_model_repair() -> None:
         ),
         "runtime_metadata_fields": ResolvedSlot(
             name="runtime_metadata_fields",
-            value=DETAILED_CASE_METADATA,
+            value=DETAILED_RUNTIME_METADATA,
             source="structured_answer",
             confidence="high",
         ),
@@ -470,30 +500,71 @@ async def test_server_owned_json_input_conflict_skips_model_repair() -> None:
         )
     ]
 
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        await process_create_intent_arguments(
-            turn=_make_turn(),
-            conversation=[],
-            arguments={
-                "flow_name": "Normalize case JSON",
-                "plan_rationale": "Normalize the submitted case.",
-                "steps": [
-                    {
-                        "name": "Normalize case",
-                        "instructions": "Normalize the submitted case.",
-                        "output_type": "json",
-                    }
-                ],
-            },
-            tool_call_id="call-json-input-schema-with-server-fields",
-            available_model_refs=None,
-            available_kb_refs=None,
-            planning_state=state,
-        )
-
-    assert exc_info.value.log_context["failure_code"] == (
-        "flow_input_schema_composite_bindings_unsupported"
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Normalize case JSON",
+            "plan_rationale": "Normalize the submitted case.",
+            "steps": [
+                {
+                    "name": "Normalize case",
+                    "instructions": "Normalize the submitted case.",
+                    "output_type": "json",
+                }
+            ],
+        },
+        tool_call_id="call-json-input-schema-with-server-fields",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
     )
+
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({"unplaced_form_fields"})
+    assert result.feedback is not None
+    assert "case_type" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_unstructured_field_text_does_not_create_hidden_server_contract() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value=DETAILED_RUNTIME_METADATA,
+        source="heuristic",
+        confidence="high",
+    )
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde där användaren fyller i ärendenummer och "
+                    "handläggare vid körning."
+                ),
+            )
+        ],
+        arguments={
+            "flow_name": "Ärendesammanfattning",
+            "plan_rationale": "Sammanfatta ärendet.",
+            "steps": [
+                {
+                    "name": "Sammanfatta ärendet",
+                    "instructions": "Skriv en tydlig sammanfattning.",
+                }
+            ],
+        },
+        tool_call_id="call-no-hidden-field-contract",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.content.spec.form_fields is None
 
 
 @pytest.mark.asyncio
@@ -542,6 +613,48 @@ async def test_confirmed_create_field_preserves_options_and_provenance() -> None
     }
     assert result.compiled_proposal.content.lint_warnings == []
     assert state.input_fields[0].provenance == "user_confirmed"
+    stored_proposal = build_flow_builder_proposal(result.compiled_proposal)
+    assert stored_proposal.content.spec.form_fields == fields
+
+
+@pytest.mark.asyncio
+async def test_confirmed_create_field_set_rejects_model_proposed_addition() -> None:
+    state = PlanningState.empty()
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="case_type",
+            label="Case type",
+            provenance="user_confirmed",
+        )
+    ]
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Case response",
+            "plan_rationale": "Use runtime case details.",
+            "input_fields": [
+                {"name": "case_type", "label": "Case type"},
+                {"name": "tone", "label": "Tone"},
+            ],
+            "steps": [
+                {
+                    "name": "Draft response",
+                    "instructions": "Draft the response.",
+                    "uses_form_fields": ["case_type", "tone"],
+                }
+            ],
+        },
+        tool_call_id="call-unconfirmed-field-addition",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({"unconfirmed_runtime_form_fields"})
 
 
 @pytest.mark.asyncio

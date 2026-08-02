@@ -31,6 +31,11 @@ from eneo.completion_models.infrastructure.context_builder import (
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
+    compile_step_input_bindings,
+    derive_input_contract,
+)
+from eneo.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRun,
@@ -42,6 +47,13 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_spec import (
+    AssistantSpec,
+    InputSource,
+    InputType,
+    OutputType,
+    StepSpec,
+)
 from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
     build_rerun_execution_input_envelope,
@@ -61,6 +73,7 @@ from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
 )
+from eneo.flows.runtime.step_input_validation import validate_input_contract
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -650,6 +663,238 @@ async def test_resolve_step_input_json_previous_step_structured_only_emits_under
     summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
     assert len(summaries) == 1
     assert summaries[0].severity == "info"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_source_refs_build_exact_structured_projection(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="first",
+            structured={
+                "meeting": {
+                    "summary": "Grounded summary",
+                    "unused": "drop nested",
+                },
+                "unused": "drop me",
+            },
+        ),
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=2,
+            text="second",
+            structured={"decisions": ["Approve"], "unused": "drop me too"},
+        ),
+    ]
+    prior_specs = [
+        StepSpec(
+            plan_step_ref="step_a",
+            name="Extract meeting facts",
+            assistant_spec=AssistantSpec(instructions="Extract meeting facts."),
+            input_source=InputSource.FLOW_INPUT,
+            output_type=OutputType.JSON,
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "meeting": {
+                        "type": "object",
+                        "properties": {
+                            "summary": {"type": "string"},
+                            "unused": {"type": "string"},
+                        },
+                        "required": ["summary", "unused"],
+                        "additionalProperties": False,
+                    },
+                    "unused": {"type": "string"},
+                },
+                "required": ["meeting", "unused"],
+                "additionalProperties": False,
+            },
+        ),
+        StepSpec(
+            plan_step_ref="step_b",
+            name="Extract decisions",
+            assistant_spec=AssistantSpec(instructions="Extract decisions."),
+            input_source=InputSource.PREVIOUS_STEP,
+            output_type=OutputType.JSON,
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "decisions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "unused": {"type": "string"},
+                },
+                "required": ["decisions", "unused"],
+                "additionalProperties": False,
+            },
+        ),
+    ]
+    input_bindings = compile_step_input_bindings(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        uses_form_fields=[],
+        uses_previous_fields=[
+            PreviousFieldRef(from_step=1, field_path="meeting.summary"),
+            PreviousFieldRef(from_step=2, field_path="decisions"),
+        ],
+        uses_previous_outputs=[],
+        prior_steps=prior_specs,
+        require_declared_previous_fields=True,
+    )
+    assert input_bindings is not None
+    input_contract = derive_input_contract(
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        prior_steps=prior_specs,
+        input_bindings=input_bindings,
+    )
+    assert input_contract is not None
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_bindings=input_bindings,
+        input_contract=input_contract,
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+    state = RunExecutionState(
+        completed_by_order={1: prior[0], 2: prior[1]},
+        prior_results=prior,
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_a": 1, "step_b": 2},
+    )
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+        state=state,
+    )
+
+    assert resolved.structured == {
+        "meeting": {"summary": "Grounded summary"},
+        "decisions": ["Approve"],
+    }
+    assert json.loads(resolved.text) == resolved.structured
+    assert "unused" not in resolved.text
+    assert len(resolved.edges) == 2
+    assert validate_input_contract(
+        step_order=3,
+        input_type="json",
+        input_contract=input_contract,
+        text=resolved.text,
+        structured=resolved.structured,
+        binding_context="input_bindings.source_refs",
+    ) == {
+        "schema_type_hint": "object",
+        "parse_attempted": False,
+        "parse_succeeded": True,
+        "candidate_type": "dict",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_source_refs_require_input_contract(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="first",
+            structured={"summary": "Grounded summary"},
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "summary",
+                }
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_source_refs_reject_path_collision(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=step_order,
+            text=f"source {step_order}",
+            structured={"summary": f"summary {step_order}"},
+        )
+        for step_order in (1, 2)
+    ]
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={"type": "object"},
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "summary",
+                },
+                {
+                    "step_ref": "step_2",
+                    "output": "structured",
+                    "field_path": "summary",
+                },
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(
+        TypedIOValidationException,
+        match="source_ref path collision at 'summary'",
+    ):
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
 
 
 @pytest.mark.asyncio

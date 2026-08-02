@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
-from typing import Literal
 from uuid import UUID
 
+from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
+    comparison_scope_is_relevant,
+    report_disposition_is_relevant,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ClassifierRetentionClass,
     question_answer_from_metadata,
@@ -55,7 +58,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    DETAILED_CASE_METADATA,
+    DETAILED_RUNTIME_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     extract_runtime_input_field_hints,
     infer_runtime_metadata_slot,
@@ -70,6 +73,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
+    KNOWN_REQUIREMENT_SLOT_NAMES,
     LLM_RESOLVABLE_SLOT_NAMES,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -301,7 +305,7 @@ def _reconcile_report_disposition_after_classifier_replay(
 
 
 _MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(
-    {"structured_answer", "flow_default"}
+    {"structured_answer", "flow_default", "attachment_structure"}
 )
 
 
@@ -910,6 +914,17 @@ def _model_slot_is_persistable(slot_name: str) -> bool:
 
 
 def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
+    if slot_name == "comparison_scope":
+        primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
+        return comparison_scope_is_relevant(
+            primary_runtime_input=(
+                primary_runtime_input.value
+                if primary_runtime_input is not None
+                and primary_runtime_input.is_commit_grade
+                else None
+            ),
+            unresolved_values_are_relevant=True,
+        )
     if slot_name == "report_disposition":
         return _report_disposition_slot_is_relevant(state)
     if slot_name != "structured_io_contract":
@@ -930,48 +945,22 @@ def _report_disposition_slot_is_relevant(state: PlanningState) -> bool:
     terminal_output = state.resolved_slots.get("terminal_output")
     document_material_scope = state.resolved_slots.get("document_material_scope")
     docx_output_mode = state.resolved_slots.get("docx_output_mode")
-    if primary_runtime_input is not None and primary_runtime_input.value not in {
-        "document",
-        "documents",
-        "text_and_documents",
-    }:
-        return False
-    if terminal_output is not None and terminal_output.value not in {
-        "pdf_document",
-        "docx_document",
-    }:
-        return False
-    if (
-        terminal_output is not None
-        and terminal_output.value == "docx_document"
-        and docx_output_mode is not None
-        and docx_output_mode.value == "template_fill_docx"
-    ):
-        return False
-    if document_material_scope is not None and document_material_scope.value not in {
-        "multiple_documents_case",
-        "flexible_document_case",
-    }:
-        return False
-    return True
-
-
-def _report_disposition_values_are_relevant(
-    *,
-    primary_runtime_input: str | None,
-    terminal_output: str | None,
-    document_material_scope: str | None,
-    docx_output_mode: str | None,
-) -> bool:
-    return (
-        primary_runtime_input in {"document", "documents", "text_and_documents"}
-        and terminal_output in {"pdf_document", "docx_document"}
-        and not (
-            terminal_output == "docx_document"
-            and docx_output_mode == "template_fill_docx"
-        )
-        and document_material_scope
-        in {"multiple_documents_case", "flexible_document_case"}
+    return report_disposition_is_relevant(
+        primary_runtime_input=(
+            primary_runtime_input.value if primary_runtime_input is not None else None
+        ),
+        terminal_output=(
+            terminal_output.value if terminal_output is not None else None
+        ),
+        document_material_scope=(
+            document_material_scope.value
+            if document_material_scope is not None
+            else None
+        ),
+        docx_output_mode=(
+            docx_output_mode.value if docx_output_mode is not None else None
+        ),
+        unresolved_values_are_relevant=True,
     )
 
 
@@ -1003,6 +992,7 @@ def _resolve_slots(
 ) -> dict[str, ResolvedSlot]:
     answer_signals = extract_answer_signals(conversation)
     requirements_state = resolve_requirements_state(conversation)
+    requirements_summary_values = _requirements_summary_values(requirements_state)
     freeform_text = _semantic_planning_text(
         aggregate_unprompted_user_text(conversation),
         requirements_state,
@@ -1018,7 +1008,15 @@ def _resolve_slots(
 
     slots: dict[str, ResolvedSlot] = {}
 
-    primary_runtime_input = input_intent.primary_runtime_input
+    primary_runtime_input = (
+        _single_slot_value(
+            answer_signals=answer_signals,
+            flow_defaults=flow_defaults,
+            requirements_summary_values=requirements_summary_values,
+            question_id="primary_runtime_input",
+        )
+        or input_intent.primary_runtime_input
+    )
     if primary_runtime_input != "unknown":
         slots["primary_runtime_input"] = _build_slot(
             name="primary_runtime_input",
@@ -1026,54 +1024,78 @@ def _resolve_slots(
             question_id="primary_runtime_input",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field="input_description",
             slot_value=primary_runtime_input,
         )
 
-    if output_intent.terminal_output is not None:
+    terminal_output = (
+        _single_slot_value(
+            answer_signals=answer_signals,
+            flow_defaults=flow_defaults,
+            requirements_summary_values=requirements_summary_values,
+            question_id="terminal_output",
+        )
+        or output_intent.terminal_output
+    )
+    if terminal_output is not None:
         slots["terminal_output"] = _build_slot(
             name="terminal_output",
-            value=output_intent.terminal_output,
+            value=terminal_output,
             question_id="terminal_output",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field="output_description",
-            slot_value=output_intent.terminal_output,
+            slot_value=terminal_output,
         )
 
-    if output_intent.docx_output_mode is not None:
+    docx_output_mode = (
+        _single_slot_value(
+            answer_signals=answer_signals,
+            flow_defaults=flow_defaults,
+            requirements_summary_values=requirements_summary_values,
+            question_id="docx_output_mode",
+        )
+        or output_intent.docx_output_mode
+    )
+    if docx_output_mode is not None:
         slots["docx_output_mode"] = _build_slot(
             name="docx_output_mode",
-            value=output_intent.docx_output_mode,
+            value=docx_output_mode,
             question_id="docx_output_mode",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field="output_description",
-            slot_value=output_intent.docx_output_mode,
+            slot_value=docx_output_mode,
         )
 
-    if output_intent.pdf_generation_mode is not None:
+    pdf_generation_mode = (
+        _single_slot_value(
+            answer_signals=answer_signals,
+            flow_defaults=flow_defaults,
+            requirements_summary_values=requirements_summary_values,
+            question_id="pdf_generation_mode",
+        )
+        or output_intent.pdf_generation_mode
+    )
+    if pdf_generation_mode is not None:
         slots["pdf_generation_mode"] = _build_slot(
             name="pdf_generation_mode",
-            value=output_intent.pdf_generation_mode,
+            value=pdf_generation_mode,
             question_id="pdf_generation_mode",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field="output_description",
-            slot_value=output_intent.pdf_generation_mode,
+            slot_value=pdf_generation_mode,
         )
 
     document_material_scope = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
+        requirements_summary_values=requirements_summary_values,
         question_id="document_material_scope",
     )
     if document_material_scope is None and primary_runtime_input in {
@@ -1088,22 +1110,23 @@ def _resolve_slots(
             question_id="document_material_scope",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field=None,
             slot_value=document_material_scope,
         )
 
     report_disposition = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
+        requirements_summary_values=requirements_summary_values,
         question_id="report_disposition",
     )
-    if report_disposition is not None and _report_disposition_values_are_relevant(
+    if report_disposition is not None and report_disposition_is_relevant(
         primary_runtime_input=primary_runtime_input,
-        terminal_output=output_intent.terminal_output,
+        terminal_output=terminal_output,
         document_material_scope=document_material_scope,
-        docx_output_mode=output_intent.docx_output_mode,
+        docx_output_mode=docx_output_mode,
+        unresolved_values_are_relevant=False,
     ):
         slots["report_disposition"] = _build_slot(
             name="report_disposition",
@@ -1111,9 +1134,8 @@ def _resolve_slots(
             question_id="report_disposition",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field=None,
             slot_value=report_disposition,
         )
 
@@ -1121,6 +1143,7 @@ def _resolve_slots(
     comparison_scope = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
+        requirements_summary_values=requirements_summary_values,
         question_id="comparison_scope",
     )
     if comparison_scope is not None:
@@ -1130,15 +1153,15 @@ def _resolve_slots(
             question_id="comparison_scope",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field=None,
             slot_value=comparison_scope,
         )
 
     post_processing_goal = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
+        requirements_summary_values=requirements_summary_values,
         question_id="post_processing_goal",
     )
     if post_processing_goal is not None:
@@ -1148,15 +1171,15 @@ def _resolve_slots(
             question_id="post_processing_goal",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field=None,
             slot_value=post_processing_goal,
         )
 
     structured_io_contract = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
+        requirements_summary_values=requirements_summary_values,
         question_id="structured_io_contract",
     )
     if structured_io_contract is not None:
@@ -1166,15 +1189,15 @@ def _resolve_slots(
             question_id="structured_io_contract",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field=None,
             slot_value=structured_io_contract,
         )
 
     runtime_metadata_fields = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
+        requirements_summary_values=requirements_summary_values,
         question_id="runtime_metadata_fields",
     )
     if runtime_metadata_fields is not None:
@@ -1184,9 +1207,8 @@ def _resolve_slots(
             question_id="runtime_metadata_fields",
             conversation=conversation,
             flow_defaults=flow_defaults,
-            requirements_state=requirements_state,
+            requirements_summary_values=requirements_summary_values,
             freeform_text=freeform_text,
-            summary_field=None,
             slot_value=runtime_metadata_fields,
         )
 
@@ -1216,18 +1238,16 @@ def _build_slot(
     question_id: str,
     conversation: list[ConversationMessage],
     flow_defaults: dict[str, set[str]],
-    requirements_state: RequirementsState,
+    requirements_summary_values: dict[str, str],
     freeform_text: str,
-    summary_field: Literal["input_description", "output_description"] | None,
     slot_value: str,
 ) -> ResolvedSlot:
     source, evidence, confidence = _resolve_slot_origin(
         question_id=question_id,
         conversation=conversation,
         flow_defaults=flow_defaults,
-        requirements_state=requirements_state,
+        requirements_summary_values=requirements_summary_values,
         freeform_text=freeform_text,
-        summary_field=summary_field,
         slot_value=slot_value,
     )
     return ResolvedSlot(
@@ -1244,9 +1264,8 @@ def _resolve_slot_origin(
     question_id: str,
     conversation: list[ConversationMessage],
     flow_defaults: dict[str, set[str]],
-    requirements_state: RequirementsState,
+    requirements_summary_values: dict[str, str],
     freeform_text: str,
-    summary_field: Literal["input_description", "output_description"] | None,
     slot_value: str,
 ) -> tuple[SlotSource, tuple[str, ...], SlotConfidence]:
     if has_explicit_structured_answer(conversation, question_id):
@@ -1264,23 +1283,12 @@ def _resolve_slot_origin(
             "high",
         )
 
-    latest_summary = requirements_state.latest_summary
-    if latest_summary is not None and summary_field is not None:
-        summary_value = getattr(latest_summary, summary_field)
-        if (
-            isinstance(summary_value, str)
-            and summary_value
-            and _requirements_summary_supports_slot(
-                question_id=question_id,
-                summary_value=summary_value,
-                slot_value=slot_value,
-            )
-        ):
-            return (
-                "requirements_summary",
-                (f"requirements_summary.{summary_field}={summary_value}",),
-                "high",
-            )
+    if requirements_summary_values.get(question_id) == slot_value:
+        return (
+            "requirements_summary",
+            (f"requirements_summary.resolved_requirements:{question_id}={slot_value}",),
+            "high",
+        )
 
     if _is_policy_default_slot(
         question_id=question_id,
@@ -1309,25 +1317,20 @@ def _resolve_slot_origin(
     )
 
 
-def _requirements_summary_supports_slot(
-    *,
-    question_id: str,
-    summary_value: str,
-    slot_value: str,
-) -> bool:
-    if question_id == "primary_runtime_input":
-        return (
-            resolve_input_intent(summary_value, {}).primary_runtime_input == slot_value
-        )
-
-    output_intent = resolve_output_intent(summary_value, {})
-    if question_id == "terminal_output":
-        return output_intent.terminal_output == slot_value
-    if question_id == "docx_output_mode":
-        return output_intent.docx_output_mode == slot_value
-    if question_id == "pdf_generation_mode":
-        return output_intent.pdf_generation_mode == slot_value
-    return False
+def _requirements_summary_values(
+    requirements_state: RequirementsState,
+) -> dict[str, str]:
+    if not requirements_state.confirmed:
+        return {}
+    summary = requirements_state.latest_summary
+    if summary is None:
+        return {}
+    return {
+        requirement.requirement_id: requirement.selected_value
+        for requirement in summary.resolved_requirements
+        if requirement.requirement_id in KNOWN_REQUIREMENT_SLOT_NAMES
+        and requirement.selected_value in legal_slot_values(requirement.requirement_id)
+    }
 
 
 def _heuristic_slot_confidence(
@@ -1359,8 +1362,9 @@ def _heuristic_slot_confidence(
             and inferred_runtime_metadata == NO_EXTRA_RUNTIME_METADATA
         ):
             return "high"
-        if slot_value == DETAILED_CASE_METADATA and extract_runtime_input_field_hints(
-            freeform_text
+        if (
+            slot_value == DETAILED_RUNTIME_METADATA
+            and extract_runtime_input_field_hints(freeform_text)
         ):
             return "high"
     if question_id == "post_processing_goal":
@@ -1458,9 +1462,16 @@ def _single_slot_value(
     *,
     answer_signals: dict[str, set[str]],
     flow_defaults: dict[str, set[str]],
+    requirements_summary_values: dict[str, str],
     question_id: str,
 ) -> str | None:
-    values = answer_signals.get(question_id) or flow_defaults.get(question_id)
-    if not values or len(values) != 1:
-        return None
-    return next(iter(values))
+    for values in (
+        answer_signals.get(question_id),
+        flow_defaults.get(question_id),
+    ):
+        if values is None:
+            continue
+        if len(values) != 1:
+            return None
+        return next(iter(values))
+    return requirements_summary_values.get(question_id)

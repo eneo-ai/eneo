@@ -119,6 +119,10 @@ def _resolved_state() -> PlanningState:
                 "post_processing_goal",
                 "summarize_or_overview",
             ),
+            "comparison_scope": _slot(
+                "comparison_scope",
+                "no_direct_compare",
+            ),
             "runtime_metadata_fields": _slot(
                 "runtime_metadata_fields",
                 "no_extra_metadata",
@@ -504,7 +508,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
                 "slots": [
                     {
                         "slot_name": "runtime_metadata_fields",
-                        "value": "basic_case_metadata",
+                        "value": "basic_runtime_metadata",
                         "confidence": "high",
                         "reason": "runtime fields requested",
                         "evidence": [
@@ -538,7 +542,8 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
 
     assert state.resolved_slots["runtime_metadata_fields"].source == "model"
     assert (
-        state.resolved_slots["runtime_metadata_fields"].value == "basic_case_metadata"
+        state.resolved_slots["runtime_metadata_fields"].value
+        == "basic_runtime_metadata"
     )
 
 
@@ -753,7 +758,7 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
 
     slot = state.resolved_slots["docx_output_mode"]
     assert slot.value == "template_fill_docx"
-    assert slot.source == "heuristic"
+    assert slot.source == "attachment_structure"
     assert slot.confidence == "high"
     assert slot.evidence == [f"file:{file_id}:content:template_placeholder:kundnamn"]
     evidence = state.output_schema_evidence
@@ -874,7 +879,7 @@ async def test_runtime_input_schema_does_not_override_requested_docx_output() ->
     assert "terminal_output" not in analysis.selected_question_ids
     compile_context = create_compile_context_from_planning_state(state)
     assert compile_context is not None
-    assert compile_context.final_output_type.value == "docx"
+    assert compile_context.final_output_type is None
     assert compile_context.terminal_output_schema is None
 
 

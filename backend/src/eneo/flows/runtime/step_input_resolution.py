@@ -96,6 +96,13 @@ class ResolvedSourceRefsInput:
     edges: tuple[FlowResolvedInputEdge, ...]
 
 
+@dataclass(frozen=True)
+class ResolvedStructuredSourceRefsInput:
+    structured: dict[str, Any]
+    reference_count: int
+    edges: tuple[FlowResolvedInputEdge, ...]
+
+
 async def resolve_step_input(
     *,
     step: RuntimeStep,
@@ -229,7 +236,18 @@ async def resolve_step_input(
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     explicit_binding_edges: tuple[FlowResolvedInputEdge, ...] = ()
+    used_structured_source_refs = False
     if bindings is not None:
+        structured_source_refs_input = (
+            _resolve_structured_source_refs_input(
+                step=step,
+                bindings=bindings,
+                prior_results=prior_results,
+                state=state,
+            )
+            if step.input_type == "json"
+            else None
+        )
         source_refs_input = (
             _resolve_compose_source_refs_input(
                 step=step,
@@ -243,7 +261,27 @@ async def resolve_step_input(
             if step.output_mode == "compose_text"
             else None
         )
-        if source_refs_input is not None:
+        if structured_source_refs_input is not None:
+            structured = structured_source_refs_input.structured
+            input_text = json.dumps(structured, ensure_ascii=False)
+            # Existing execution metadata names all explicit Underlag paths as
+            # question bindings. Keep that compatibility signal until the
+            # broader attempt-input contract can rename it atomically.
+            used_question_binding = True
+            used_structured_source_refs = True
+            explicit_binding_edges = structured_source_refs_input.edges
+            diagnostics.append(
+                StepDiagnostic(
+                    code="flow_underlag_summary",
+                    message=(
+                        "Resolved structured underlag from "
+                        f"{structured_source_refs_input.reference_count} source refs "
+                        f"({len(input_text.encode('utf-8'))} bytes)."
+                    ),
+                    severity="info",
+                )
+            )
+        elif source_refs_input is not None:
             input_text = source_refs_input.text
             used_question_binding = True
             explicit_binding_edges = source_refs_input.edges
@@ -332,7 +370,7 @@ async def resolve_step_input(
             raw_extracted_text = runtime_input_text or raw_extracted_text
 
     if step.input_type == "json":
-        if used_question_binding:
+        if used_question_binding and not used_structured_source_refs:
             # Explicit underlag is the complete LLM input; JSON normalization
             # may parse it for contracts, but must not replace it with source data.
             try:
@@ -729,6 +767,135 @@ def _resolve_compose_source_refs_input(
         reference_count=len(source_refs),
         template_reference_count=template_reference_count,
         edges=merge_resolved_input_edges(edges),
+    )
+
+
+def _resolve_structured_source_refs_input(
+    *,
+    step: RuntimeStep,
+    bindings: dict[str, Any],
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+) -> ResolvedStructuredSourceRefsInput | None:
+    if question_binding(bindings) is not None:
+        return None
+    try:
+        source_refs = source_ref_bindings(bindings)
+    except InputBindingContractError as exc:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: {exc}",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        ) from exc
+    if not source_refs or any(
+        ref.output != "structured" or ref.item_template is not None
+        for ref in source_refs
+    ):
+        return None
+    if step.input_contract is None:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: structured JSON source_refs require input_contract.",
+            code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+        )
+
+    projected: dict[str, Any] = {}
+    projection_containers: set[tuple[str, ...]] = set()
+    edges: list[FlowResolvedInputEdge] = []
+    results_by_order = _prior_results_by_order(prior_results=prior_results, state=state)
+    for ref_index, ref in enumerate(source_refs):
+        if not ref.field_path:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: structured JSON source_refs must select "
+                "explicit field_path values.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        referenced_order = _source_ref_step_order(ref.step_ref, state=state)
+        result = (
+            results_by_order.get(referenced_order)
+            if referenced_order is not None
+            else None
+        )
+        if result is None:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: source_ref references unknown step "
+                f"'{ref.step_ref}'.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        value = _source_ref_runtime_value(
+            ref_output=ref.output,
+            field_path=ref.field_path,
+            result=result,
+            consuming_step_order=step.step_order,
+        )
+        selector_path = ("output", "structured", *ref.field_path)
+        edges.append(
+            _step_result_edge(
+                binding_ref=f"input_bindings.source_refs[{ref_index}]",
+                result=result,
+                selector_path=selector_path,
+                selected_value=value,
+            )
+        )
+        _insert_structured_projection_value(
+            projected=projected,
+            field_path=ref.field_path,
+            value=value,
+            source_step_ref=ref.step_ref,
+            projection_containers=projection_containers,
+            consuming_step_order=step.step_order,
+        )
+
+    return ResolvedStructuredSourceRefsInput(
+        structured=projected,
+        reference_count=len(source_refs),
+        edges=merge_resolved_input_edges(edges),
+    )
+
+
+def _insert_structured_projection_value(
+    *,
+    projected: dict[str, Any],
+    field_path: tuple[str, ...],
+    value: Any,
+    source_step_ref: str,
+    projection_containers: set[tuple[str, ...]],
+    consuming_step_order: int,
+) -> None:
+    current = projected
+    traversed: tuple[str, ...] = ()
+    for segment in field_path[:-1]:
+        traversed = (*traversed, segment)
+        existing = current.get(segment)
+        if existing is None:
+            existing = {}
+            current[segment] = existing
+            projection_containers.add(traversed)
+        elif traversed not in projection_containers:
+            raise _structured_projection_collision(
+                consuming_step_order=consuming_step_order,
+                field_path=traversed,
+                source_step_ref=source_step_ref,
+            )
+        current = cast(dict[str, Any], existing)
+    leaf = field_path[-1]
+    if leaf in current:
+        raise _structured_projection_collision(
+            consuming_step_order=consuming_step_order,
+            field_path=field_path,
+            source_step_ref=source_step_ref,
+        )
+    current[leaf] = value
+
+
+def _structured_projection_collision(
+    *,
+    consuming_step_order: int,
+    field_path: tuple[str, ...],
+    source_step_ref: str,
+) -> TypedIOValidationException:
+    return TypedIOValidationException(
+        f"Step {consuming_step_order}: source_ref path collision at "
+        f"'{'.'.join(field_path)}' while projecting '{source_step_ref}'.",
+        code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
     )
 
 

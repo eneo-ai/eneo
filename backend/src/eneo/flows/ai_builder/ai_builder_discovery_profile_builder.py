@@ -252,7 +252,6 @@ def build_discovery_profile(
             "comparison_scope",
             "primary_runtime_input",
             "flow_input_architecture",
-            "document_kind",
             "document_material_scope",
             "terminal_output",
             "docx_output_mode",
@@ -334,23 +333,6 @@ def build_discovery_profile(
         reference_source=reference_source,
         document_like_input=input_intent.document_runtime_input_requested
         or "documents" in default_input_modes,
-        case_like_flow=contains_any_phrase(
-            text,
-            (
-                "case material",
-                "case package",
-                "ärende",
-                "underlag",
-                "ticket",
-                "tickets",
-                "support ticket",
-                "support tickets",
-                "inquiry",
-                "inquiries",
-                "triage",
-            ),
-        )
-        or bool(flow_defaults.get("runtime_metadata_fields")),
         audio_like_input=input_intent.audio_requested or "audio" in default_input_modes,
         final_output_text_or_docx=(
             explicit_output in {"structured_text", "docx_document", "pdf_document"}
@@ -389,9 +371,7 @@ def resolve_reference_source(
 
     comparison_scope = answers.get("comparison_scope", set())
     if comparison_scope:
-        if comparison_scope.intersection(
-            {"same_run_compare", "same_run_multiple_documents"}
-        ):
+        if comparison_scope.intersection({"same_run_compare"}):
             return ReferenceSourceResolution(
                 status="same_run_sources",
                 reason="comparison_scope_answer_same_run",

@@ -31,18 +31,8 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     mentions_output_change,
     mentions_runtime_metadata,
 )
-from eneo.flows.ai_builder.planning_state import ResolvedSlot
 
 EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID: Final = "external_delivery_unsupported"
-
-_DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
-    "dokumentpaket",
-    "document package",
-    "flera relaterade pdf",
-    "multiple related pdf",
-    "flera dokument i samma ärende",
-    "multiple documents for the same case",
-)
 
 
 def question_category(question_id: str) -> str:
@@ -50,7 +40,6 @@ def question_category(question_id: str) -> str:
         "processing_scope": "scope",
         "primary_runtime_input": "input",
         "flow_input_architecture": "input",
-        "document_kind": "input",
         "document_material_scope": "input",
         "post_processing_goal": "outcome",
         "structured_io_contract": "outcome",
@@ -160,7 +149,6 @@ def terminal_output_is_vague(profile: DiscoveryProfile) -> bool:
     if (
         profile.document_like_input
         or profile.audio_like_input
-        or profile.case_like_flow
         or profile.final_output_text_or_docx
     ):
         return True
@@ -208,7 +196,7 @@ def ultra_vague_terminal_output_choice_is_vague(profile: DiscoveryProfile) -> bo
         return False
     if profile.flow_defaults.get("terminal_output"):
         return False
-    if profile.case_like_flow or profile.comparison_requested:
+    if profile.comparison_requested:
         return False
     if len(profile.text.split()) > 7:
         return False
@@ -247,7 +235,7 @@ def ultra_vague_terminal_output_choice_is_vague(profile: DiscoveryProfile) -> bo
 def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "post_processing_goal"):
         return False
-    resolved_goal = _resolved_slot(profile, "post_processing_goal")
+    resolved_goal = profile.resolved_slot("post_processing_goal")
     if resolved_goal is not None:
         return False
     if "post_processing_goal" in profile.answers:
@@ -263,17 +251,12 @@ def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
     return (
         profile.audio_like_input
         or profile.document_like_input
-        or profile.case_like_flow
         or profile.final_output_text_or_docx
     )
 
 
 def _explicit_post_processing_goal_present(text: str) -> bool:
     return infer_post_processing_goal(text) is not None
-
-
-def _resolved_slot(profile: DiscoveryProfile, slot_name: str) -> ResolvedSlot | None:
-    return profile.resolved_slot(slot_name)
 
 
 def structured_io_contract_is_vague(profile: DiscoveryProfile) -> bool:
@@ -382,13 +365,11 @@ def has_same_run_comparison_contradiction(
     if contains_any_phrase(
         answer_texts,
         (
-            "same_run_multiple_documents",
             "same_run_compare",
             "multiple_documents_case",
             "flexible_document_case",
-            "multiple_pdfs_same_run",
-            "single_document_against_previous",
-            "remove_direct_comparison",
+            "compare_previous_material",
+            "no_direct_compare",
         ),
     ):
         return False
@@ -448,7 +429,7 @@ def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if implies_single_primary_document(text):
         return False
-    return profile.case_like_flow or profile.comparison_requested
+    return profile.comparison_requested
 
 
 def mixed_input_architecture_is_vague(
@@ -461,84 +442,6 @@ def mixed_input_architecture_is_vague(
     if _family_inactive(profile, "flow_input_architecture"):
         return False
     return profile.input_intent.needs_architecture_clarification
-
-
-def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "document_kind"):
-        return False
-    if not profile.document_like_input or profile.audio_like_input:
-        return False
-    answers = profile.answers
-    text = profile.text
-    if "document_kind" in answers:
-        return False
-    if "comparison_scope" in answers:
-        return False
-    if all(
-        key in answers
-        for key in (
-            "processing_scope",
-            "primary_runtime_input",
-            "terminal_output",
-        )
-    ):
-        return False
-    if "runtime_metadata_fields" in answers and "primary_runtime_input" in answers:
-        return False
-    if (
-        profile.output_intent.terminal_output is not None
-        and not profile.case_like_flow
-        and not profile.comparison_requested
-    ):
-        return False
-    if contains_any_phrase(
-        text,
-        (
-            *_DOCUMENT_PACKAGE_PHRASES,
-            "case material",
-            "underlag",
-            "kommunärende",
-            "municipal case",
-            "news article",
-            "news articles",
-            "nyhetsartikel",
-            "nyhetsartiklar",
-            "contract",
-            "contracts",
-            "avtal",
-            "agreement",
-            "agreements",
-            "budget",
-            "remiss",
-            "tjänsteskrivelse",
-        ),
-    ):
-        return False
-    if (
-        profile.output_intent.terminal_output == "structured_text"
-        and not profile.comparison_requested
-    ):
-        return False
-    resolved_document_scope = profile.resolved_slot("document_material_scope")
-    if (
-        resolved_document_scope is not None
-        and resolved_document_scope.value == "single_document_case"
-        and not profile.comparison_requested
-    ):
-        return False
-    return contains_any_phrase(
-        text,
-        (
-            "pdf",
-            "document",
-            "documents",
-            "dokument",
-            "dokumentet",
-            "dokumenten",
-            "files",
-            "filer",
-        ),
-    )
 
 
 def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
@@ -732,8 +635,6 @@ def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
     ):
         return False
     if document_cardinality_is_vague(profile):
-        return False
-    if document_kind_is_vague(profile):
         return False
     if terminal_output_is_vague(profile):
         return False

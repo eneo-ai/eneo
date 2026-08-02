@@ -655,6 +655,7 @@ def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) ->
     cases_path.write_text(
         json.dumps(
             {
+                "version": 4,
                 "cases": [
                     {
                         "id": "bad-classifier-expectation",
@@ -668,7 +669,7 @@ def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) ->
                             ]
                         },
                     }
-                ]
+                ],
             }
         ),
         encoding="utf-8",
@@ -678,11 +679,46 @@ def test_cases_file_rejects_misspelled_classifier_expectation(tmp_path: Path) ->
         _battle_harness()._read_cases_file(cases_path)
 
 
+def test_cases_file_rejects_unsupported_version(tmp_path: Path) -> None:
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps({"version": 3, "cases": []}),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match="version must be 4"):
+        _battle_harness()._read_cases_file(cases_path)
+
+
+def test_cases_file_rejects_duplicate_case_ids_and_prompts(tmp_path: Path) -> None:
+    harness = _battle_harness()
+    duplicate_cases = [
+        {"id": "case-a", "prompt": "Build a report."},
+        {"id": "case-b", "prompt": "Build a report."},
+    ]
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps({"version": 4, "cases": duplicate_cases}), encoding="utf-8"
+    )
+
+    with raises(ValueError, match="duplicate prompt"):
+        harness._read_cases_file(cases_path)
+
+    duplicate_cases[1] = {"id": "case-a", "prompt": "Build another report."}
+    cases_path.write_text(
+        json.dumps({"version": 4, "cases": duplicate_cases}), encoding="utf-8"
+    )
+
+    with raises(ValueError, match="duplicate case id"):
+        harness._read_cases_file(cases_path)
+
+
 def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> None:
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(
         json.dumps(
             {
+                "version": 4,
                 "cases": [
                     {
                         "id": "bad-posture-key",
@@ -693,7 +729,7 @@ def test_cases_file_rejects_misspelled_evidence_posture_key(tmp_path: Path) -> N
                             ]
                         },
                     }
-                ]
+                ],
             }
         ),
         encoding="utf-8",
@@ -905,6 +941,7 @@ def test_harness_checks_question_count_before_plan_exists() -> None:
         expected={
             "allow_question_instead_of_plan": True,
             "expected_question_event_count": 1,
+            "min_question_event_count": 1,
             "max_question_event_count": 1,
             "expected_question_event_ids": ["report_disposition"],
         },
@@ -917,6 +954,7 @@ def test_harness_checks_question_count_before_plan_exists() -> None:
     checks = {check["name"]: check for check in report["checks"]}
     assert checks["plan_or_structured_question"]["passed"] is True
     assert checks["expected_question_event_count"]["passed"] is True
+    assert checks["min_question_event_count"]["passed"] is True
     assert checks["max_question_event_count"]["passed"] is True
     assert checks["expected_question_event_ids"]["passed"] is True
 
@@ -936,6 +974,165 @@ def test_harness_checks_question_count_before_plan_exists() -> None:
     bad_checks = {check["name"]: check for check in bad_report["checks"]}
     assert bad_checks["expected_question_event_count"]["passed"] is False
     assert bad_checks["forbidden_question_event_ids"]["passed"] is False
+
+
+def test_harness_checks_directional_schema_fragments() -> None:
+    harness = _battle_harness()
+    valid_schema = {
+        "type": "object",
+        "properties": {
+            "events": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"timestamp": {"type": "string"}},
+                    "required": ["timestamp"],
+                },
+            }
+        },
+        "required": ["events"],
+    }
+    plan = {
+        "proposal": {
+            "spec": {
+                "steps": [
+                    {
+                        "name": "Map events",
+                        "input_source": "flow_input",
+                        "input_type": "json",
+                        "output_type": "json",
+                        "input_contract": {
+                            "type": "object",
+                            "properties": {"payload": {"type": "object"}},
+                        },
+                        "output_contract": valid_schema,
+                    }
+                ]
+            }
+        }
+    }
+    expected = {
+        "expected_input_contract_schema": {
+            "type": "object",
+            "properties": {"payload": {"type": "object"}},
+        },
+        "expected_output_contract_schema": valid_schema,
+    }
+
+    checks = {
+        check["name"]: check
+        for check in harness._quality_report(
+            plan=plan,
+            summary=harness._summarize_plan(plan),
+            expected=expected,
+            applied_flow={
+                "steps": [
+                    {
+                        "step_order": 1,
+                        "input_source": "flow_input",
+                        "input_type": "json",
+                        "output_type": "json",
+                        "input_contract": plan["proposal"]["spec"]["steps"][0][
+                            "input_contract"
+                        ],
+                        "output_contract": valid_schema,
+                    }
+                ]
+            },
+        )["checks"]
+    }
+    assert checks["expected_input_contract_schema"]["passed"] is True
+    assert checks["expected_output_contract_schema"]["passed"] is True
+    assert checks["applied_expected_input_contract_schema"]["passed"] is True
+    assert checks["applied_expected_output_contract_schema"]["passed"] is True
+
+    missing_applied_checks = {
+        check["name"]: check
+        for check in harness._quality_report(
+            plan=plan,
+            summary=harness._summarize_plan(plan),
+            expected=expected,
+            applied_flow={
+                "steps": [
+                    {
+                        "step_order": 1,
+                        "input_source": "flow_input",
+                        "input_type": "json",
+                        "output_type": "json",
+                    }
+                ]
+            },
+        )["checks"]
+    }
+    assert (
+        missing_applied_checks["applied_expected_input_contract_schema"]["passed"]
+        is False
+    )
+    assert (
+        missing_applied_checks["applied_expected_output_contract_schema"]["passed"]
+        is False
+    )
+
+    flat_plan = {
+        "proposal": {
+            "spec": {
+                "steps": [
+                    {
+                        "name": "Flatten events",
+                        "input_source": "flow_input",
+                        "input_type": "text",
+                        "output_type": "json",
+                        "output_contract": {
+                            "type": "object",
+                            "properties": {
+                                "events": {"type": "string"},
+                                "timestamp": {"type": "string"},
+                            },
+                        },
+                    }
+                ]
+            }
+        }
+    }
+    flat_checks = {
+        check["name"]: check
+        for check in harness._quality_report(
+            plan=flat_plan,
+            summary=harness._summarize_plan(flat_plan),
+            expected=expected,
+        )["checks"]
+    }
+    assert flat_checks["expected_input_contract_schema"]["passed"] is False
+    assert flat_checks["expected_output_contract_schema"]["passed"] is False
+
+    swapped_plan = {
+        "proposal": {
+            "spec": {
+                "steps": [
+                    {
+                        "name": "Swap contracts",
+                        "input_source": "flow_input",
+                        "input_type": "json",
+                        "output_type": "json",
+                        "input_contract": valid_schema,
+                        "output_contract": plan["proposal"]["spec"]["steps"][0][
+                            "input_contract"
+                        ],
+                    }
+                ]
+            }
+        }
+    }
+    swapped_checks = {
+        check["name"]: check
+        for check in harness._quality_report(
+            plan=swapped_plan,
+            summary=harness._summarize_plan(swapped_plan),
+            expected=expected,
+        )["checks"]
+    }
+    assert swapped_checks["expected_input_contract_schema"]["passed"] is False
+    assert swapped_checks["expected_output_contract_schema"]["passed"] is False
 
 
 def test_artifact_warning_allows_document_body_copy() -> None:
@@ -1201,8 +1398,8 @@ def test_release_thresholds_are_predeclared_and_compared(
     gate = harness.ReleaseGate(
         required_case_ids=("required-positive",),
         thresholds=harness.ReleaseThresholds(
-            max_case_errors=0,
-            max_quality_failures=0,
+            max_required_case_errors=0,
+            max_required_quality_failures=0,
             max_required_skips=0,
         ),
     )
@@ -1256,8 +1453,8 @@ def test_release_thresholds_are_predeclared_and_compared(
     assert suite_dir.stat().st_mode & 0o777 == 0o700
     manifest = json.loads((suite_dir / "release-manifest.json").read_text())
     assert manifest["thresholds"] == {
-        "max_case_errors": 0,
-        "max_quality_failures": 0,
+        "max_required_case_errors": 0,
+        "max_required_quality_failures": 0,
         "max_required_skips": 0,
     }
     summary = json.loads((suite_dir / "suite-summary.json").read_text())
@@ -1265,16 +1462,186 @@ def test_release_thresholds_are_predeclared_and_compared(
 
     failed_checks = harness._evaluate_release_thresholds(
         gate.thresholds,
-        case_error_count=0,
-        quality_failure_run_count=1,
+        required_case_error_count=0,
+        required_quality_failure_run_count=1,
         required_skipped_run_count=0,
     )
     assert (
         next(
-            check for check in failed_checks if check["name"] == "max_quality_failures"
+            check
+            for check in failed_checks
+            if check["name"] == "max_required_quality_failures"
         )["passed"]
         is False
     )
+
+
+def test_release_receipt_version_defaults_to_v2_and_rejects_other_versions(
+    tmp_path: Path,
+) -> None:
+    harness = _battle_harness()
+    thresholds = harness.ReleaseThresholds(
+        max_required_case_errors=0,
+        max_required_quality_failures=0,
+        max_required_skips=0,
+    )
+
+    gate = harness.ReleaseGate(
+        required_case_ids=("required-case",),
+        thresholds=thresholds,
+    )
+
+    assert gate.artifact_schema_version == "ai-builder-live-release.v2"
+    assert gate.artifact_schema_version == harness.SUPPORTED_RECEIPT_ARTIFACT_VERSION
+
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "release_gate": {
+                    "artifact_schema_version": "ai-builder-live-release.unsupported",
+                    "require_clean_source": False,
+                    "thresholds": {
+                        "max_required_case_errors": 0,
+                        "max_required_quality_failures": 0,
+                        "max_required_skips": 0,
+                    },
+                },
+                "cases": [
+                    {
+                        "id": "required-case",
+                        "prompt": "Build the required case.",
+                        "required": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cases = harness._read_cases_file(cases_path)
+    with raises(ValueError, match="artifact_schema_version must be"):
+        harness._read_release_gate(cases_path, cases=cases)
+
+
+def test_suite_receipts_preserve_canonical_case_identity_for_every_outcome(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    cases = [
+        harness.BattleCase(
+            case_id="success-case",
+            prompt="Build the successful case.",
+            required=True,
+            complexity="medium",
+            domain="municipality_records",
+            cohorts=("foundation", "json"),
+        ),
+        harness.BattleCase(
+            case_id="skipped-case",
+            prompt="Build the skipped case.",
+            complexity="easy",
+            domain="municipality_documents",
+            cohorts=("attachments",),
+        ),
+        harness.BattleCase(
+            case_id="failed-case",
+            prompt="Build the failed case.",
+            complexity="hard",
+            domain="municipality_procurement",
+            cohorts=("runtime", "review"),
+        ),
+    ]
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=cases[0].case_id,
+        prompt=cases[0].prompt,
+    )
+    monkeypatch.setattr(harness, "_release_run_identity", lambda **_: release_identity)
+    monkeypatch.setattr(
+        harness,
+        "_missing_file_id_envs",
+        lambda case, _args: ("MISSING_FILE_ID",)
+        if case.case_id == "skipped-case"
+        else (),
+    )
+
+    def run_case(*, case: object, **_: object) -> dict[str, object]:
+        assert isinstance(case, harness.BattleCase)
+        if case.case_id == "failed-case":
+            raise ValueError("verified failure")
+        return {
+            "created_at": "20260713T120003",
+            "artifact_mode": "live_execution",
+            "live_execution_provenance": _live_provenance_fixture(
+                harness,
+                prompt=case.prompt,
+            ),
+            "case": {"id": case.case_id},
+            "session_id": "session-1",
+            "plan_id": "plan-1",
+            "plan_summary": {"step_count": 1},
+            "event_summary": {},
+            "quality_report": {"checks": [], "warnings": [], "metrics": {}},
+        }
+
+    monkeypatch.setattr(harness, "_run_case", run_case)
+
+    exit_code = harness._run_suite(
+        cases=cases,
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=type("Args", (), {"repetitions": 1, "space_id": "space-1"})(),
+        output_dir=tmp_path,
+    )
+
+    assert exit_code == 0
+    expected_identities = {
+        case.case_id: {
+            "id": case.case_id,
+            "required": case.required,
+            "complexity": case.complexity,
+            "domain": case.domain,
+            "cohorts": list(case.cohorts),
+        }
+        for case in cases
+    }
+    suite_dir = next(tmp_path.glob("ai-builder-api-battle-suite-*"))
+    manifest = json.loads((suite_dir / "release-manifest.json").read_text())
+    assert {
+        row["case_identity"]["id"]: row["case_identity"]
+        for row in manifest["selected_cases"]
+    } == expected_identities
+
+    bundles = [
+        json.loads(path.read_text())
+        for path in suite_dir.glob("ai-builder-api-battle-test-*.json")
+    ]
+    assert {
+        bundle["case_identity"]["id"]: bundle["case_identity"] for bundle in bundles
+    } == expected_identities
+
+    summary = json.loads((suite_dir / "suite-summary.json").read_text())
+    assert {
+        result["case_identity"]["id"]: result["case_identity"]
+        for result in summary["results"]
+    } == expected_identities
+    results_by_case_id = {
+        result["case_identity"]["id"]: result for result in summary["results"]
+    }
+    assert results_by_case_id["success-case"]["artifact_mode"] == "live_execution"
+    assert results_by_case_id["success-case"]["error"] is None
+    assert results_by_case_id["skipped-case"]["skipped"] is True
+    assert results_by_case_id["skipped-case"]["error"] is None
+    assert (
+        results_by_case_id["failed-case"]["artifact_mode"] == "live_execution_failure"
+    )
+    assert results_by_case_id["failed-case"]["error"] == "verified failure"
 
 
 def test_suite_identity_rechecks_a_to_b_before_green_summary(
@@ -1374,11 +1741,10 @@ def test_release_gate_rejects_dirty_source_before_creating_output(
 ) -> None:
     harness = _battle_harness()
     gate = harness.ReleaseGate(
-        artifact_schema_version="ai-builder-live-release.v1",
         required_case_ids=("required-positive",),
         thresholds=harness.ReleaseThresholds(
-            max_case_errors=0,
-            max_quality_failures=0,
+            max_required_case_errors=0,
+            max_required_quality_failures=0,
             max_required_skips=0,
         ),
         require_clean_source=True,
@@ -1448,6 +1814,7 @@ def test_release_identity_rejects_untracked_case_input(
 
 def test_live_provenance_captures_source_build_model_prompt_and_usage(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     harness = _battle_harness()
     monkeypatch.setattr(
@@ -1472,9 +1839,12 @@ def test_live_provenance_captures_source_build_model_prompt_and_usage(
         }
     }
     classifier_diagnostics = _classifier_diagnostics()
+    cases_path = tmp_path / "selected-cases.json"
+    cases_path.write_text('{"version":4,"cases":[]}', encoding="utf-8")
 
     provenance = harness._live_execution_provenance(
         case=case,
+        cases_path=cases_path,
         latest_session=latest_session,
         classifier_diagnostics=classifier_diagnostics,
         requested_model_id=None,
@@ -1484,6 +1854,10 @@ def test_live_provenance_captures_source_build_model_prompt_and_usage(
     assert provenance["source"]["revision"]
     assert len(provenance["source"]["revision_sha256"]) == 64
     assert provenance["build"]["app_version"] == harness.LOCAL_APP_VERSION
+    assert (
+        provenance["build"]["cases_sha256"]
+        == hashlib.sha256(cases_path.read_bytes()).hexdigest()
+    )
     assert len(provenance["build"]["sha256"]) == 64
     assert provenance["model"]["observed_ids"] == ["openai/gpt-test"]
     assert len(provenance["model"]["sha256"]) == 64
@@ -1497,6 +1871,9 @@ def test_live_provenance_captures_source_build_model_prompt_and_usage(
         "completion_tokens": 17,
         "total_tokens": 118,
         "model_calls": 3,
+        "repair_attempts": None,
+        "parse_repair_attempts": None,
+        "elapsed_ms": None,
         "raw_reads": {
             "classifier_run_count": 1,
             "source_inventory_entry_count": 2,
@@ -2371,11 +2748,11 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
     release_gate = harness._read_release_gate(cases_path, cases=cases)
     by_id = {case.case_id: case for case in cases}
 
-    assert release_gate.artifact_schema_version == "ai-builder-live-release.v1"
+    assert release_gate.artifact_schema_version == "ai-builder-live-release.v2"
     assert release_gate.require_clean_source is True
     assert release_gate.thresholds == harness.ReleaseThresholds(
-        max_case_errors=0,
-        max_quality_failures=0,
+        max_required_case_errors=0,
+        max_required_quality_failures=0,
         max_required_skips=0,
     )
     required_dimensions = {
@@ -2584,6 +2961,7 @@ def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
     cases_path.write_text(
         json.dumps(
             {
+                "version": 4,
                 "cases": [
                     {
                         "id": "typo",
@@ -2592,7 +2970,7 @@ def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
                             "expected_runtime_evidnce": {"source_file_count": 6}
                         },
                     }
-                ]
+                ],
             }
         ),
         encoding="utf-8",
@@ -2758,6 +3136,13 @@ def test_event_summary_records_assumptions_for_posture_goldens(
     )
     result = harness._suite_result(
         {
+            "case_identity": {
+                "id": "document_pdf_source_retention_balance",
+                "required": False,
+                "complexity": "custom",
+                "domain": "custom",
+                "cohorts": [],
+            },
             "case": {"id": "document_pdf_source_retention_balance"},
             "session_id": "session-1",
             "plan_id": "plan-1",
@@ -2778,7 +3163,7 @@ def test_event_summary_records_assumptions_for_posture_goldens(
     ]
 
 
-def test_suite_returns_failure_when_quality_checks_fail(
+def test_benchmark_quality_failure_is_reported_without_failing_required_gate(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     harness = _battle_harness()
@@ -2830,7 +3215,7 @@ def test_suite_returns_failure_when_quality_checks_fail(
         output_dir=tmp_path,
     )
 
-    assert exit_code == 1
+    assert exit_code == 0
     summary_path = next(
         tmp_path.glob("ai-builder-api-battle-suite-*/suite-summary.json")
     )
@@ -2838,8 +3223,10 @@ def test_suite_returns_failure_when_quality_checks_fail(
     assert summary["case_error_count"] == 0
     assert summary["app_version"] == harness.LOCAL_APP_VERSION
     assert summary["quality_failure_run_count"] == 1
+    assert summary["required_quality_failure_run_count"] == 0
     assert summary["failure_count"] == 1
     assert summary["results"][0]["failed_check_count"] == 1
+    assert all(check["passed"] for check in summary["release_threshold_checks"])
 
 
 def test_reanalysis_can_use_current_case_expectations(tmp_path: Path) -> None:
@@ -2917,3 +3304,264 @@ def test_reanalysis_can_use_current_case_expectations(tmp_path: Path) -> None:
         check["name"]: check for check in current_bundle["quality_report"]["checks"]
     }
     assert current_checks["expected_leaf_output_fields"]["passed"] is True
+
+
+def test_case_loader_merges_synthetic_user_profile_with_case_overrides(
+    tmp_path: Path,
+) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "synthetic_user_profiles": {
+                    "document_report_owner": {
+                        "description": "Owner building a report from documents.",
+                        "question_answers": {
+                            "primary_runtime_input": {
+                                "selected_option_id": "documents"
+                            },
+                            "post_processing_goal": {
+                                "selected_option_id": "extract_key_information"
+                            },
+                            "terminal_output": {"selected_option_id": "pdf_document"},
+                        },
+                    }
+                },
+                "cases": [
+                    {
+                        "id": "profiled-case",
+                        "prompt": "Help me design the flow.",
+                        "synthetic_user_profile": "document_report_owner",
+                        "question_answer_overrides": {
+                            "terminal_output": {"selected_option_id": "structured_json"}
+                        },
+                        "cohorts": ["vague", "document", "json"],
+                        "expected": {
+                            "preferred_question_event_ids": ["post_processing_goal"],
+                            "allowed_question_event_ids": [
+                                "primary_runtime_input",
+                                "terminal_output",
+                            ],
+                            "forbidden_question_event_ids": ["docx_output_mode"],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    case = harness._read_cases_file(cases_path)[0]
+
+    assert case.synthetic_user_profile == "document_report_owner"
+    assert case.cohorts == ("vague", "document", "json")
+    assert case.configured_question_answers == {
+        "primary_runtime_input": {"selected_option_id": "documents"},
+        "post_processing_goal": {"selected_option_id": "extract_key_information"},
+        "terminal_output": {"selected_option_id": "structured_json"},
+    }
+    assert case.question_answer_sources == {
+        "primary_runtime_input": "profile",
+        "post_processing_goal": "profile",
+        "terminal_output": "case_override",
+    }
+
+    malformed = json.loads(cases_path.read_text(encoding="utf-8"))
+    malformed["cases"][0]["expected"]["preferred_question_event_ids"] = (
+        "post_processing_goal"
+    )
+    cases_path.write_text(json.dumps(malformed), encoding="utf-8")
+    with raises(ValueError, match="must be a list of unique, non-empty strings"):
+        harness._read_cases_file(cases_path)
+
+
+def test_case_loader_requires_answers_for_plan_required_question_paths(
+    tmp_path: Path,
+) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "cases.json"
+    payload = {
+        "version": 4,
+        "synthetic_user_profiles": {
+            "document_owner": {
+                "description": "Owner who uploads source documents.",
+                "question_answers": {
+                    "primary_runtime_input": {"selected_option_id": "documents"}
+                },
+            }
+        },
+        "cases": [
+            {
+                "id": "plan-required",
+                "prompt": "Help me build the flow.",
+                "synthetic_user_profile": "document_owner",
+                "expected": {
+                    "preferred_question_event_ids": ["primary_runtime_input"],
+                    "allowed_question_event_ids": ["terminal_output"],
+                },
+            }
+        ],
+    }
+    cases_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with raises(ValueError, match="terminal_output"):
+        harness._read_cases_file(cases_path)
+
+    payload["cases"][0]["expected"]["allow_question_instead_of_plan"] = True
+    cases_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    case = harness._read_cases_file(cases_path)[0]
+    assert case.case_id == "plan-required"
+
+
+def test_configured_answer_uses_exact_option_id_and_never_falls_back() -> None:
+    harness = _battle_harness()
+    question = {
+        "question_id": "primary_runtime_input",
+        "allow_custom": False,
+        "options": [
+            {"id": "audio", "value": "audio", "label": "Audio"},
+            {"id": "documents", "value": "documents", "label": "Documents"},
+        ],
+    }
+
+    answer = harness._configured_question_answer(
+        question=question,
+        configured_answers={
+            "primary_runtime_input": {"selected_option_id": "documents"}
+        },
+        answer_sources={"primary_runtime_input": "profile"},
+    )
+
+    assert answer["answer_source"] == "profile"
+    assert answer["question_answer"]["selected_option_ids"] == ["documents"]
+    assert answer["question_answer"]["selected_values"] == ["documents"]
+    assert (
+        harness._configured_question_answer(
+            question=question,
+            configured_answers={},
+            answer_sources={},
+        )
+        is None
+    )
+    with raises(ValueError, match="does not allow a custom answer"):
+        harness._configured_question_answer(
+            question=question,
+            configured_answers={
+                "primary_runtime_input": {"custom_value": "Something else"}
+            },
+            answer_sources={"primary_runtime_input": "case_override"},
+        )
+
+
+def test_journey_summary_preserves_order_and_marks_reopened_questions() -> None:
+    harness = _battle_harness()
+    interactions = [
+        {
+            "events": [
+                {
+                    "event": "question",
+                    "data": {
+                        "question_id": "primary_runtime_input",
+                        "question": "What is the input?",
+                        "allow_custom": False,
+                        "selection_mode": "single",
+                        "options": [{"id": "documents"}],
+                    },
+                }
+            ]
+        },
+        {
+            "question_answer": {
+                "question_id": "primary_runtime_input",
+                "selected_option_ids": ["documents"],
+            },
+            "configured_answer_source": "profile",
+            "events": [
+                {
+                    "event": "question",
+                    "data": {
+                        "question_id": "terminal_output",
+                        "question": "What is the output?",
+                        "allow_custom": False,
+                        "selection_mode": "single",
+                        "options": [{"id": "pdf_document"}],
+                    },
+                }
+            ],
+        },
+        {
+            "question_answer": {
+                "question_id": "terminal_output",
+                "selected_option_ids": ["pdf_document"],
+            },
+            "configured_answer_source": "case_override",
+            "events": [
+                {
+                    "event": "question",
+                    "data": {
+                        "question_id": "primary_runtime_input",
+                        "question": "What is the input?",
+                        "allow_custom": False,
+                        "selection_mode": "single",
+                        "options": [{"id": "documents"}],
+                    },
+                }
+            ],
+        },
+        {
+            "question_answer": {
+                "question_id": "primary_runtime_input",
+                "selected_option_ids": ["documents"],
+            },
+            "configured_answer_source": "profile",
+            "plan_id": "plan-1",
+            "events": [{"event": "plan", "data": {"plan_id": "plan-1"}}],
+            "latest_session": {
+                "telemetry": {
+                    "repair_attempts_total": 0,
+                    "parse_repair_attempts_total": 0,
+                }
+            },
+        },
+    ]
+
+    journey = harness._journey_summary(
+        interactions,
+        expected={
+            "preferred_question_event_ids": ["primary_runtime_input"],
+            "allowed_question_event_ids": ["terminal_output"],
+            "forbidden_question_event_ids": [],
+        },
+        interaction_limit=6,
+    )
+
+    assert journey["termination"] == "plan_created"
+    assert journey["question_event_ids"] == [
+        "primary_runtime_input",
+        "terminal_output",
+        "primary_runtime_input",
+    ]
+    assert journey["unique_question_event_ids"] == [
+        "primary_runtime_input",
+        "terminal_output",
+    ]
+    assert journey["reopened_question_ids"] == ["primary_runtime_input"]
+    assert journey["questions"][0]["resolution"] == "reopened"
+    assert journey["questions"][1]["resolution"] == "resolved"
+    assert journey["questions"][2]["resolution"] == "resolved"
+    assert journey["questions"][0]["answer_source"] == "profile"
+    assert journey["questions"][0]["next_outcome"] == "next_question"
+    assert journey["questions"][0]["next_question_id"] == "terminal_output"
+    assert journey["questions"][1]["relevance"] == "allowed"
+    assert journey["plan_outcome"]["kind"] == "first_pass_success"
+
+    final_turn_error = harness._journey_summary(
+        [{"events": []}] * 5
+        + [{"events": [{"event": "error", "data": {"code": "provider_error"}}]}],
+        expected={},
+        interaction_limit=6,
+    )
+    assert final_turn_error["termination"] == "turn_error"

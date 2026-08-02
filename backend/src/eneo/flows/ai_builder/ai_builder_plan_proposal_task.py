@@ -7,10 +7,15 @@ content through the create/edit tool schema.
 
 from __future__ import annotations
 
+import json
 from typing import assert_never
 
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
+)
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    CreateCompileContext,
+    create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
@@ -50,6 +55,7 @@ def build_plan_proposal_system_prompt(
     resource_catalog: AIBuilderResourceCatalog,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
+    compile_context: CreateCompileContext | None = None,
 ) -> str:
     submission_tool = PROPOSE_FLOW_TOOL_NAME
     resource_material = build_ai_builder_resource_reference_material(
@@ -106,6 +112,17 @@ def build_plan_proposal_system_prompt(
         "Confirmed requirements:",
         render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
     ]
+    server_owned_fields_block = _server_owned_runtime_input_fields_block(
+        compile_context or create_compile_context_from_planning_state(planning_state)
+    )
+    if not is_edit_mode and server_owned_fields_block is not None:
+        lines.extend(
+            [
+                "",
+                "Server-owned runtime input fields:",
+                server_owned_fields_block,
+            ]
+        )
     file_roles_block = _file_roles_block(planning_state)
     if file_roles_block is not None:
         lines.extend(["", "Uploaded file roles:", file_roles_block])
@@ -132,6 +149,36 @@ def build_plan_proposal_system_prompt(
         lines.extend(["", plan_revision_context])
     if attachment_context:
         lines.extend(["", "Attachment context:", attachment_context])
+    return "\n".join(lines)
+
+
+def _server_owned_runtime_input_fields_block(
+    compile_context: CreateCompileContext | None,
+) -> str | None:
+    if compile_context is None or not compile_context.admitted_form_field_hints:
+        return None
+
+    lines: list[str] = []
+    for field in compile_context.admitted_form_field_hints:
+        contract: dict[str, object] = {
+            "variable_name": field.variable_name,
+            "field_type": field.field_type,
+            "required": field.required,
+            "label": field.label,
+        }
+        if field.options:
+            contract["options"] = list(field.options)
+        contract["provenance"] = field.provenance
+        lines.append(f"- {json.dumps(contract, ensure_ascii=False)}")
+
+    lines.extend(
+        [
+            "- Do not redeclare or rename these server-owned fields in input_fields.",
+            "- Use each exact variable_name in uses_form_fields only on steps "
+            "whose semantic work directly consumes it; every field needs at "
+            "least one actual consumer.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -213,6 +260,8 @@ def _resolved_slot_prompt_status(slot: ResolvedSlot) -> str:
             return "confirmed"
         case "flow_default":
             return "from existing flow"
+        case "attachment_structure":
+            return "confirmed from attachment structure"
         case "policy_default":
             return "policy default assumption"
         case "heuristic":

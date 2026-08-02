@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
@@ -21,6 +25,7 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    FlowInputFieldIntent,
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
@@ -76,17 +81,46 @@ def _slot(name: str, value: str) -> ResolvedSlot:
     )
 
 
+def _commit_architecture(state: PlanningState) -> None:
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(
+        draft,
+        now=lambda: datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+
+
 def test_compile_context_bridges_flow_input_type_to_authoring_input_type() -> None:
     state = PlanningState.empty()
     state.resolved_slots["primary_runtime_input"] = _slot(
         "primary_runtime_input",
         "documents",
     )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_text",
+    )
+    _commit_architecture(state)
 
     context = create_compile_context_from_planning_state(state)
 
     assert context is not None
     assert context.runtime_input_type == InputType.DOCUMENT
+
+
+def test_compile_context_does_not_derive_uncommitted_architecture() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "structured_text"),
+    }
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_input_type is None
+    assert context.final_output_type is None
+    assert context.pattern_ids == ()
 
 
 def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_schema() -> (
@@ -97,6 +131,19 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
         "terminal_output",
         "docx_document",
     )
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "single_document_case",
+    )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "template_fill_docx",
+    )
+    _commit_architecture(state)
     state.output_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
@@ -116,6 +163,110 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
     assert [
         hint.variable_name for hint in context.template_placeholder_field_hints
     ] == ["kundnamn"]
+
+
+def test_compile_context_ignores_non_commit_grade_runtime_metadata() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "structured_text"),
+        "document_material_scope": _slot(
+            "document_material_scope",
+            "single_document_case",
+        ),
+    }
+    _commit_architecture(state)
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value="no_extra_metadata",
+        source="model",
+        confidence="medium",
+        evidence=["quote:user_message:example:no extra fields were mentioned"],
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_metadata_state is None
+
+
+def test_policy_default_does_not_override_confirmed_runtime_fields() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value="no_extra_metadata",
+        source="policy_default",
+        confidence="high",
+    )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="case_type",
+            label="Case type",
+            provenance="user_confirmed",
+        )
+    ]
+    context = create_compile_context_from_planning_state(state)
+    assert context is not None
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case routing",
+            "plan_rationale": "Route the case using its confirmed type.",
+            "steps": [
+                {
+                    "name": "Route case",
+                    "instructions": "Route the case using its type.",
+                    "uses_form_fields": ["case_type"],
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    assert [field.name for field in compiled.form_fields or ()] == ["case_type"]
+    assert "{{ flow_input.case_type }}" in _question(compiled.steps[0].input_bindings)
+
+
+def test_confirmed_runtime_field_set_rejects_model_proposed_addition() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case routing",
+            "plan_rationale": "Route the case with its runtime fields.",
+            "input_fields": [
+                {"name": "case_type", "label": "Case type"},
+                {"name": "tone", "label": "Tone"},
+            ],
+            "steps": [
+                {
+                    "name": "Route case",
+                    "instructions": "Route the case using its type and tone.",
+                    "uses_form_fields": ["case_type", "tone"],
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_metadata_state="detailed_runtime_metadata",
+                runtime_input_field_hints=(
+                    RuntimeInputFieldHint(
+                        variable_name="case_type",
+                        label="Case type",
+                        provenance="user_confirmed",
+                    ),
+                ),
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "unconfirmed_runtime_form_fields"
+    )
+    assert exc_info.value.log_context["field_names"] == "tone"
 
 
 def test_compile_context_keeps_distinct_long_template_placeholder_names() -> None:
@@ -154,10 +305,15 @@ def test_compile_context_keeps_distinct_long_template_placeholder_names() -> Non
 
 def test_compile_context_binds_declared_output_schema_to_json_terminal() -> None:
     state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "text",
+    )
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
         "structured_json",
     )
+    _commit_architecture(state)
     schema: JsonObject = {
         "type": "object",
         "properties": {"decision": {"type": "string"}},
@@ -184,6 +340,11 @@ def test_compile_context_binds_declared_input_schema_to_json_flow_input() -> Non
         "primary_runtime_input",
         "json",
     )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_json",
+    )
+    _commit_architecture(state)
     schema: JsonObject = {
         "type": "object",
         "properties": {"case_id": {"type": "string"}},
@@ -224,6 +385,7 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
         "terminal_output",
         "structured_json",
     )
+    _commit_architecture(state)
     state.input_schema_evidence = build_schema_evidence(
         json_schema=input_schema,
         source="declared_schema",
@@ -338,10 +500,14 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
         {
             **dict(PlanningState.empty()),
             "resolved_slots": {
+                "primary_runtime_input": _slot(
+                    "primary_runtime_input",
+                    "text",
+                ),
                 "terminal_output": _slot(
                     "terminal_output",
                     "structured_json",
-                )
+                ),
             },
             "file_roles": [
                 FileRoleEvidence(
@@ -390,6 +556,7 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
             ),
         }
     )
+    _commit_architecture(state)
 
     context = create_compile_context_from_planning_state(state)
 
@@ -401,10 +568,19 @@ def test_compile_context_binds_inferred_example_as_an_open_json_shape() -> None:
 
 def test_compile_context_keeps_input_schema_out_of_docx_terminal() -> None:
     state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "json",
+    )
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
         "docx_document",
     )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "generated_docx",
+    )
+    _commit_architecture(state)
     state.input_schema_evidence = build_schema_evidence(
         json_schema={
             "type": "object",
@@ -510,8 +686,29 @@ def test_compile_context_derives_analysis_fields_from_result_obligations() -> No
     assert context.source_reader_required_fields == ()
 
 
-def test_compile_context_carries_report_disposition() -> None:
+def test_compile_context_reads_report_disposition_only_from_commit() -> None:
     state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "per_source_sections",
+    )
+    _commit_architecture(state)
     state.resolved_slots["report_disposition"] = _slot(
         "report_disposition",
         "both",
@@ -520,7 +717,7 @@ def test_compile_context_carries_report_disposition() -> None:
     context = create_compile_context_from_planning_state(state)
 
     assert context is not None
-    assert context.report_disposition == "both"
+    assert context.report_disposition == "per_source_sections"
 
 
 def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
@@ -963,22 +1160,18 @@ def test_assembly_projects_one_structured_contract_to_each_section_writer() -> N
     compiled = compile_create_intent_to_spec(intent)
 
     expected_source_refs = [
-        [{"step_ref": "step_a", "output": "structured"}],
-        [
-            {"step_ref": "step_b", "output": "text"},
-            {"step_ref": "step_a", "output": "structured"},
-        ],
-        [
-            {"step_ref": "step_c", "output": "text"},
-            {"step_ref": "step_a", "output": "structured"},
-        ],
+        {
+            "step_ref": "step_a",
+            "output": "structured",
+            "field_path": field_name,
+            "label": field_name,
+        }
+        for field_name in ("background", "findings", "recommendations")
     ]
     assert len(compiled.steps) == 4
-    for writer, source_refs in zip(
-        compiled.steps[1:], expected_source_refs, strict=True
-    ):
+    for writer in compiled.steps[1:]:
         assert writer.input_source == InputSource.PREVIOUS_STEP
-        assert writer.input_bindings == {"source_refs": source_refs}
+        assert writer.input_bindings == {"source_refs": expected_source_refs}
     assert all(
         step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
     )
@@ -1253,7 +1446,30 @@ def test_compiler_preserves_result_contract_fields_on_analysis_step() -> None:
                 "field_path": "requirements",
                 "label": "requirements",
             },
-            {"step_ref": "step_b", "output": "structured"},
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "comparison_results",
+                "label": "comparison results",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "missing_information",
+                "label": "missing information",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "uncertainty",
+                "label": "uncertainty",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "recommended_action",
+                "label": "recommended action",
+            },
         ]
     }
     assert validate_spec(compiled).valid
@@ -1267,22 +1483,16 @@ def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
             "plan_rationale": "Läs ansökan, jämför mot regeln och skriv rapport.",
             "input_fields": [
                 {
-                    "variable_name": "reference_material",
-                    "label": "Reference material",
+                    "variable_name": "checklista",
+                    "label": "Model checklist label",
                     "field_type": "text",
                     "required": True,
                 },
                 {
-                    "variable_name": "case_context",
-                    "label": "Case context",
+                    "variable_name": "regel",
+                    "label": "Model rule label",
                     "field_type": "text",
-                    "required": False,
-                },
-                {
-                    "variable_name": "jurisdiction",
-                    "label": "Jurisdiction",
-                    "field_type": "text",
-                    "required": False,
+                    "required": True,
                 },
             ],
             "steps": [
@@ -1303,9 +1513,8 @@ def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
                     "instructions": "Jämför ansökan mot checklistan eller regeln.",
                     "output_type": "json",
                     "uses_form_fields": [
-                        "reference_material",
-                        "case_context",
-                        "jurisdiction",
+                        "checklista",
+                        "regel",
                     ],
                     "output_fields": [
                         {
@@ -1329,22 +1538,36 @@ def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
         context=CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.TEXT,
-            runtime_metadata_state="detailed_case_metadata",
+            runtime_metadata_state="detailed_runtime_metadata",
             runtime_input_field_hints=(
-                RuntimeInputFieldHint("checklista", "checklista"),
-                RuntimeInputFieldHint("regel", "regel"),
+                RuntimeInputFieldHint(
+                    "checklista",
+                    "checklista",
+                    provenance="user_confirmed",
+                ),
+                RuntimeInputFieldHint(
+                    "regel",
+                    "regel",
+                    provenance="user_confirmed",
+                ),
             ),
         ),
     )
 
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["checklista", "regel"]
-    report_question = _question(compiled.steps[-1].input_bindings)
-    assert "checklista: {{ flow_input.checklista }}" in report_question
-    assert "regel: {{ flow_input.regel }}" in report_question
-    assert "reference_material" not in report_question
-    assert "case_context" not in report_question
-    assert "jurisdiction" not in report_question
+    assert [field.label for field in compiled.form_fields] == ["checklista", "regel"]
+    assert [field.required for field in compiled.form_fields] == [False, False]
+    comparison_step = next(
+        step for step in compiled.steps if step.name == "Jämför krav"
+    )
+    assert comparison_step.input_type == InputType.TEXT
+    assert comparison_step.input_contract is None
+    comparison_question = _question(comparison_step.input_bindings)
+    assert "checklista: {{ flow_input.checklista }}" in comparison_question
+    assert "regel: {{ flow_input.regel }}" in comparison_question
+    assert "flow_input.checklista" not in repr(compiled.steps[-1].input_bindings)
+    assert "flow_input.regel" not in repr(compiled.steps[-1].input_bindings)
     assert validate_spec(compiled).valid
 
 
@@ -1603,7 +1826,7 @@ def test_inferred_primary_input_shadow_drop_emits_typed_diagnostic() -> None:
         intent,
         context=CreateCompileContext(
             runtime_input_type=InputType.AUDIO,
-            runtime_metadata_state="detailed_case_metadata",
+            runtime_metadata_state="detailed_runtime_metadata",
             runtime_input_field_hints=(
                 RuntimeInputFieldHint(
                     "audio",
@@ -1621,7 +1844,7 @@ def test_inferred_primary_input_shadow_drop_emits_typed_diagnostic() -> None:
     ]
 
 
-def test_assembly_places_server_owned_runtime_field_hints() -> None:
+def test_assembly_places_explicit_server_owned_runtime_field_consumers() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Bygglovsrapport",
@@ -1648,6 +1871,12 @@ def test_assembly_places_server_owned_runtime_field_hints() -> None:
                 {
                     "name": "Skriv handläggarrapport",
                     "instructions": "Skriv en kort handläggarrapport.",
+                    "uses_form_fields": [
+                        "arendenummer",
+                        "kommun",
+                        "handlaggare",
+                        "sista_svarsdatum",
+                    ],
                     "output_type": "text",
                 },
             ],
@@ -1659,7 +1888,7 @@ def test_assembly_places_server_owned_runtime_field_hints() -> None:
         context=CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.TEXT,
-            runtime_metadata_state="detailed_case_metadata",
+            runtime_metadata_state="detailed_runtime_metadata",
             runtime_input_field_hints=(
                 RuntimeInputFieldHint("arendenummer", "ärendenummer", required=True),
                 RuntimeInputFieldHint("kommun", "kommun", required=True),
@@ -1684,6 +1913,57 @@ def test_assembly_places_server_owned_runtime_field_hints() -> None:
     assert "handlaggare: {{ flow_input.handlaggare }}" in question
     assert "sista_svarsdatum: {{ flow_input.sista_svarsdatum }}" in question
     assert validate_spec(compiled).valid
+
+
+def test_confirmed_field_definition_overrides_model_redeclaration() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case routing",
+            "plan_rationale": "Route the case using its confirmed type.",
+            "input_fields": [
+                {
+                    "variable_name": "case_type",
+                    "label": "Model label",
+                    "field_type": "text",
+                    "required": False,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Route case",
+                    "instructions": "Route the case using its type.",
+                    "uses_form_fields": ["case_type"],
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_metadata_state="detailed_runtime_metadata",
+            runtime_input_field_hints=(
+                RuntimeInputFieldHint(
+                    "case_type",
+                    "Confirmed case type",
+                    field_type="select",
+                    required=True,
+                    options=("permit", "complaint"),
+                    provenance="user_confirmed",
+                ),
+            ),
+        ),
+    )
+
+    assert compiled.form_fields is not None
+    assert compiled.form_fields[0].model_dump(exclude_none=True) == {
+        "name": "case_type",
+        "label": "Confirmed case type",
+        "type": "select",
+        "required": True,
+        "options": ["permit", "complaint"],
+    }
 
 
 @pytest.mark.parametrize("aggregation_intent", ["aggregate", "compare"])
@@ -1969,9 +2249,24 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
     assert validate_spec(compiled).valid
 
 
-def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underlag() -> (
-    None
-):
+@pytest.mark.parametrize(
+    ("ui_language", "actual_input_prefix"),
+    [
+        (
+            "sv",
+            "Faktiskt underlag: Det här steget får den fullständiga "
+            "texttranskriberingen",
+        ),
+        (
+            "en",
+            "Actual input: This step receives the complete text transcript",
+        ),
+    ],
+)
+def test_compiler_describes_transcript_input_and_avoids_raw_audio_report_fan_in(
+    ui_language: str,
+    actual_input_prefix: str,
+) -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Meeting report",
@@ -2018,6 +2313,7 @@ def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underl
                 TERMINAL_ARTIFACT_STEP,
             ),
             runtime_max_files=1,
+            ui_language=ui_language,
         ),
     )
 
@@ -2041,15 +2337,11 @@ def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underl
     assert transcription_step.input_config is not None
     assert transcription_step.input_config["runtime_input"]["input_format"] == "audio"
     assert extract_step.input_source == InputSource.PREVIOUS_STEP
+    assert extract_step.assistant_spec.instructions.startswith(actual_input_prefix)
     assert body_step.input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_b", "output": "structured"},
-            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
-        ]
+        "source_refs": [{"step_ref": "step_b", "output": "structured"}]
     }
-    assert _question(body_step.input_bindings) == (
-        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-    )
+    assert _question(body_step.input_bindings) == "{{ step_b.output.structured }}"
     assert body_step.input_contract is None
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert renderer_step.input_bindings is None
@@ -2064,9 +2356,21 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
         "terminal_output": _slot("terminal_output", "docx_document"),
         "runtime_metadata_fields": _slot(
             "runtime_metadata_fields",
-            "detailed_case_metadata",
+            "detailed_runtime_metadata",
         ),
     }
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="arendenummer",
+            label="ärendenummer",
+            provenance="user_confirmed",
+        ),
+        FlowInputFieldIntent(
+            variable_name="handlaggare",
+            label="handläggare",
+            provenance="user_confirmed",
+        ),
+    ]
     architecture = derive_architecture_commit_draft(state)
 
     assert architecture is not None
@@ -2074,14 +2378,11 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
         "audio_to_artifact_report",
         "form_field_runtime_inputs",
     ]
+    _commit_architecture(state)
 
     context = create_compile_context_from_planning_state(
         state,
         ui_language="sv",
-        runtime_input_hint_text=(
-            "Bygg ett ljudflöde där användaren ska fylla i ärendenummer och "
-            "handläggare vid körning. Skapa sedan en DOCX-rapport."
-        ),
     )
     assert context is not None
     assert context.pattern_ids == tuple(architecture.chosen_patterns)
@@ -2099,6 +2400,7 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
                 {
                     "name": "Analysera transkriptionen",
                     "instructions": "Identifiera de viktigaste sakuppgifterna.",
+                    "uses_form_fields": ["arendenummer", "handlaggare"],
                     "output_type": "json",
                     "output_fields": [
                         {
@@ -2112,6 +2414,7 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
                 {
                     "name": "Skriv rapporten",
                     "instructions": "Skriv en tydlig rapport från sakuppgifterna.",
+                    "uses_form_fields": ["arendenummer", "handlaggare"],
                     "output_type": "text",
                 },
             ],
@@ -2132,13 +2435,24 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
     assert transcription_step.output_mode == OutputMode.TRANSCRIBE_ONLY
     assert transcription_step.input_type == InputType.AUDIO
     assert analysis_step.output_type == OutputType.JSON
+    assert analysis_step.input_type == InputType.TEXT
+    assert analysis_step.input_bindings == {
+        "question": (
+            "arendenummer: {{ flow_input.arendenummer }}\n"
+            "handlaggare: {{ flow_input.handlaggare }}"
+        ),
+        "source_refs": [{"step_ref": "step_a", "output": "text"}],
+    }
+    assert analysis_step.assistant_spec.instructions.startswith(
+        "Faktiskt underlag: Det här steget får den fullständiga texttranskriberingen"
+    )
     assert analysis_step.review_policy is not None
     assert analysis_step.review_policy.mode.value == "edit"
     assert report_step.review_policy is None
     report_question = _question(report_step.input_bindings)
     assert "arendenummer: {{ flow_input.arendenummer }}" in report_question
     assert "handlaggare: {{ flow_input.handlaggare }}" in report_question
-    for step in (transcription_step, analysis_step, renderer_step):
+    for step in (transcription_step, renderer_step):
         assert "flow_input.arendenummer" not in repr(step.input_bindings)
         assert "flow_input.handlaggare" not in repr(step.input_bindings)
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
@@ -2277,7 +2591,7 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
         ),
         "runtime_metadata_fields": _slot(
             "runtime_metadata_fields",
-            "detailed_case_metadata",
+            "detailed_runtime_metadata",
         ),
     }
     state.file_roles = [
@@ -2297,12 +2611,17 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
             template_placeholders=["arendenummer"],
         )
     ]
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="arendenummer",
+            label="ärendenummer",
+            provenance="user_confirmed",
+        )
+    ]
+    _commit_architecture(state)
     context = create_compile_context_from_planning_state(
         state,
         ui_language="sv",
-        runtime_input_hint_text=(
-            "Användaren ska fylla i ärendenummer vid körning innan mallen fylls."
-        ),
     )
     assert context is not None
     assert context.pattern_ids == (
@@ -2318,6 +2637,7 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
                 {
                     "name": "Förbered dokumentinnehåll",
                     "instructions": "Förbered innehållet för dokumentmallen.",
+                    "uses_form_fields": ["arendenummer"],
                     "output_type": "text",
                     "review_mode": "view",
                 }
@@ -2381,6 +2701,7 @@ def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
                 {
                     "name": "Prepare template content",
                     "instructions": "Prepare the content for the DOCX template.",
+                    "uses_form_fields": ["kundnamn", "case_id"],
                     "output_type": "text",
                 }
             ],
@@ -2899,6 +3220,7 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                 {
                     "name": "Sätt ihop slutrapport",
                     "instructions": "Sätt ihop slutrapporten.",
+                    "uses_form_fields": ["case_number"],
                     "output_type": "text",
                 },
             ],
@@ -2915,6 +3237,14 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
             aggregation_intent=cast(AggregationIntent, "aggregate"),
             ui_language="sv",
             report_disposition="both",
+            runtime_metadata_state="detailed_runtime_metadata",
+            runtime_input_field_hints=(
+                RuntimeInputFieldHint(
+                    "case_number",
+                    "Case number",
+                    provenance="user_confirmed",
+                ),
+            ),
         ),
     )
 
@@ -2948,25 +3278,24 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
     body_writer_step = compiled.steps[3]
     assert body_writer_step.input_source == InputSource.PREVIOUS_STEP
     assert body_writer_step.output_mode == OutputMode.COMPOSE_TEXT
-    assert body_writer_step.input_bindings == {
-        "question": "# {{ step_c.output.structured.report_title }}",
-        "source_refs": [
-            {
-                "step_ref": "step_b",
-                "output": "structured",
-                "field_path": "source_sections",
-                "item_template": (
-                    "## {section_title}\n\n{section_body}\n\nKälla: {source_label}"
-                ),
-            },
-            {
-                "step_ref": "step_c",
-                "output": "structured",
-                "field_path": "overall_overview",
-                "label": "Samlad översikt",
-            },
-        ],
-    }
+    assert body_writer_step.input_bindings is not None
+    assert "{{ flow_input.case_number }}" in _question(body_writer_step.input_bindings)
+    assert body_writer_step.input_bindings["source_refs"] == [
+        {
+            "step_ref": "step_b",
+            "output": "structured",
+            "field_path": "source_sections",
+            "item_template": (
+                "## {section_title}\n\n{section_body}\n\nKälla: {source_label}"
+            ),
+        },
+        {
+            "step_ref": "step_c",
+            "output": "structured",
+            "field_path": "overall_overview",
+            "label": "Samlad översikt",
+        },
+    ]
     assert all(
         step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
     )
@@ -3075,6 +3404,13 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
         {
             "flow_name": "Rapport över dokument",
             "plan_rationale": "Läs källor, skriv källavsnitt och slutrapport.",
+            "input_fields": [
+                {
+                    "name": "case_id",
+                    "label": "Ärendenummer",
+                    "type": "text",
+                }
+            ],
             "steps": [
                 {
                     "name": "Läs dokumenten",
@@ -3103,6 +3439,7 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
                 {
                     "name": "Bygg rapportavsnitt",
                     "instructions": "Skriv ett rapportavsnitt per dokument.",
+                    "uses_form_fields": ["case_id"],
                     "output_type": "json",
                     "output_fields": [
                         {
@@ -3160,6 +3497,15 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
         OutputMode.COMPOSE_TEXT,
         OutputMode.RENDER_VERBATIM,
     ]
+    section_writer_step = compiled.steps[1]
+    assert section_writer_step.input_bindings is None
+    assert section_writer_step.input_type == InputType.JSON
+    assert section_writer_step.input_contract == compiled.steps[0].output_contract
+    assert "case_id: {{ flow_input.case_id }}" in (
+        section_writer_step.assistant_spec.instructions
+    )
+    assert section_writer_step.input_config is not None
+    assert section_writer_step.input_config["item_map"]["enabled"] is True
     body_writer_step = compiled.steps[-2]
     assert body_writer_step.input_bindings == {
         "question": "# {{ step_c.output.structured.report_title }}",
@@ -3180,7 +3526,8 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
             },
         ],
     }
-    assert validate_spec(compiled).valid
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
 
 
 def test_report_disposition_both_inserts_missing_source_section_map() -> None:

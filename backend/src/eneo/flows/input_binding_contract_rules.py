@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 FLOW_INPUT_BINDING_UNSUPPORTED_KEY = "flow_input_binding_unsupported_key"
 SOURCE_REFS_BINDING_KEY = "source_refs"
 SUPPORTED_INPUT_BINDING_KEYS = frozenset({"question", SOURCE_REFS_BINDING_KEY})
 SourceRefOutput = Literal["text", "structured"]
+InputContractBindingConflict = Literal["question", "source_refs"]
 _SOURCE_REF_OUTPUTS: frozenset[SourceRefOutput] = frozenset(("text", "structured"))
 _SOURCE_REF_KEYS = frozenset(
     {"step_ref", "output", "field_path", "label", "item_template"}
@@ -73,26 +75,6 @@ def dedupe_source_refs(
         if existing.label is None and ref.label is not None:
             deduped[existing_index] = ref
     return tuple(deduped)
-
-
-def field_refs_cover_whole_structured_object(
-    *,
-    field_paths: Iterable[str],
-    property_names: Iterable[str],
-) -> bool:
-    top_level_properties = {
-        property_name for property_name in property_names if "." not in property_name
-    }
-    if len(top_level_properties) <= 1:
-        return False
-    selected_fields = {
-        field_path
-        for field_path in field_paths
-        if "." not in field_path and field_path in top_level_properties
-    }
-    return len(selected_fields) > 1 and len(selected_fields) * 2 >= len(
-        top_level_properties
-    )
 
 
 def duplicate_source_ref_expressions(input_bindings: object) -> tuple[str, ...]:
@@ -190,15 +172,166 @@ def effective_question_binding(input_bindings: object) -> str | None:
     return question_binding(lowered)
 
 
-def input_contract_conflicts_with_question_binding(
+def input_contract_binding_conflict(
     *,
     input_bindings: object,
     input_contract: object,
+    input_type: str | None = None,
+) -> InputContractBindingConflict | None:
+    if input_contract is None:
+        return None
+    if question_binding(input_bindings) is not None:
+        return "question"
+    try:
+        refs = source_ref_bindings(input_bindings)
+    except InputBindingContractError:
+        # Binding validation reports the more precise malformed-ref error.
+        return None
+    if not refs:
+        return None
+    if input_type != "json" or any(
+        ref.output != "structured" or ref.item_template is not None for ref in refs
+    ):
+        return "source_refs"
+    return None
+
+
+def is_structured_projection_binding(
+    *,
+    input_bindings: object,
+    input_type: str | None,
 ) -> bool:
-    return (
-        input_contract is not None
-        and effective_question_binding(input_bindings) is not None
+    if input_type != "json" or question_binding(input_bindings) is not None:
+        return False
+    refs = source_ref_bindings(input_bindings)
+    return bool(refs) and all(
+        ref.output == "structured" and ref.item_template is None for ref in refs
     )
+
+
+def derive_structured_projection_contract(
+    *,
+    input_bindings: object,
+    source_contracts_by_step_ref: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    if question_binding(input_bindings) is not None:
+        raise InputBindingContractError(
+            "Structured JSON source_refs cannot be combined with input_bindings.question."
+        )
+    refs = source_ref_bindings(input_bindings)
+    if not refs:
+        raise InputBindingContractError(
+            "Structured JSON projection requires at least one source_ref."
+        )
+    projected: dict[str, Any] = {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+    projection_containers: set[tuple[str, ...]] = set()
+    for ref in refs:
+        if ref.output != "structured" or ref.item_template is not None:
+            raise InputBindingContractError(
+                "Structured JSON projection accepts only structured source_refs "
+                "without item_template."
+            )
+        if not ref.field_path:
+            raise InputBindingContractError(
+                "Structured JSON projection source_refs must select an explicit field_path."
+            )
+        source_contract = source_contracts_by_step_ref.get(ref.step_ref)
+        if source_contract is None:
+            raise InputBindingContractError(
+                f"Structured JSON projection source step '{ref.step_ref}' has no output contract."
+            )
+        selected_schema = _schema_at_projection_path(
+            source_contract=source_contract,
+            field_path=ref.field_path,
+            source_step_ref=ref.step_ref,
+        )
+        _insert_projected_schema(
+            projected=projected,
+            field_path=ref.field_path,
+            selected_schema=selected_schema,
+            source_step_ref=ref.step_ref,
+            projection_containers=projection_containers,
+        )
+    return projected
+
+
+def _schema_at_projection_path(
+    *,
+    source_contract: Mapping[str, Any],
+    field_path: tuple[str, ...],
+    source_step_ref: str,
+) -> Mapping[str, Any]:
+    current = source_contract
+    for segment in field_path:
+        if current.get("type") != "object":
+            raise InputBindingContractError(
+                f"source_ref field_path '{'.'.join(field_path)}' for "
+                f"'{source_step_ref}' crosses a non-object schema."
+            )
+        properties = current.get("properties")
+        if not isinstance(properties, Mapping):
+            raise InputBindingContractError(
+                f"source_ref field_path '{'.'.join(field_path)}' for "
+                f"'{source_step_ref}' crosses an object without properties."
+            )
+        next_schema = properties.get(segment)
+        if not isinstance(next_schema, Mapping):
+            raise InputBindingContractError(
+                f"source_ref field_path '{'.'.join(field_path)}' is absent from "
+                f"'{source_step_ref}' output contract."
+            )
+        current = cast(Mapping[str, Any], next_schema)
+    return current
+
+
+def _insert_projected_schema(
+    *,
+    projected: dict[str, Any],
+    field_path: tuple[str, ...],
+    selected_schema: Mapping[str, Any],
+    source_step_ref: str,
+    projection_containers: set[tuple[str, ...]],
+) -> None:
+    current = projected
+    traversed: tuple[str, ...] = ()
+    for segment in field_path[:-1]:
+        traversed = (*traversed, segment)
+        properties = cast(dict[str, Any], current["properties"])
+        existing = properties.get(segment)
+        if existing is None:
+            existing = {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            }
+            properties[segment] = existing
+            projection_containers.add(traversed)
+        elif traversed not in projection_containers:
+            raise InputBindingContractError(
+                f"source_ref path collision at '{'.'.join(traversed)}' while "
+                f"projecting '{source_step_ref}'."
+            )
+        current_required = cast(list[str], current.setdefault("required", []))
+        if segment not in current_required:
+            current_required.append(segment)
+        current = cast(dict[str, Any], existing)
+
+    leaf = field_path[-1]
+    properties = cast(dict[str, Any], current["properties"])
+    if leaf in properties:
+        raise InputBindingContractError(
+            f"source_ref path collision at '{'.'.join(field_path)}' while "
+            f"projecting '{source_step_ref}'."
+        )
+    properties[leaf] = deepcopy(dict(selected_schema))
+    current_required = cast(list[str], current.setdefault("required", []))
+    if leaf not in current_required:
+        current_required.append(leaf)
 
 
 def source_ref_bindings(input_bindings: object) -> tuple[SourceRefBinding, ...]:
@@ -315,6 +448,10 @@ def _field_path(value: object, *, index: int) -> tuple[str, ...]:
     if any(not part for part in parts):
         raise InputBindingContractError(
             f"input_bindings.source_refs[{index}].field_path contains an empty segment."
+        )
+    if "{{" in value or "}}" in value:
+        raise InputBindingContractError(
+            f"input_bindings.source_refs[{index}].field_path must not contain templates."
         )
     return parts
 
