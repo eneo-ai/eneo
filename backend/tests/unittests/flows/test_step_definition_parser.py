@@ -459,33 +459,111 @@ def test_parse_runtime_steps_allows_typed_source_refs_without_input_contract() -
     assert parsed[1].input_contract is None
 
 
-def test_parse_runtime_steps_rejects_source_refs_with_input_contract() -> None:
-    with pytest.raises(
-        BadRequestException,
-        match="input_contract cannot validate input_bindings.question",
-    ) as exc_info:
+def test_parse_runtime_steps_accepts_structured_projection_with_input_contract() -> (
+    None
+):
+    parsed = parse_runtime_steps(
+        _definition(
+            _step_snapshot(step_order=1, output_type="json"),
+            _step_snapshot(
+                step_order=2,
+                input_source="previous_step",
+                input_type="json",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "title",
+                        }
+                    ]
+                },
+                input_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                    "additionalProperties": False,
+                },
+            ),
+        )
+    )
+
+    assert parsed[1].input_contract == {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+
+
+def test_parse_runtime_steps_rejects_structured_projection_without_input_contract() -> (
+    None
+):
+    with pytest.raises(BadRequestException) as exc_info:
         parse_runtime_steps(
             _definition(
-                _step_snapshot(
-                    step_order=1,
-                    output_type="json",
-                ),
+                _step_snapshot(step_order=1, output_type="json"),
                 _step_snapshot(
                     step_order=2,
                     input_source="previous_step",
-                    input_type="text",
+                    input_type="json",
                     input_bindings={
-                        "source_refs": [{"step_ref": "step_1", "output": "structured"}]
-                    },
-                    input_contract={
-                        "type": "object",
-                        "properties": {"title": {"type": "string"}},
+                        "source_refs": [
+                            {
+                                "step_ref": "step_1",
+                                "output": "structured",
+                                "field_path": "title",
+                            }
+                        ]
                     },
                 ),
             )
         )
 
     assert exc_info.value.code == "flow_input_contract_inapplicable"
+    assert exc_info.value.context["conflict"] == "input_bindings.source_refs"
+
+
+def test_parse_runtime_steps_rejects_unbounded_whole_object_projection() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(step_order=1, output_type="json"),
+                _step_snapshot(
+                    step_order=2,
+                    input_source="previous_step",
+                    input_type="json",
+                    input_bindings={
+                        "source_refs": [{"step_ref": "step_1", "output": "structured"}]
+                    },
+                    input_contract={"type": "object"},
+                ),
+            )
+        )
+
+    assert exc_info.value.code == "flow_input_binding_unsupported_key"
+    assert exc_info.value.context["key"] == "source_refs"
+
+
+def test_parse_runtime_steps_rejects_text_source_ref_with_input_contract() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(step_order=1),
+                _step_snapshot(
+                    step_order=2,
+                    input_source="previous_step",
+                    input_type="json",
+                    input_bindings={
+                        "source_refs": [{"step_ref": "step_1", "output": "text"}]
+                    },
+                    input_contract={"type": "object"},
+                ),
+            )
+        )
+
+    assert exc_info.value.code == "flow_input_contract_inapplicable"
+    assert exc_info.value.context["conflict"] == "input_bindings.source_refs"
 
 
 def test_parse_runtime_steps_rejects_malformed_source_refs_as_bad_request() -> None:

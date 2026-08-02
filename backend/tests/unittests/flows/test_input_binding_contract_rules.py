@@ -7,8 +7,7 @@ from eneo.flows.input_binding_contract_rules import (
     SourceRefBinding,
     dedupe_source_refs,
     effective_question_binding,
-    field_refs_cover_whole_structured_object,
-    input_contract_conflicts_with_question_binding,
+    input_contract_binding_conflict,
     item_template_field_names,
     lower_source_refs_to_question_binding,
     question_binding,
@@ -48,45 +47,50 @@ def test_effective_question_binding_lowers_authoring_source_refs() -> None:
     )
 
 
-def test_input_contract_conflicts_only_when_question_binding_supplies_input() -> None:
+def test_input_contract_binding_conflict_names_the_binding_owner() -> None:
     contract = {"type": "object"}
 
-    assert input_contract_conflicts_with_question_binding(
-        input_bindings={"question": "{{ step_a.output.structured }}"},
-        input_contract=contract,
+    assert (
+        input_contract_binding_conflict(
+            input_bindings={"question": "{{ step_a.output.structured }}"},
+            input_contract=contract,
+            input_type="json",
+        )
+        == "question"
     )
-    assert not input_contract_conflicts_with_question_binding(
-        input_bindings={"question": "  "},
-        input_contract=contract,
+    assert (
+        input_contract_binding_conflict(
+            input_bindings={"question": "  "},
+            input_contract=contract,
+            input_type="json",
+        )
+        is None
     )
-    assert not input_contract_conflicts_with_question_binding(
-        input_bindings={"question": "{{ step_a.output.structured }}"},
-        input_contract=None,
+    assert (
+        input_contract_binding_conflict(
+            input_bindings={"question": "{{ step_a.output.structured }}"},
+            input_contract=None,
+            input_type="json",
+        )
+        is None
     )
-    assert input_contract_conflicts_with_question_binding(
-        input_bindings={
-            "source_refs": [{"step_ref": "step_a", "output": "structured"}]
-        },
-        input_contract=contract,
+    assert (
+        input_contract_binding_conflict(
+            input_bindings={
+                "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+            },
+            input_contract=contract,
+            input_type="json",
+        )
+        is None
     )
-
-
-def test_field_refs_cover_whole_structured_object_requires_broad_top_level_coverage() -> (
-    None
-):
-    property_names = {"summary", "details", "decision", "metadata.created_at"}
-
-    assert field_refs_cover_whole_structured_object(
-        field_paths={"summary", "details"},
-        property_names=property_names,
-    )
-    assert not field_refs_cover_whole_structured_object(
-        field_paths={"summary"},
-        property_names=property_names,
-    )
-    assert not field_refs_cover_whole_structured_object(
-        field_paths={"metadata.created_at", "unknown"},
-        property_names=property_names,
+    assert (
+        input_contract_binding_conflict(
+            input_bindings={"source_refs": [{"step_ref": "step_a", "output": "text"}]},
+            input_contract=contract,
+            input_type="json",
+        )
+        == "source_refs"
     )
 
 

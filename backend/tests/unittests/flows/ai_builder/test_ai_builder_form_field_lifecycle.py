@@ -492,6 +492,8 @@ def test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each() -> 
     assert [field.name for field in result.spec.form_fields] == ["audience"]
     assert first_question.count("{{ flow_input.audience }}") == 1
     assert final_question.count("{{ flow_input.audience }}") == 1
+    assert result.spec.steps[-1].input_type == InputType.TEXT
+    assert result.spec.steps[-1].input_contract is None
     assert validate_spec(result.spec).valid
 
 

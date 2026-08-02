@@ -1043,22 +1043,18 @@ def test_assembly_projects_one_structured_contract_to_each_section_writer() -> N
     compiled = compile_create_intent_to_spec(intent)
 
     expected_source_refs = [
-        [{"step_ref": "step_a", "output": "structured"}],
-        [
-            {"step_ref": "step_b", "output": "text"},
-            {"step_ref": "step_a", "output": "structured"},
-        ],
-        [
-            {"step_ref": "step_c", "output": "text"},
-            {"step_ref": "step_a", "output": "structured"},
-        ],
+        {
+            "step_ref": "step_a",
+            "output": "structured",
+            "field_path": field_name,
+            "label": field_name,
+        }
+        for field_name in ("background", "findings", "recommendations")
     ]
     assert len(compiled.steps) == 4
-    for writer, source_refs in zip(
-        compiled.steps[1:], expected_source_refs, strict=True
-    ):
+    for writer in compiled.steps[1:]:
         assert writer.input_source == InputSource.PREVIOUS_STEP
-        assert writer.input_bindings == {"source_refs": source_refs}
+        assert writer.input_bindings == {"source_refs": expected_source_refs}
     assert all(
         step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
     )
@@ -1333,7 +1329,30 @@ def test_compiler_preserves_result_contract_fields_on_analysis_step() -> None:
                 "field_path": "requirements",
                 "label": "requirements",
             },
-            {"step_ref": "step_b", "output": "structured"},
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "comparison_results",
+                "label": "comparison results",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "missing_information",
+                "label": "missing information",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "uncertainty",
+                "label": "uncertainty",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "recommended_action",
+                "label": "recommended action",
+            },
         ]
     }
     assert validate_spec(compiled).valid
@@ -1425,6 +1444,8 @@ def test_compiler_uses_server_runtime_hints_as_form_field_owner() -> None:
     comparison_step = next(
         step for step in compiled.steps if step.name == "Jämför krav"
     )
+    assert comparison_step.input_type == InputType.TEXT
+    assert comparison_step.input_contract is None
     comparison_question = _question(comparison_step.input_bindings)
     assert "checklista: {{ flow_input.checklista }}" in comparison_question
     assert "regel: {{ flow_input.regel }}" in comparison_question
@@ -2111,9 +2132,24 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
     assert validate_spec(compiled).valid
 
 
-def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underlag() -> (
-    None
-):
+@pytest.mark.parametrize(
+    ("ui_language", "actual_input_prefix"),
+    [
+        (
+            "sv",
+            "Faktiskt underlag: Det här steget får den fullständiga "
+            "texttranskriberingen",
+        ),
+        (
+            "en",
+            "Actual input: This step receives the complete text transcript",
+        ),
+    ],
+)
+def test_compiler_describes_transcript_input_and_avoids_raw_audio_report_fan_in(
+    ui_language: str,
+    actual_input_prefix: str,
+) -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Meeting report",
@@ -2160,6 +2196,7 @@ def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underl
                 TERMINAL_ARTIFACT_STEP,
             ),
             runtime_max_files=1,
+            ui_language=ui_language,
         ),
     )
 
@@ -2183,15 +2220,11 @@ def test_compiler_strips_audio_report_semantic_refs_and_uses_whole_object_underl
     assert transcription_step.input_config is not None
     assert transcription_step.input_config["runtime_input"]["input_format"] == "audio"
     assert extract_step.input_source == InputSource.PREVIOUS_STEP
+    assert extract_step.assistant_spec.instructions.startswith(actual_input_prefix)
     assert body_step.input_bindings == {
-        "source_refs": [
-            {"step_ref": "step_b", "output": "structured"},
-            {"step_ref": "step_a", "output": "text", "label": "Källmaterial"},
-        ]
+        "source_refs": [{"step_ref": "step_b", "output": "structured"}]
     }
-    assert _question(body_step.input_bindings) == (
-        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-    )
+    assert _question(body_step.input_bindings) == "{{ step_b.output.structured }}"
     assert body_step.input_contract is None
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert renderer_step.input_bindings is None
@@ -2249,6 +2282,7 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
                 {
                     "name": "Analysera transkriptionen",
                     "instructions": "Identifiera de viktigaste sakuppgifterna.",
+                    "uses_form_fields": ["arendenummer", "handlaggare"],
                     "output_type": "json",
                     "output_fields": [
                         {
@@ -2283,13 +2317,24 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
     assert transcription_step.output_mode == OutputMode.TRANSCRIBE_ONLY
     assert transcription_step.input_type == InputType.AUDIO
     assert analysis_step.output_type == OutputType.JSON
+    assert analysis_step.input_type == InputType.TEXT
+    assert analysis_step.input_bindings == {
+        "question": (
+            "arendenummer: {{ flow_input.arendenummer }}\n"
+            "handlaggare: {{ flow_input.handlaggare }}"
+        ),
+        "source_refs": [{"step_ref": "step_a", "output": "text"}],
+    }
+    assert analysis_step.assistant_spec.instructions.startswith(
+        "Faktiskt underlag: Det här steget får den fullständiga texttranskriberingen"
+    )
     assert analysis_step.review_policy is not None
     assert analysis_step.review_policy.mode.value == "edit"
     assert report_step.review_policy is None
     report_question = _question(report_step.input_bindings)
     assert "arendenummer: {{ flow_input.arendenummer }}" in report_question
     assert "handlaggare: {{ flow_input.handlaggare }}" in report_question
-    for step in (transcription_step, analysis_step, renderer_step):
+    for step in (transcription_step, renderer_step):
         assert "flow_input.arendenummer" not in repr(step.input_bindings)
         assert "flow_input.handlaggare" not in repr(step.input_bindings)
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
@@ -3333,9 +3378,15 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
         OutputMode.COMPOSE_TEXT,
         OutputMode.RENDER_VERBATIM,
     ]
-    assert "case_id: {{ flow_input.case_id }}" in _question(
-        compiled.steps[1].input_bindings
+    section_writer_step = compiled.steps[1]
+    assert section_writer_step.input_bindings is None
+    assert section_writer_step.input_type == InputType.JSON
+    assert section_writer_step.input_contract == compiled.steps[0].output_contract
+    assert "case_id: {{ flow_input.case_id }}" in (
+        section_writer_step.assistant_spec.instructions
     )
+    assert section_writer_step.input_config is not None
+    assert section_writer_step.input_config["item_map"]["enabled"] is True
     body_writer_step = compiled.steps[-2]
     assert body_writer_step.input_bindings == {
         "question": "# {{ step_c.output.structured.report_title }}",
@@ -3356,7 +3407,8 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
             },
         ],
     }
-    assert validate_spec(compiled).valid
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
 
 
 def test_report_disposition_both_inserts_missing_source_section_map() -> None:

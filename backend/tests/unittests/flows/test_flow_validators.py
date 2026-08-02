@@ -988,6 +988,215 @@ def test_validate_steps_allows_question_binding_without_input_contract():
     )
 
 
+def test_validate_steps_accepts_structured_source_refs_with_projection_contract():
+    validate_steps(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                    "additionalProperties": False,
+                },
+            ),
+            _step(
+                2,
+                input_type="json",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "title",
+                        }
+                    ]
+                },
+                input_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                    "additionalProperties": False,
+                },
+            ),
+        ]
+    )
+
+
+def test_validate_steps_rejects_structured_source_refs_without_input_contract():
+    producer_contract = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+
+    exc = _assert_validate_steps_rejects(
+        [
+            _step(1, output_type="json", output_contract=producer_contract),
+            _step(
+                2,
+                input_type="json",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "title",
+                        }
+                    ]
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="structured JSON source_refs require input_contract",
+        code="flow_input_contract_inapplicable",
+        step_order=2,
+    )
+
+    assert exc.context["conflict"] == "input_bindings.source_refs"
+
+
+def test_validate_steps_rejects_structured_projection_without_producer_contract():
+    _assert_validate_steps_rejects(
+        [
+            _step(1, output_type="json"),
+            _step(
+                2,
+                input_type="json",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "title",
+                        }
+                    ]
+                },
+                input_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                    "additionalProperties": False,
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="requires a producer output_contract",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+    )
+
+
+def test_validate_steps_rejects_structured_projection_unknown_field_path():
+    _assert_validate_steps_rejects(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                },
+            ),
+            _step(
+                2,
+                input_type="json",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "missing",
+                        }
+                    ]
+                },
+                input_contract={"type": "object"},
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="field_path 'missing' is absent",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+    )
+
+
+def test_validate_steps_rejects_structured_projection_path_collision():
+    producer_contract = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+    }
+
+    _assert_validate_steps_rejects(
+        [
+            _step(1, output_type="json", output_contract=producer_contract),
+            _step(2, output_type="json", output_contract=producer_contract),
+            _step(
+                3,
+                input_type="json",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "title",
+                        },
+                        {
+                            "step_ref": "step_2",
+                            "output": "structured",
+                            "field_path": "title",
+                        },
+                    ]
+                },
+                input_contract={"type": "object"},
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="source_ref path collision at 'title'",
+        code="flow_input_binding_unsupported_key",
+        step_order=3,
+    )
+
+
+def test_validate_steps_rejects_mismatched_structured_projection_contract():
+    _assert_validate_steps_rejects(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                },
+            ),
+            _step(
+                2,
+                input_type="json",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "title",
+                        }
+                    ]
+                },
+                input_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "number"}},
+                    "required": ["title"],
+                    "additionalProperties": False,
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="input_contract does not match the exact structured source_ref projection",
+        code="flow_input_contract_inapplicable",
+        step_order=2,
+    )
+
+
 def _source_sections_contract() -> dict[str, object]:
     return {
         "type": "object",

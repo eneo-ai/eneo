@@ -10,18 +10,11 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
-    derive_new_step_output_mode,
     make_plan_step_ref,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
-)
-from eneo.flows.ai_builder.ai_builder_source_material import (
-    SourceMaterialBindingStatus,
-    iter_compiled_source_material_boundaries,
-    source_material_binding_status,
-    source_material_bindings_for_boundary,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     apply_terminal_output_schema,
@@ -30,8 +23,6 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
 from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
-    FormFieldSpec,
-    InputType,
     OutputMode,
     StepSpec,
 )
@@ -79,8 +70,6 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
     for index, (planned_step, step_draft) in enumerate(
         zip(plan.steps, step_drafts, strict=True)
     ):
-        if planned_step.output_mode != derive_new_step_output_mode(step_draft):
-            raise ValueError("Planned step output_mode diverged during lowering.")
         compiled_step = compile_new_step_draft(
             step_draft=step_draft,
             plan_step_ref=make_plan_step_ref(index),
@@ -95,6 +84,8 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
             ),
             ui_language=plan.ui_language,
         )
+        if planned_step.output_mode != compiled_step.output_mode:
+            raise ValueError("Planned step output_mode diverged during lowering.")
         if planned_step.output_mode == OutputMode.COMPOSE_TEXT:
             compiled_step = _with_compose_source_refs(
                 step=compiled_step,
@@ -106,13 +97,6 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
     compiled_steps = apply_terminal_output_schema(
         compiled_steps,
         terminal_output_schema=plan.terminal_output_schema,
-    )
-    compiled_steps = _complete_source_material_boundaries(
-        flow_name=flow_name,
-        flow_description=plan.flow_description,
-        steps=compiled_steps,
-        form_fields=form_fields,
-        ui_language=plan.ui_language,
     )
     document_body_writer_step_refs = tuple(
         compiled_step.plan_step_ref
@@ -126,42 +110,6 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
         form_fields=form_fields or None,
         document_body_writer_step_refs=document_body_writer_step_refs or None,
     )
-
-
-def _complete_source_material_boundaries(
-    *,
-    flow_name: str,
-    flow_description: str,
-    steps: list[StepSpec],
-    form_fields: list[FormFieldSpec],
-    ui_language: str | None,
-) -> list[StepSpec]:
-    spec = FlowDraftSpecCore(
-        flow_name=flow_name,
-        flow_description=flow_description,
-        steps=steps,
-        form_fields=form_fields or None,
-    )
-    updated_steps = list(steps)
-    mutated = False
-    for boundary in iter_compiled_source_material_boundaries(spec):
-        if (
-            source_material_binding_status(boundary)
-            is not SourceMaterialBindingStatus.NEEDS_COMPLETION
-        ):
-            continue
-        updated_steps[boundary.step_order - 1] = boundary.step.model_copy(
-            update={
-                "input_type": InputType.TEXT,
-                "input_bindings": source_material_bindings_for_boundary(
-                    boundary,
-                    ui_language=ui_language,
-                ),
-                "input_contract": None,
-            }
-        )
-        mutated = True
-    return updated_steps if mutated else steps
 
 
 def _with_compose_source_refs(

@@ -60,8 +60,10 @@ from eneo.flows.flow_validators_template import (
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     InputBindingContractError,
+    derive_structured_projection_contract,
     effective_question_binding,
-    input_contract_conflicts_with_question_binding,
+    input_contract_binding_conflict,
+    is_structured_projection_binding,
     item_template_field_names,
     question_binding,
     source_ref_bindings,
@@ -439,7 +441,7 @@ def collect_step_graph_issues(
             _capture_flow_step_validation(
                 issues,
                 FlowGraphIssueCode.FLOW_STEP_INVALID,
-                lambda: _validate_compose_source_ref_contracts(
+                lambda: _validate_source_ref_contracts(
                     step=step,
                     steps_by_order=steps_by_order,
                     step_ref_mapping=(
@@ -758,11 +760,25 @@ def _validate_input_contract_source_compatibility(
 def _validate_input_contract_binding_compatibility(
     *, step: FlowStepValidationView
 ) -> None:
-    if not input_contract_conflicts_with_question_binding(
+    conflict = input_contract_binding_conflict(
         input_bindings=step.input_bindings,
         input_contract=step.input_contract,
-    ):
+        input_type=step.input_type,
+    )
+    if conflict is None:
         return
+    if conflict == "source_refs":
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: input_contract requires structured JSON "
+            "input_bindings.source_refs without question, text refs, or item templates.",
+            code=FlowGraphIssueCode.FLOW_INPUT_CONTRACT_INAPPLICABLE.value,
+            context={
+                "step_order": step.step_order,
+                "field": "input_contract",
+                "conflict": "input_bindings.source_refs",
+            },
+            step_order=step.step_order,
+        )
     raise FlowStepValidationError(
         f"Step {step.step_order}: input_contract cannot validate "
         "input_bindings.question because the question binding supplies the "
@@ -1097,7 +1113,7 @@ def _validate_binding_references(
             )
 
 
-def _validate_compose_source_ref_contracts(
+def _validate_source_ref_contracts(
     *,
     step: FlowStepValidationView,
     steps_by_order: dict[int, FlowStepValidationView],
@@ -1113,6 +1129,64 @@ def _validate_compose_source_ref_contracts(
             step_order=step.step_order,
         ) from exc
     if not source_refs:
+        return
+
+    if is_structured_projection_binding(
+        input_bindings=step.input_bindings,
+        input_type=step.input_type,
+    ):
+        if step.input_contract is None:
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: structured JSON source_refs require "
+                "input_contract.",
+                code=FlowGraphIssueCode.FLOW_INPUT_CONTRACT_INAPPLICABLE.value,
+                context={
+                    "step_order": step.step_order,
+                    "field": "input_contract",
+                    "conflict": "input_bindings.source_refs",
+                },
+                step_order=step.step_order,
+            )
+        source_contracts_by_step_ref: dict[str, FlowPersistedJsonObject] = {}
+        for ref in source_refs:
+            referenced_step = _referenced_step_for_source_ref(
+                ref_step=ref.step_ref,
+                steps_by_order=steps_by_order,
+                step_ref_mapping=step_ref_mapping,
+            )
+            if referenced_step is None or referenced_step.output_contract is None:
+                raise FlowStepValidationError(
+                    f"Step {step.step_order}: structured JSON source_ref "
+                    f"'{ref.step_ref}' requires a producer output_contract.",
+                    code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                    context={"field": "input_bindings", "key": "source_refs"},
+                    step_order=step.step_order,
+                )
+            source_contracts_by_step_ref[ref.step_ref] = referenced_step.output_contract
+        try:
+            projected_contract = derive_structured_projection_contract(
+                input_bindings=step.input_bindings,
+                source_contracts_by_step_ref=source_contracts_by_step_ref,
+            )
+        except InputBindingContractError as exc:
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: {exc}",
+                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                context={"field": "input_bindings", "key": "source_refs"},
+                step_order=step.step_order,
+            ) from exc
+        if projected_contract != step.input_contract:
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: input_contract does not match the exact "
+                "structured source_ref projection.",
+                code=FlowGraphIssueCode.FLOW_INPUT_CONTRACT_INAPPLICABLE.value,
+                context={
+                    "step_order": step.step_order,
+                    "field": "input_contract",
+                    "conflict": "input_bindings.source_refs",
+                },
+                step_order=step.step_order,
+            )
         return
 
     if step.output_mode != "compose_text":

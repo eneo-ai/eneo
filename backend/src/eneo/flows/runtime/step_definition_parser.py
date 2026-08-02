@@ -27,7 +27,9 @@ from eneo.flows.flow_review_policy import parse_flow_step_review_policy
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     InputBindingContractError,
-    input_contract_conflicts_with_question_binding,
+    input_contract_binding_conflict,
+    is_structured_projection_binding,
+    source_ref_bindings,
     unsupported_input_binding_key,
     validate_source_refs_binding,
 )
@@ -351,11 +353,44 @@ def _parse_input_fields(item: Mapping[str, object]) -> _StepInputFields:
 def _validate_input_contract_binding_compatibility(
     input_fields: _StepInputFields,
 ) -> None:
-    if not input_contract_conflicts_with_question_binding(
+    is_structured_projection = is_structured_projection_binding(
+        input_bindings=input_fields.input_bindings,
+        input_type=input_fields.input_type,
+    )
+    if is_structured_projection and any(
+        not ref.field_path for ref in source_ref_bindings(input_fields.input_bindings)
+    ):
+        raise BadRequestException(
+            "Structured JSON input_bindings.source_refs must select explicit field_path values.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": "source_refs"},
+        )
+    if is_structured_projection and input_fields.input_contract is None:
+        raise BadRequestException(
+            "Structured JSON input_bindings.source_refs require input_contract.",
+            code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+            context={
+                "field": "input_contract",
+                "conflict": "input_bindings.source_refs",
+            },
+        )
+    conflict = input_contract_binding_conflict(
         input_bindings=input_fields.input_bindings,
         input_contract=input_fields.input_contract,
-    ):
+        input_type=input_fields.input_type,
+    )
+    if conflict is None:
         return
+    if conflict == "source_refs":
+        raise BadRequestException(
+            "input_contract requires structured JSON input_bindings.source_refs "
+            "without question, text refs, or item templates.",
+            code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+            context={
+                "field": "input_contract",
+                "conflict": "input_bindings.source_refs",
+            },
+        )
     raise BadRequestException(
         "input_contract cannot validate input_bindings.question because the "
         "question binding supplies the complete rendered step input. Remove "
