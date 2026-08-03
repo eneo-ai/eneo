@@ -65,7 +65,6 @@ def _sample_response(input_tokens: int = 42, file_tokens: int = 7) -> PreflightR
     )
 
 
-@pytest.mark.asyncio
 async def test_preflight_router_returns_service_result():
     """Router calls scope validation, then service, and returns the response."""
     expected = _sample_response()
@@ -103,7 +102,6 @@ async def test_preflight_router_returns_service_result():
     )
 
 
-@pytest.mark.asyncio
 async def test_preflight_router_propagates_session_id():
     """When given session_id the router forwards it to the service."""
     container, service = _make_container(preflight_result=_sample_response())
@@ -133,7 +131,6 @@ async def test_preflight_router_propagates_session_id():
     assert call_kwargs["group_chat_id"] is None
 
 
-@pytest.mark.asyncio
 async def test_preflight_router_forwards_tool_assistant_id():
     """Mention targets are forwarded so group-chat preflight can use the same model."""
     container, service = _make_container(preflight_result=_sample_response())
@@ -164,7 +161,6 @@ async def test_preflight_router_forwards_tool_assistant_id():
     assert service.preflight_tokens.call_args.kwargs["tool_assistant_id"] == target_id
 
 
-@pytest.mark.asyncio
 async def test_preflight_router_raises_429_on_rate_limit():
     """A breached rate limit surfaces as 429 with a Retry-After header."""
     container, service = _make_container(preflight_result=_sample_response())
@@ -203,7 +199,6 @@ async def test_preflight_router_raises_429_on_rate_limit():
     service.preflight_tokens.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_preflight_router_falls_open_when_limiter_unavailable():
     """If Redis is down the request still proceeds — preflight is non-critical."""
     container, service = _make_container(preflight_result=_sample_response())
@@ -231,7 +226,6 @@ async def test_preflight_router_falls_open_when_limiter_unavailable():
     service.preflight_tokens.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_preflight_router_propagates_scope_403():
     """When scope validation rejects the request, the 403 propagates."""
     container, service = _make_container(preflight_result=_sample_response())

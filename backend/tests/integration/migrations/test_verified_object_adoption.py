@@ -14,7 +14,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"

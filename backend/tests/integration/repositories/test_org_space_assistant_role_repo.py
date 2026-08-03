@@ -85,8 +85,6 @@ async def _insert_assistant(
     return assistant_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_add_then_get_by_id_round_trips_all_fields(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -129,16 +127,12 @@ async def test_add_then_get_by_id_round_trips_all_fields(db_container, admin_use
         assert fetched.is_visible_to_users is False
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_none_when_missing(db_container, admin_user):
     async with db_container() as container:
         repo = container.org_space_assistant_role_repo()
         assert await repo.get_by_id(uuid4()) is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_org_space_and_kind_returns_assignment(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -168,8 +162,6 @@ async def test_get_by_org_space_and_kind_returns_assignment(db_container, admin_
         assert fetched.assistant_id == assistant_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_org_space_and_kind_returns_none_when_missing(
     db_container, admin_user
 ):
@@ -187,8 +179,6 @@ async def test_get_by_org_space_and_kind_returns_none_when_missing(
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_for_org_space_returns_only_that_spaces_rows(
     db_container, admin_user
 ):
@@ -232,8 +222,6 @@ async def test_list_for_org_space_returns_only_that_spaces_rows(
         assert rows_for_a[0].assistant_id == assistant_a
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_update_persists_field_changes(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -279,8 +267,6 @@ async def test_update_persists_field_changes(db_container, admin_user):
         assert fetched.is_visible_to_users is False
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_removes_assignment(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -311,8 +297,6 @@ async def test_delete_removes_assignment(db_container, admin_user):
         assert remaining.scalar_one_or_none() is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_exists_active_for_assistant_true_when_assigned_false_after_delete(
     db_container, admin_user
 ):
@@ -350,8 +334,6 @@ async def test_exists_active_for_assistant_true_when_assigned_false_after_delete
         assert await repo.exists_active_for_assistant(helper_assistant_id) is False
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_duplicate_kind_for_org_space_raises_integrity_error(
     db_container, admin_user
 ):

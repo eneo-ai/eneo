@@ -168,7 +168,6 @@ class TestRecoverSession:
     We must patch at the source module: eneo.database.database.sessionmanager
     """
 
-    @pytest.mark.asyncio
     async def test_creates_new_session_from_sessionmanager(self):
         """Should create a fresh session via sessionmanager.create_session()."""
         from eneo.worker.crawl.recovery import recover_session
@@ -216,7 +215,6 @@ class TestRecoverSession:
         # Verify transaction was started
         new_session.begin.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_cleans_up_old_session_with_timeout(self):
         """Should clean up old session with rollback and close timeouts."""
         from eneo.worker.crawl.recovery import recover_session
@@ -255,7 +253,6 @@ class TestRecoverSession:
         old_session.rollback.assert_called_once()
         old_session.close.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_handles_none_old_session(self):
         """Should handle None old_session gracefully."""
         from eneo.worker.crawl.recovery import recover_session
@@ -298,7 +295,6 @@ class TestExecuteWithRecovery:
     Operations must accept a `session` parameter.
     """
 
-    @pytest.mark.asyncio
     async def test_successful_operation_returns_result(self):
         """Should return result when operation succeeds."""
         from eneo.worker.crawl.recovery import execute_with_recovery
@@ -335,7 +331,6 @@ class TestExecuteWithRecovery:
         mock_session.commit.assert_called_once()
         mock_session.close.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_non_transaction_error_is_reraised(self):
         """Should re-raise non-transaction errors without recovery."""
         from eneo.worker.crawl.recovery import execute_with_recovery
@@ -369,7 +364,6 @@ class TestExecuteWithRecovery:
         # Verify rollback was called on error
         mock_session.rollback.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_transaction_error_triggers_recovery(self):
         """Should trigger recovery on transaction error and retry."""
         from eneo.worker.crawl.recovery import execute_with_recovery
@@ -426,7 +420,6 @@ class TestExecuteWithRecovery:
 class TestResetTenantRetryDelay:
     """Tests for reset_tenant_retry_delay function."""
 
-    @pytest.mark.asyncio
     async def test_returns_none_when_redis_is_none(self):
         """Should return None when Redis client is None."""
         from eneo.worker.crawl.recovery import reset_tenant_retry_delay
@@ -435,7 +428,6 @@ class TestResetTenantRetryDelay:
         result = await reset_tenant_retry_delay(tenant_id=uuid4(), redis_client=None)
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_deletes_backoff_key(self):
         """Should delete the tenant backoff key."""
         from eneo.worker.crawl.recovery import reset_tenant_retry_delay
@@ -450,7 +442,6 @@ class TestResetTenantRetryDelay:
         expected_key = f"tenant:{tenant_id}:limiter_backoff"
         mock_redis.delete.assert_called_once_with(expected_key)
 
-    @pytest.mark.asyncio
     async def test_swallows_redis_exceptions(self):
         """Should swallow Redis exceptions (best-effort cleanup)."""
         from eneo.worker.crawl.recovery import reset_tenant_retry_delay

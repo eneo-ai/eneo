@@ -1,6 +1,5 @@
 import asyncio
 
-import pytest
 from dependency_injector import providers
 from sqlalchemy import delete, insert
 
@@ -38,8 +37,6 @@ async def _seed_policy() -> None:
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_policy_put_returns_the_committed_projection(
     client,
     db_container,
@@ -78,8 +75,6 @@ async def test_policy_put_returns_the_committed_projection(
     assert policy["updated_by_actor"] == "platform_admin"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_policy_compare_and_swap_has_one_winner_and_atomic_read(
     admin_user,
 ) -> None:
@@ -128,8 +123,6 @@ async def test_policy_compare_and_swap_has_one_winner_and_atomic_read(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
     await _seed_policy()
     async with db_container():
@@ -170,8 +163,6 @@ async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_global_inventory_requires_platform_admin_authority(
     client,
     db_container,
@@ -215,8 +206,6 @@ async def test_global_inventory_requires_platform_admin_authority(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_policy_routes_enforce_api_key_auth_asymmetry(
     client,
     admin_user_api_key,
@@ -263,8 +252,6 @@ async def test_policy_routes_enforce_api_key_auth_asymmetry(
         assert "session token" in response.text.lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_independent_api_and_worker_containers_observe_committed_revision(
     admin_user,
     db_container,

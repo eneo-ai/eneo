@@ -21,7 +21,6 @@ NOTE: This uses Redis's eval() method for Lua scripts - NOT Python's eval().
 Redis eval is the standard way to run atomic Lua scripts on Redis server.
 """
 
-import pytest
 from uuid import uuid4
 
 
@@ -156,7 +155,6 @@ class TestLuaAcquireScript:
         "return current\n"
     )
 
-    @pytest.mark.asyncio
     async def test_fixed_script_does_not_refresh_ttl_on_failure(self):
         """CRITICAL: Verify fixed script does NOT refresh TTL when at capacity.
 
@@ -197,7 +195,6 @@ class TestLuaAcquireScript:
             "Fixed script should NOT call EXPIRE on failure"
         )
 
-    @pytest.mark.asyncio
     async def test_fixed_script_refreshes_ttl_on_success(self):
         """Verify fixed script DOES refresh TTL on successful acquisition."""
         redis = FakeRedis()
@@ -216,7 +213,6 @@ class TestLuaAcquireScript:
         assert key in redis._ttl, "TTL should be set on success"
         assert redis._ttl[key] == ttl, "TTL should match provided value"
 
-    @pytest.mark.asyncio
     async def test_script_structure_has_ttl_refresh_only_on_success_path(self):
         """Verify the script structure places EXPIRE only after success confirmation."""
         script = self.FIXED_ACQUIRE_LUA
@@ -255,7 +251,6 @@ class TestLuaAcquireScript:
 class TestLuaScriptConsistency:
     """Test that centralized Lua scripts are properly structured."""
 
-    @pytest.mark.asyncio
     async def test_centralized_scripts_exist(self):
         """Verify LuaScripts contains all required centralized scripts."""
         from eneo.worker.redis.lua_scripts import LuaScripts
@@ -280,7 +275,6 @@ class TestLuaScriptConsistency:
             and len(LuaScripts.RELEASE_SLOT) > 0
         )
 
-    @pytest.mark.asyncio
     async def test_acquire_script_has_ttl_fix(self):
         """Verify centralized acquire script has the TTL fix (only refresh on success)."""
         from eneo.worker.redis.lua_scripts import LuaScripts
@@ -332,7 +326,6 @@ class TestLuaReleaseScript:
         "return current\n"
     )
 
-    @pytest.mark.asyncio
     async def test_release_cleans_up_at_zero(self):
         """Verify release DELetes key when counter reaches zero."""
         redis = FakeRedis()
@@ -348,7 +341,6 @@ class TestLuaReleaseScript:
         assert result == 0, "Release should return 0 at zero"
         assert key not in redis._store, "Key should be deleted at zero"
 
-    @pytest.mark.asyncio
     async def test_release_safe_on_missing_key(self):
         """Verify release is safe when key doesn't exist."""
         redis = FakeRedis()

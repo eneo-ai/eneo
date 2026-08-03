@@ -22,7 +22,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 
 # Revision that unify_roles depends on, where predefined_roles and

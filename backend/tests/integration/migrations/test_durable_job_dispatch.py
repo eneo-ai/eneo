@@ -17,7 +17,7 @@ from alembic import command
 from alembic.config import Config
 from eneo.jobs.durable_dispatch import stale_dispatch_statement
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _PREVIOUS_REVISION = "202607281340"
 _INDEX = "ix_jobs_durable_dispatch"

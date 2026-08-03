@@ -211,7 +211,6 @@ def _build_service(
     }
 
 
-@pytest.mark.asyncio
 async def test_continue_turn_reuses_session_and_persists_question():
     user = _make_user()
     assistant_id = uuid4()
@@ -297,7 +296,6 @@ async def test_continue_turn_reuses_session_and_persists_question():
     assert result.answer == "Follow-up answer."
 
 
-@pytest.mark.asyncio
 async def test_streaming_persists_adapter_cumulative_input_estimate():
     user = _make_user()
     helper_assistant = _mock_helper_assistant(assistant_id=uuid4())
@@ -335,7 +333,6 @@ async def test_streaming_persists_adapter_cumulative_input_estimate():
     assert persisted.num_tokens_question == 57
 
 
-@pytest.mark.asyncio
 async def test_continue_turn_rejects_different_user():
     actor = _make_user()
     other_user = _make_user()
@@ -356,7 +353,6 @@ async def test_continue_turn_rejects_different_user():
     mocks["completion_service"].get_response.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_continue_turn_rejects_missing_run():
     user = _make_user()
     helper_run_repo = AsyncMock()
@@ -370,7 +366,6 @@ async def test_continue_turn_rejects_missing_run():
     mocks["role_service"].get_active.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "role_state",
     [
@@ -416,7 +411,6 @@ async def test_continue_turn_rejects_when_role_changed_mid_conversation(
     mocks["completion_service"].get_response.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_set_status_only_allows_transitions_from_in_progress():
     user = _make_user()
     run = _make_run(actor_user_id=user.id, status=HelperRunStatus.COMPLETED)
@@ -432,7 +426,6 @@ async def test_set_status_only_allows_transitions_from_in_progress():
     helper_run_repo.update_status.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_set_status_rejects_in_progress_target():
     user = _make_user()
     run = _make_run(actor_user_id=user.id)
@@ -448,7 +441,6 @@ async def test_set_status_rejects_in_progress_target():
     helper_run_repo.update_status.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_set_status_rejects_different_user():
     actor = _make_user()
     other_user = _make_user()
@@ -465,7 +457,6 @@ async def test_set_status_rejects_different_user():
     helper_run_repo.update_status.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_set_status_completed_fills_completed_at():
     user = _make_user()
     run = _make_run(actor_user_id=user.id)
@@ -502,7 +493,6 @@ async def test_set_status_completed_fills_completed_at():
         HelperRunStatus.FAILED,
     ],
 )
-@pytest.mark.asyncio
 async def test_set_status_accepts_all_terminal_statuses(
     terminal_status: HelperRunStatus,
 ):

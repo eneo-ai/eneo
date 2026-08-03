@@ -27,7 +27,7 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.content_repository import ObjectContentRepository
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"

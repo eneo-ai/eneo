@@ -253,8 +253,6 @@ async def _advance_with_statement_count(
     return response, statement_count
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_chunk_advances_apps_while_retained_run_provenance_stays_exact(
     client,
     admin_token,
@@ -344,8 +342,6 @@ async def test_chunk_advances_apps_while_retained_run_provenance_stays_exact(
     assert "instructions" not in str(audit_metadata[0])
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_queued_run_keeps_old_provenance_while_fleet_advance_waits(
     monkeypatch,
     client,
@@ -450,8 +446,6 @@ async def test_queued_run_keeps_old_provenance_while_fleet_advance_waits(
     assert pin == seed.published_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_recovery_audit_uses_the_applied_revision_name(
     client,
     admin_token,
@@ -499,8 +493,6 @@ async def test_recovery_audit_uses_the_applied_revision_name(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_app_fleet_is_admin_only(
     client,
     regular_token,
@@ -537,8 +529,6 @@ async def test_app_fleet_is_admin_only(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_oversized_candidate_keeps_the_app_pin_unchanged(
     client,
     admin_token,
@@ -589,8 +579,6 @@ async def test_oversized_candidate_keeps_the_app_pin_unchanged(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_pending_derived_image_retries_before_context_validation(
     monkeypatch,
     client,
@@ -744,8 +732,6 @@ async def test_pending_derived_image_retries_before_context_validation(
         ("blocked", 9054),
     ],
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_terminal_skill_changes_refuse_the_app_chunk(
     terminal_state,
     expected_code,
@@ -814,8 +800,6 @@ async def test_terminal_skill_changes_refuse_the_app_chunk(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("max_input_tokens", "reviewed_instructions"),
     [
@@ -900,8 +884,6 @@ async def test_concurrent_app_edit_supersedes_the_staged_validation_result(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_editor_first_app_update_and_fleet_apply_do_not_deadlock(
     monkeypatch,
     client,
@@ -970,8 +952,6 @@ async def test_editor_first_app_update_and_fleet_apply_do_not_deadlock(
     }
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_fleet_first_app_apply_and_publish_do_not_deadlock(
     monkeypatch,
     client,
@@ -1055,8 +1035,6 @@ async def test_fleet_first_app_apply_and_publish_do_not_deadlock(
     ("terminal_state", "expected_code"),
     [("unpublished", 9053), ("blocked", 9054)],
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_skill_lifecycle_change_after_validation_aborts_the_app_chunk(
     terminal_state,
     expected_code,
@@ -1129,8 +1107,6 @@ async def test_skill_lifecycle_change_after_validation_aborts_the_app_chunk(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_cursor_advances_more_than_one_app_chunk_with_chunk_bounded_queries(
     client,
     admin_token,

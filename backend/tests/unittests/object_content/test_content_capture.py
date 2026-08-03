@@ -8,7 +8,6 @@ from eneo.object_content import content as content_module
 from eneo.object_content.content import ContentTooLargeError, capture_content
 
 
-@pytest.mark.asyncio
 async def test_capture_content_hashes_exact_stream_and_spools_owner_only() -> None:
     chunks = (b"abc", b"defgh", b"ijkl")
 
@@ -40,7 +39,6 @@ async def test_capture_content_hashes_exact_stream_and_spools_owner_only() -> No
         assert spool_mode == 0o600
 
 
-@pytest.mark.asyncio
 async def test_capture_content_rejects_maximum_plus_one_without_reading_ahead() -> None:
     consumed: list[bytes] = []
 
@@ -64,7 +62,6 @@ async def test_capture_content_rejects_maximum_plus_one_without_reading_ahead() 
     assert consumed == [b"1234", b"5"]
 
 
-@pytest.mark.asyncio
 async def test_capture_offloads_spilled_file_io_from_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -93,7 +90,6 @@ async def test_capture_offloads_spilled_file_io_from_the_event_loop(
     assert {"write", "seek", "close"} <= set(offloaded)
 
 
-@pytest.mark.asyncio
 async def test_empty_capture_has_one_verification_chunk() -> None:
     async def source():
         if False:

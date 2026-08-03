@@ -14,24 +14,22 @@ These tests verify end-to-end that:
 from datetime import datetime
 
 import pytest
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 
 from eneo.completion_models.infrastructure.model_cleanup_worker import (
     cleanup_orphaned_models,
 )
-from eneo.database.tables.app_template_table import AppTemplates
 from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.app_template_table import AppTemplates
+from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.completion_model_migration_history_table import (
     CompletionModelMigrationHistory,
 )
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
-from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.main.exceptions import ValidationException
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestQuestionsNotMigrated:
     """Core invariant: questions must keep their original completion_model_id."""
 
@@ -49,8 +47,12 @@ class TestQuestionsNotMigrated:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
             # Create an assistant and a session for the question
             assistant = await assistant_factory(session, "Test Assistant", old_model.id)
@@ -100,8 +102,6 @@ class TestQuestionsNotMigrated:
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestSourceModelMarkedAsMigrated:
     """After migration, the source model must have migrated_to_model_id set."""
 
@@ -115,8 +115,12 @@ class TestSourceModelMarkedAsMigrated:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-4", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
 
             await assistant_factory(session, "Test Assistant", old_model.id)
 
@@ -145,9 +149,15 @@ class TestSourceModelMarkedAsMigrated:
         async with db_container() as container:
             session = container.session()
 
-            model_a = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            model_b = await completion_model_factory(session, "gpt-4", provider="openai")
-            model_c = await completion_model_factory(session, "gpt-4o", provider="openai")
+            model_a = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            model_b = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
+            model_c = await completion_model_factory(
+                session, "gpt-4o", provider="openai"
+            )
 
             # Migrate A → B
             migration_service = container.completion_model_migration_service()
@@ -180,9 +190,15 @@ class TestSourceModelMarkedAsMigrated:
         async with db_container() as container:
             session = container.session()
 
-            model_a = await completion_model_factory(session, "gpt-3.5-turbo", provider="openai")
-            model_b = await completion_model_factory(session, "gpt-4", provider="openai")
-            model_c = await completion_model_factory(session, "gpt-4o", provider="openai")
+            model_a = await completion_model_factory(
+                session, "gpt-3.5-turbo", provider="openai"
+            )
+            model_b = await completion_model_factory(
+                session, "gpt-4", provider="openai"
+            )
+            model_c = await completion_model_factory(
+                session, "gpt-4o", provider="openai"
+            )
 
             # Migrate A → B
             migration_service = container.completion_model_migration_service()
@@ -202,8 +218,6 @@ class TestSourceModelMarkedAsMigrated:
             assert "already been migrated" in str(exc_info.value)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestSoftDelete:
     """Soft-deleted models are hidden from listings but preserved in DB."""
 
@@ -216,11 +230,14 @@ class TestSoftDelete:
         async with db_container() as container:
             session = container.session()
 
-            model = await completion_model_factory(session, "gpt-to-delete", provider="openai")
+            model = await completion_model_factory(
+                session, "gpt-to-delete", provider="openai"
+            )
             model_id = model.id
 
             # Soft-delete
             from datetime import datetime
+
             model.deleted_at = datetime.utcnow()
             await session.flush()
 
@@ -237,8 +254,6 @@ class TestSoftDelete:
             assert db_model.deleted_at is not None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestRestrictForeignKey:
     """RESTRICT FK prevents hard-delete of models referenced by questions."""
 
@@ -256,7 +271,9 @@ class TestRestrictForeignKey:
         async with db_container() as container:
             session = container.session()
 
-            model = await completion_model_factory(session, "gpt-referenced", provider="openai")
+            model = await completion_model_factory(
+                session, "gpt-referenced", provider="openai"
+            )
             assistant = await assistant_factory(session, "Test", model.id)
 
             test_session = Sessions(
@@ -290,8 +307,6 @@ class TestRestrictForeignKey:
                 await session.flush()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestLifecycleCleanup:
     """Lifecycle cleanup should delete models only after all references are gone."""
 
@@ -307,8 +322,12 @@ class TestLifecycleCleanup:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-cleanup-old", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-cleanup-new", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-cleanup-old", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-cleanup-new", provider="openai"
+            )
             await assistant_factory(session, "Cleanup Assistant", old_model.id)
 
             migration_service = container.completion_model_migration_service()
@@ -345,10 +364,16 @@ class TestLifecycleCleanup:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-history-old", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-history-new", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-history-old", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-history-new", provider="openai"
+            )
 
-            assistant = await assistant_factory(session, "History Assistant", old_model.id)
+            assistant = await assistant_factory(
+                session, "History Assistant", old_model.id
+            )
             test_session = Sessions(
                 name="History Session",
                 user_id=admin_user.id,
@@ -403,7 +428,9 @@ class TestLifecycleCleanup:
 
         async with db_container() as container:
             session = container.session()
-            model = await completion_model_factory(session, "gpt-template-active", provider="openai")
+            model = await completion_model_factory(
+                session, "gpt-template-active", provider="openai"
+            )
             model.deleted_at = datetime.utcnow()
 
             session.add(
@@ -443,7 +470,9 @@ class TestLifecycleCleanup:
 
         async with db_container() as container:
             session = container.session()
-            model = await completion_model_factory(session, "gpt-template-soft-deleted", provider="openai")
+            model = await completion_model_factory(
+                session, "gpt-template-soft-deleted", provider="openai"
+            )
             model.deleted_at = datetime.utcnow()
 
             session.add(
@@ -491,8 +520,12 @@ class TestLifecycleCleanup:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await completion_model_factory(session, "gpt-history-query-old", provider="openai")
-            new_model = await completion_model_factory(session, "gpt-history-query-new", provider="openai")
+            old_model = await completion_model_factory(
+                session, "gpt-history-query-old", provider="openai"
+            )
+            new_model = await completion_model_factory(
+                session, "gpt-history-query-new", provider="openai"
+            )
             await assistant_factory(session, "History Query Assistant", old_model.id)
 
             migration_service = container.completion_model_migration_service()

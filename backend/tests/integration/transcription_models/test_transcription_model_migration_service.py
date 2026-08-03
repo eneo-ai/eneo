@@ -22,8 +22,6 @@ from eneo.database.tables.spaces_table import SpacesTranscriptionModels
 from eneo.main.exceptions import ValidationException
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestTranscriptionModelMigration:
     """End-to-end tests for transcription model migration."""
 

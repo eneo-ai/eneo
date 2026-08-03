@@ -105,8 +105,6 @@ async def _add_inline_file_content(
     await session.flush()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_get_auto_creates_empty_policy(client, admin_token):
     resp = await client.get(
         "/api/v1/admin/governance-policy/",
@@ -131,8 +129,6 @@ async def test_admin_get_auto_creates_empty_policy(client, admin_token):
     }
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_non_admin_gets_403(client, regular_user_token):
     resp = await client.get(
         "/api/v1/admin/governance-policy/",
@@ -142,8 +138,6 @@ async def test_non_admin_gets_403(client, regular_user_token):
     assert resp.status_code == 403
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_model_restriction_requires_at_least_one_model(client, admin_token):
     resp = await client.put(
         "/api/v1/admin/governance-policy/",
@@ -154,8 +148,6 @@ async def test_model_restriction_requires_at_least_one_model(client, admin_token
     assert resp.status_code == 400
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_mcp_restriction_rejects_empty_enabled_grant(client, admin_token):
     resp = await client.put(
         "/api/v1/admin/governance-policy/",
@@ -172,8 +164,6 @@ async def test_mcp_restriction_rejects_empty_enabled_grant(client, admin_token):
     assert resp.status_code == 400, resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_skill_policy_rejects_unusable_personal_assistant_baseline(
     client, admin_token, db_container
 ):
@@ -218,8 +208,6 @@ async def test_skill_policy_rejects_unusable_personal_assistant_baseline(
     assert persisted.json()["skills"]["bindings"] == []
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_skill_policy_counts_personal_assistant_mcp_schema_and_rolls_back(
     client, admin_token, db_container, admin_user
 ):
@@ -355,8 +343,6 @@ async def test_skill_policy_counts_personal_assistant_mcp_schema_and_rolls_back(
     assert persisted.json()["skills"]["bindings"] == []
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_skill_policy_counts_other_owners_visible_derived_images(
     client,
     admin_token,
@@ -473,8 +459,6 @@ async def test_skill_policy_counts_other_owners_visible_derived_images(
     assert persisted.json()["skills"]["bindings"] == []
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_skill_policy_preflight_queries_do_not_grow_per_personal_assistant(
     client, admin_token, db_container, admin_user
 ):

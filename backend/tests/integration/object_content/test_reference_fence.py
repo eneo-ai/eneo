@@ -95,7 +95,6 @@ def _captured_content(payload: bytes = b"x") -> CapturedContent:
     )
 
 
-@pytest.mark.asyncio
 async def test_pending_content_accepts_its_first_reference_in_creation_transaction(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -130,7 +129,6 @@ async def test_pending_content_accepts_its_first_reference_in_creation_transacti
         assert initial_content.reference_count == 1
 
 
-@pytest.mark.asyncio
 async def test_verified_object_content_accepts_first_reference_at_publication(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -177,7 +175,6 @@ async def test_verified_object_content_accepts_first_reference_at_publication(
         assert row.reference_count == 1
 
 
-@pytest.mark.asyncio
 async def test_verified_object_content_without_product_owner_cannot_commit(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -205,7 +202,6 @@ async def test_verified_object_content_without_product_owner_cannot_commit(
             )
 
 
-@pytest.mark.asyncio
 async def test_info_blob_pending_content_accepts_its_first_reference_at_creation(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -245,7 +241,6 @@ async def test_info_blob_pending_content_accepts_its_first_reference_at_creation
         )
 
 
-@pytest.mark.asyncio
 async def test_icon_pending_content_accepts_its_first_reference_at_creation(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -273,7 +268,6 @@ async def test_icon_pending_content_accepts_its_first_reference_at_creation(
         )
 
 
-@pytest.mark.asyncio
 async def test_ownerless_pending_content_cannot_commit(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -291,7 +285,6 @@ async def test_ownerless_pending_content_cannot_commit(
             session.add(_descriptor(content.id, "ownerless-content"))
 
 
-@pytest.mark.asyncio
 async def test_prepare_is_idempotent_and_rejects_fingerprint_substitution(
     object_content_database: DatabaseSessionManager,
 ) -> None:

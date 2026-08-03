@@ -2,8 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-import pytest
-
 from eneo.roles.permissions import Permission
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings import (
@@ -59,7 +57,6 @@ def _setting_service() -> SettingService:
     )
 
 
-@pytest.mark.asyncio
 async def test_model_projection_uses_canonical_skill_context_allowance():
     service = _setting_service()
     service.skill_repo.get_or_seed_runtime_policy = AsyncMock(

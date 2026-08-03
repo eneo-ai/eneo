@@ -395,7 +395,6 @@ def test_live_tool_refresh_only_exposes_db_approved_definitions():
     }
 
 
-@pytest.mark.asyncio
 async def test_identity_scoped_catalog_is_intersected_with_each_users_live_tools(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -427,7 +426,6 @@ async def test_identity_scoped_catalog_is_intersected_with_each_users_live_tools
     }
 
 
-@pytest.mark.asyncio
 async def test_stable_approved_catalog_skips_runtime_staging(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -462,7 +460,6 @@ async def test_stable_approved_catalog_skips_runtime_staging(
     }
 
 
-@pytest.mark.asyncio
 async def test_user_only_tool_is_staged_then_requires_admin_approval_before_exposure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -530,7 +527,6 @@ async def test_user_only_tool_is_staged_then_requires_admin_approval_before_expo
     }
 
 
-@pytest.mark.asyncio
 async def test_user_only_definition_drift_is_queued_without_exposure_or_overwrite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -588,7 +584,6 @@ async def test_user_only_definition_drift_is_queued_without_exposure_or_overwrit
     assert approved.pending_input_schema == changed_schema
 
 
-@pytest.mark.asyncio
 async def test_oversized_identity_catalog_fails_closed_without_database_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -614,7 +609,6 @@ async def test_oversized_identity_catalog_fails_closed_without_database_writes(
     assert tool_repo.batch_observation_count == 0
 
 
-@pytest.mark.asyncio
 async def test_oversized_identity_definition_fails_closed_without_database_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -647,7 +641,6 @@ async def test_oversized_identity_definition_fails_closed_without_database_write
     assert tool_repo.batch_observation_count == 0
 
 
-@pytest.mark.asyncio
 async def test_oversized_identity_catalog_bytes_fail_closed_without_database_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -678,7 +671,6 @@ async def test_oversized_identity_catalog_bytes_fail_closed_without_database_wri
     assert tool_repo.batch_observation_count == 0
 
 
-@pytest.mark.asyncio
 async def test_identity_scoped_catalog_fails_closed_when_live_discovery_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -698,7 +690,6 @@ async def test_identity_scoped_catalog_fails_closed_when_live_discovery_fails(
     assert proxy._owner_task is None
 
 
-@pytest.mark.asyncio
 async def test_identity_scoped_catalog_fails_closed_when_staging_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -720,7 +711,6 @@ async def test_identity_scoped_catalog_fails_closed_when_staging_is_unavailable(
     assert proxy.get_tools_for_llm() == []
 
 
-@pytest.mark.asyncio
 async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -759,7 +749,6 @@ async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
     assert runtime_client.disconnect_task is streaming_task
 
 
-@pytest.mark.asyncio
 async def test_identity_discovery_and_tool_calls_resume_one_protocol_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -800,7 +789,6 @@ async def test_identity_discovery_and_tool_calls_resume_one_protocol_session(
     assert _StatefulMCPClient.terminated_session_ids == []
 
 
-@pytest.mark.asyncio
 async def test_ephemeral_global_session_executes_and_terminates_assigned_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -819,7 +807,6 @@ async def test_ephemeral_global_session_executes_and_terminates_assigned_id(
     assert _StatefulMCPClient.instances[0].disconnect_task is not None
 
 
-@pytest.mark.asyncio
 async def test_ephemeral_identity_session_exposes_calls_and_terminates_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -847,7 +834,6 @@ async def test_ephemeral_identity_session_exposes_calls_and_terminates_ids(
     ]
 
 
-@pytest.mark.asyncio
 async def test_ephemeral_close_disconnects_when_termination_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -863,7 +849,6 @@ async def test_ephemeral_close_disconnects_when_termination_fails(
     assert _StatefulMCPClient.instances[0].disconnect_task is not None
 
 
-@pytest.mark.asyncio
 async def test_runtime_call_fails_closed_when_durable_session_has_no_repository(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -878,7 +863,6 @@ async def test_runtime_call_fails_closed_when_durable_session_has_no_repository(
     assert _StatefulMCPClient.instances[0].disconnect_task is not None
 
 
-@pytest.mark.asyncio
 async def test_concurrent_first_turn_probes_keep_one_durable_protocol_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -912,7 +896,6 @@ async def test_concurrent_first_turn_probes_keep_one_durable_protocol_session(
     )
 
 
-@pytest.mark.asyncio
 async def test_identity_discovery_terminates_session_when_it_cannot_be_persisted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -933,7 +916,6 @@ async def test_identity_discovery_terminates_session_when_it_cannot_be_persisted
     assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
 
 
-@pytest.mark.asyncio
 async def test_runtime_call_fails_closed_when_session_cannot_be_persisted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -956,7 +938,6 @@ async def test_runtime_call_fails_closed_when_session_cannot_be_persisted(
     assert _StatefulMCPClient.instances[0].disconnect_task is not None
 
 
-@pytest.mark.asyncio
 async def test_runtime_call_disconnects_when_unclaimed_session_termination_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -979,7 +960,6 @@ async def test_runtime_call_disconnects_when_unclaimed_session_termination_fails
     assert _StatefulMCPClient.instances[0].disconnect_task is not None
 
 
-@pytest.mark.asyncio
 async def test_failed_discovery_does_not_terminate_a_persisted_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1004,7 +984,6 @@ async def test_failed_discovery_does_not_terminate_a_persisted_session(
     assert _StatefulMCPClient.terminated_session_ids == []
 
 
-@pytest.mark.asyncio
 async def test_identity_discovery_fails_closed_when_persisted_session_cannot_be_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1030,7 +1009,6 @@ async def test_identity_discovery_fails_closed_when_persisted_session_cannot_be_
     assert _StatefulMCPClient.terminated_session_ids == []
 
 
-@pytest.mark.asyncio
 async def test_identity_catalog_probes_share_one_preparation_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1062,7 +1040,6 @@ async def test_identity_catalog_probes_share_one_preparation_deadline(
         )
 
 
-@pytest.mark.asyncio
 async def test_identity_catalog_results_keep_configured_server_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1092,7 +1069,6 @@ async def test_identity_catalog_results_keep_configured_server_order(
     ]
 
 
-@pytest.mark.asyncio
 async def test_call_tool_marks_server_failed_but_keeps_client_for_close():
     """On MCP error, the client must stay in _clients so close() can disconnect
     it on the owner task. Dropping it would orphan the streamablehttp_client's
@@ -1121,7 +1097,6 @@ async def test_call_tool_marks_server_failed_but_keeps_client_for_close():
     assert dead_client.call_tool.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_call_tool_returns_error_when_no_client_cached():
     """call_tool must NOT trigger a connect (it runs under asyncio.gather, on a
     task other than the proxy's owner task). When no pre-connected client is
@@ -1137,7 +1112,6 @@ async def test_call_tool_returns_error_when_no_client_cached():
     assert server.id not in proxy._clients
 
 
-@pytest.mark.asyncio
 async def test_circuit_breaker_open_returns_generic_message_without_internal_details():
     server = _make_server(name="internal-tools")
     proxy = MCPProxySession([server])

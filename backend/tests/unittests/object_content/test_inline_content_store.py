@@ -24,7 +24,6 @@ def _captured(payload: bytes) -> CapturedContent:
     )
 
 
-@pytest.mark.asyncio
 async def test_inline_materialization_accepts_exact_deployment_ceiling() -> None:
     store = InlineContentStore(maximum_size_bytes=8, io_chunk_bytes=3)
     content = _captured(b"12345678")
@@ -32,7 +31,6 @@ async def test_inline_materialization_accepts_exact_deployment_ceiling() -> None
     assert await store.materialize(content) == b"12345678"
 
 
-@pytest.mark.asyncio
 async def test_inline_materialization_rejects_maximum_plus_one_without_reading() -> (
     None
 ):
@@ -46,7 +44,6 @@ async def test_inline_materialization_rejects_maximum_plus_one_without_reading()
     assert captured.value.maximum_size_bytes == 8
 
 
-@pytest.mark.asyncio
 async def test_inline_read_verifies_full_content_before_serving_single_range() -> None:
     payload = b"0123456789"
     store = InlineContentStore(maximum_size_bytes=len(payload), io_chunk_bytes=2)
@@ -66,7 +63,6 @@ async def test_inline_read_verifies_full_content_before_serving_single_range() -
     assert opened.media_type == "text/plain"
 
 
-@pytest.mark.asyncio
 async def test_inline_read_rejects_same_size_corruption_before_yielding() -> None:
     canonical = b"canonical"
     store = InlineContentStore(maximum_size_bytes=32, io_chunk_bytes=4)

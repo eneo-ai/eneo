@@ -96,8 +96,6 @@ async def _create_organization_skill(client, *, token: str, slug: str) -> dict:
     return response.json()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_taken_slug_is_reported_as_a_slug_conflict_in_both_scopes(
     client, admin_token
 ):
@@ -132,8 +130,6 @@ async def test_taken_slug_is_reported_as_a_slug_conflict_in_both_scopes(
     assert _conflict(organization_retry) == (409, ErrorCodes.SKILL_SLUG_TAKEN)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_stale_publish_and_stale_restore_report_a_revision_conflict(
     client, admin_token
 ):
@@ -169,8 +165,6 @@ async def test_stale_publish_and_stale_restore_report_a_revision_conflict(
     assert _conflict(stale_restore) == (409, ErrorCodes.SKILL_REVISION_CONFLICT)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_published_organisation_skill_reports_its_own_delete_conflict(
     client, admin_token
 ):
@@ -200,8 +194,6 @@ async def test_published_organisation_skill_reports_its_own_delete_conflict(
     assert _conflict(delete) == (409, ErrorCodes.SKILL_PUBLISHED_NOT_DELETABLE)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_attached_skill_reports_a_distinct_delete_conflict(client, admin_token):
     space_id = await _create_space(client, token=admin_token)
     skill = await _create_space_skill(
@@ -233,8 +225,6 @@ async def test_attached_skill_reports_a_distinct_delete_conflict(client, admin_t
     assert _conflict(delete) == (409, ErrorCodes.SKILL_STILL_ATTACHED)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_stale_execution_block_no_longer_borrows_the_revision_conflict(
     client, admin_token
 ):
@@ -278,8 +268,6 @@ async def test_stale_execution_block_no_longer_borrows_the_revision_conflict(
     assert _conflict(stale) == (409, ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_unsupported_activation_mode_stays_a_bad_request(client, admin_token):
     space_id = await _create_space(client, token=admin_token)
     skill = await _create_space_skill(
@@ -311,7 +299,6 @@ async def test_unsupported_activation_mode_stays_a_bad_request(client, admin_tok
     assert "on-demand" in body["message"].lower()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("domain_error", "expected_code"),
     SKILL_CONFLICT_WIRE_CONTRACT,

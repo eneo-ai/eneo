@@ -138,7 +138,6 @@ def _build_service(
 class TestCompatibleModels:
     """Same family, same capabilities -> compatible with only kwargs_reset."""
 
-    @pytest.mark.asyncio
     async def test_fully_compatible_returns_true(self):
         from_model = _make_model(name="gpt-4o", family="openai")
         to_model = _make_model(name="gpt-4o-mini", family="openai")
@@ -154,7 +153,6 @@ class TestCompatibleModels:
 
 
 class TestTargetDeprecated:
-    @pytest.mark.asyncio
     async def test_deprecated_target_yields_warning(self):
         from_model = _make_model(name="gpt-4o")
         to_model = _make_model(name="gpt-4-0613", is_deprecated=True)
@@ -170,7 +168,6 @@ class TestTargetDeprecated:
 
 
 class TestAlreadyMigratedSource:
-    @pytest.mark.asyncio
     async def test_validate_migration_rejects_already_migrated_source(self):
         from_model = _make_model(name="gpt-4o")
         from_model.migrated_to_model_id = uuid4()
@@ -185,7 +182,6 @@ class TestAlreadyMigratedSource:
 
 
 class TestLowerTokenLimit:
-    @pytest.mark.asyncio
     async def test_lower_token_limit_yields_warning(self):
         from_model = _make_model(name="big-ctx", max_input_tokens=128_000)
         to_model = _make_model(name="small-ctx", max_input_tokens=32_000)
@@ -198,7 +194,6 @@ class TestLowerTokenLimit:
         assert result.requires_confirmation is True
         assert "lower_token_limit:32000" in result.warning_codes
 
-    @pytest.mark.asyncio
     async def test_equal_token_limit_no_warning(self):
         from_model = _make_model(max_input_tokens=128_000)
         to_model = _make_model(max_input_tokens=128_000)
@@ -210,7 +205,6 @@ class TestLowerTokenLimit:
         # No token-limit warning
         assert not any(w.startswith("lower_token_limit") for w in result.warning_codes)
 
-    @pytest.mark.asyncio
     async def test_higher_token_limit_no_warning(self):
         from_model = _make_model(max_input_tokens=32_000)
         to_model = _make_model(max_input_tokens=128_000)
@@ -223,7 +217,6 @@ class TestLowerTokenLimit:
 
 
 class TestDifferentFamily:
-    @pytest.mark.asyncio
     async def test_family_mismatch_yields_warning(self):
         from_model = _make_model(name="gpt-4o", family="openai")
         to_model = _make_model(name="claude-3", family="anthropic")
@@ -236,7 +229,6 @@ class TestDifferentFamily:
         assert result.requires_confirmation is True
         assert "different_family:openai:anthropic" in result.warning_codes
 
-    @pytest.mark.asyncio
     async def test_same_family_no_warning(self):
         from_model = _make_model(family="openai")
         to_model = _make_model(family="openai")
@@ -249,7 +241,6 @@ class TestDifferentFamily:
 
 
 class TestVisionLoss:
-    @pytest.mark.asyncio
     async def test_vision_loss_yields_warning(self):
         from_model = _make_model(name="gpt-4o", vision=True)
         to_model = _make_model(name="gpt-4", vision=False)
@@ -261,7 +252,6 @@ class TestVisionLoss:
         assert result.compatible is False
         assert "lacks_vision" in result.warning_codes
 
-    @pytest.mark.asyncio
     async def test_both_have_vision_no_warning(self):
         from_model = _make_model(vision=True)
         to_model = _make_model(vision=True)
@@ -272,7 +262,6 @@ class TestVisionLoss:
 
         assert "lacks_vision" not in result.warning_codes
 
-    @pytest.mark.asyncio
     async def test_gaining_vision_no_warning(self):
         from_model = _make_model(vision=False)
         to_model = _make_model(vision=True)
@@ -285,7 +274,6 @@ class TestVisionLoss:
 
 
 class TestReasoningLoss:
-    @pytest.mark.asyncio
     async def test_reasoning_loss_yields_warning(self):
         from_model = _make_model(name="o1", reasoning=True)
         to_model = _make_model(name="gpt-4o", reasoning=False)
@@ -297,7 +285,6 @@ class TestReasoningLoss:
         assert result.compatible is False
         assert "lacks_reasoning" in result.warning_codes
 
-    @pytest.mark.asyncio
     async def test_both_have_reasoning_no_warning(self):
         from_model = _make_model(reasoning=True)
         to_model = _make_model(reasoning=True)
@@ -310,7 +297,6 @@ class TestReasoningLoss:
 
 
 class TestToolCallingLoss:
-    @pytest.mark.asyncio
     async def test_tool_calling_loss_yields_warning(self):
         from_model = _make_model(supports_tool_calling=True)
         to_model = _make_model(supports_tool_calling=False)
@@ -322,7 +308,6 @@ class TestToolCallingLoss:
         assert result.compatible is False
         assert "lacks_tool_calling" in result.warning_codes
 
-    @pytest.mark.asyncio
     async def test_both_support_tool_calling_no_warning(self):
         from_model = _make_model(supports_tool_calling=True)
         to_model = _make_model(supports_tool_calling=True)
@@ -337,7 +322,6 @@ class TestToolCallingLoss:
 class TestKwargsReset:
     """kwargs_reset is always present as an informational warning."""
 
-    @pytest.mark.asyncio
     async def test_kwargs_reset_always_present_when_compatible(self):
         from_model = _make_model()
         to_model = _make_model()
@@ -348,7 +332,6 @@ class TestKwargsReset:
 
         assert "kwargs_reset" in result.warning_codes
 
-    @pytest.mark.asyncio
     async def test_kwargs_reset_present_alongside_other_warnings(self):
         from_model = _make_model(vision=True, reasoning=True, family="openai")
         to_model = _make_model(
@@ -363,7 +346,6 @@ class TestKwargsReset:
 
 
 class TestMultipleWarnings:
-    @pytest.mark.asyncio
     async def test_multiple_issues_all_reported(self):
         from_model = _make_model(
             name="gpt-4o",
@@ -404,7 +386,6 @@ class TestMultipleWarnings:
 class TestSecurityClassificationBlocker:
     """Security classification blockers make compatible=False and cannot be overridden."""
 
-    @pytest.mark.asyncio
     async def test_security_blocker_makes_incompatible(self):
         sec_class = _make_security_classification(name="public", security_level=1)
         from_model = _make_model(name="high-sec-model")
@@ -431,7 +412,6 @@ class TestSecurityClassificationBlocker:
         assert ":3:" in security_warnings[0]  # 3 spaces affected
         assert "public" in security_warnings[0]
 
-    @pytest.mark.asyncio
     async def test_security_blocker_with_no_classification_on_target(self):
         """Target model without security classification gets level 0 / name 'none'."""
         from_model = _make_model(name="classified-model")
@@ -454,7 +434,6 @@ class TestSecurityClassificationBlocker:
         assert "none" in security_warnings[0]  # no classification = "none"
         assert ":2:" in security_warnings[0]  # 2 spaces affected
 
-    @pytest.mark.asyncio
     async def test_no_security_blocker_when_zero_affected_spaces(self):
         """When no spaces are affected by security mismatch, no blocker."""
         from_model = _make_model()
@@ -475,7 +454,6 @@ class TestSecurityClassificationBlocker:
         assert len(security_warnings) == 0
         assert result.compatible is True
 
-    @pytest.mark.asyncio
     async def test_security_blocker_combined_with_other_issues(self):
         """Security blocker + other issues: all appear in warnings, compatible=False."""
         sec_class = _make_security_classification(name="restricted", security_level=3)
@@ -513,7 +491,6 @@ class TestSecurityClassificationBlocker:
         assert "lacks_vision" in result.warning_codes
         assert "kwargs_reset" in result.warning_codes
 
-    @pytest.mark.asyncio
     async def test_blocker_warnings_come_first(self):
         """Security blockers should be placed before regular issues in the list."""
         sec_class = _make_security_classification(name="high", security_level=5)

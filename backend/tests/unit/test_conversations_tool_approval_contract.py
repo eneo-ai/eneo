@@ -65,7 +65,6 @@ def _make_context(user, assistant_id=None) -> ToolApprovalContext:
     )
 
 
-@pytest.mark.asyncio
 async def test_tool_result_rechecks_current_session_access():
     session = SimpleNamespace(
         id=uuid4(), group_chat_id=None, assistant=SimpleNamespace()
@@ -94,7 +93,6 @@ async def test_tool_result_rechecks_current_session_access():
     assert response.result == "result"
 
 
-@pytest.mark.asyncio
 async def test_tool_result_is_not_read_when_current_access_is_revoked():
     session = SimpleNamespace(
         id=uuid4(), group_chat_id=None, assistant=SimpleNamespace()
@@ -119,7 +117,6 @@ async def test_tool_result_is_not_read_when_current_access_is_revoked():
     session_service.get_tool_call_result.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_returns_accepted_payload_shape():
     container, user, _ = _make_container()
     context = _make_context(user)
@@ -170,7 +167,6 @@ async def test_approve_tools_returns_accepted_payload_shape():
     assert payload["unrecognized_tool_call_ids"] == []
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_returns_already_processed_payload_shape():
     container, user, audit_service = _make_container()
     context = _make_context(user)
@@ -218,7 +214,6 @@ async def test_approve_tools_returns_already_processed_payload_shape():
     assert payload["approval_id"] == context.approval_id
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_returns_404_payload_shape():
     container, _, _ = _make_container()
     manager = AsyncMock()
@@ -248,7 +243,6 @@ async def test_approve_tools_returns_404_payload_shape():
     assert "expired" in str(exc_info.value.detail)
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_returns_409_payload_shape():
     container, user, _ = _make_container()
     context = _make_context(user)
@@ -294,7 +288,6 @@ async def test_approve_tools_returns_409_payload_shape():
     assert detail["existing_status"] == "accepted"
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_returns_429_payload_shape_with_retry_after():
     container, user, _ = _make_container()
     rate_limit_result = RateLimitResult(
@@ -324,7 +317,6 @@ async def test_approve_tools_returns_429_payload_shape_with_retry_after():
     assert detail["retry_after_seconds"] == 60
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_success_creates_audit_log_entry():
     container, user, audit_service = _make_container()
     context = _make_context(user)
@@ -376,7 +368,6 @@ async def test_approve_tools_success_creates_audit_log_entry():
     assert kwargs["metadata"]["extra"]["denied_count"] == 0
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_denial_creates_audit_log_entry():
     container, user, audit_service = _make_container()
     context = _make_context(user)
@@ -430,7 +421,6 @@ async def test_approve_tools_denial_creates_audit_log_entry():
     assert kwargs["metadata"]["extra"]["denied_count"] == 1
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_skip_audit_log_on_replay():
     container, user, audit_service = _make_container()
     context = _make_context(user)
@@ -475,7 +465,6 @@ async def test_approve_tools_skip_audit_log_on_replay():
     audit_service.log_async.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_approve_tools_session_entity_type():
     container, user, audit_service = _make_container()
     # Create context without assistant_id (None)

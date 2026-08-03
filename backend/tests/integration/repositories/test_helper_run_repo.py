@@ -18,13 +18,13 @@ import psycopg2
 import pytest
 import sqlalchemy as sa
 
-from init_db import add_tenant_user
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.help_assistants.domain.helper_run_status import HelperRunStatus
+from init_db import add_tenant_user
 
 
 @pytest.fixture
@@ -113,8 +113,6 @@ async def _insert_session(
     return session_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_add_then_get_by_id_round_trips_all_fields(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -166,8 +164,6 @@ async def test_add_then_get_by_id_round_trips_all_fields(db_container, admin_use
         assert fetched.status == HelperRunStatus.IN_PROGRESS
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_none_for_other_tenant(
     db_container, admin_user, second_tenant_user
 ):
@@ -205,16 +201,12 @@ async def test_get_by_id_returns_none_for_other_tenant(
         ) is not None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_none_when_missing(db_container, admin_user):
     async with db_container() as container:
         repo = container.helper_run_repo()
         assert (await repo.get_by_id(uuid4(), tenant_id=admin_user.tenant_id)) is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_session_id_returns_run(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -251,8 +243,6 @@ async def test_get_by_session_id_returns_run(db_container, admin_user):
         assert fetched.session_id == session_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_session_id_returns_none_for_other_tenant(
     db_container, admin_user, second_tenant_user
 ):
@@ -289,8 +279,6 @@ async def test_get_by_session_id_returns_none_for_other_tenant(
         ) is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_update_status_to_completed_persists_completed_at(
     db_container, admin_user
 ):
@@ -338,8 +326,6 @@ async def test_update_status_to_completed_persists_completed_at(
         assert fetched.completed_at is not None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_update_status_to_in_progress_leaves_completed_at_null(
     db_container, admin_user
 ):
@@ -383,8 +369,6 @@ async def test_update_status_to_in_progress_leaves_completed_at_null(
         assert updated.completed_at is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_update_status_does_not_touch_other_tenants_rows(
     db_container, admin_user, second_tenant_user
 ):
@@ -431,8 +415,6 @@ async def test_update_status_does_not_touch_other_tenants_rows(
         assert unchanged.completed_at is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_by_tenant_excludes_other_tenants(
     db_container, admin_user, second_tenant_user
 ):
@@ -494,8 +476,6 @@ async def test_list_by_tenant_excludes_other_tenants(
         assert added_a.id not in ids_b
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_by_tenant_filters_by_status(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -555,8 +535,6 @@ async def test_list_by_tenant_filters_by_status(db_container, admin_user):
         assert [r.id for r in completed_rows] == [completed.id]
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_older_than_purges_only_below_threshold_for_tenant(
     db_container, admin_user, second_tenant_user
 ):
@@ -646,8 +624,6 @@ async def test_delete_older_than_purges_only_below_threshold_for_tenant(
         ) is not None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_is_helper_session_true_for_existing_row(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -678,8 +654,6 @@ async def test_is_helper_session_true_for_existing_row(db_container, admin_user)
         assert await repo.is_helper_session(session_id) is True
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_is_helper_session_false_for_unknown_session(db_container, admin_user):
     async with db_container() as container:
         session = container.session()

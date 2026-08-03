@@ -130,7 +130,6 @@ async def _clear_deployment_namespace(
     )
 
 
-@pytest.mark.asyncio
 async def test_real_store_single_multipart_range_list_and_delete(
     real_object_store: RealObjectStore,
 ) -> None:
@@ -198,7 +197,6 @@ async def test_real_store_single_multipart_range_list_and_delete(
         await store.head(single_key)
 
 
-@pytest.mark.asyncio
 async def test_real_store_rejects_bucket_escape_and_wrong_credentials(
     real_object_store: RealObjectStore,
 ) -> None:
@@ -229,7 +227,6 @@ async def test_real_store_rejects_bucket_escape_and_wrong_credentials(
         wrong_credentials.close()
 
 
-@pytest.mark.asyncio
 async def test_real_store_lists_and_aborts_multipart_and_rejects_part_reordering(
     real_object_store: RealObjectStore,
 ) -> None:
@@ -296,7 +293,6 @@ async def test_real_store_lists_and_aborts_multipart_and_rejects_part_reordering
         client.close()
 
 
-@pytest.mark.asyncio
 async def test_store_process_restart_preserves_bytes_and_readiness_recovers(
     real_object_store: RealObjectStore,
 ) -> None:
@@ -333,7 +329,6 @@ async def test_store_process_restart_preserves_bytes_and_readiness_recovers(
     await store.delete_and_confirm(key)
 
 
-@pytest.mark.asyncio
 async def test_real_store_binding_create_is_idempotent_for_the_same_identity(
     real_object_store: RealObjectStore,
 ) -> None:
@@ -361,7 +356,6 @@ async def test_real_store_binding_create_is_idempotent_for_the_same_identity(
         client.close()
 
 
-@pytest.mark.asyncio
 async def test_real_store_binding_rejects_foreign_identity_created_after_preflight(
     real_object_store: RealObjectStore,
 ) -> None:
@@ -391,7 +385,6 @@ async def test_real_store_binding_rejects_foreign_identity_created_after_preflig
         client.close()
 
 
-@pytest.mark.asyncio
 async def test_real_store_tls_requires_and_accepts_custom_ca(
     real_tls_object_store: RealObjectStore,
 ) -> None:

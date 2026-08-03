@@ -97,7 +97,6 @@ def _make_space(space_id: UUID) -> SimpleNamespace:
 class TestScopeEnforcementUnit:
     """Direct unit tests for UserService._enforce_api_key_scope()."""
 
-    @pytest.mark.asyncio
     async def test_tenant_key_always_passes(self):
         """Tenant-scoped key should pass regardless of resource_type."""
         svc = _make_user_service()
@@ -108,7 +107,6 @@ class TestScopeEnforcementUnit:
         # Should not raise
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_key_admin_route_denied(self):
         """Space-scoped key on admin route → 403 insufficient_scope."""
         space_id = uuid4()
@@ -123,7 +121,6 @@ class TestScopeEnforcementUnit:
         assert exc_info.value.status_code == 403
         assert "Admin endpoints require a tenant-scoped key" in exc_info.value.message
 
-    @pytest.mark.asyncio
     async def test_assistant_key_admin_route_denied(self):
         """Assistant-scoped key on admin route → 403."""
         svc = _make_user_service()
@@ -135,7 +132,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_app_key_admin_route_denied(self):
         """App-scoped key on admin route → 403."""
         svc = _make_user_service()
@@ -147,7 +143,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_space_key_matching_space_passes(self):
         """Space-scoped key accessing resource in its own space → pass."""
         space_id = uuid4()
@@ -159,7 +154,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_key_different_space_denied(self):
         """Space-scoped key accessing resource in another space → 403."""
         key_space = uuid4()
@@ -175,7 +169,6 @@ class TestScopeEnforcementUnit:
         assert exc_info.value.code == "insufficient_scope"
         assert "different scope" in exc_info.value.message
 
-    @pytest.mark.asyncio
     async def test_space_key_space_resource_exact_match(self):
         """Space-scoped key accessing its own space directly → pass."""
         space_id = uuid4()
@@ -186,7 +179,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_key_different_space_resource_denied(self):
         """Space-scoped key accessing another space directly → 403."""
         key_space = uuid4()
@@ -200,7 +192,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_assistant_key_exact_match_passes(self):
         """Assistant-scoped key accessing its own assistant → pass."""
         assistant_id = uuid4()
@@ -211,7 +202,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_assistant_key_different_assistant_denied(self):
         """Assistant-scoped key accessing different assistant (even same space) → 403."""
         key_assistant = uuid4()
@@ -227,7 +217,6 @@ class TestScopeEnforcementUnit:
         assert "assistant" in exc_info.value.message.lower()
         assert "conversations, and files" in exc_info.value.message
 
-    @pytest.mark.asyncio
     async def test_assistant_key_own_conversation_passes(self):
         """Assistant-scoped key accessing conversation of its own assistant → pass."""
         assistant_id = uuid4()
@@ -239,7 +228,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_assistant_key_other_conversation_denied(self):
         """Assistant-scoped key accessing conversation of different assistant → 403."""
         key_assistant = uuid4()
@@ -254,7 +242,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_assistant_key_app_endpoint_denied(self):
         """Assistant-scoped key accessing app endpoint → 403 (wrong scope type)."""
         svc = _make_user_service()
@@ -267,7 +254,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_app_key_exact_match_passes(self):
         """App-scoped key accessing its own app → pass."""
         app_id = uuid4()
@@ -278,7 +264,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_app_key_different_app_denied(self):
         """App-scoped key accessing different app → 403."""
         key_app = uuid4()
@@ -293,7 +278,6 @@ class TestScopeEnforcementUnit:
         assert exc_info.value.code == "insufficient_scope"
         assert "runs, and files" in exc_info.value.message
 
-    @pytest.mark.asyncio
     async def test_app_key_own_app_run_passes(self):
         """App-scoped key accessing app_run of its own app → pass."""
         app_id = uuid4()
@@ -306,7 +290,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_app_key_other_app_run_denied(self):
         """App-scoped key accessing app_run of different app → 403."""
         key_app = uuid4()
@@ -321,7 +304,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_app_key_assistant_endpoint_denied(self):
         """App-scoped key accessing assistant endpoint → 403."""
         svc = _make_user_service()
@@ -334,7 +316,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_app_key_service_endpoint_denied(self):
         """App-scoped key accessing service endpoint → 403 (services are not app sub-resources)."""
         svc = _make_user_service()
@@ -347,7 +328,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_space_key_single_resource_file_route_passes_defense_in_depth(self):
         """If file routes become ID-scoped later, files should remain allowed."""
         svc = _make_user_service()
@@ -357,7 +337,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_assistant_key_single_resource_file_route_passes_defense_in_depth(
         self,
     ):
@@ -368,7 +347,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_app_key_single_resource_file_route_passes_defense_in_depth(self):
         svc = _make_user_service()
         key = _make_key(scope_type=ApiKeyScopeType.APP, scope_id=uuid4())
@@ -377,7 +355,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_key_unresolvable_resource_denied(self):
         """Space-scoped key with unresolvable resource → 403 (fail-closed)."""
         svc = _make_user_service(session_scalar_return=None)
@@ -389,7 +366,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_space_key_info_blob_id_in_scope_passes(self):
         """Space-scoped key with info_blob id resolves to same space → pass."""
         space_id = uuid4()
@@ -401,7 +377,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_key_space_scoped_info_blob_listing_route_passes(
         self,
     ):
@@ -414,7 +389,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_key_space_scoped_info_blob_listing_route_wrong_space_denied(
         self,
     ):
@@ -430,7 +404,6 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_space_key_file_detail_route_allowed(self):
         """File routes are allowed (user-scoped policy)."""
         space_id = uuid4()
@@ -442,7 +415,6 @@ class TestScopeEnforcementUnit:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_key_file_detail_route_stays_list_path(self):
         """File detail route should not reinterpret file id as space id."""
         space_id = uuid4()
@@ -454,7 +426,6 @@ class TestScopeEnforcementUnit:
         await svc._enforce_api_key_scope(request, key, scope_config)
         svc.repo.session.scalar.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_no_scope_config_no_check(self):
         """When no scope config is set on route, enforcement is skipped."""
         # This is tested at the _resolve_api_key level:
@@ -464,7 +435,6 @@ class TestScopeEnforcementUnit:
         request = _scope_request()
         assert not hasattr(request.state, "_scope_check_config")
 
-    @pytest.mark.asyncio
     async def test_error_code_is_insufficient_scope(self):
         """All scope denials should use code 'insufficient_scope' (distinct from permission)."""
         svc = _make_user_service()
@@ -486,7 +456,6 @@ class TestScopeEnforcementUnit:
 class TestScopeListEndpoints:
     """List endpoint behavior: path_param present but no resource_id in path."""
 
-    @pytest.mark.asyncio
     async def test_space_key_list_apps_passes(self):
         """Space-scoped key listing apps (no path ID) → pass (service filters)."""
         svc = _make_user_service()
@@ -496,7 +465,6 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_key_list_assistants_passes(self):
         """Space-scoped key listing assistants → pass."""
         svc = _make_user_service()
@@ -506,7 +474,6 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_assistant_key_list_assistants_passes(self):
         """Assistant-scoped key listing assistants → pass (own type)."""
         svc = _make_user_service()
@@ -516,7 +483,6 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_assistant_key_list_conversations_passes(self):
         """Assistant-scoped key listing conversations → pass (related type)."""
         svc = _make_user_service()
@@ -526,7 +492,6 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_assistant_key_list_apps_denied(self):
         """Assistant-scoped key listing apps → 403 (wrong type)."""
         svc = _make_user_service()
@@ -539,7 +504,6 @@ class TestScopeListEndpoints:
         assert exc_info.value.code == "insufficient_scope"
         assert "conversations, and files" in exc_info.value.message
 
-    @pytest.mark.asyncio
     async def test_assistant_key_list_services_denied(self):
         """Assistant-scoped key listing services → 403."""
         svc = _make_user_service()
@@ -551,7 +515,6 @@ class TestScopeListEndpoints:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_assistant_key_list_files_passes(self):
         """Assistant-scoped keys can use file list/detail routes."""
         svc = _make_user_service()
@@ -561,7 +524,6 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_app_key_list_apps_passes(self):
         """App-scoped key listing apps → pass (own type)."""
         svc = _make_user_service()
@@ -571,7 +533,6 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_app_key_list_app_runs_passes(self):
         """App-scoped key listing app_runs → pass (related type)."""
         svc = _make_user_service()
@@ -581,7 +542,6 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_app_key_list_assistants_denied(self):
         """App-scoped key listing assistants → 403."""
         svc = _make_user_service()
@@ -594,7 +554,6 @@ class TestScopeListEndpoints:
         assert exc_info.value.code == "insufficient_scope"
         assert "runs, and files" in exc_info.value.message
 
-    @pytest.mark.asyncio
     async def test_app_key_list_services_denied(self):
         """App-scoped key listing services → 403 (services are not app sub-resources)."""
         svc = _make_user_service()
@@ -606,7 +565,6 @@ class TestScopeListEndpoints:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_app_key_list_files_passes(self):
         """App-scoped keys can use file list/detail routes."""
         svc = _make_user_service()
@@ -668,7 +626,6 @@ class TestResolveApiKeyScopeWiring:
         svc._enforce_api_key_scope = AsyncMock()
         return svc
 
-    @pytest.mark.asyncio
     async def test_resolve_api_key_enforces_scope_for_non_tenant_key(self, monkeypatch):
         """Scope enforcement is called for non-tenant scoped keys."""
         key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
@@ -697,7 +654,6 @@ class TestResolveApiKeyScopeWiring:
 
         svc._enforce_api_key_scope.assert_awaited_once()
 
-    @pytest.mark.asyncio
     async def test_resolve_api_key_tenant_scoped_key_skips_scope_enforcement(
         self, monkeypatch
     ):
@@ -990,7 +946,6 @@ class TestScopeBodyDriven:
 
         return container
 
-    @pytest.mark.asyncio
     async def test_no_scope_passes(self):
         """No scope metadata (bearer token or no key) → pass."""
         request = self._make_http_request(scope_type=None)
@@ -1004,7 +959,6 @@ class TestScopeBodyDriven:
             session_id=None,
         )
 
-    @pytest.mark.asyncio
     async def test_tenant_scope_passes(self):
         """Tenant-scoped key → always pass."""
         request = self._make_http_request(scope_type="tenant")
@@ -1018,7 +972,6 @@ class TestScopeBodyDriven:
             session_id=None,
         )
 
-    @pytest.mark.asyncio
     async def test_app_scope_denied(self):
         """App-scoped key → DENY (can't create conversations)."""
         app_id = uuid4()
@@ -1043,7 +996,6 @@ class TestScopeBodyDriven:
         assert exc_info.value.detail["request_id"] == "req-scope-1"
         assert exc_info.value.detail["context"]["auth_layer"] == "api_key_scope"
 
-    @pytest.mark.asyncio
     async def test_assistant_scope_matching_assistant_passes(self):
         """Assistant-scoped key + matching assistant_id → pass."""
         assistant_id = uuid4()
@@ -1058,7 +1010,6 @@ class TestScopeBodyDriven:
             session_id=None,
         )
 
-    @pytest.mark.asyncio
     async def test_assistant_scope_different_assistant_denied(self):
         """Assistant-scoped key + different assistant_id → 403."""
         key_assistant = uuid4()
@@ -1079,7 +1030,6 @@ class TestScopeBodyDriven:
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail["code"] == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_assistant_scope_group_chat_denied(self):
         """Assistant-scoped key + group_chat_id → 403 (can't access group chats)."""
         assistant_id = uuid4()
@@ -1096,7 +1046,6 @@ class TestScopeBodyDriven:
             )
         assert exc_info.value.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_assistant_scope_session_own_assistant_passes(self):
         """Assistant-scoped key + session_id of own assistant → pass."""
         assistant_id = uuid4()
@@ -1116,7 +1065,6 @@ class TestScopeBodyDriven:
             session_id=session_id,
         )
 
-    @pytest.mark.asyncio
     async def test_assistant_scope_session_other_assistant_denied(self):
         """Assistant-scoped key + session_id of different assistant → 403."""
         key_assistant = uuid4()
@@ -1141,7 +1089,6 @@ class TestScopeBodyDriven:
             )
         assert exc_info.value.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_space_scope_assistant_in_own_space_passes(self):
         """Space-scoped key + assistant in own space → pass."""
         space_id = uuid4()
@@ -1157,7 +1104,6 @@ class TestScopeBodyDriven:
             session_id=None,
         )
 
-    @pytest.mark.asyncio
     async def test_space_scope_assistant_in_other_space_denied(self):
         """Space-scoped key + assistant in different space → 403."""
         key_space = uuid4()
@@ -1176,7 +1122,6 @@ class TestScopeBodyDriven:
             )
         assert exc_info.value.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_space_scope_group_chat_in_own_space_passes(self):
         """Space-scoped key + group_chat in own space → pass."""
         space_id = uuid4()
@@ -1192,7 +1137,6 @@ class TestScopeBodyDriven:
             session_id=None,
         )
 
-    @pytest.mark.asyncio
     async def test_space_scope_group_chat_in_other_space_denied(self):
         """Space-scoped key + group_chat in different space → 403."""
         key_space = uuid4()
@@ -1210,7 +1154,6 @@ class TestScopeBodyDriven:
             )
         assert exc_info.value.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_space_scope_session_in_own_space_passes(self):
         """Space-scoped key + session in own space → pass."""
         space_id = uuid4()
@@ -1233,7 +1176,6 @@ class TestScopeBodyDriven:
             session_id=session_id,
         )
 
-    @pytest.mark.asyncio
     async def test_space_scope_session_in_other_space_denied(self):
         """Space-scoped key + session in different space → 403."""
         key_space = uuid4()
@@ -1259,7 +1201,6 @@ class TestScopeBodyDriven:
             )
         assert exc_info.value.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_error_messages_are_human_readable(self):
         """All scope denial messages should be clear and actionable."""
         app_id = uuid4()
@@ -1281,7 +1222,6 @@ class TestScopeBodyDriven:
         # Message should explain what the key can access
         assert "only access" in msg.lower() or "can only" in msg.lower()
 
-    @pytest.mark.asyncio
     async def test_session_not_found_returns_403_not_404(self):
         """Anti-enumeration: scoped key + nonexistent session → 403 (not 404).
 
@@ -1312,7 +1252,6 @@ class TestScopeBodyDriven:
 class TestScopeConfigStashPattern:
     """Verify the config-stash pattern for scope enforcement."""
 
-    @pytest.mark.asyncio
     async def test_factory_stores_config_on_request_state(self):
         """require_api_key_scope_check stores config on request.state."""
         dep = require_api_key_scope_check(resource_type="space", path_param="id")
@@ -1323,7 +1262,6 @@ class TestScopeConfigStashPattern:
         assert config["resource_type"] == "space"
         assert config["path_param"] == "id"
 
-    @pytest.mark.asyncio
     async def test_factory_with_none_path_param(self):
         """Config-stash with path_param=None (list/admin endpoints)."""
         dep = require_api_key_scope_check(resource_type="admin", path_param=None)
@@ -1334,7 +1272,6 @@ class TestScopeConfigStashPattern:
         assert config["resource_type"] == "admin"
         assert config["path_param"] is None
 
-    @pytest.mark.asyncio
     async def test_factory_default_path_param(self):
         """Default path_param should be 'id'."""
         dep = require_api_key_scope_check(resource_type="app")
@@ -1344,7 +1281,6 @@ class TestScopeConfigStashPattern:
         config = request.state._scope_check_config
         assert config["path_param"] == "id"
 
-    @pytest.mark.asyncio
     async def test_factory_self_filtering_default_false(self):
         """Default self_filtering should be False."""
         dep = require_api_key_scope_check(resource_type="assistant")
@@ -1354,7 +1290,6 @@ class TestScopeConfigStashPattern:
         config = request.state._scope_check_config
         assert config["self_filtering"] is False
 
-    @pytest.mark.asyncio
     async def test_factory_self_filtering_true_stored(self):
         """self_filtering=True should be stored in config."""
         dep = require_api_key_scope_check(
@@ -1377,7 +1312,6 @@ class TestScopeConfigStashPattern:
 class TestScopeErrorMessages:
     """Verify error messages are clear, actionable, and include relevant context."""
 
-    @pytest.mark.asyncio
     async def test_admin_denial_mentions_tenant_requirement(self):
         """Admin scope denial should tell user they need a tenant-scoped key."""
         svc = _make_user_service()
@@ -1391,7 +1325,6 @@ class TestScopeErrorMessages:
         assert "tenant-scoped key" in msg.lower()
         assert "admin" in msg.lower()
 
-    @pytest.mark.asyncio
     async def test_space_denial_mentions_different_scope(self):
         """Space scope denial should mention the resource belongs to a different scope."""
         key_space = uuid4()
@@ -1407,7 +1340,6 @@ class TestScopeErrorMessages:
         assert str(key_space) in msg
         assert "different scope" in msg.lower()
 
-    @pytest.mark.asyncio
     async def test_assistant_denial_explains_scope_limit(self):
         """Assistant denial should explain what the key can access."""
         assistant_id = uuid4()
@@ -1422,7 +1354,6 @@ class TestScopeErrorMessages:
         assert str(assistant_id) in msg
         assert "conversations" in msg.lower()
 
-    @pytest.mark.asyncio
     async def test_app_denial_explains_scope_limit(self):
         """App denial should explain what the key can access."""
         app_id = uuid4()
@@ -1446,7 +1377,6 @@ class TestScopeErrorMessages:
 class TestPromptScopeResolver:
     """Prompt scope checks must handle many-to-many prompt<->assistant mappings."""
 
-    @pytest.mark.asyncio
     async def test_prompt_linked_to_multiple_spaces_allows_membership_match(self):
         """Prompt linked to spaces A+B: key scoped to A should pass."""
         space_a = uuid4()
@@ -1461,7 +1391,6 @@ class TestPromptScopeResolver:
         await svc._enforce_api_key_scope(request, key, scope_config)
         svc._resolve_prompt_space_ids.assert_awaited_once_with(prompt_id)
 
-    @pytest.mark.asyncio
     async def test_prompt_linked_to_multiple_spaces_denies_non_member_scope(self):
         """Prompt linked to spaces A+B: key scoped to C should be denied."""
         space_a = uuid4()
@@ -1479,7 +1408,6 @@ class TestPromptScopeResolver:
         assert exc_info.value.code == "insufficient_scope"
         assert "different scope" in exc_info.value.message
 
-    @pytest.mark.asyncio
     async def test_prompt_with_no_associated_spaces_fails_closed(self):
         """Prompt with no assistant mappings should fail closed."""
         space_id = uuid4()
@@ -1509,7 +1437,6 @@ class TestRequireFileDeleteScopeGuard:
     ``api_key_scope_type``.
     """
 
-    @pytest.mark.asyncio
     async def test_stashes_marker_on_delete_request(self):
         """DELETE request → marker stashed on request.state."""
         from eneo.authentication.auth_dependencies import (
@@ -1522,7 +1449,6 @@ class TestRequireFileDeleteScopeGuard:
         await dep(request)
         assert getattr(request.state, "_require_file_delete_scope_guard", False) is True
 
-    @pytest.mark.asyncio
     async def test_no_marker_on_get_request(self):
         """GET request → no marker stashed."""
         from eneo.authentication.auth_dependencies import (
@@ -1537,7 +1463,6 @@ class TestRequireFileDeleteScopeGuard:
             getattr(request.state, "_require_file_delete_scope_guard", False) is False
         )
 
-    @pytest.mark.asyncio
     async def test_no_marker_on_post_request(self):
         """POST request → no marker stashed."""
         from eneo.authentication.auth_dependencies import (
@@ -1632,7 +1557,6 @@ class TestFileDeleteScopeEnforcement:
             ),
         )
 
-    @pytest.mark.asyncio
     async def test_non_tenant_user_owned_key_delete_allowed(self, monkeypatch):
         """User-owned scoped keys may reach FileService owner-bound DELETE."""
         key = _make_key(
@@ -1649,7 +1573,6 @@ class TestFileDeleteScopeEnforcement:
         assert returned_key is key
         svc._log_api_key_auth_failed.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_non_tenant_service_key_delete_blocked(self, monkeypatch):
         """Service keys cannot delete user-owned files."""
         key = _make_key(
@@ -1678,7 +1601,6 @@ class TestFileDeleteScopeEnforcement:
         }
         svc._log_api_key_auth_failed.assert_awaited_once()
 
-    @pytest.mark.asyncio
     async def test_tenant_service_key_delete_blocked(self, monkeypatch):
         """Tenant scope does not make service keys owners of user-owned files."""
         key = _make_key(
@@ -1697,7 +1619,6 @@ class TestFileDeleteScopeEnforcement:
         assert exc_info.value.code == "service_key_cannot_delete_files"
         svc._log_api_key_auth_failed.assert_awaited_once()
 
-    @pytest.mark.asyncio
     async def test_tenant_scoped_key_delete_allowed(self, monkeypatch):
         """Tenant-scoped key + DELETE marker → passes (no error)."""
         key = _make_key(scope_type="tenant", permission=ApiKeyPermission.ADMIN)
@@ -1709,7 +1630,6 @@ class TestFileDeleteScopeEnforcement:
         _, returned_key = await svc._resolve_api_key("sk_test", request=request)
         assert returned_key is key
 
-    @pytest.mark.asyncio
     async def test_no_marker_space_scoped_key_allowed(self, monkeypatch):
         """Space-scoped key WITHOUT marker → passes (GET/POST routes)."""
         key = _make_key(

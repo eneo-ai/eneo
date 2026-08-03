@@ -30,8 +30,6 @@ from eneo.sessions.session_service import SessionService
 from eneo.sessions.sessions_repo import SessionRepository
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_protocol_session_state_survives_outer_request_rollback(
     setup_database: None,
     admin_user,
@@ -92,8 +90,6 @@ async def test_protocol_session_state_survives_outer_request_rollback(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_protocol_session_state_rejects_uncommitted_chat_without_blocking(
     setup_database: None,
     admin_user,
@@ -156,8 +152,6 @@ async def test_protocol_session_state_rejects_uncommitted_chat_without_blocking(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_new_chat_and_protocol_state_survive_outer_request_rollback(
     setup_database: None,
     admin_user,
@@ -239,8 +233,6 @@ async def test_new_chat_and_protocol_state_survive_outer_request_rollback(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_concurrent_runtime_discovery_stages_one_pending_tool(
     setup_database: None,
     admin_user,
@@ -291,8 +283,6 @@ async def test_concurrent_runtime_discovery_stages_one_pending_tool(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_runtime_staging_completes_inside_read_only_request_transaction(
     setup_database: None,
     admin_user,
@@ -349,8 +339,6 @@ async def test_runtime_staging_completes_inside_read_only_request_transaction(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_runtime_staging_times_out_behind_conflicting_request_lock(
     setup_database: None,
     admin_user,
@@ -410,8 +398,6 @@ async def test_runtime_staging_times_out_behind_conflicting_request_lock(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_runtime_discovery_rejects_disjoint_catalog_beyond_persisted_limit(
     setup_database: None,
     admin_user,
@@ -463,8 +449,6 @@ async def test_runtime_discovery_rejects_disjoint_catalog_beyond_persisted_limit
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_identity_admin_refresh_cannot_grow_persisted_union_past_limit(
     setup_database: None,
     admin_user,
@@ -545,8 +529,6 @@ async def test_identity_admin_refresh_cannot_grow_persisted_union_past_limit(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_runtime_and_admin_refresh_share_one_bounded_catalog_union(
     setup_database: None,
     admin_user,
@@ -651,8 +633,6 @@ async def test_runtime_and_admin_refresh_share_one_bounded_catalog_union(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_concurrent_disjoint_catalogs_cannot_exceed_persisted_byte_limit(
     setup_database: None,
     admin_user,
@@ -716,8 +696,6 @@ async def test_concurrent_disjoint_catalogs_cannot_exceed_persisted_byte_limit(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_runtime_staging_queues_approved_drift_once(
     setup_database: None,
     admin_user,
@@ -795,8 +773,6 @@ async def test_runtime_staging_queues_approved_drift_once(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_concurrent_protocol_session_claims_return_one_winner(
     setup_database: None,
     admin_user,
@@ -843,8 +819,6 @@ async def test_concurrent_protocol_session_claims_return_one_winner(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_concurrent_expired_session_replacements_return_current_winner(
     setup_database: None,
     admin_user,
@@ -895,8 +869,6 @@ async def test_concurrent_expired_session_replacements_return_current_winner(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_first_session_claim_crossing_identity_toggle_is_rejected(
     setup_database: None,
     admin_user,
@@ -968,8 +940,6 @@ async def test_first_session_claim_crossing_identity_toggle_is_rejected(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_server_session_invalidation_joins_the_callers_transaction(
     setup_database: None,
     admin_user,

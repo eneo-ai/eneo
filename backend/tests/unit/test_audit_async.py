@@ -13,7 +13,6 @@ from eneo.audit.domain.outcome import Outcome
 from eneo.jobs.job_models import Task
 
 
-@pytest.mark.asyncio
 async def test_log_async_enqueues_to_arq():
     """Test that log_async enqueues the audit log to ARQ."""
     # Mock the repository and job_manager
@@ -59,7 +58,6 @@ async def test_log_async_enqueues_to_arq():
         assert params["outcome"] == "success"
 
 
-@pytest.mark.asyncio
 async def test_log_async_validation():
     """Test that log_async validates failure requires error_message."""
     mock_repository = MagicMock()
@@ -79,7 +77,6 @@ async def test_log_async_validation():
         )
 
 
-@pytest.mark.asyncio
 async def test_log_async_with_optional_params():
     """Test log_async with optional parameters."""
     mock_repository = MagicMock()

@@ -1,8 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import uuid4
 
-import pytest
-
 from eneo.templates.app_template.api.admin_router import (
     create_template as create_app_template,
 )
@@ -49,7 +47,6 @@ def _build_template(completion_model_id, wizard, *, is_app):
     return template
 
 
-@pytest.mark.asyncio
 async def test_app_admin_create_router_passes_completion_model_id():
     completion_model_id = uuid4()
     user = MagicMock(id=uuid4(), tenant_id=uuid4())
@@ -85,7 +82,6 @@ async def test_app_admin_create_router_passes_completion_model_id():
     assert create_data.completion_model_id == completion_model_id
 
 
-@pytest.mark.asyncio
 async def test_assistant_admin_create_router_passes_completion_model_id():
     completion_model_id = uuid4()
     user = MagicMock(id=uuid4(), tenant_id=uuid4())

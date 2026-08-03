@@ -21,8 +21,6 @@ async def admin_token(db_container, patch_auth_service_jwt, admin_user):
         return container.auth_service().create_access_token_for_user(admin_user)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_advance_moves_the_pin_audits_once_and_repeats_cleanly(
     client, admin_token, db_container
 ):
@@ -153,8 +151,6 @@ async def test_advance_moves_the_pin_audits_once_and_repeats_cleanly(
     assert [b["skill_revision_id"] for b in bindings] == [second_revision_id]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_a_move_the_governance_fit_rejects_rolls_back_unaudited(
     client, admin_token, db_container
 ):
@@ -245,8 +241,6 @@ async def test_a_move_the_governance_fit_rejects_rolls_back_unaudited(
     assert [b["skill_revision_id"] for b in bindings] == [first_revision_id]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_a_publish_after_the_review_is_refused_not_silently_applied(
     client, admin_token, db_container
 ):
@@ -335,8 +329,6 @@ async def test_a_publish_after_the_review_is_refused_not_silently_applied(
     assert [b["skill_revision_id"] for b in bindings] == [first_revision_id]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_unpublished_and_blocked_refusals_carry_their_own_codes(
     client, admin_token, db_container
 ):

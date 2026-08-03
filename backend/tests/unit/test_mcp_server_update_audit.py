@@ -11,8 +11,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.audit.domain.action_types import ActionType
 from eneo.mcp_servers.presentation.mcp_server_router import update_mcp_server
 from eneo.mcp_servers.presentation.models import MCPServerUpdate
@@ -74,19 +72,16 @@ async def _audited_changes(old: bool, new: bool | None) -> dict:
     return kwargs["metadata"].get("changes", {})
 
 
-@pytest.mark.asyncio
 async def test_enabling_forward_identity_is_audited_with_old_and_new():
     changes = await _audited_changes(old=False, new=True)
     assert changes["forward_identity"] == {"old": False, "new": True}
 
 
-@pytest.mark.asyncio
 async def test_disabling_forward_identity_is_audited_with_old_and_new():
     changes = await _audited_changes(old=True, new=False)
     assert changes["forward_identity"] == {"old": True, "new": False}
 
 
-@pytest.mark.asyncio
 async def test_update_without_forward_identity_records_no_change():
     changes = await _audited_changes(old=True, new=None)
     assert "forward_identity" not in changes

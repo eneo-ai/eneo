@@ -21,8 +21,6 @@ from eneo.scim.schemas.common import ScimFilter, ScimSort
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_returns_active_users(db_session, test_tenant):
     """list() includes active users for the given tenant."""
     async with db_session() as session:
@@ -43,8 +41,6 @@ async def test_list_returns_active_users(db_session, test_tenant):
     assert "active@example.com" in emails
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_excludes_inactive_users(db_session, test_tenant):
     """list() excludes users with state='inactive'."""
     async with db_session() as session:
@@ -65,8 +61,6 @@ async def test_list_excludes_inactive_users(db_session, test_tenant):
     assert "inactive@example.com" not in emails
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_eq_username(db_session, test_tenant):
     """list() with eq filter on userName returns only the matching user."""
     async with db_session() as session:
@@ -102,8 +96,6 @@ async def test_list_filter_eq_username(db_session, test_tenant):
     assert username == "filter.alpha"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_co_email(db_session, test_tenant):
     """list() with co (contains) filter on email performs case-insensitive substring match."""
     async with db_session() as session:
@@ -138,8 +130,6 @@ async def test_list_filter_co_email(db_session, test_tenant):
     assert "other@different.com" not in emails
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_sw_username(db_session, test_tenant):
     """list() with sw (starts with) filter matches prefix correctly."""
     async with db_session() as session:
@@ -172,8 +162,6 @@ async def test_list_filter_sw_username(db_session, test_tenant):
     assert "jane.doe" not in usernames
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_pr_external_id(db_session, test_tenant):
     """list() with pr (present) filter returns only users that have externalId set."""
     async with db_session() as session:
@@ -207,8 +195,6 @@ async def test_list_filter_pr_external_id(db_session, test_tenant):
     assert "no-ext@example.com" not in emails
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_emails_value_maps_to_email(db_session, test_tenant):
     """Azure Entra ID sends `emails.value eq "x@y"` as its primary de-dup
     filter. The previous code path silently dropped this filter and returned
@@ -246,8 +232,6 @@ async def test_list_filter_emails_value_maps_to_email(db_session, test_tenant):
     assert emails == {"azure-match@example.com"}
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_unsupported_attribute_raises_invalid_filter(
     db_session, test_tenant
 ):
@@ -267,8 +251,6 @@ async def test_list_filter_unsupported_attribute_raises_invalid_filter(
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_sort_ascending_by_username(db_session, test_tenant):
     """list() with sort ascending on userName returns results in ascending order."""
     async with db_session() as session:
@@ -295,8 +277,6 @@ async def test_list_sort_ascending_by_username(db_session, test_tenant):
     assert usernames == sorted(usernames)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_sort_descending_by_username(db_session, test_tenant):
     """list() with sort descending on userName returns results in descending order."""
     async with db_session() as session:
@@ -323,8 +303,6 @@ async def test_list_sort_descending_by_username(db_session, test_tenant):
     assert usernames == sorted(usernames, reverse=True)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_correct_user(db_session, scim_user):
     """get_by_id() returns the user with the given UUID."""
     async with db_session() as session:
@@ -337,8 +315,6 @@ async def test_get_by_id_returns_correct_user(db_session, scim_user):
     assert found_email == scim_user.email
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_none_for_unknown_id(db_session, test_tenant):
     """get_by_id() returns None for a UUID that doesn't exist."""
     async with db_session() as session:
@@ -348,8 +324,6 @@ async def test_get_by_id_returns_none_for_unknown_id(db_session, test_tenant):
     assert result is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_none_for_wrong_tenant(db_session, scim_user):
     """get_by_id() returns None when tenant_id doesn't match the user's tenant."""
     async with db_session() as session:
@@ -359,8 +333,6 @@ async def test_get_by_id_returns_none_for_wrong_tenant(db_session, scim_user):
     assert result is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_username_returns_correct_user(db_session, scim_user):
     """get_by_username() returns the user with the given username."""
     async with db_session() as session:
@@ -373,8 +345,6 @@ async def test_get_by_username_returns_correct_user(db_session, scim_user):
     assert found_username == scim_user.username
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_username_returns_none_for_unknown(db_session, test_tenant):
     """get_by_username() returns None for a username that doesn't exist."""
     async with db_session() as session:
@@ -384,8 +354,6 @@ async def test_get_by_username_returns_none_for_unknown(db_session, test_tenant)
     assert result is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_soft_delete_via_state_inactive(db_session, scim_user):
     """Setting state='inactive' hides the user from list() but keeps the row.
 
@@ -417,8 +385,6 @@ async def test_soft_delete_via_state_inactive(db_session, scim_user):
     assert row_exists, "Row must still exist after soft delete"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filters_by_tenant(db_session, test_tenant):
     """list() returns only users for the given tenant_id — no cross-tenant leakage."""
     from dependency_injector import providers
@@ -460,8 +426,6 @@ async def test_list_filters_by_tenant(db_session, test_tenant):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_users_http(client, bypass_scim_auth):
     """GET /scim/v2/Users returns a ListResponse."""
     response = await client.get("/scim/v2/Users")
@@ -471,8 +435,6 @@ async def test_list_users_http(client, bypass_scim_auth):
     assert "Resources" in body
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_users_http_unsupported_filter_returns_400_invalid_filter(
     client, bypass_scim_auth
 ):
@@ -485,8 +447,6 @@ async def test_list_users_http_unsupported_filter_returns_400_invalid_filter(
     assert "phoneNumbers.value" in body.get("detail", "")
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_users_http_emails_value_filter_returns_match(
     client, bypass_scim_auth, db_session, test_tenant
 ):
@@ -511,8 +471,6 @@ async def test_list_users_http_emails_value_filter_returns_match(
     assert body["Resources"][0]["userName"] == "http.azure"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_create_user_http(client, bypass_scim_auth):
     payload = {
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
@@ -523,8 +481,6 @@ async def test_create_user_http(client, bypass_scim_auth):
     assert response.status_code == 201
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_user_http(client, bypass_scim_auth, scim_user):
     """GET /scim/v2/Users/{id} returns a ScimUser."""
     response = await client.get(f"/scim/v2/Users/{scim_user.id}")
@@ -533,8 +489,6 @@ async def test_get_user_http(client, bypass_scim_auth, scim_user):
     assert body["id"] == str(scim_user.id)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_user_sets_deleted_state_and_timestamp(
     db_session, client, bypass_scim_auth, scim_user
 ):
@@ -551,8 +505,6 @@ async def test_delete_user_sets_deleted_state_and_timestamp(
         assert user.deleted_at is not None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_user_is_idempotent(
     db_session, client, bypass_scim_auth, scim_user
 ):
@@ -576,8 +528,6 @@ async def test_delete_user_is_idempotent(
         assert user.deleted_at == first_deleted_at
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_patch_active_false_soft_deletes_user(
     db_session, client, bypass_scim_auth, scim_user
 ):
@@ -599,8 +549,6 @@ async def test_patch_active_false_soft_deletes_user(
         assert user.deleted_at is not None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_patch_active_true_reactivates_deleted_user(
     db_session, client, bypass_scim_auth, scim_user
 ):
@@ -630,8 +578,6 @@ async def test_patch_active_true_reactivates_deleted_user(
         assert user.deleted_at is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_create_logs_warning_when_tenant_has_no_default_role(
     db_session, test_tenant, caplog
 ):

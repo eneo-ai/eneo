@@ -33,8 +33,6 @@ def enable_tenant_credentials(test_settings):
     set_settings(test_settings)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_municipality_admin_sets_api_key(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -119,8 +117,6 @@ async def test_municipality_admin_sets_api_key(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_azure_with_data_residency(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -198,8 +194,6 @@ async def test_azure_with_data_residency(
     assert azure_db_cred["deployment_name"] == "gpt-4-sweden"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_multi_provider_configuration(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -301,8 +295,6 @@ async def test_multi_provider_configuration(
     assert "mistral" not in tenant.api_credentials
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_backward_compatibility(
     legacy_credentials_mode,  # Disable strict mode for this test
     client: AsyncClient,
@@ -395,8 +387,6 @@ async def test_backward_compatibility(
     settings.openai_api_key = original_openai_key
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.xfail(
     reason="Chat completions endpoint (/api/v1/chat/completions) not implemented or requires different routing. "
     "Test returns 404 instead of 401. May require tenant-scoped path, tenant headers, or endpoint doesn't exist yet. "
@@ -506,8 +496,6 @@ async def test_strict_error_handling_no_fallback(
     assert "openai" not in tenant.api_credentials, "Credential should be deleted"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_credential_update_overwrites_existing(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -578,8 +566,6 @@ async def test_credential_update_overwrites_existing(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_credential_validation_rejects_invalid_format(
     client: AsyncClient,
     test_tenant,
@@ -629,8 +615,6 @@ async def test_credential_validation_rejects_invalid_format(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_unauthorized_access_to_credentials(
     client: AsyncClient,
     test_tenant,
@@ -678,8 +662,6 @@ async def test_unauthorized_access_to_credentials(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_cross_tenant_credential_isolation(
     client: AsyncClient,
     async_session: AsyncSession,

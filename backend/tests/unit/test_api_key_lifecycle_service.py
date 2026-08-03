@@ -38,7 +38,6 @@ def user():
     return SimpleNamespace(id=uuid4(), email="user@example.com", tenant_id=uuid4())
 
 
-@pytest.mark.asyncio
 async def test_suspend_logs_audit(user):
     key = _make_key(tenant_id=user.tenant_id)
     repo = AsyncMock()
@@ -67,7 +66,6 @@ async def test_suspend_logs_audit(user):
     assert audit.log_async.call_args.kwargs["action"] == ActionType.API_KEY_SUSPENDED
 
 
-@pytest.mark.asyncio
 async def test_revoke_logs_audit(user):
     key = _make_key(tenant_id=user.tenant_id)
     repo = AsyncMock()
@@ -96,7 +94,6 @@ async def test_revoke_logs_audit(user):
     assert audit.log_async.call_args.kwargs["action"] == ActionType.API_KEY_REVOKED
 
 
-@pytest.mark.asyncio
 async def test_rotate_logs_audit(user):
     key = _make_key(tenant_id=user.tenant_id)
     new_key = _make_key(tenant_id=user.tenant_id, rotated_from_key_id=key.id)
@@ -127,7 +124,6 @@ async def test_rotate_logs_audit(user):
     assert metadata["extra"]["grace_period_disabled"] is False
 
 
-@pytest.mark.asyncio
 async def test_rotate_disable_grace_period_collapses_grace_window(user):
     key = _make_key(tenant_id=user.tenant_id)
     new_key = _make_key(tenant_id=user.tenant_id, rotated_from_key_id=key.id)
@@ -161,7 +157,6 @@ async def test_rotate_disable_grace_period_collapses_grace_window(user):
     assert metadata["extra"]["grace_period_disabled"] is True
 
 
-@pytest.mark.asyncio
 async def test_update_revoked_key_allows_metadata_only(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -200,7 +195,6 @@ async def test_update_revoked_key_allows_metadata_only(user):
     repo.update.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_update_revoked_key_rejects_policy_fields(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -232,7 +226,6 @@ async def test_update_revoked_key_rejects_policy_fields(user):
     assert "Only name and description" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_double_revoke_is_idempotent(user):
     """Revoking an already-revoked key returns success without error."""
     key = _make_key(
@@ -260,7 +253,6 @@ async def test_double_revoke_is_idempotent(user):
     repo.update.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_rotate_key_with_existing_grace_period(user):
     """Rotation of a key that already has rotation_grace_until overwrites the grace window."""
     key = _make_key(
@@ -296,7 +288,6 @@ async def test_rotate_key_with_existing_grace_period(user):
     assert update_kwargs["rotation_grace_until"] > key.rotation_grace_until
 
 
-@pytest.mark.asyncio
 async def test_rotate_key_uses_default_when_policy_grace_period_is_null(user):
     """Explicit null policy value falls back to settings default, while avoiding timedelta(None)."""
     user.tenant = SimpleNamespace(api_key_policy={"rotation_grace_hours": None})
@@ -334,7 +325,6 @@ async def test_rotate_key_uses_default_when_policy_grace_period_is_null(user):
     assert grace_until < before + timedelta(hours=24, minutes=1)
 
 
-@pytest.mark.asyncio
 async def test_rotate_serializes_resource_permissions_for_repo_create(user):
     """Rotate passes JSON-serializable resource_permissions to repo.create."""
     key = _make_key(
@@ -381,7 +371,6 @@ def _extend_policy_mock() -> SimpleNamespace:
     )
 
 
-@pytest.mark.asyncio
 async def test_extend_expiration_updates_and_logs(user):
     original = datetime.now(timezone.utc) + timedelta(days=1)
     new_date = datetime.now(timezone.utc) + timedelta(days=90)
@@ -417,7 +406,6 @@ async def test_extend_expiration_updates_and_logs(user):
     assert metadata["extra"]["via"] == "standalone"
 
 
-@pytest.mark.asyncio
 async def test_extend_expiration_to_null_when_policy_permits(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -445,7 +433,6 @@ async def test_extend_expiration_to_null_when_policy_permits(user):
     assert repo.update.call_args.kwargs["expires_at"] is None
 
 
-@pytest.mark.asyncio
 async def test_extend_expiration_no_change_is_noop(user):
     expires = datetime.now(timezone.utc) + timedelta(days=30)
     key = _make_key(tenant_id=user.tenant_id, expires_at=expires)
@@ -469,7 +456,6 @@ async def test_extend_expiration_no_change_is_noop(user):
     audit.log_async.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_extend_expiration_rejects_revoked_key(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -499,7 +485,6 @@ async def test_extend_expiration_rejects_revoked_key(user):
     repo.update.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_extend_expiration_rejects_expired_key(user):
     past = datetime.now(timezone.utc) - timedelta(days=1)
     key = _make_key(tenant_id=user.tenant_id, expires_at=past)
@@ -524,7 +509,6 @@ async def test_extend_expiration_rejects_expired_key(user):
     repo.update.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_extend_expiration_rejects_past_date(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -551,7 +535,6 @@ async def test_extend_expiration_rejects_past_date(user):
     assert "future" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_extend_expiration_propagates_policy_violation(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -588,7 +571,6 @@ async def test_extend_expiration_propagates_policy_violation(user):
     repo.update.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_rotate_with_update_expiration_logs_two_audits(user):
     original = datetime.now(timezone.utc) + timedelta(days=1)
     new_date = datetime.now(timezone.utc) + timedelta(days=90)
@@ -636,7 +618,6 @@ async def test_rotate_with_update_expiration_logs_two_audits(user):
     assert metadata["extra"]["via"] == "rotation"
 
 
-@pytest.mark.asyncio
 async def test_purge_revoked_key_deletes_and_audits(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -669,7 +650,6 @@ async def test_purge_revoked_key_deletes_and_audits(user):
     assert metadata["extra"]["previous_state"] == "revoked"
 
 
-@pytest.mark.asyncio
 async def test_purge_expired_key_deletes(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -698,7 +678,6 @@ async def test_purge_expired_key_deletes(user):
     assert metadata["extra"]["previous_state"] == "expired"
 
 
-@pytest.mark.asyncio
 async def test_purge_active_key_rejected(user):
     key = _make_key(tenant_id=user.tenant_id)
     repo = AsyncMock()
@@ -723,7 +702,6 @@ async def test_purge_active_key_rejected(user):
     repo.delete.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_purge_suspended_key_rejected(user):
     key = _make_key(
         tenant_id=user.tenant_id,
@@ -750,7 +728,6 @@ async def test_purge_suspended_key_rejected(user):
     repo.delete.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_rotate_with_update_expiration_but_same_date_skips_extension_event(user):
     """When update_expiration=true but the date is unchanged, only the rotation
     event is emitted — there is no expiration change to record."""
@@ -787,7 +764,6 @@ async def test_rotate_with_update_expiration_but_same_date_skips_extension_event
     assert actions == [ActionType.API_KEY_ROTATED]
 
 
-@pytest.mark.asyncio
 async def test_rotate_without_update_expiration_preserves_existing(user):
     original = datetime.now(timezone.utc) + timedelta(days=10)
     key = _make_key(tenant_id=user.tenant_id, expires_at=original)

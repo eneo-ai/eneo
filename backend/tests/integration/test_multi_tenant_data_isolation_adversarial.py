@@ -161,8 +161,6 @@ async def _put_tenant_credential(
     assert response.status_code == 200, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
     client: AsyncClient,
     super_admin_token: str,
@@ -235,8 +233,6 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_insights_logging_never_hydrates_another_tenants_message(
     client: AsyncClient,
     super_admin_token: str,
@@ -337,8 +333,6 @@ def _tenant_credentials_enabled(test_settings):
     set_settings(test_settings)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     client: AsyncClient,
     super_admin_token: str,
@@ -428,8 +422,6 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_user_login_rejects_wrong_tenant_credentials(
     client: AsyncClient,
     super_admin_token: str,
@@ -500,8 +492,6 @@ async def test_user_login_rejects_wrong_tenant_credentials(
     # and cannot be used to authenticate in a different tenant's context
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_config_endpoint_isolates_tenants(
     client: AsyncClient,
     super_admin_token: str,
@@ -589,8 +579,6 @@ async def test_federation_config_endpoint_isolates_tenants(
     # This test documents the expected isolation behavior
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_deletion_rejects_cross_tenant_operation(
     client: AsyncClient,
     super_admin_token: str,
@@ -663,8 +651,6 @@ async def test_space_deletion_rejects_cross_tenant_operation(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_list_spaces_endpoint_filters_by_tenant(
     client: AsyncClient,
     super_admin_token: str,
@@ -756,8 +742,6 @@ async def test_list_spaces_endpoint_filters_by_tenant(
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     client: AsyncClient,
     super_admin_token: str,
@@ -901,8 +885,6 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
     assert tenant_b["name"] not in tenant_names_a, "Tenant B name leaked to Tenant A!"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_super_admin_endpoints_require_authentication(
     client: AsyncClient,
     super_admin_token: str,

@@ -82,8 +82,6 @@ async def _create_app_id(client, bearer_token: str, space_id: str) -> str:
     return response.json()["id"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_publish_assistant_auto_follows_when_user_and_policy_allow(
     client,
     default_user_token,
@@ -127,8 +125,6 @@ async def test_publish_assistant_auto_follows_when_user_and_policy_allow(
     }
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_notification_preferences_apply_policy_gates_and_persist(
     client,
     default_user_token,
@@ -167,8 +163,6 @@ async def test_notification_preferences_apply_policy_gates_and_persist(
     assert current["auto_follow_published_apps"] is False
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_publish_assistant_does_not_auto_follow_when_opt_out(
     client,
     default_user_token,
@@ -211,8 +205,6 @@ async def test_publish_assistant_does_not_auto_follow_when_opt_out(
     }
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_publish_assistant_auto_follow_is_idempotent_for_same_target(
     client,
     default_user_token,
@@ -263,8 +255,6 @@ async def test_publish_assistant_auto_follow_is_idempotent_for_same_target(
     assert len(matches) == 1
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_publish_app_auto_follows_when_user_and_policy_allow(
     client,
     default_user_token,

@@ -45,8 +45,6 @@ def captured_spans():
         exporter.clear()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_request_produces_correlated_auto_instrumented_spans(
     client, admin_user_api_key, captured_spans
 ):

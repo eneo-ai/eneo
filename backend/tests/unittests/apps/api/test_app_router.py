@@ -34,7 +34,6 @@ def _request(*, api_key=None) -> Request:
     return request
 
 
-@pytest.mark.asyncio
 async def test_update_app_accepts_model_kwargs_when_input_field_changes(monkeypatch):
     """PATCH audit logging must handle ModelKwargs, not dict-only kwargs."""
     app_id = uuid4()

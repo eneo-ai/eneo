@@ -6,12 +6,9 @@ Tests PostgreSQL JSONB atomic merge operations for crawler settings:
 - Race condition prevention via atomic operations
 """
 
-import pytest
 import asyncio
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestUpdateCrawlerSettings:
     """Tests for atomic JSONB merge operations."""
 
@@ -86,8 +83,6 @@ class TestUpdateCrawlerSettings:
             assert updated.crawler_settings["retry_times"] == 5
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestAtomicJSONBMerge:
     """Tests for race condition prevention via atomic JSONB merge."""
 
@@ -155,8 +150,6 @@ class TestAtomicJSONBMerge:
             assert tenant.crawler_settings.get("download_timeout") in [100, 200, 150]
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestClearCrawlerSettings:
     """Tests for clear_crawler_settings operation."""
 
@@ -197,8 +190,6 @@ class TestClearCrawlerSettings:
             assert tenant.crawler_settings == {}
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestCrawlerSettingsIntegrationWithHelper:
     """Tests verifying consumers correctly use tenant-specific settings."""
 

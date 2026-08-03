@@ -110,8 +110,6 @@ async def test_space_id(client, admin_token) -> str:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_admin_service_key_can_list_assistants_for_tenant(
     client, tenant_admin_service_secret
 ):
@@ -126,8 +124,6 @@ async def test_tenant_admin_service_key_can_list_assistants_for_tenant(
     assert "items" in body
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_read_service_key_cannot_list_assistants_for_tenant(
     client, tenant_read_service_secret
 ):
@@ -159,8 +155,6 @@ async def test_tenant_read_service_key_cannot_list_assistants_for_tenant(
         ("PUT", "/api/v1/api-keys/notification-preferences"),
     ],
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_lifecycle_mutations_reject_service_keys(
     client, tenant_admin_service_secret, admin_token, method, path
 ):
@@ -197,8 +191,6 @@ async def test_api_key_lifecycle_mutations_reject_service_keys(
     assert "session token" in resp.text.lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_logging_details_rejects_service_key(
     client,
     tenant_read_service_secret,
@@ -212,8 +204,6 @@ async def test_logging_details_rejects_service_key(
     assert response.json().get("code") == "session_auth_required"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_chat_turn_diagnostics_reject_service_keys(
     client, tenant_admin_service_secret
 ):
@@ -226,8 +216,6 @@ async def test_chat_turn_diagnostics_reject_service_keys(
     assert "session token" in resp.text.lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_chat_turn_diagnostics_reject_user_owned_api_keys(client, admin_token):
     response = await client.post(
         "/api/v1/api-keys",
@@ -266,8 +254,6 @@ def _has_user_identity_required_code(payload: dict) -> bool:
     return payload.get("code") == "user_identity_required"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_get_users_me_rejects_service_key(client, tenant_admin_service_secret):
     resp = await client.get(
         "/api/v1/users/me/",
@@ -277,8 +263,6 @@ async def test_get_users_me_rejects_service_key(client, tenant_admin_service_sec
     assert _has_user_identity_required_code(resp.json()), resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_get_users_me_works_for_bearer_user(client, admin_token):
     """Sanity check — the user-identity gate must NOT regress bearer auth."""
     resp = await client.get(
@@ -368,8 +352,6 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
 
 
 @pytest.mark.parametrize("method,path_template,body", _CREATION_ENDPOINTS)
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_creation_endpoints_return_403_with_gate_code(
     client, tenant_admin_service_secret, test_space_id, method, path_template, body
 ):
@@ -386,8 +368,6 @@ async def test_service_key_creation_endpoints_return_403_with_gate_code(
     assert _has_creation_gate_code(resp.json()), f"{method} {path}: {resp.text}"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_cannot_upload_a_user_owned_file(
     client,
     tenant_admin_service_secret,
@@ -402,8 +382,6 @@ async def test_service_key_cannot_upload_a_user_owned_file(
     assert _has_creation_gate_code(response.json()), response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_bearer_user_can_create_space(client, admin_token):
     """Sanity check — the creation gate must NOT regress bearer auth."""
     resp = await client.post(

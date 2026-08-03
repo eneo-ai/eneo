@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import jwt
-import pytest
 import sqlalchemy as sa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -142,8 +141,6 @@ def _generate_rs256_keypair() -> tuple[str, str]:
     return private_pem, public_pem
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_patch_federation_updates_single_field_without_full_payload(
     client: AsyncClient,
     async_session,
@@ -201,8 +198,6 @@ async def test_patch_federation_updates_single_field_without_full_payload(
     assert stored["redirect_path"] == "/auth/callback"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_patch_federation_updates_client_secret_only(
     client: AsyncClient,
     async_session,
@@ -261,8 +256,6 @@ async def test_patch_federation_updates_client_secret_only(
     assert encryption_service.decrypt(after["client_secret"]) == new_secret
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_patch_federation_refreshes_discovery_fields(
     client: AsyncClient,
     async_session,
@@ -326,8 +319,6 @@ async def test_patch_federation_refreshes_discovery_fields(
     assert stored["token_endpoint_auth_method"] == "client_secret_basic"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_patch_federation_clears_optional_fields(
     client: AsyncClient,
     async_session,
@@ -388,8 +379,6 @@ async def test_patch_federation_clears_optional_fields(
     assert stored["additional_redirect_uris"] == []
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_patch_federation_requires_existing_config(
     client: AsyncClient,
     super_admin_token: str,
@@ -407,8 +396,6 @@ async def test_patch_federation_requires_existing_config(
     assert response.json()["detail"] == "No federation config found for tenant"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_put_federation_still_requires_full_payload(
     client: AsyncClient,
     super_admin_token: str,
@@ -425,8 +412,6 @@ async def test_put_federation_still_requires_full_payload(
     assert response.status_code == 422
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_patch_federation_rejects_null_required_field(
     client: AsyncClient,
     super_admin_token: str,
@@ -445,8 +430,6 @@ async def test_patch_federation_rejects_null_required_field(
     assert "PATCH does not allow null for: client_id" in response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_initiate_requires_valid_tenant(
     client: AsyncClient,
     super_admin_token: str,
@@ -497,8 +480,6 @@ async def test_federation_initiate_requires_valid_tenant(
     assert unknown_tenant.status_code == 404
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_callback_enforces_allowed_domains(
     client: AsyncClient,
     super_admin_token: str,
@@ -592,8 +573,6 @@ async def test_federation_callback_enforces_allowed_domains(
     assert "not allowed" in failure.json()["detail"].lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_callback_rejects_tampered_state(
     client: AsyncClient,
     super_admin_token: str,
@@ -675,8 +654,6 @@ async def test_federation_callback_rejects_tampered_state(
     assert tampered.status_code in {400, 404}
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_callback_accepts_future_iat_within_leeway(
     client: AsyncClient,
     super_admin_token: str,
@@ -764,8 +741,6 @@ async def test_federation_callback_accepts_future_iat_within_leeway(
     assert response.status_code == 200, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_callback_rejects_future_iat_beyond_leeway(
     client: AsyncClient,
     super_admin_token: str,
@@ -855,8 +830,6 @@ async def test_federation_callback_rejects_future_iat_beyond_leeway(
     assert "unexpected" in detail.lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_callback_rejects_redirect_mismatch_without_grace(
     client: AsyncClient,
     super_admin_token: str,
@@ -992,8 +965,6 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         test_settings.strict_oidc_redirect_validation = original_strict
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_callback_allows_recent_config_change_within_grace(
     client: AsyncClient,
     super_admin_token: str,

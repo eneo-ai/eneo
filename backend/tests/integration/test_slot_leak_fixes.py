@@ -38,7 +38,6 @@ def create_mock_container(embeddings_service):
 class TestPersistBatchReturnType:
     """Tests for persist_batch returning tuple[int, int, list[str], list[str]]."""
 
-    @pytest.mark.asyncio
     async def test_empty_buffer_returns_empty_urls(self):
         """
         Empty page_buffer should return (0, 0, [], []).
@@ -78,7 +77,6 @@ class TestPersistBatchReturnType:
             f"Empty buffer should return (0, 0, [], {{}}), got {result}"
         )
 
-    @pytest.mark.asyncio
     async def test_no_embedding_model_returns_all_failed(self):
         """
         When embedding_model is None, all pages should fail with empty successful_urls.
@@ -207,6 +205,7 @@ class TestSessionLifecycle:
         to return the connection to the pool before the long-running crawl begins.
         """
         import inspect
+
         from eneo.worker import crawl_tasks
 
         source = inspect.getsource(crawl_tasks.crawl_task)
@@ -232,7 +231,6 @@ class TestSessionLifecycle:
 class TestEmbeddingAPIFailures:
     """Tests for embedding API failure handling."""
 
-    @pytest.mark.asyncio
     async def test_embedding_timeout_doesnt_corrupt_tracking(self):
         """
         When embedding API times out, the page should fail but not corrupt
@@ -263,7 +261,6 @@ class TestEmbeddingAPIFailures:
 class TestCancellationSafety:
     """Tests for task cancellation safety."""
 
-    @pytest.mark.asyncio
     async def test_cancellation_during_batch_persist(self):
         """
         When a task is cancelled during batch persist, in-progress work
@@ -309,6 +306,7 @@ class TestRedisTTLManagement:
         Note: Heartbeat logic was extracted to HeartbeatMonitor during refactoring.
         """
         import inspect
+
         from eneo.worker.crawl.heartbeat import HeartbeatMonitor
 
         source = inspect.getsource(HeartbeatMonitor._refresh_redis_ttl)
@@ -330,6 +328,7 @@ class TestZombieJobPrevention:
         Note: Preemption logic was extracted to HeartbeatMonitor during refactoring.
         """
         import inspect
+
         from eneo.worker.crawl.heartbeat import HeartbeatMonitor
 
         source = inspect.getsource(HeartbeatMonitor._check_preemption)
@@ -344,6 +343,7 @@ class TestZombieJobPrevention:
         and return preempted_during_crawl status.
         """
         import inspect
+
         from eneo.worker import crawl_tasks
 
         source = inspect.getsource(crawl_tasks.crawl_task)

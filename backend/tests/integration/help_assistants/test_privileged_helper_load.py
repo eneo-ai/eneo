@@ -35,9 +35,6 @@ from eneo.help_assistants.domain.assignment_history_reason import (
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.main.exceptions import NotFoundException
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
-
-
 # ---------------------------------------------------------------------------
 # DB / fixture helpers — mirror neighbouring test files
 # ---------------------------------------------------------------------------

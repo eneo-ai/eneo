@@ -148,8 +148,6 @@ async def _remove_space_member(db_container, space_id: str, user_id: UUID):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_creation_rejected_for_non_admin(client, regular_user_token):
     """A user without Permission.API_KEYS cannot create service-owned keys.
 
@@ -167,8 +165,6 @@ async def test_service_key_creation_rejected_for_non_admin(client, regular_user_
     assert resp.status_code == 403, resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_tenant_write_requires_guardrails(client, default_user_token):
     """Service tenant write/admin key without IP or expiry is rejected."""
     resp = await _create_service_key(
@@ -181,8 +177,6 @@ async def test_service_key_tenant_write_requires_guardrails(client, default_user
     assert "IP allowlist or expiration" in resp.json()["message"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_tenant_write_accepted_with_expiry(
     client, default_user_token
 ):
@@ -201,8 +195,6 @@ async def test_service_key_tenant_write_accepted_with_expiry(
     assert key["owner_user_id"] is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_tenant_read_no_guardrails_needed(client, default_user_token):
     """Service tenant read key doesn't need IP/expiry guardrail."""
     resp = await _create_service_key(
@@ -216,8 +208,6 @@ async def test_service_key_tenant_read_no_guardrails_needed(client, default_user
     assert key["ownership"] == "service"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_survives_owner_deactivation(
     client, db_container, default_user, default_user_token
 ):
@@ -261,8 +251,6 @@ async def test_service_key_survives_owner_deactivation(
         await session.commit()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_survives_owner_deletion(
     client, db_container, default_user, default_user_token
 ):
@@ -326,8 +314,6 @@ async def test_service_key_survives_owner_deletion(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_still_enforces_scope(client, default_user_token):
     """Service key with space scope cannot access resources in another space."""
     space_id = await _create_space(client, token=default_user_token)
@@ -366,8 +352,6 @@ async def test_service_key_still_enforces_scope(client, default_user_token):
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_space_scoped_can_read_space(client, default_user_token):
     """Space-scoped read service key can GET the space it's scoped to."""
     space_id = await _create_space(client, token=default_user_token)
@@ -391,8 +375,6 @@ async def test_service_key_space_scoped_can_read_space(client, default_user_toke
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_space_scoped_read_cannot_patch_space(
     client, default_user_token
 ):
@@ -419,8 +401,6 @@ async def test_service_key_space_scoped_read_cannot_patch_space(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_space_scoped_write_cannot_patch_space(
     client, default_user_token
 ):
@@ -449,8 +429,6 @@ async def test_service_key_space_scoped_write_cannot_patch_space(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_space_scoped_admin_can_patch_space(
     client, default_user_token
 ):
@@ -481,8 +459,6 @@ async def test_service_key_space_scoped_admin_can_patch_space(
     assert probe.json()["name"] == new_name
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_survives_member_removal(
     client, db_container, default_user, default_user_token
 ):

@@ -25,7 +25,7 @@ from eneo.database.tables.object_content_table import (
     ObjectStoreObjects,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"

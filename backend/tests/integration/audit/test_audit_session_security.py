@@ -1,16 +1,12 @@
 """Integration tests for audit session security improvements."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
 import redis.exceptions
 
 from eneo.audit.infrastructure.audit_session_service import AuditSessionService
 
-pytestmark = pytest.mark.integration
 
-
-@pytest.mark.asyncio
 async def test_environment_aware_cookies_in_development(
     client, auth_headers, monkeypatch
 ):
@@ -58,7 +54,6 @@ async def test_environment_aware_cookies_in_development(
         monkeypatch.setattr(settings, "testing", original_testing)
 
 
-@pytest.mark.asyncio
 async def test_redis_error_handling_on_session_creation(client, auth_headers):
     """Test that Redis errors return 503 with helpful message."""
     with patch(
@@ -84,7 +79,6 @@ async def test_redis_error_handling_on_session_creation(client, auth_headers):
         assert "temporarily unavailable" in response.json()["detail"].lower()
 
 
-@pytest.mark.asyncio
 async def test_redis_error_handling_on_session_validation(client, auth_headers):
     """Test that Redis errors during validation return 503."""
     # First create a session successfully
@@ -117,7 +111,6 @@ async def test_redis_error_handling_on_session_validation(client, auth_headers):
         assert response.status_code == 503
 
 
-@pytest.mark.asyncio
 async def test_rate_limiting_enforces_5_sessions_per_hour(client, auth_headers):
     """Test that rate limiting blocks the 6th session creation attempt."""
     # Create 5 sessions (should all succeed)
@@ -147,7 +140,6 @@ async def test_rate_limiting_enforces_5_sessions_per_hour(client, auth_headers):
     assert "5" in response.json()["detail"]
 
 
-@pytest.mark.asyncio
 async def test_session_creation_is_audit_logged(client, auth_headers):
     """Test that session creation events are logged to audit logs."""
     # Create audit access session
@@ -187,7 +179,6 @@ async def test_session_creation_is_audit_logged(client, auth_headers):
     assert "rate_limit" in session_log["metadata"]
 
 
-@pytest.mark.asyncio
 async def test_session_extension_on_active_use(client, auth_headers):
     """Test that active users' sessions are extended automatically."""
     # Create audit access session
@@ -218,7 +209,6 @@ async def test_session_extension_on_active_use(client, auth_headers):
         mock_extend.assert_called_once()
 
 
-@pytest.mark.asyncio
 async def test_tenant_isolation_in_sessions(
     client, auth_headers, test_user_2, test_tenant_2
 ):
@@ -256,7 +246,6 @@ async def test_tenant_isolation_in_sessions(
     assert "invalid or expired" in response.json()["detail"].lower()
 
 
-@pytest.mark.asyncio
 async def test_session_expiration_returns_401(client, auth_headers):
     """Test that expired sessions return 401 error."""
     # Create session
@@ -285,7 +274,6 @@ async def test_session_expiration_returns_401(client, auth_headers):
         assert "invalid or expired" in response.json()["detail"].lower()
 
 
-@pytest.mark.asyncio
 async def test_missing_session_cookie_returns_401(client, auth_headers):
     """Test that requests without session cookie are rejected."""
     response = await client.get(
@@ -298,7 +286,6 @@ async def test_missing_session_cookie_returns_401(client, auth_headers):
     assert "requires justification" in response.json()["detail"].lower()
 
 
-@pytest.mark.asyncio
 async def test_dependency_injection_for_audit_session_service(container):
     """Test that AuditSessionService is properly injected via container."""
     # Verify service can be retrieved from container

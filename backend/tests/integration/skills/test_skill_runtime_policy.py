@@ -2,7 +2,6 @@ import asyncio
 from dataclasses import replace
 from uuid import uuid4
 
-import pytest
 import sqlalchemy as sa
 from sqlalchemy import event
 
@@ -15,8 +14,6 @@ from tests.integration.skills.test_skill_concurrency import (
     _wait_for_held_write,
     _wait_until_database_lock,
 )
-
-pytestmark = pytest.mark.integration
 
 
 async def test_runtime_policy_seeds_once_and_round_trips_per_tenant(

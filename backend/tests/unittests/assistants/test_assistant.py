@@ -262,7 +262,6 @@ def assistant_with_model():
     )
 
 
-@pytest.mark.asyncio
 async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
     embedding_model = MagicMock(id=1)
     assistant_with_model.mcp_servers = [MagicMock()]
@@ -289,7 +288,6 @@ async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
     assert call_kwargs["mcp_servers"] == []
 
 
-@pytest.mark.asyncio
 async def test_ask_uses_mcp_when_no_knowledge(assistant_with_model):
     mcp_servers = [MagicMock()]
     assistant_with_model.mcp_servers = mcp_servers
@@ -317,7 +315,6 @@ async def test_ask_uses_mcp_when_no_knowledge(assistant_with_model):
     assert call_kwargs["mcp_servers"] == mcp_servers
 
 
-@pytest.mark.asyncio
 async def test_ask_uses_runtime_prompt_files_without_mutating_attachments(
     assistant_with_model,
 ):

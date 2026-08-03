@@ -4,13 +4,11 @@ Tests the PUT/GET/DELETE endpoints for managing tenant-specific crawler settings
 Requires super_admin_token for authentication (system admin only).
 """
 
-import pytest
 from uuid import uuid4
+
 from eneo.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestUpdateCrawlerSettings:
     """Tests for PUT /tenants/{tenant_id}/crawler-settings"""
 
@@ -179,8 +177,6 @@ class TestUpdateCrawlerSettings:
         assert response.status_code == 422
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestGetCrawlerSettings:
     """Tests for GET /tenants/{tenant_id}/crawler-settings"""
 
@@ -241,8 +237,6 @@ class TestGetCrawlerSettings:
         assert response.status_code in [401, 403]
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestDeleteCrawlerSettings:
     """Tests for DELETE /tenants/{tenant_id}/crawler-settings"""
 
@@ -305,8 +299,6 @@ class TestDeleteCrawlerSettings:
         assert response.status_code in [401, 403]
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestCrawlerSettingsWorkflow:
     """End-to-end workflow tests for crawler settings."""
 

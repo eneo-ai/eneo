@@ -60,8 +60,6 @@ async def user_without_api_keys_token(
     return token
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_owner_session_can_create_tenant_key(client, default_user_token):
     """Owner role carries Permission.API_KEYS post-migration."""
     response = await client.post(
@@ -77,8 +75,6 @@ async def test_owner_session_can_create_tenant_key(client, default_user_token):
     assert response.status_code == 201, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_user_without_api_keys_permission_cannot_create(
     client, user_without_api_keys_token
 ):
@@ -97,8 +93,6 @@ async def test_user_without_api_keys_permission_cannot_create(
     assert "api_keys" in response.json().get("detail", "").lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_caller_cannot_mint_new_key(client, default_user_token):
     """An admin-level v2 API key cannot bootstrap another key — UI only."""
     create_response = await client.post(

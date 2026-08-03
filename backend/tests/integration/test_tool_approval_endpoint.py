@@ -112,8 +112,6 @@ async def default_user_token(db_container, patch_auth_service_jwt, default_user)
     return token
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_assistant_scoped_key_cannot_approve_other_assistant_context(
     client,
     db_container,
@@ -160,8 +158,6 @@ async def test_assistant_scoped_key_cannot_approve_other_assistant_context(
         await manager.cancel_approval(approval_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_cannot_approve_tools_outside_space(
     client,
     db_container,
@@ -204,8 +200,6 @@ async def test_space_scoped_key_cannot_approve_tools_outside_space(
         await manager.cancel_approval(approval_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_app_scoped_key_blocked_from_approve_tools(
     client,
     db_container,
@@ -247,8 +241,6 @@ async def test_app_scoped_key_blocked_from_approve_tools(
         await manager.cancel_approval(approval_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_approve_tools_succeeds_when_rate_limiter_unavailable(
     client,
     db_container,
@@ -295,8 +287,6 @@ async def test_approve_tools_succeeds_when_rate_limiter_unavailable(
     assert payload["approval_id"] == approval_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_approve_tools_replay_idempotent_then_conflict_with_real_redis(
     client,
     db_container,
@@ -353,8 +343,6 @@ async def test_approve_tools_replay_idempotent_then_conflict_with_real_redis(
         await manager.cancel_approval(approval_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_approve_tools_returns_404_after_approval_state_expires(
     client,
     db_container,
@@ -396,8 +384,6 @@ async def test_approve_tools_returns_404_after_approval_state_expires(
         manager._pending_events.pop(approval_id, None)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_approval_flow_fails_closed_when_redis_unavailable_mid_approval(
     client,
     default_user_token,

@@ -127,7 +127,6 @@ def test_readiness_is_healthy_when_object_store_is_not_configured(
     }
 
 
-@pytest.mark.asyncio
 async def test_concurrent_health_aliases_share_disabled_readiness_probe_and_expire(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

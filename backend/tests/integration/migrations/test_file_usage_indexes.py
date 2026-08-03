@@ -10,7 +10,7 @@ from testcontainers.postgres import PostgresContainer
 from alembic import command
 from alembic.config import Config
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"

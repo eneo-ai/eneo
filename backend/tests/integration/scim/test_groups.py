@@ -34,8 +34,6 @@ from eneo.tenants.tenant import TenantBase
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_returns_all_groups(db_session, test_tenant):
     """list() returns groups for the given tenant."""
     async with db_session() as session:
@@ -51,8 +49,6 @@ async def test_list_returns_all_groups(db_session, test_tenant):
     assert "Group Beta" in names
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_displayname_eq(db_session, test_tenant):
     """list() with eq filter on displayName returns only the matching group."""
     async with db_session() as session:
@@ -74,8 +70,6 @@ async def test_list_filter_displayname_eq(db_session, test_tenant):
     assert first_name == "Engineering"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_displayname_co(db_session, test_tenant):
     """list() with co (contains) filter on displayName performs case-insensitive match."""
     async with db_session() as session:
@@ -98,8 +92,6 @@ async def test_list_filter_displayname_co(db_session, test_tenant):
     assert "Sales" not in names
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filter_unsupported_attribute_raises_invalid_filter(
     db_session, test_tenant
 ):
@@ -118,8 +110,6 @@ async def test_list_filter_unsupported_attribute_raises_invalid_filter(
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_sort_ascending_by_displayname(db_session, test_tenant):
     """list() with sort ascending on displayName returns results in ascending order."""
     async with db_session() as session:
@@ -137,8 +127,6 @@ async def test_list_sort_ascending_by_displayname(db_session, test_tenant):
     assert names == sorted(names)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_group(db_session, scim_group):
     """get_by_id() returns the group with the given UUID."""
     async with db_session() as session:
@@ -151,8 +139,6 @@ async def test_get_by_id_returns_group(db_session, scim_group):
     assert found_name == scim_group.name
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_none_for_unknown(db_session, test_tenant):
     """get_by_id() returns None for a UUID that doesn't exist."""
     async with db_session() as session:
@@ -162,8 +148,6 @@ async def test_get_by_id_returns_none_for_unknown(db_session, test_tenant):
     assert result is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_id_returns_none_for_wrong_tenant(db_session, scim_group):
     """get_by_id() returns None when tenant_id doesn't match the group's tenant."""
     async with db_session() as session:
@@ -173,8 +157,6 @@ async def test_get_by_id_returns_none_for_wrong_tenant(db_session, scim_group):
     assert result is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_name_returns_group(db_session, scim_group):
     """get_by_name() returns the group with the given name."""
     async with db_session() as session:
@@ -185,8 +167,6 @@ async def test_get_by_name_returns_group(db_session, scim_group):
     assert found_name == scim_group.name
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_user_ids_in_tenant_excludes_other_tenants(db_session, test_tenant):
     """get_user_ids_in_tenant() only returns IDs owned by the requested tenant."""
     async with db_session() as session:
@@ -224,8 +204,6 @@ async def test_get_user_ids_in_tenant_excludes_other_tenants(db_session, test_te
     assert other_tenant_user_id not in result
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_add_member_links_user_to_group(db_session, scim_user, scim_group):
     """add_member() inserts a row in the usergroups_users junction table."""
     async with db_session() as session:
@@ -246,8 +224,6 @@ async def test_add_member_links_user_to_group(db_session, scim_user, scim_group)
     assert row_exists, "Junction row must exist after add_member"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_add_member_is_idempotent(db_session, scim_user, scim_group):
     """add_member() called twice does not create duplicate junction rows."""
     async with db_session() as session:
@@ -274,8 +250,6 @@ async def test_add_member_is_idempotent(db_session, scim_user, scim_group):
     assert count == 1, "ON CONFLICT DO NOTHING must prevent duplicates"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_remove_member_unlinks_user(db_session, scim_user, scim_group):
     """remove_member() deletes the junction row between user and group."""
     async with db_session() as session:
@@ -302,8 +276,6 @@ async def test_remove_member_unlinks_user(db_session, scim_user, scim_group):
     assert not row_exists, "Junction row must be gone after remove_member"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_set_members_replaces_all_members(db_session, test_tenant, scim_group):
     """set_members() replaces the full member list atomically."""
     async with db_session() as session:
@@ -345,8 +317,6 @@ async def test_set_members_replaces_all_members(db_session, test_tenant, scim_gr
     assert uid_a not in member_ids, "set_members() should remove user_a"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_set_members_with_empty_list_removes_all(
     db_session, scim_user, scim_group
 ):
@@ -372,8 +342,6 @@ async def test_set_members_with_empty_list_removes_all(
     assert count == 0
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_removes_group_row(db_session, scim_group):
     """delete() performs a hard delete — the group row is gone from the table."""
     async with db_session() as session:
@@ -388,8 +356,6 @@ async def test_delete_removes_group_row(db_session, scim_group):
     assert not exists, "Hard delete must remove the row"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_add_member_ignores_group_in_another_tenant(
     db_session, scim_user, scim_group
 ):
@@ -413,8 +379,6 @@ async def test_add_member_ignores_group_in_another_tenant(
     assert not row_exists, "add_member must be a no-op for a foreign-tenant group"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_set_members_ignores_group_in_another_tenant(
     db_session, scim_user, scim_group
 ):
@@ -441,8 +405,6 @@ async def test_set_members_ignores_group_in_another_tenant(
     assert count == 1, "set_members must not clear members of a foreign-tenant group"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_ignores_group_in_another_tenant(db_session, scim_group):
     """delete() with a foreign tenant must leave the group untouched."""
     async with db_session() as session:
@@ -456,8 +418,6 @@ async def test_delete_ignores_group_in_another_tenant(db_session, scim_group):
     assert result is not None, "delete must be a no-op for a foreign-tenant group"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_filters_by_tenant(db_session, test_tenant):
     """list() returns only groups for the given tenant_id — no cross-tenant leakage."""
     async with db_session() as session:
@@ -485,8 +445,6 @@ async def test_list_filters_by_tenant(db_session, test_tenant):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_groups_empty_returns_200(client, bypass_scim_auth):
     """GET /scim/v2/Groups returns 200 with empty Resources when no groups exist."""
     response = await client.get("/scim/v2/Groups")
@@ -496,8 +454,6 @@ async def test_list_groups_empty_returns_200(client, bypass_scim_auth):
     assert body["Resources"] == []
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_create_group_http(client, bypass_scim_auth):
     """POST /scim/v2/Groups creates a group and returns 201."""
     payload = {
@@ -509,8 +465,6 @@ async def test_create_group_http(client, bypass_scim_auth):
     assert response.status_code == 201
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_create_group_http_rejects_other_tenant_member(
     client,
     db_session,
@@ -550,8 +504,6 @@ async def test_create_group_http_rejects_other_tenant_member(
     assert "Group members must belong to the authenticated tenant" in body["detail"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_group_http(client, bypass_scim_auth, scim_group):
     """GET /scim/v2/Groups/{id} returns a ScimGroup.
 
@@ -564,8 +516,6 @@ async def test_get_group_http(client, bypass_scim_auth, scim_group):
     assert body["id"] == str(scim_group.id)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_create_group_with_active_duplicate_returns_409(
     client, bypass_scim_auth, scim_group
 ):
@@ -580,8 +530,6 @@ async def test_create_group_with_active_duplicate_returns_409(
     assert response.json()["scimType"] == "uniqueness"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_group_is_idempotent(
     db_session, client, bypass_scim_auth, scim_group
 ):
@@ -599,16 +547,12 @@ async def test_delete_group_is_idempotent(
         assert result.scalar_one().state == "deleted"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_group_returns_404_for_unknown_id(client, bypass_scim_auth):
     """DELETE on a never-existed group ID returns 404 (not 204) — distinguishes from idempotent re-delete."""
     response = await client.delete(f"/scim/v2/Groups/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_create_group_reactivates_soft_deleted_group(
     db_session, client, bypass_scim_auth, scim_group
 ):

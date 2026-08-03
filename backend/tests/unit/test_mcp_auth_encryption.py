@@ -493,7 +493,6 @@ class TestUpdateConnectionValidation:
 
         return service, mock_repo, existing, enc
 
-    @pytest.mark.asyncio
     async def test_rejects_update_when_url_change_fails_connection(self, _setup):
         """Changing URL triggers validation; failure blocks the update."""
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
@@ -518,7 +517,6 @@ class TestUpdateConnectionValidation:
         # Should NOT have saved
         mock_repo.update.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_allows_update_when_url_change_passes_connection(self, _setup):
         """Changing URL triggers validation; success allows the update."""
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
@@ -537,7 +535,6 @@ class TestUpdateConnectionValidation:
         assert result.connection is None or result.connection.success is not False
         mock_repo.update.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_rejects_update_when_auth_type_change_fails(self, _setup):
         """Changing auth type from bearer to none triggers validation."""
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
@@ -560,7 +557,6 @@ class TestUpdateConnectionValidation:
         assert result.connection.success is False
         mock_repo.update.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_skips_validation_for_non_connection_changes(self, _setup):
         """Changing only name/description does NOT trigger connection validation."""
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
@@ -585,7 +581,6 @@ class TestUpdateConnectionValidation:
         mock_repo.update.assert_called_once()
         service._test_connection_and_discover_tools.assert_not_called()
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("existing_mode", "requested_mode"), [(False, True), (True, False)]
     )
@@ -615,7 +610,6 @@ class TestUpdateConnectionValidation:
         assert validated_server.forward_identity is requested_mode
         mock_repo.update.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_same_identity_mode_does_not_trigger_validation(self, _setup):
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
@@ -636,7 +630,6 @@ class TestUpdateConnectionValidation:
         mock_repo.update.assert_called_once()
         service._test_connection_and_discover_tools.assert_not_called()
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("existing_mode", "requested_mode"), [(False, True), (True, False)]
     )
@@ -661,7 +654,6 @@ class TestUpdateConnectionValidation:
         state_repo.delete_for_server.assert_awaited_once_with(existing.id)
         assert existing.identity_policy_generation == 1
 
-    @pytest.mark.asyncio
     async def test_disabling_identity_uses_anonymous_catalog_as_availability_snapshot(
         self, _setup
     ):
@@ -712,7 +704,6 @@ class TestUpdateConnectionValidation:
         proxy = MCPProxySession([existing])
         assert proxy.get_allowed_tool_names() == {"test__shared"}
 
-    @pytest.mark.asyncio
     async def test_rejects_credential_update_when_connection_fails(self, _setup):
         """Providing new credentials triggers validation."""
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
@@ -736,7 +727,6 @@ class TestUpdateConnectionValidation:
         assert "Invalid token" in result.connection.error_message
         mock_repo.update.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_uses_plaintext_new_credentials_for_test(self, _setup):
         """When new credentials are provided, they are used in plaintext for the connection test."""
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
@@ -757,7 +747,6 @@ class TestUpdateConnectionValidation:
         test_credentials = call_args[0][1]  # second positional arg
         assert test_credentials == {"token": "new-token"}
 
-    @pytest.mark.asyncio
     async def test_decrypts_existing_credentials_for_url_change_test(self, _setup):
         """When URL changes but credentials don't, existing encrypted credentials are decrypted for the test."""
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
@@ -778,7 +767,6 @@ class TestUpdateConnectionValidation:
         test_credentials = call_args[0][1]
         assert test_credentials["token"] == "old-token"
 
-    @pytest.mark.asyncio
     async def test_same_url_resent_does_not_trigger_validation(self, _setup):
         """Sending the same URL that's already stored should not trigger validation."""
         from eneo.mcp_servers.application.mcp_server_service import ConnectionResult

@@ -11,8 +11,6 @@ import logging
 import pytest
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_raises_when_no_key_configured(test_tenant, test_settings):
     """ValueError raised when no credential available (tenant or global).
 
@@ -49,8 +47,6 @@ async def test_raises_when_no_key_configured(test_tenant, test_settings):
         resolver.get_api_key("anthropic")
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_logging_on_error(test_tenant, test_settings, caplog):
     """Error logs include tenant_id and provider when credential not found.
 
@@ -93,8 +89,6 @@ async def test_logging_on_error(test_tenant, test_settings, caplog):
             cr_logger.removeHandler(caplog.handler)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_no_tenant_no_global_raises(test_settings):
     """When no tenant and no global credential, ValueError is raised.
 
@@ -120,8 +114,6 @@ async def test_no_tenant_no_global_raises(test_settings):
         resolver.get_api_key("openai")
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_strict_mode_blocks_global_fallback(test_tenant, test_settings):
     """Strict mode prevents fallback to global credentials.
 

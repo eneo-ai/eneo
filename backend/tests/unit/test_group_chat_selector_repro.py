@@ -68,7 +68,6 @@ def _two_assistants() -> list[GroupChatAssistant]:
 # --- routing happy path ---------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_sentinel_routes_to_named_assistant():
     service = _make_service(selector_text="ASSISTANT=2")
     assistants = _two_assistants()
@@ -82,7 +81,6 @@ async def test_sentinel_routes_to_named_assistant():
     assert result.assistant is assistants[1]
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "selector_text",
     [
@@ -109,7 +107,6 @@ async def test_sentinel_tolerates_whitespace_and_case(selector_text: str):
 # --- regressions for the original crash class -----------------------------
 
 
-@pytest.mark.asyncio
 async def test_bare_out_of_range_digit_does_not_crash():
     """Original crash repro: model emits '3' with 2 assistants.
 
@@ -128,7 +125,6 @@ async def test_bare_out_of_range_digit_does_not_crash():
     assert result.assistant is None
 
 
-@pytest.mark.asyncio
 async def test_stray_year_in_prose_does_not_crash():
     """`\\d+` used to grab '2024' from any clarification text.
 
@@ -150,7 +146,6 @@ async def test_stray_year_in_prose_does_not_crash():
     assert "clarify" in result.response_str
 
 
-@pytest.mark.asyncio
 async def test_out_of_range_sentinel_falls_through_to_clarification():
     """Even with the right token, an out-of-range index must not route."""
     service = _make_service(selector_text="ASSISTANT=5")
@@ -168,7 +163,6 @@ async def test_out_of_range_sentinel_falls_through_to_clarification():
 # --- new in-range false-positive class (the sentinel's main win) ---------
 
 
-@pytest.mark.asyncio
 async def test_numbered_list_in_clarification_does_not_route():
     """Pre-sentinel, this routed to assistant 1 because `\\d+` matched '1)'.
 
@@ -190,7 +184,6 @@ async def test_numbered_list_in_clarification_does_not_route():
     assert "specify" in result.response_str
 
 
-@pytest.mark.asyncio
 async def test_bare_digit_without_sentinel_does_not_route():
     """Strict contract: a number alone is not a routing decision."""
     service = _make_service(selector_text="2")
@@ -208,7 +201,6 @@ async def test_bare_digit_without_sentinel_does_not_route():
 # --- pure clarification path -----------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_clarification_text_with_no_digits():
     service = _make_service(
         selector_text="Could you be more specific about what you need?"
@@ -228,7 +220,6 @@ async def test_clarification_text_with_no_digits():
 # --- single-assistant shortcut (no model call) ----------------------------
 
 
-@pytest.mark.asyncio
 async def test_single_assistant_shortcut_bypasses_selector():
     service = _make_service(selector_text="<should not be read>")
     only = _make_assistant("Solo", "Handles everything")

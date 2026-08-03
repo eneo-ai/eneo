@@ -15,7 +15,7 @@ from alembic import command
 from alembic.config import Config
 from eneo.database.tables.info_blobs_table import InfoBlobs
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"

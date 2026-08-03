@@ -23,7 +23,6 @@ def service() -> FileService:
     )
 
 
-@pytest.mark.asyncio
 async def test_with_derived_images_appends_new_images_once(
     service: FileService,
 ) -> None:
@@ -38,7 +37,6 @@ async def test_with_derived_images_appends_new_images_once(
     service.get_derived_images.assert_awaited_once_with(parent_ids=[parent.id])
 
 
-@pytest.mark.asyncio
 async def test_with_derived_images_skips_lookup_without_text_files(
     service: FileService,
 ) -> None:
@@ -51,7 +49,6 @@ async def test_with_derived_images_skips_lookup_without_text_files(
     service.get_derived_images.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_object_store_save_rejects_ambient_transaction_before_external_work() -> (
     None
 ):

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles, AppsFiles
@@ -12,8 +11,6 @@ from eneo.files.file_models import FileType, FileUsageKind
 from eneo.files.file_usage import FileUsageRepository
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_file_usage_groups_every_current_product_relation(
     async_session: AsyncSession,
     admin_user,

@@ -4,11 +4,6 @@ import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-import pytest
-
-
-pytestmark = pytest.mark.integration
-
 
 class TestAsyncExportAuthentication:
     """Tests for async export endpoint authentication."""

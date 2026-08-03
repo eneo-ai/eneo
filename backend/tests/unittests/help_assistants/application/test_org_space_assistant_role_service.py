@@ -141,7 +141,6 @@ def _build_service(
     }
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "method, kwargs",
     [
@@ -169,7 +168,6 @@ async def test_non_admin_mutations_raise_unauthorized(method: str, kwargs: dict)
         await getattr(service, method)(**kwargs)
 
 
-@pytest.mark.asyncio
 async def test_get_active_does_not_require_admin():
     non_admin = _make_user()
     org_space_id = uuid4()
@@ -192,7 +190,6 @@ async def test_get_active_does_not_require_admin():
     )
 
 
-@pytest.mark.asyncio
 async def test_toggle_enabled_writes_audit_entry_with_change_block():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
@@ -232,7 +229,6 @@ async def test_toggle_enabled_writes_audit_entry_with_change_block():
     assert changes == {"is_enabled": {"old": True, "new": False}}
 
 
-@pytest.mark.asyncio
 async def test_toggle_visible_to_users_writes_audit_entry_with_change_block():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
@@ -274,7 +270,6 @@ async def test_toggle_visible_to_users_writes_audit_entry_with_change_block():
     assert changes == {"is_visible_to_users": {"old": True, "new": False}}
 
 
-@pytest.mark.asyncio
 async def test_toggle_raises_when_no_active_assignment():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
@@ -290,7 +285,6 @@ async def test_toggle_raises_when_no_active_assignment():
         await service.toggle_enabled(kind=HelperKind.PROMPT_GUIDE, value=False)
 
 
-@pytest.mark.asyncio
 async def test_list_for_calling_tenant_returns_assignments_for_org_space():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
@@ -315,7 +309,6 @@ async def test_list_for_calling_tenant_returns_assignments_for_org_space():
     role_repo.list_for_org_space.assert_awaited_once_with(org_space_id=org_space_id)
 
 
-@pytest.mark.asyncio
 async def test_list_available_templates_excludes_installed_kinds():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
@@ -336,7 +329,6 @@ async def test_list_available_templates_excludes_installed_kinds():
     assert HelperKind.PROMPT_GUIDE not in {kind for kind, _template in result}
 
 
-@pytest.mark.asyncio
 async def test_list_available_templates_lists_uninstalled_kinds():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
@@ -353,7 +345,6 @@ async def test_list_available_templates_lists_uninstalled_kinds():
     assert HelperKind.PROMPT_GUIDE in {kind for kind, _template in result}
 
 
-@pytest.mark.asyncio
 async def test_install_helper_creates_assistant_with_shipped_prompt_and_visible_role():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
@@ -415,7 +406,6 @@ async def test_install_helper_creates_assistant_with_shipped_prompt_and_visible_
     assert audit_kwargs["action"] == ActionType.HELP_ASSISTANT_INSTALLED
 
 
-@pytest.mark.asyncio
 async def test_install_helper_rejects_when_already_installed():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
@@ -436,7 +426,6 @@ async def test_install_helper_rejects_when_already_installed():
     role_repo.add.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_uninstall_helper_writes_history_then_removes_role_and_assistant():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()

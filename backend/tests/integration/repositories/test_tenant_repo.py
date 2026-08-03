@@ -9,11 +9,7 @@ These operations use PostgreSQL's JSONB functions for efficient updates
 without loading/modifying/saving the entire JSONB object.
 """
 
-import pytest
 
-
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_update_api_credential_creates_new(db_container, test_tenant):
     """Creating new credential via JSONB set operation.
 
@@ -44,8 +40,6 @@ async def test_update_api_credential_creates_new(db_container, test_tenant):
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_update_api_credential_overwrites_existing(db_container, test_tenant):
     """Updating existing credential via JSONB set operation.
 
@@ -75,8 +69,6 @@ async def test_update_api_credential_overwrites_existing(db_container, test_tena
         assert encrypted_value != "sk-new-key-456", "Key should be encrypted"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_update_api_credential_multiple_providers(db_container, test_tenant):
     """Adding multiple providers creates separate JSONB keys.
 
@@ -124,8 +116,6 @@ async def test_update_api_credential_multiple_providers(db_container, test_tenan
         assert updated_tenant.api_credentials["azure"]["deployment_name"] == "gpt-4"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_update_api_credential_case_insensitive(db_container, test_tenant):
     """Provider names are normalized to lowercase.
 
@@ -146,8 +136,6 @@ async def test_update_api_credential_case_insensitive(db_container, test_tenant)
         assert "OpenAI" not in updated_tenant.api_credentials
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_api_credential_removes_specific(db_container, test_tenant):
     """Delete removes specific provider credential.
 
@@ -178,8 +166,6 @@ async def test_delete_api_credential_removes_specific(db_container, test_tenant)
         assert "openai" not in updated_tenant.api_credentials
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_api_credential_leaves_others(db_container, test_tenant):
     """Deleting one provider leaves others intact.
 
@@ -223,8 +209,6 @@ async def test_delete_api_credential_leaves_others(db_container, test_tenant):
         assert "azure" in updated_tenant.api_credentials
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_api_credential_nonexistent(db_container, test_tenant):
     """Deleting non-existent credential is idempotent.
 
@@ -252,8 +236,6 @@ async def test_delete_api_credential_nonexistent(db_container, test_tenant):
         assert "anthropic" not in updated_tenant.api_credentials
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_api_credential_case_insensitive(db_container, test_tenant):
     """Provider names are normalized to lowercase when deleting.
 
@@ -279,8 +261,6 @@ async def test_delete_api_credential_case_insensitive(db_container, test_tenant)
         assert "openai" not in updated_tenant.api_credentials
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_api_credentials_masked_returns_last_4(db_container, test_tenant):
     """Returns last 4 chars with '...' prefix for keys >4 chars.
 
@@ -310,8 +290,6 @@ async def test_get_api_credentials_masked_returns_last_4(db_container, test_tena
         assert masked["anthropic"] == "sk-...5678"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_api_credentials_masked_handles_short_keys(db_container, test_tenant):
     """Masking handles keys ≤4 chars with '***'.
 
@@ -352,8 +330,6 @@ async def test_get_api_credentials_masked_handles_short_keys(db_container, test_
         assert masked["azure"] == "***"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_api_credentials_masked_empty_credentials(db_container, test_tenant):
     """Empty credentials dict returns empty dict.
 
@@ -370,8 +346,6 @@ async def test_get_api_credentials_masked_empty_credentials(db_container, test_t
         assert masked == {}
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_api_credentials_masked_multiple_providers(db_container, test_tenant):
     """Multiple providers all masked correctly.
 
@@ -411,8 +385,6 @@ async def test_get_api_credentials_masked_multiple_providers(db_container, test_
         assert masked["azure"] == "...7890"  # No sk- prefix for azure key
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_api_credentials_masked_with_azure_extra_fields(
     db_container, test_tenant
 ):

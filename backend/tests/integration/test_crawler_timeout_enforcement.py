@@ -12,17 +12,14 @@ running live Scrapy crawlers with test HTTP servers that delay responses.
 These tests verify the integration layer that makes timeout enforcement possible.
 """
 
-import pytest
 from httpx import AsyncClient
 
 from eneo.tenants.crawler_settings_helper import (
-    get_crawler_setting,
     CRAWLER_SETTING_SPECS,
+    get_crawler_setting,
 )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestTimeoutConfiguration:
     """Tests that timeout settings are correctly configured for worker use."""
 
@@ -120,8 +117,6 @@ class TestTimeoutConfiguration:
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestTimeoutRangeValidation:
     """Tests that timeout settings enforce their min/max ranges."""
 
@@ -232,8 +227,6 @@ class TestTimeoutRangeValidation:
         assert response.status_code == 200
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestTimeoutDefaultBehavior:
     """Tests timeout default values when not explicitly configured."""
 
@@ -284,8 +277,6 @@ class TestTimeoutDefaultBehavior:
             assert default_timeout == 30, "Hardcoded default should be 30s"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestMultiTenantTimeoutIsolation:
     """Tests that timeout settings are isolated between tenants."""
 
@@ -373,8 +364,6 @@ class TestMultiTenantTimeoutIsolation:
             assert t2_max_length == 7200, "Tenant 2 should have long max length"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestTimeoutUpdatePropagation:
     """Tests that timeout changes propagate immediately."""
 

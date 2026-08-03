@@ -188,8 +188,6 @@ async def _advance(
     return stage.advance
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_advances_only_the_reviewed_pin_and_preserves_everything_else(
     db_container, admin_user
 ):
@@ -260,8 +258,6 @@ async def test_advances_only_the_reviewed_pin_and_preserves_everything_else(
         assert untouched.position == 1
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_repeating_the_advance_is_a_typed_no_op(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -327,8 +323,6 @@ async def test_repeating_the_advance_is_a_typed_no_op(db_container, admin_user):
         assert retried.outcome is PersonalChatPinAdvanceOutcome.ALREADY_CURRENT
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_a_stale_reviewed_revision_loses_instead_of_overwriting(
     db_container, admin_user
 ):
@@ -383,8 +377,6 @@ async def test_a_stale_reviewed_revision_loses_instead_of_overwriting(
         assert row.skill_revision_id == old_revision.id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
     db_container, admin_user
 ):
@@ -481,8 +473,6 @@ async def test_unbound_unpublished_blocked_and_foreign_skills_stop_cleanly(
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_validation_holds_no_locks_at_all(db_container, admin_user):
     """A governance binding replacement commits while validation is open."""
     import sqlalchemy as sa2
@@ -590,8 +580,6 @@ async def test_validation_holds_no_locks_at_all(db_container, admin_user):
         assert binding.skill_revision_id == published.id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_personal_default_change_during_validation_refuses_the_apply(
     db_container, admin_user
 ):
@@ -671,8 +659,6 @@ async def test_personal_default_change_during_validation_refuses_the_apply(
         assert binding.skill_revision_id == old_revision.id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_adding_mcp_to_personal_default_during_validation_refuses_the_apply(
     db_container, admin_user
 ):
@@ -764,8 +750,6 @@ async def test_adding_mcp_to_personal_default_during_validation_refuses_the_appl
         assert binding.skill_revision_id == old_revision.id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_an_in_flight_assistant_save_drains_before_the_apply(
     db_container, admin_user
 ):
@@ -926,8 +910,6 @@ async def test_an_in_flight_assistant_save_drains_before_the_apply(
         assert binding.skill_revision_id == old_revision.id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_a_runtime_policy_change_during_validation_refuses_the_apply(
     db_container, admin_user
 ):
@@ -1000,8 +982,6 @@ async def test_a_runtime_policy_change_during_validation_refuses_the_apply(
         assert binding.skill_revision_id == old_revision.id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_a_policy_change_during_validation_refuses_the_apply(
     db_container, admin_user
 ):
@@ -1077,8 +1057,6 @@ async def test_a_policy_change_during_validation_refuses_the_apply(
         assert binding.scalar_one() == old_revision.id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_concurrent_advances_cannot_jointly_commit_unvalidated_state(
     db_container, admin_user
 ):

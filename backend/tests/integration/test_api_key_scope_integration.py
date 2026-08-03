@@ -328,8 +328,6 @@ def _error_code_from_response(response) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_get_assistants_returns_only_scope_space(
     client, bearer_token
 ):
@@ -355,8 +353,6 @@ async def test_space_scoped_key_get_assistants_returns_only_scope_space(
     assert asst_b not in ids, f"Assistant {asst_b} from space B should NOT appear"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_assistant_scoped_key_get_assistants_returns_only_that_assistant(
     client, bearer_token
 ):
@@ -385,8 +381,6 @@ async def test_assistant_scoped_key_get_assistants_returns_only_that_assistant(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_get_spaces_returns_only_scope_space(
     client, bearer_token
 ):
@@ -414,8 +408,6 @@ async def test_space_scoped_key_get_spaces_returns_only_scope_space(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_get_info_blobs_returns_only_scope_space_blobs(
     api_client, bearer_token, db_container, default_user
 ):
@@ -454,8 +446,6 @@ async def test_space_scoped_key_get_info_blobs_returns_only_scope_space_blobs(
     assert blob_b not in ids, f"Blob {blob_b} from other space should not appear"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_get_legacy_groups_returns_only_scope_space_groups(
     api_client, bearer_token
 ):
@@ -489,8 +479,6 @@ async def test_space_scoped_key_get_legacy_groups_returns_only_scope_space_group
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_dashboard_returns_only_scope_space(
     api_client, bearer_token
 ):
@@ -517,8 +505,6 @@ async def test_space_scoped_key_dashboard_returns_only_scope_space(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_can_access_prompt_in_same_space(
     api_client, bearer_token, db_container, default_user
 ):
@@ -546,8 +532,6 @@ async def test_space_scoped_key_can_access_prompt_in_same_space(
     assert resp.json()["id"] == prompt_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_denied_prompt_from_other_space(
     api_client, bearer_token, db_container, default_user
 ):
@@ -592,8 +576,6 @@ async def test_space_scoped_key_denied_prompt_from_other_space(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_post_assistants_wrong_space_returns_403(
     api_client, bearer_token
 ):
@@ -621,8 +603,6 @@ async def test_space_scoped_key_post_assistants_wrong_space_returns_403(
     assert space_a in detail["message"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_post_assistants_matching_space_succeeds(
     client, bearer_token
 ):
@@ -651,8 +631,6 @@ async def test_space_scoped_key_post_assistants_matching_space_succeeds(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_cannot_create_app_in_other_space_path(
     api_client, bearer_token
 ):
@@ -677,8 +655,6 @@ async def test_space_scoped_key_cannot_create_app_in_other_space_path(
     assert _error_code_from_response(resp) == "insufficient_scope", resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_cannot_create_collection_in_other_space_path(
     api_client, bearer_token
 ):
@@ -703,8 +679,6 @@ async def test_space_scoped_key_cannot_create_collection_in_other_space_path(
     assert _error_code_from_response(resp) == "insufficient_scope", resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_cannot_create_website_in_other_space_path(
     api_client, bearer_token
 ):
@@ -734,8 +708,6 @@ async def test_space_scoped_key_cannot_create_website_in_other_space_path(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_for_tenant_true_blocked(api_client, bearer_token):
     """Space-scoped key cannot use for_tenant=true (requires tenant scope)."""
     space = await _create_space(api_client, token=bearer_token)
@@ -758,8 +730,6 @@ async def test_space_scoped_key_for_tenant_true_blocked(api_client, bearer_token
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_get_files_allowed(client, bearer_token):
     """Space-scoped key can GET /files/ (files are user-scoped, read is safe)."""
     space = await _create_space(client, token=bearer_token)
@@ -775,8 +745,6 @@ async def test_space_scoped_key_get_files_allowed(client, bearer_token):
     assert resp.status_code == 200, resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_user_key_delete_owned_file_allowed(
     api_client, bearer_token
 ):
@@ -815,8 +783,6 @@ async def test_space_scoped_user_key_delete_owned_file_allowed(
     assert get_resp.status_code == 404, get_resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_delete_files_denied_with_clear_error(
     api_client, bearer_token
 ):
@@ -840,8 +806,6 @@ async def test_service_key_delete_files_denied_with_clear_error(
     assert _error_code_from_response(resp) == "service_key_cannot_delete_files"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_key_upload_files_denied_with_creation_gate_code(
     api_client, bearer_token
 ):
@@ -868,8 +832,6 @@ async def test_service_key_upload_files_denied_with_creation_gate_code(
     assert "supported endpoints" in resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_user_key_cannot_delete_another_users_file(
     api_client, bearer_token, default_user, db_container
 ):
@@ -917,8 +879,6 @@ async def test_space_scoped_user_key_cannot_delete_another_users_file(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_post_files_allowed(api_client, bearer_token):
     """Space-scoped key can POST /files/ (upload for conversation workflow)."""
     space = await _create_space(api_client, token=bearer_token)
@@ -942,8 +902,6 @@ async def test_space_scoped_key_post_files_allowed(api_client, bearer_token):
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_get_file_by_id_allowed(api_client, bearer_token):
     """Space-scoped key can GET /files/{id}/ for files it owns."""
     space = await _create_space(api_client, token=bearer_token)
@@ -971,8 +929,6 @@ async def test_space_scoped_key_get_file_by_id_allowed(api_client, bearer_token)
     assert get_resp.json()["id"] == file_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
 async def test_non_space_scoped_keys_get_files_allowed(
     api_client, bearer_token, scope_type
@@ -992,8 +948,6 @@ async def test_non_space_scoped_keys_get_files_allowed(
     assert resp.status_code == 200, resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
 async def test_non_space_scoped_keys_post_files_allowed(
     api_client, bearer_token, scope_type
@@ -1014,8 +968,6 @@ async def test_non_space_scoped_keys_post_files_allowed(
     assert resp.status_code in (200, 201), resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
 async def test_non_space_scoped_keys_get_file_by_id_allowed(
     api_client, bearer_token, scope_type
@@ -1046,8 +998,6 @@ async def test_non_space_scoped_keys_get_file_by_id_allowed(
     assert get_resp.json()["id"] == file_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
 async def test_assistant_app_scoped_user_keys_delete_owned_file_allowed(
     api_client, bearer_token, scope_type
@@ -1075,8 +1025,6 @@ async def test_assistant_app_scoped_user_keys_delete_owned_file_allowed(
     assert resp.status_code == 204, resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_admin_key_delete_files_not_blocked_by_scope(
     api_client, bearer_token
 ):

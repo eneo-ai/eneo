@@ -24,7 +24,6 @@ def _build_container_with_admin_user():
     return container, user
 
 
-@pytest.mark.asyncio
 async def test_list_subscriptions_scopes_by_tenant():
     container, user = _build_container_with_admin_user()
     subscription_repo = AsyncMock()
@@ -45,7 +44,6 @@ async def test_list_subscriptions_scopes_by_tenant():
     subscription_repo.list_all.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_renew_expired_subscriptions_scopes_by_tenant():
     container, user = _build_container_with_admin_user()
     subscription_repo = AsyncMock()
@@ -67,7 +65,6 @@ async def test_renew_expired_subscriptions_scopes_by_tenant():
     subscription_repo.list_all.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_recreate_subscription_uses_tenant_scoped_lookup():
     container, user = _build_container_with_admin_user()
     subscription_id = uuid4()
@@ -93,7 +90,6 @@ async def test_recreate_subscription_uses_tenant_scoped_lookup():
     )
 
 
-@pytest.mark.asyncio
 async def test_token_helper_persists_rotated_service_account_refresh_token():
     container = MagicMock()
     user_integration = MagicMock()

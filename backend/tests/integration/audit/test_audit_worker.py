@@ -1,8 +1,9 @@
 """Integration tests for audit logging ARQ worker."""
 
-import pytest
 from datetime import datetime
 from uuid import uuid4
+
+import pytest
 
 from eneo.audit.application.audit_worker_task import log_audit_event_task
 from eneo.audit.domain.action_types import ActionType
@@ -11,10 +12,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-pytestmark = pytest.mark.integration
 
-
-@pytest.mark.asyncio
 async def test_log_audit_event_task(db_session, test_tenant, test_user):
     """Test that the worker task successfully persists audit logs."""
     async with db_session() as session:
@@ -66,7 +64,6 @@ async def test_log_audit_event_task(db_session, test_tenant, test_user):
         assert created_log.ip_address == "192.168.1.1"
 
 
-@pytest.mark.asyncio
 async def test_worker_task_handles_failure_outcome(db_session, test_tenant, test_user):
     """Test worker task with failure outcome and error message."""
     async with db_session() as session:
@@ -107,7 +104,6 @@ async def test_worker_task_handles_failure_outcome(db_session, test_tenant, test
         assert failed_log.error_message == "Email already exists"
 
 
-@pytest.mark.asyncio
 async def test_worker_task_validates_params(db_session, test_tenant):
     """Test that worker task validates parameters."""
     async with db_session() as session:

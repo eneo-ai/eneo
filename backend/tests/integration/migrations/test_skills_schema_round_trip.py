@@ -26,7 +26,7 @@ from sqlalchemy.exc import DBAPIError
 from alembic import command
 from alembic.config import Config
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 PRE_SKILLS_REVISION = "202607221000"
 SKILLS_SCHEMA_REVISION = "202607221200"

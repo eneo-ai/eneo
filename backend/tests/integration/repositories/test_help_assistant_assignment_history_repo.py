@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.assistant_table import Assistants
@@ -87,8 +86,6 @@ async def _insert_assistant(
     return assistant_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_add_then_list_by_org_space_and_kind_returns_row(
     db_container, admin_user
 ):
@@ -137,8 +134,6 @@ async def test_add_then_list_by_org_space_and_kind_returns_row(
         assert rows[0].replaced_by_assistant_id == new_assistant_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_by_org_space_and_kind_orders_by_replaced_at_desc(
     db_container, admin_user
 ):
@@ -187,8 +182,6 @@ async def test_list_by_org_space_and_kind_orders_by_replaced_at_desc(
         assert [r.assistant_name_snapshot for r in rows] == ["B", "A"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_by_org_space_and_kind_filters_by_org_space(
     db_container, admin_user
 ):
@@ -242,8 +235,6 @@ async def test_list_by_org_space_and_kind_filters_by_org_space(
         assert rows_for_a[0].assistant_id == assistant_a
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_replaced_assistant_ids_dedupes_and_ignores_null(
     db_container, admin_user
 ):
@@ -317,8 +308,6 @@ async def test_list_replaced_assistant_ids_dedupes_and_ignores_null(
         assert remaining == 3
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_exists_for_assistant_matches_both_columns(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -353,8 +342,6 @@ async def test_exists_for_assistant_matches_both_columns(db_container, admin_use
         assert await repo.exists_for_assistant(unrelated_assistant) is False
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_exists_for_assistant_false_when_unknown(db_container, admin_user):
     async with db_container() as container:
         repo = container.help_assistant_assignment_history_repo()

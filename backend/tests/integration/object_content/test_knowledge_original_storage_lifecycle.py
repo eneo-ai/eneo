@@ -179,7 +179,6 @@ def _params(*, user_id: UUID, group_id: UUID, space_id: UUID) -> UploadInfoBlob:
     )
 
 
-@pytest.mark.asyncio
 async def test_knowledge_original_uses_generic_inventory_move_and_delete_lifecycle(
     db_container,
     real_object_store: RealObjectStore,
@@ -362,7 +361,6 @@ async def test_knowledge_original_uses_generic_inventory_move_and_delete_lifecyc
             assert await session.get(InlineContentPayloads, content_id) is None
 
 
-@pytest.mark.asyncio
 async def test_exact_object_store_reupload_skips_remote_upload_and_orphan(
     db_container,
     real_object_store: RealObjectStore,
@@ -490,7 +488,6 @@ async def test_exact_object_store_reupload_skips_remote_upload_and_orphan(
         second_embeddings.get_embeddings.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_concurrent_exact_object_store_uploads_share_one_remote_publication(
     db_container,
     real_object_store: RealObjectStore,
@@ -621,7 +618,6 @@ async def test_concurrent_exact_object_store_uploads_share_one_remote_publicatio
         second_embeddings.get_embeddings.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_combined_original_and_text_quota_fails_before_remote_work(
     db_container,
     real_object_store: RealObjectStore,
@@ -710,7 +706,6 @@ async def test_combined_original_and_text_quota_fails_before_remote_work(
         embeddings.get_embeddings.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_remote_upload_becomes_reconcilable_orphan_when_final_transaction_fails(
     db_container,
     real_object_store: RealObjectStore,

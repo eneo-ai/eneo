@@ -91,7 +91,6 @@ def test_bad_request_error_does_not_leak_provider_details():
     assert exc_info.value.code == "provider_rejected_request"
 
 
-@pytest.mark.asyncio
 async def test_provider_rejected_embedding_request_is_not_retried(monkeypatch):
     attempts = 0
 

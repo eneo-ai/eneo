@@ -12,8 +12,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.completion_models.application.completion_model_migration_history_service import (
     CompletionModelMigrationHistoryService,
 )
@@ -73,7 +71,6 @@ def _make_db_record(
 class TestCreateMigrationHistory:
     """Tests for the repo's create_migration_history method."""
 
-    @pytest.mark.asyncio
     async def test_create_stores_model_names_and_provider_types(self):
         """create_migration_history should store technical model names and provider types."""
         session = AsyncMock()
@@ -111,7 +108,6 @@ class TestCreateMigrationHistory:
         assert added_record.to_model_id == to_model_id
         assert added_record.migration_id == migration_id
 
-    @pytest.mark.asyncio
     async def test_create_stores_none_names_when_not_provided(self):
         """create_migration_history should store None for names when not provided."""
         session = AsyncMock()
@@ -133,7 +129,6 @@ class TestCreateMigrationHistory:
         assert added_record.from_provider_type is None
         assert added_record.to_provider_type is None
 
-    @pytest.mark.asyncio
     async def test_create_record_contains_all_expected_fields(self):
         """Created history record should contain all expected fields."""
         session = AsyncMock()
@@ -192,7 +187,6 @@ class TestConvertToPublicModels:
         service = CompletionModelMigrationHistoryService(session)
         return service
 
-    @pytest.mark.asyncio
     async def test_uses_stored_name_when_model_deleted(self):
         """Deleted models keep readable names, but not dead UUID fallbacks."""
         service = self._make_service()
@@ -218,7 +212,6 @@ class TestConvertToPublicModels:
         assert result[0].from_model_id is None
         assert result[0].to_model_id is None
 
-    @pytest.mark.asyncio
     async def test_uses_stored_name_as_primary_source_even_when_model_exists(self):
         """Stored name should be used as primary source, even if the model still exists in DB."""
         service = self._make_service()
@@ -254,7 +247,6 @@ class TestConvertToPublicModels:
         assert result[0].from_model_id == from_id
         assert result[0].to_model_id == to_id
 
-    @pytest.mark.asyncio
     async def test_falls_back_to_deleted_model_when_both_name_and_id_null(self):
         """Should fall back to 'Deleted model' when both stored name and model_id are null."""
         service = self._make_service()
@@ -277,7 +269,6 @@ class TestConvertToPublicModels:
         assert result[0].from_model_name == "Deleted model"
         assert result[0].to_model_name == "Deleted model"
 
-    @pytest.mark.asyncio
     async def test_falls_back_to_live_name_when_stored_name_is_none(self):
         """When stored name is None but model still exists, should use live DB name."""
         service = self._make_service()
@@ -309,7 +300,6 @@ class TestConvertToPublicModels:
         assert result[0].from_model_name == "gpt-4-live"
         assert result[0].to_model_name == "gpt-4o-live"
 
-    @pytest.mark.asyncio
     async def test_convert_empty_list_returns_empty(self):
         """Converting an empty list should return an empty list without DB queries."""
         service = self._make_service()
@@ -318,7 +308,6 @@ class TestConvertToPublicModels:
 
         assert result == []
 
-    @pytest.mark.asyncio
     async def test_convert_populates_all_public_model_fields(self):
         """All fields on ModelMigrationHistory should be populated from the DB record."""
         service = self._make_service()
@@ -367,7 +356,6 @@ class TestConvertToPublicModels:
         assert public.duration == 5.0
         assert public.error_message is None
 
-    @pytest.mark.asyncio
     async def test_deleted_models_keep_null_ids_after_cleanup(self):
         """Deleted models should expose readable snapshots, not stale UUIDs."""
         service = self._make_service()
@@ -391,7 +379,6 @@ class TestConvertToPublicModels:
         assert result[0].from_model_id is None
         assert result[0].to_model_id is None
 
-    @pytest.mark.asyncio
     async def test_convert_multiple_records(self):
         """Should correctly handle multiple records in a single batch."""
         service = self._make_service()
@@ -416,9 +403,7 @@ class TestConvertToPublicModels:
         )
 
         service._get_model_names = AsyncMock(return_value={})
-        service._get_user_names = AsyncMock(
-            return_value={user_id: "admin@test.com"}
-        )
+        service._get_user_names = AsyncMock(return_value={user_id: "admin@test.com"})
 
         result = await service._convert_to_public_models([record1, record2])
 

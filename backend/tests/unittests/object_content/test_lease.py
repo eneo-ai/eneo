@@ -6,7 +6,6 @@ from eneo.object_content import lease as lease_module
 from eneo.object_content.lease import OperationLeaseCheckpoint
 
 
-@pytest.mark.asyncio
 async def test_checkpoint_amortizes_renewal_from_a_conservative_timestamp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -40,7 +39,6 @@ async def test_checkpoint_amortizes_renewal_from_a_conservative_timestamp(
     assert renewals == [100, 200]
 
 
-@pytest.mark.asyncio
 async def test_checkpoint_renews_during_and_after_an_in_flight_operation() -> None:
     renewals = 0
     renewed = asyncio.Event()
@@ -73,7 +71,6 @@ async def test_checkpoint_renews_during_and_after_an_in_flight_operation() -> No
     assert renewals >= 2
 
 
-@pytest.mark.asyncio
 async def test_checkpoint_rejects_a_result_when_final_renewal_fails() -> None:
     operation_completed = False
 
@@ -97,7 +94,6 @@ async def test_checkpoint_rejects_a_result_when_final_renewal_fails() -> None:
     assert operation_completed
 
 
-@pytest.mark.asyncio
 async def test_checkpoint_observes_late_failure_after_renewal_loss() -> None:
     started = asyncio.Event()
     release = asyncio.Event()
@@ -129,7 +125,6 @@ async def test_checkpoint_observes_late_failure_after_renewal_loss() -> None:
     await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
 async def test_checkpoint_observes_an_in_flight_operation_after_cancellation() -> None:
     started = asyncio.Event()
     release = asyncio.Event()

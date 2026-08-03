@@ -13,7 +13,6 @@ from eneo.files.file_service import FileService
 from eneo.sessions.session_service import SessionService
 
 
-@pytest.mark.asyncio
 async def test_session_service_create_session_commits_independently(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -56,7 +55,6 @@ async def test_session_service_create_session_commits_independently(
     request_repo.add.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_question_placeholder_commits_independently(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -109,7 +107,6 @@ async def test_question_placeholder_commits_independently(
     request_question_repo.add.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_new_session_and_first_question_share_one_short_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -167,7 +164,6 @@ async def test_new_session_and_first_question_share_one_short_transaction(
     fresh_question_repo.add.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_file_service_save_image_starts_short_transaction_when_needed():
     entered = 0
 
@@ -211,7 +207,6 @@ async def test_file_service_save_image_starts_short_transaction_when_needed():
     service._persist_prepared_file.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_file_service_save_image_reuses_existing_transaction():
     session = MagicMock()
     session.in_transaction.return_value = True

@@ -7,9 +7,10 @@ Tests the heartbeat module's behavior:
 - Preemption detection
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 from eneo.worker.crawl.heartbeat import (
     HeartbeatFailedError,
@@ -21,7 +22,6 @@ from eneo.worker.crawl.heartbeat import (
 class TestHeartbeatMonitorInterval:
     """Tests for interval-based heartbeat gating."""
 
-    @pytest.mark.asyncio
     async def test_tick_skips_before_interval(self):
         """tick() should be a no-op when interval hasn't elapsed."""
         monitor = HeartbeatMonitor(
@@ -51,7 +51,6 @@ class TestHeartbeatMonitorInterval:
 
         assert execute_call_count == 0
 
-    @pytest.mark.asyncio
     async def test_tick_executes_after_interval(self):
         """tick() should execute heartbeat when interval has elapsed."""
         monitor = HeartbeatMonitor(
@@ -82,7 +81,6 @@ class TestHeartbeatMonitorInterval:
 class TestHeartbeatMonitorFailures:
     """Tests for consecutive failure tracking and threshold."""
 
-    @pytest.mark.asyncio
     async def test_consecutive_failures_increment_on_redis_error(self):
         """Redis errors should increment consecutive_failures counter."""
         redis_client = MagicMock()
@@ -114,7 +112,6 @@ class TestHeartbeatMonitorFailures:
 
         assert monitor.consecutive_failures == 1
 
-    @pytest.mark.asyncio
     async def test_heartbeat_failed_error_on_threshold(self):
         """HeartbeatFailedError raised when max_failures reached."""
         redis_client = MagicMock()
@@ -146,7 +143,6 @@ class TestHeartbeatMonitorFailures:
         assert exc_info.value.consecutive_failures == 2
         assert exc_info.value.max_failures == 2
 
-    @pytest.mark.asyncio
     async def test_failures_reset_on_success(self):
         """Consecutive failures should reset to 0 on successful heartbeat."""
         redis_client = MagicMock()
@@ -179,7 +175,6 @@ class TestHeartbeatMonitorFailures:
 class TestHeartbeatMonitorPreemption:
     """Tests for job preemption detection."""
 
-    @pytest.mark.asyncio
     async def test_preemption_raises_job_preempted_error(self):
         """JobPreemptedError raised when job status is FAILED."""
         job_id = uuid4()
@@ -222,9 +217,7 @@ class TestHeartbeatMonitorPreemption:
         with patch.dict(
             "sys.modules",
             {
-                "eneo.database.database": MagicMock(
-                    sessionmanager=mock_sessionmanager
-                ),
+                "eneo.database.database": MagicMock(sessionmanager=mock_sessionmanager),
                 "eneo.jobs.job_repo": MagicMock(
                     JobRepository=MagicMock(return_value=mock_repo)
                 ),
@@ -250,7 +243,6 @@ class TestHeartbeatMonitorPreemption:
 class TestHeartbeatMonitorNoRedis:
     """Tests for behavior when Redis is not available."""
 
-    @pytest.mark.asyncio
     async def test_no_redis_skips_ttl_refresh(self):
         """TTL refresh should be skipped when redis_client is None."""
         monitor = HeartbeatMonitor(
@@ -267,7 +259,6 @@ class TestHeartbeatMonitorNoRedis:
 
         assert monitor.consecutive_failures == 0
 
-    @pytest.mark.asyncio
     async def test_no_tenant_skips_ttl_refresh(self):
         """TTL refresh should be skipped when tenant is None."""
         redis_client = MagicMock()

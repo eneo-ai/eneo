@@ -32,8 +32,6 @@ from eneo.transcription_models.presentation.tenant_transcription_models_router i
 )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestTranscriptionModelSoftDelete:
     async def test_delete_soft_deletes_and_hides_from_reads(
         self, db_container, transcription_model_factory, admin_user
@@ -103,8 +101,6 @@ class TestTranscriptionModelSoftDelete:
                 )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestTranscriptionModelCleanupWorker:
     async def test_cleanup_removes_soft_deleted_without_references(
         self, db_container, transcription_model_factory, admin_user

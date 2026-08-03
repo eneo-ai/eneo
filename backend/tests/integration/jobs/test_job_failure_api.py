@@ -7,8 +7,6 @@ from eneo.database.tables.job_table import Jobs
 from eneo.jobs.job_models import Task
 from eneo.main.models import Status
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture
 async def admin_token(db_container, patch_auth_service_jwt, admin_user) -> str:

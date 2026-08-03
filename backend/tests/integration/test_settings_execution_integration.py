@@ -11,19 +11,17 @@ This verifies the CRITICAL gap: that settings don't just store correctly,
 but actually propagate through all layers to affect worker behavior.
 """
 
-import pytest
 from uuid import uuid4
+
 from httpx import AsyncClient
 
 from eneo.tenants.crawler_settings_helper import (
-    get_crawler_setting,
-    get_all_crawler_settings,
     CRAWLER_SETTING_SPECS,
+    get_all_crawler_settings,
+    get_crawler_setting,
 )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestSettingsPropagation:
     """Tests that settings flow correctly from API → Database → Helper functions."""
 
@@ -123,8 +121,6 @@ class TestSettingsPropagation:
             assert len(all_settings) == len(CRAWLER_SETTING_SPECS)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestSettingsImmediateApplication:
     """Tests that settings changes apply immediately without restart."""
 
@@ -197,8 +193,6 @@ class TestSettingsImmediateApplication:
             assert all_settings["retry_times"] == 7, "retry_times should be preserved"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestMultiTenantSettingsIsolation:
     """Tests that tenant settings don't leak between tenants."""
 
@@ -274,8 +268,6 @@ class TestMultiTenantSettingsIsolation:
             assert t2_retries == 8, "Tenant 2 should have its own retry count"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestBooleanAndRangeSettings:
     """Tests for boolean settings and range validation."""
 
@@ -354,8 +346,6 @@ class TestBooleanAndRangeSettings:
             assert batch_size == 5, "Custom batch size should propagate"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestHeartbeatAndTimeoutSettings:
     """Tests for new heartbeat and timeout settings added in this branch."""
 

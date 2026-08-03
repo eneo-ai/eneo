@@ -296,7 +296,6 @@ def test_tenant_user_write_schema_cannot_escalate_platform_authority() -> None:
     assert projected.is_platform_admin is True
 
 
-@pytest.mark.asyncio
 async def test_platform_authority_requires_current_active_eligibility() -> None:
     eligible = TEST_USER.model_copy(update={"is_platform_admin": True})
     await require_platform_admin(eligible)
@@ -527,7 +526,6 @@ def test_policy_put_resolves_shared_container_once_before_readiness(
     assert resolutions == 1
 
 
-@pytest.mark.asyncio
 async def test_concurrent_policy_projections_close_transactions_before_readiness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -610,7 +608,6 @@ async def test_concurrent_policy_projections_close_transactions_before_readiness
     await asyncio.gather(*(request_projection() for _ in range(6)))
 
 
-@pytest.mark.asyncio
 async def test_policy_put_projects_after_its_compare_and_swap_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -710,7 +707,6 @@ def test_policy_router_is_registered_on_the_admin_surface() -> None:
     assert set(app.openapi()["paths"]["/admin/object-content-moves/pause"]) == {"put"}
 
 
-@pytest.mark.asyncio
 async def test_policy_replace_uses_revision_compare_and_swap() -> None:
     row = ObjectContentDeploymentPolicy(
         id=1,
@@ -742,7 +738,6 @@ async def test_policy_replace_uses_revision_compare_and_swap() -> None:
         await repository.replace(replacement, actor_user_id=uuid4())
 
 
-@pytest.mark.asyncio
 async def test_move_pause_uses_the_policy_revision_compare_and_swap() -> None:
     row = ObjectContentDeploymentPolicy(
         id=1,

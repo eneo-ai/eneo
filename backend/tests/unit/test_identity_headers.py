@@ -10,7 +10,6 @@ from urllib.parse import unquote
 from uuid import uuid4
 
 import httpx
-import pytest
 from mcp.shared._httpx_utils import create_mcp_http_client
 
 from eneo.authentication.auth_models import ApiKeyOwnership
@@ -76,7 +75,6 @@ class TestBuildIdentityHeaders:
         assert unquote(headers["X-Eneo-User-Name"]) == "Åsa Öberg \U0001f600"
         assert unquote(headers["X-Eneo-Tenant-Name"]) == "Härnösands kommun"
 
-    @pytest.mark.asyncio
     async def test_headers_construct_the_actual_http_clients(self):
         # The mapping is handed verbatim to create_mcp_http_client (MCP
         # transport) and to a plain httpx request (the connect diagnostic).
@@ -115,7 +113,6 @@ class TestMCPClientIdentityForwarding:
         server.forward_identity = forward_identity
         return server
 
-    @pytest.mark.asyncio
     async def test_identity_forwarded_only_when_server_opted_in(self):
         identity = {"X-Eneo-User-Id": "u1", "X-Eneo-Tenant-Id": "t1"}
 
@@ -129,7 +126,6 @@ class TestMCPClientIdentityForwarding:
         assert headers["X-Eneo-User-Id"] == "u1"
         assert headers["X-Eneo-Tenant-Id"] == "t1"
 
-    @pytest.mark.asyncio
     async def test_identity_absent_when_not_opted_in(self):
         identity = {"X-Eneo-User-Id": "u1"}
         client = MCPClient(
@@ -141,7 +137,6 @@ class TestMCPClientIdentityForwarding:
         assert headers == {"Authorization": "Bearer secret"}
         assert "X-Eneo-User-Id" not in headers
 
-    @pytest.mark.asyncio
     async def test_service_key_keeps_bearer_auth_without_fabricated_user_headers(self):
         service_key = make_api_key(ownership=ApiKeyOwnership.SERVICE)
         synthetic_service_user = _user(
@@ -188,7 +183,6 @@ class TestManagementPathsCarryIdentity:
         )
         return service
 
-    @pytest.mark.asyncio
     async def test_create_validation_carries_the_acting_admins_identity(self):
         user = _user(permissions=["admin"])
         service = self._service(user)
@@ -208,7 +202,6 @@ class TestManagementPathsCarryIdentity:
         assert identity["X-Eneo-User-Id"] == str(user.id)
         assert identity["X-Eneo-User-Name"] == "anna"
 
-    @pytest.mark.asyncio
     async def test_refresh_tools_discovery_carries_the_acting_admins_identity(self):
         user = _user(permissions=["admin"])
         service = self._service(user)
@@ -230,7 +223,6 @@ class TestManagementPathsCarryIdentity:
         identity = client_cls.call_args.kwargs["identity_headers"]
         assert identity["X-Eneo-User-Id"] == str(user.id)
 
-    @pytest.mark.asyncio
     async def test_identity_scoped_admin_sync_does_not_remove_user_only_tools(self):
         user = _user(permissions=["admin"])
         service = self._service(user)
@@ -257,7 +249,6 @@ class TestManagementPathsCarryIdentity:
         assert result.removed_tools == []
         service.tool_repo.update.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_global_admin_sync_still_marks_missing_tools_removed(self):
         user = _user(permissions=["admin"])
         service = self._service(user)
@@ -284,7 +275,6 @@ class TestManagementPathsCarryIdentity:
         assert existing.removed_from_remote is True
         assert existing.requires_approval is True
 
-    @pytest.mark.asyncio
     async def test_management_refresh_adds_tools_through_bounded_catalog_staging(self):
         user = _user(permissions=["admin"])
         service = self._service(user)
@@ -351,7 +341,6 @@ class TestTerminationCarriesIdentityOnTheWire:
         monkeypatch.setattr(httpx, "AsyncClient", RecordingClient)
         return recorded
 
-    @pytest.mark.asyncio
     async def test_terminate_sends_identity_when_server_opted_in(self, monkeypatch):
         recorded = self._record_http(monkeypatch)
         factory = MCPProxySessionFactory(encryption_service=None)
@@ -367,7 +356,6 @@ class TestTerminationCarriesIdentityOnTheWire:
         assert request.headers["X-Eneo-User-Id"] == "u1"
         assert request.headers["Mcp-Session-Id"] == "mcp-session-1"
 
-    @pytest.mark.asyncio
     async def test_terminate_omits_identity_when_server_not_opted_in(self, monkeypatch):
         recorded = self._record_http(monkeypatch)
         factory = MCPProxySessionFactory(encryption_service=None)

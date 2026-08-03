@@ -91,7 +91,6 @@ def _service(
     )
 
 
-@pytest.mark.asyncio
 async def test_used_depth_two_descendant_blocks_root_deletion(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -154,7 +153,6 @@ async def test_used_depth_two_descendant_blocks_root_deletion(
         assert await session.get(QuestionsFiles, relation_key) is not None
 
 
-@pytest.mark.asyncio
 async def test_delete_first_prevents_a_late_attachment_without_losing_a_use(
     object_content_database: DatabaseSessionManager,
 ) -> None:

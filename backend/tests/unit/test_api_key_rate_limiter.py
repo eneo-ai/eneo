@@ -25,7 +25,6 @@ class FakeRedis:
         return self.count
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_allows_default_scope_limit():
     redis_client = FakeRedis(count=1)
     limiter = ApiKeyRateLimiter(redis_client=redis_client)
@@ -42,7 +41,6 @@ async def test_rate_limit_allows_default_scope_limit():
     assert len(redis_client.calls) == 1
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_exceeded_raises_error():
     redis_client = FakeRedis(count=2)
     limiter = ApiKeyRateLimiter(redis_client=redis_client)
@@ -61,7 +59,6 @@ async def test_rate_limit_exceeded_raises_error():
     assert exc.value.code == "rate_limit_exceeded"
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_unlimited_skips_redis():
     redis_client = FakeRedis(count=1)
     limiter = ApiKeyRateLimiter(redis_client=redis_client)
@@ -78,7 +75,6 @@ async def test_rate_limit_unlimited_skips_redis():
     assert redis_client.calls == []
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_fail_open_when_redis_unavailable():
     settings = get_settings()
     patched = settings.model_copy(update={"api_key_rate_limit_fail_open": True})
@@ -100,7 +96,6 @@ async def test_rate_limit_fail_open_when_redis_unavailable():
         set_settings(settings)
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_fail_closed_when_redis_unavailable():
     """Redis unavailable + fail_open=False → 503."""
     settings = get_settings()
@@ -126,7 +121,6 @@ async def test_rate_limit_fail_closed_when_redis_unavailable():
         set_settings(settings)
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_fail_closed_when_redis_is_none():
     """Redis client is None + fail_open=False → 503."""
     settings = get_settings()
@@ -151,7 +145,6 @@ async def test_rate_limit_fail_closed_when_redis_is_none():
         set_settings(settings)
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_exceeded_includes_headers():
     """Rate limit exceeded response includes Retry-After and X-RateLimit headers."""
     redis_client = FakeRedis(count=2)

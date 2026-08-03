@@ -19,8 +19,6 @@ from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.main.exceptions import ValidationException
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestCompletionModelMigration:
     """Test suite for model migration functionality."""
 

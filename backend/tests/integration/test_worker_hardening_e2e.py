@@ -12,7 +12,6 @@ These are comprehensive tests that exercise the full stack from API to worker.
 import asyncio
 from uuid import UUID, uuid4
 
-import pytest
 import redis.asyncio as aioredis
 from httpx import AsyncClient
 
@@ -39,8 +38,6 @@ async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> 
 # See test_crawler_retry_behavior.py for new per-job retry tests.
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_redis_outage_during_crawl_uses_fallback(
     client: AsyncClient,
     super_admin_token: str,
@@ -111,8 +108,6 @@ async def test_redis_outage_during_crawl_uses_fallback(
     assert final_count is None or int(final_count) == 0, "All slots should be released"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_fallback_mode_behavior_under_redis_failure(
     client: AsyncClient,
     super_admin_token: str,
@@ -186,8 +181,6 @@ async def test_fallback_mode_behavior_under_redis_failure(
     assert tenant_id not in limiter._local_counts, "All slots should be released"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_limiter_release_always_succeeds_with_new_logic(
     client: AsyncClient,
     super_admin_token: str,

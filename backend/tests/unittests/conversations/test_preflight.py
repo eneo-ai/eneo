@@ -102,7 +102,6 @@ def _make_assistant(
     return assistant
 
 
-@pytest.mark.asyncio
 async def test_preflight_counts_input_only():
     """A bare text question without files yields input_tokens > 0, file_tokens = 0."""
     service = _make_service(assistant=_make_assistant())
@@ -119,7 +118,6 @@ async def test_preflight_counts_input_only():
     assert result.context_window == 128000
 
 
-@pytest.mark.asyncio
 async def test_preflight_counts_zero_for_empty_question():
     """Defensive: count_tokens('') returns 0; service shouldn't crash.
 
@@ -138,7 +136,6 @@ async def test_preflight_counts_zero_for_empty_question():
     assert result.file_tokens == 0
 
 
-@pytest.mark.asyncio
 async def test_preflight_file_tokens_match_context_builder_output():
     """Text files contribute exactly what context_builder would tokenize.
 
@@ -169,7 +166,6 @@ async def test_preflight_file_tokens_match_context_builder_output():
     service.file_service.get_files_by_ids.assert_awaited_once_with(file_ids=[file_id])
 
 
-@pytest.mark.asyncio
 async def test_preflight_skips_image_files_without_vision():
     """Images cost nothing on a non-vision model — they are never sent."""
     image_file = MagicMock()
@@ -199,7 +195,6 @@ _PNG_1PX = bytes.fromhex(
 )
 
 
-@pytest.mark.asyncio
 async def test_preflight_counts_image_files_on_vision_model():
     """On a vision model attached images are priced like the real request."""
     image_file = MagicMock()
@@ -225,7 +220,6 @@ async def test_preflight_counts_image_files_on_vision_model():
     assert result.excluded_file_count == 0
 
 
-@pytest.mark.asyncio
 async def test_preflight_includes_derived_images_on_vision_model():
     """Document uploads carry their derived images (rendered pages) too."""
     text_file = MagicMock()
@@ -259,7 +253,6 @@ async def test_preflight_includes_derived_images_on_vision_model():
     )
 
 
-@pytest.mark.asyncio
 async def test_preflight_includes_derived_images_for_image_only_pdf():
     """An image-only PDF has no extractable text but still carries derived
     vision images. They must be priced (not reported as ~0 tokens) and the PDF
@@ -299,7 +292,6 @@ async def test_preflight_includes_derived_images_for_image_only_pdf():
     assert result.excluded_file_count == 0
 
 
-@pytest.mark.asyncio
 async def test_preflight_counts_file_header_for_textless_documents():
     """The real request inlines every document — a textless one still costs
     its FILE header block and the shared preamble, so preflight must count it
@@ -328,7 +320,6 @@ async def test_preflight_counts_file_header_for_textless_documents():
     assert result.excluded_file_count == 1
 
 
-@pytest.mark.asyncio
 async def test_empty_assistant_preflight_includes_assistant_baseline():
     """A bare assistant target reports the persistent baseline: the system
     prompt and the attachments sent on every question, in their own fields."""
@@ -361,7 +352,6 @@ async def test_empty_assistant_preflight_includes_assistant_baseline():
     assert result.skill_context_tokens == 37
 
 
-@pytest.mark.asyncio
 async def test_empty_assistant_preflight_uses_unsaved_assistant_prompt_override():
     service = _make_service(assistant=_make_assistant())
     service.assistant_service.get_preflight_baseline = AsyncMock(
@@ -386,7 +376,6 @@ async def test_empty_assistant_preflight_uses_unsaved_assistant_prompt_override(
     )
 
 
-@pytest.mark.asyncio
 async def test_empty_assistant_preflight_baseline_includes_derived_images():
     """Persistent document attachments carry derived vision images too, matching
     the config meter's live-file path and the real request."""
@@ -426,7 +415,6 @@ async def test_empty_assistant_preflight_baseline_includes_derived_images():
     )
 
 
-@pytest.mark.asyncio
 async def test_preflight_baseline_zero_for_session_target():
     """An existing session already carries the prompt + attachments in its
     history, so the baseline fields stay 0 and the baseline is not fetched."""
@@ -448,7 +436,6 @@ async def test_preflight_baseline_zero_for_session_target():
     service.assistant_service.get_preflight_baseline.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_preflight_baseline_zero_for_group_chat_target():
     """Group-chat targets have no single persistent baseline; fields stay 0."""
     member = MagicMock()
@@ -468,7 +455,6 @@ async def test_preflight_baseline_zero_for_group_chat_target():
     assert result.prompt_tokens == 0
 
 
-@pytest.mark.asyncio
 async def test_preflight_resolves_session_assistant_model():
     """Session-id path goes through session → assistant → model."""
     session_id = uuid4()
@@ -498,7 +484,6 @@ async def test_preflight_resolves_session_assistant_model():
     )
 
 
-@pytest.mark.asyncio
 async def test_preflight_resolves_session_to_group_chat_model():
     """A session whose `group_chat_id` is set must route through the group chat,
     not the (possibly stale) `session.assistant` field."""
@@ -530,7 +515,6 @@ async def test_preflight_resolves_session_to_group_chat_model():
     service.group_chat_service.get_group_chat.assert_awaited_once_with(group_chat_id)
 
 
-@pytest.mark.asyncio
 async def test_preflight_rejects_assistant_without_model():
     """No completion model → 400, matching the actual chat path failure."""
     assistant = MagicMock()
@@ -546,7 +530,6 @@ async def test_preflight_rejects_assistant_without_model():
         )
 
 
-@pytest.mark.asyncio
 async def test_preflight_rejects_empty_group_chat():
     """Group chat with no assistants → 400, matching ask_group_chat behavior."""
     group_chat = MagicMock()
@@ -562,7 +545,6 @@ async def test_preflight_rejects_empty_group_chat():
         )
 
 
-@pytest.mark.asyncio
 async def test_preflight_group_chat_uses_single_assistant_model():
     """Single-assistant group chat preflight tokenizes against that assistant's model."""
     member = MagicMock()
@@ -583,7 +565,6 @@ async def test_preflight_group_chat_uses_single_assistant_model():
     assert result.model_name == "gpt-4o"
 
 
-@pytest.mark.asyncio
 async def test_preflight_group_chat_counts_selector_tokens_and_uses_smallest_window():
     """Multi-assistant group chat includes selector prompt cost and projects conservatively."""
     first_member = MagicMock()
@@ -613,7 +594,6 @@ async def test_preflight_group_chat_counts_selector_tokens_and_uses_smallest_win
     assert result.context_window == 4096
 
 
-@pytest.mark.asyncio
 async def test_preflight_group_chat_mention_uses_target_assistant_model():
     """Mention-targeted group chat preflight mirrors the actual target assistant."""
     target_id = uuid4()

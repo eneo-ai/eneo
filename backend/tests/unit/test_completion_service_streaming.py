@@ -5,8 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-import pytest
-
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
@@ -67,7 +65,6 @@ def _make_completion_model() -> CompletionModel:
     )
 
 
-@pytest.mark.asyncio
 async def test_streaming_wrapper_cancels_pending_approval_ids():
     completion_model = _make_completion_model()
     adapter = _DummyAdapter(model=completion_model)
@@ -108,7 +105,6 @@ async def test_streaming_wrapper_cancels_pending_approval_ids():
     approval_manager.cancel_approval.assert_awaited_once_with("approval-123")
 
 
-@pytest.mark.asyncio
 async def test_estimated_context_overflow_is_still_sent_to_provider():
     completion_model = _make_completion_model()
     completion_model.max_input_tokens = 1
@@ -139,7 +135,6 @@ async def test_estimated_context_overflow_is_still_sent_to_provider():
     )
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_uses_adapter_cumulative_input_estimate():
     completion_model = _make_completion_model()
     adapter = _DummyAdapter(model=completion_model)

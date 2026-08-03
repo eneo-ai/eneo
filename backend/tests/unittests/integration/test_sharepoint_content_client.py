@@ -1,13 +1,10 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentClient,
 )
 
 
-@pytest.mark.asyncio
 async def test_uses_settings_default_max_download_bytes_when_not_overridden():
     settings = MagicMock()
     settings.sharepoint_max_download_bytes = 12_345_678
@@ -27,7 +24,6 @@ async def test_uses_settings_default_max_download_bytes_when_not_overridden():
         await client.client.close()
 
 
-@pytest.mark.asyncio
 async def test_explicit_max_download_bytes_overrides_settings():
     settings = MagicMock()
     settings.sharepoint_max_download_bytes = 12_345_678

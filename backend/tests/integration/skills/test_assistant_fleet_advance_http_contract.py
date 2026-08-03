@@ -287,8 +287,6 @@ async def _seed_behind_fleet(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_zero_target_chunk_completes_without_a_cursor_or_outcomes(
     client,
     admin_token,
@@ -327,8 +325,6 @@ async def test_zero_target_chunk_completes_without_a_cursor_or_outcomes(
     assert audit_count == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_empty_pages_still_enforce_skill_lifecycle(
     client,
     admin_token,
@@ -435,8 +431,6 @@ async def test_empty_pages_still_enforce_skill_lifecycle(
     assert republished.json()["eneo_error_code"] == 9043
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_endpoint_is_admin_only(client, regular_token):
     response = await client.post(
         f"/api/v1/skills/organization/{uuid4()}/assistants/advance/",
@@ -450,8 +444,6 @@ async def test_endpoint_is_admin_only(client, regular_token):
     assert response.status_code == 403, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_cursor_must_be_well_formed_and_match_the_request(
     client,
     admin_token,
@@ -504,8 +496,6 @@ async def test_cursor_must_be_well_formed_and_match_the_request(
     assert wrong_revision.status_code == 400, wrong_revision.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_chunk_advances_behind_assistants_and_writes_one_atomic_audit_receipt(
     client,
     admin_token,
@@ -590,8 +580,6 @@ async def test_chunk_advances_behind_assistants_and_writes_one_atomic_audit_rece
         ("blocked", 9054),
     ],
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_terminal_refusals_keep_the_pin_and_write_no_audit(
     terminal_state,
     expected_code,
@@ -673,8 +661,6 @@ async def test_terminal_refusals_keep_the_pin_and_write_no_audit(
     assert audit_count == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_runtime_policy_change_during_validation_returns_policy_conflict(
     monkeypatch,
     client,
@@ -744,8 +730,6 @@ async def test_runtime_policy_change_during_validation_returns_policy_conflict(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_oversized_candidate_skips_only_the_incompatible_assistant(
     client,
     admin_token,
@@ -881,8 +865,6 @@ async def test_oversized_candidate_skips_only_the_incompatible_assistant(
     assert pins[compatible_id] == published_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_disabled_selective_activation_keeps_on_demand_pin_unchanged(
     client,
     admin_token,
@@ -971,8 +953,6 @@ async def test_disabled_selective_activation_keeps_on_demand_pin_unchanged(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_missing_model_keeps_on_demand_pin_unchanged(
     client,
     admin_token,
@@ -1056,8 +1036,6 @@ async def test_missing_model_keeps_on_demand_pin_unchanged(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_inactive_provider_does_not_block_always_only_fleet_targets(
     client,
     admin_token,
@@ -1127,8 +1105,6 @@ async def test_inactive_provider_does_not_block_always_only_fleet_targets(
     assert pins == [seed.published_revision_id, seed.published_revision_id]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_inactive_on_demand_provider_only_excludes_its_assistant(
     client,
     admin_token,
@@ -1251,8 +1227,6 @@ async def test_inactive_on_demand_provider_only_excludes_its_assistant(
     }
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_retained_deprecated_model_still_rejects_an_oversized_candidate(
     client,
     admin_token,
@@ -1575,8 +1549,6 @@ async def _advance_owner_attachment_fleet_with_query_counts(
     return response, derived_selects, content_reference_selects
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_owner_derived_images_are_included_in_admin_fleet_validation(
     client,
     admin_token,
@@ -1630,8 +1602,6 @@ async def test_owner_derived_images_are_included_in_admin_fleet_validation(
     assert pin == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_owner_derived_image_hydration_query_count_is_chunk_bounded(
     monkeypatch,
     client,
@@ -1726,8 +1696,6 @@ async def test_owner_derived_image_hydration_query_count_is_chunk_bounded(
     assert live_derived_payload_bytes[0] == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_non_vision_fleet_skips_derived_image_projection(
     client,
     admin_token,
@@ -1775,8 +1743,6 @@ async def test_non_vision_fleet_skips_derived_image_projection(
     assert pin == seed.candidate_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_unavailable_owner_derivative_matches_owner_time_fleet_validation(
     monkeypatch,
     client,
@@ -1899,8 +1865,6 @@ async def test_unavailable_owner_derivative_matches_owner_time_fleet_validation(
     ]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_failed_owner_derivative_is_a_stable_runtime_omission(
     client,
     admin_token,
@@ -1958,8 +1922,6 @@ async def test_failed_owner_derivative_is_a_stable_runtime_omission(
     assert pin == seed.candidate_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_projected_mcp_tool_schema_matches_save_time_candidate_fit(
     client,
     admin_token,
@@ -2138,8 +2100,6 @@ async def test_projected_mcp_tool_schema_matches_save_time_candidate_fit(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_always_candidate_counts_mcp_baseline_and_fitting_control_can_ask(
     client,
     admin_token,
@@ -2386,8 +2346,6 @@ async def test_always_candidate_counts_mcp_baseline_and_fitting_control_can_ask(
     assert mcp_proxy.get_tool_count() == 1
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_cursor_drives_a_fleet_larger_than_one_chunk_to_completion(
     client,
     admin_token,

@@ -21,7 +21,7 @@ from alembic.script import ScriptDirectory
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.icons_table import Icons
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"

@@ -5,8 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.api_key_maintenance import ApiKeyMaintenanceService
 from eneo.authentication.auth_models import (
@@ -24,7 +22,6 @@ def _make_key(**overrides: object) -> ApiKeyV2InDB:
     )
 
 
-@pytest.mark.asyncio
 async def test_run_daily_maintenance_expires_due_keys():
     key = _make_key(expires_at=datetime.now(timezone.utc))
     repo = AsyncMock()
@@ -47,7 +44,6 @@ async def test_run_daily_maintenance_expires_due_keys():
     assert audit.log_async.call_args.kwargs["action"] == ActionType.API_KEY_EXPIRED
 
 
-@pytest.mark.asyncio
 async def test_auto_expire_unused_keys_uses_tenant_policy():
     key = _make_key()
     repo = AsyncMock()
@@ -70,7 +66,6 @@ async def test_auto_expire_unused_keys_uses_tenant_policy():
     assert audit.log_async.call_args.kwargs["action"] == ActionType.API_KEY_EXPIRED
 
 
-@pytest.mark.asyncio
 async def test_rotation_grace_revocation_sets_reason():
     key = _make_key(rotation_grace_until=datetime.now(timezone.utc))
     repo = AsyncMock()

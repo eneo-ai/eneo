@@ -2,14 +2,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.mcp_servers.application.mcp_session_lifecycle_service import (
     McpSessionLifecycleService,
 )
 
 
-@pytest.mark.asyncio
 async def test_terminate_for_chat_session_terminates_every_persisted_session():
     chat_session_id = uuid4()
     first_server_id = uuid4()
@@ -44,7 +41,6 @@ async def test_terminate_for_chat_session_terminates_every_persisted_session():
     )
 
 
-@pytest.mark.asyncio
 async def test_terminate_carries_the_acting_users_identity_headers():
     chat_session_id = uuid4()
     server_id = uuid4()
@@ -76,7 +72,6 @@ async def test_terminate_carries_the_acting_users_identity_headers():
     assert kwargs["identity_headers"]["X-Eneo-User-Name"] == "anna"
 
 
-@pytest.mark.asyncio
 async def test_remote_failure_does_not_block_remaining_cleanup():
     chat_session_id = uuid4()
     first_server_id = uuid4()

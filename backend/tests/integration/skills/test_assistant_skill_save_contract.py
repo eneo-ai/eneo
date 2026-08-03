@@ -190,8 +190,6 @@ async def _create_on_demand_save_contract(
     return session, space, assistant, skill
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_assistant_mode_rejection_rolls_back_parent_and_bindings(
     client,
     admin_token,
@@ -302,8 +300,6 @@ async def test_assistant_mode_rejection_rolls_back_parent_and_bindings(
     assert persisted_bindings == original_bindings
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_on_demand_revision_upgrade_rejection_rolls_back_parent_and_binding(
     client,
     admin_token,
@@ -422,8 +418,6 @@ async def test_on_demand_revision_upgrade_rejection_rolls_back_parent_and_bindin
     [(7_000, 200), (7_001, 400)],
     ids=("fits-reserved-ceiling", "exceeds-reserved-ceiling"),
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_retained_on_demand_candidate_rejection_rolls_back_new_always_binding(
     client,
     admin_token,
@@ -555,8 +549,6 @@ async def test_retained_on_demand_candidate_rejection_rolls_back_new_always_bind
         "blocked-always-overflows",
     ),
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_blocked_binding_is_staged_before_binding_save(
     client,
     admin_token,
@@ -793,8 +785,6 @@ async def test_blocked_binding_is_staged_before_binding_save(
     [(7_000, 200), (7_001, 400)],
     ids=("fits-reserved-ceiling", "exceeds-reserved-ceiling"),
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back(
     client,
     admin_token,
@@ -954,8 +944,6 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
     [(7_000, 200), (7_001, 400)],
     ids=("fits-reserved-ceiling", "exceeds-reserved-ceiling"),
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_mcp_schema_activation_preflight_is_atomic(
     client,
     admin_token,
@@ -1146,8 +1134,6 @@ async def test_mcp_schema_activation_preflight_is_atomic(
     [(7_000, 200), (7_001, 400)],
     ids=("fits-reserved-ceiling", "exceeds-reserved-ceiling"),
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_add_mcp_route_rejects_overflow_without_persisting_association(
     client,
     admin_token,
@@ -1284,8 +1270,6 @@ async def test_add_mcp_route_rejects_overflow_without_persisting_association(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_assistant_skill_configuration_requires_skill_read_access(
     client,
     db_container,

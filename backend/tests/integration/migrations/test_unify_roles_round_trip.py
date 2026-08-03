@@ -31,7 +31,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 
 PRE_UNIFY_REVISION = "202604101000"

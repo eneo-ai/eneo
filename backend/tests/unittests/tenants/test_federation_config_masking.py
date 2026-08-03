@@ -8,8 +8,6 @@ real secret — not the Fernet ciphertext stored in the database.
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.tenants.tenant_repo import TenantRepository
 
 
@@ -26,7 +24,6 @@ def _mock_scalar_one(session, value):
     session.execute.return_value = result
 
 
-@pytest.mark.asyncio
 async def test_masks_decrypted_secret_not_ciphertext():
     """Encrypted client_secret must be decrypted before masking."""
     encryption = MagicMock()
@@ -54,7 +51,6 @@ async def test_masks_decrypted_secret_not_ciphertext():
     assert result["encryption_status"] == "encrypted"
 
 
-@pytest.mark.asyncio
 async def test_masks_plaintext_secret_when_no_encryption():
     """Without encryption service, plaintext secret is masked directly."""
     repo, session = _make_repo(encryption_service=None)
@@ -77,7 +73,6 @@ async def test_masks_plaintext_secret_when_no_encryption():
     assert result["encryption_status"] == "plaintext"
 
 
-@pytest.mark.asyncio
 async def test_handles_decryption_failure_gracefully():
     """If decryption fails, masks the raw value and doesn't crash."""
     encryption = MagicMock()
@@ -104,7 +99,6 @@ async def test_handles_decryption_failure_gracefully():
     assert result["encryption_status"] == "encrypted"
 
 
-@pytest.mark.asyncio
 async def test_returns_none_when_no_config():
     """Returns None when tenant has no federation config."""
     repo, session = _make_repo()
@@ -115,7 +109,6 @@ async def test_returns_none_when_no_config():
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_short_secret_masked_completely():
     """Secrets <= 4 chars are fully masked as '***'."""
     repo, session = _make_repo(encryption_service=None)

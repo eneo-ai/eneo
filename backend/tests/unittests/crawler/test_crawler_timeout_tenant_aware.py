@@ -61,7 +61,6 @@ class MockCrawlManager:
 class TestCrawlerTimeoutEnforcement:
     """Tests that crawl timeout is properly enforced via CrawlManager."""
 
-    @pytest.mark.asyncio
     async def test_timeout_triggers_crawler_timeout_error(self):
         """When crawl exceeds max_length, CrawlTimeoutError is raised.
 
@@ -85,7 +84,6 @@ class TestCrawlerTimeoutEnforcement:
 
             assert "https://example.com" in str(exc_info.value)
 
-    @pytest.mark.asyncio
     async def test_sitemap_timeout_triggers_crawler_timeout_error(self):
         """Sitemap crawl also respects timeout and raises CrawlTimeoutError."""
 
@@ -105,7 +103,6 @@ class TestCrawlerTimeoutEnforcement:
 
             assert "sitemap.xml" in str(exc_info.value)
 
-    @pytest.mark.asyncio
     async def test_successful_crawl_within_timeout(self):
         """Crawl completes successfully when within timeout limit."""
 
@@ -129,7 +126,6 @@ class TestCrawlerTimeoutEnforcement:
 class TestCrawlerTenantSettingsResolution:
     """Tests tenant-aware timeout resolution in crawl() method."""
 
-    @pytest.mark.asyncio
     async def test_uses_tenant_override_timeout(self):
         """When tenant has custom crawl_max_length, it's used."""
         tenant_settings = {"crawl_max_length": 120}  # 2 minutes
@@ -161,7 +157,6 @@ class TestCrawlerTenantSettingsResolution:
             )
             assert captured_max_length == 120
 
-    @pytest.mark.asyncio
     async def test_uses_default_when_no_tenant_settings(self):
         """When no tenant settings provided, uses environment default."""
         with patch("eneo.crawler.crawler.get_crawler_setting") as mock_get_setting:
@@ -186,7 +181,6 @@ class TestCrawlerTenantSettingsResolution:
             mock_get_setting.assert_called_once_with("crawl_max_length", None)
             assert captured_max_length == 7200
 
-    @pytest.mark.asyncio
     async def test_sitemap_crawl_uses_tenant_timeout(self):
         """SITEMAP crawl type also uses tenant-aware timeout."""
         from eneo.websites.domain.crawl_run import CrawlType
@@ -219,7 +213,6 @@ class TestCrawlerTenantSettingsResolution:
 class TestCrawlerTimeoutEdgeCases:
     """Tests edge cases and error handling for timeout behavior."""
 
-    @pytest.mark.asyncio
     async def test_very_short_timeout_still_works(self):
         """Extremely short timeout (1 second) still properly triggers."""
 
@@ -242,7 +235,6 @@ class TestCrawlerTimeoutEdgeCases:
         # Should timeout quickly, not wait for the full 5 seconds
         assert elapsed < 3, f"Timeout should trigger quickly, took {elapsed}s"
 
-    @pytest.mark.asyncio
     async def test_timeout_message_includes_url(self):
         """Timeout exception message includes the URL for debugging."""
 
@@ -264,7 +256,6 @@ class TestCrawlerTimeoutEdgeCases:
             error_message = str(exc_info.value)
             assert test_url in error_message, "Error should include full URL"
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize("timeout_value", [1, 2])
     async def test_timeout_message_includes_seconds(self, timeout_value):
         """Timeout exception message includes the max_length value."""
@@ -289,7 +280,6 @@ class TestCrawlerTimeoutEdgeCases:
 class TestCrawlerTimeoutIsolation:
     """Tests that different tenants get different timeouts."""
 
-    @pytest.mark.asyncio
     async def test_different_tenants_different_timeouts(self):
         """Two consecutive crawls with different tenant settings use different timeouts."""
         tenant_a_settings = {"crawl_max_length": 60}  # 1 minute
@@ -338,7 +328,6 @@ class TestCrawlerTimeoutIsolation:
 class TestCrawlerNoRegressions:
     """Tests ensuring no regressions from CrawlManager integration."""
 
-    @pytest.mark.asyncio
     async def test_all_parameters_still_passed_correctly(self):
         """Verify all existing parameters are still passed through correctly."""
         tenant_settings = {"download_timeout": 100}
@@ -375,7 +364,6 @@ class TestCrawlerNoRegressions:
         assert captured_kwargs.get("http_pass") == "testpass"
         assert captured_kwargs.get("tenant_crawler_settings") == tenant_settings
 
-    @pytest.mark.asyncio
     async def test_download_files_flag_passed_correctly(self):
         """Ensure download_files parameter controls files_dir correctly."""
         captured_kwargs = {}

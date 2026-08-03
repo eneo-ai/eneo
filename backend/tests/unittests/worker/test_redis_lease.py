@@ -17,7 +17,6 @@ def _redis(set_result):
     return redis_mock
 
 
-@pytest.mark.asyncio
 async def test_yields_true_when_acquired_and_releases_on_exit():
     redis_mock = _redis(set_result=True)
 
@@ -42,7 +41,6 @@ async def test_yields_true_when_acquired_and_releases_on_exit():
     assert release.await_args.args[2] == args[1]
 
 
-@pytest.mark.asyncio
 async def test_yields_false_when_held_by_another_and_does_not_release():
     redis_mock = _redis(set_result=None)
 
@@ -58,7 +56,6 @@ async def test_yields_false_when_held_by_another_and_does_not_release():
     release.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_watchdog_refreshes_ttl_while_held():
     redis_mock = _redis(set_result=True)
 
@@ -76,7 +73,6 @@ async def test_watchdog_refreshes_ttl_while_held():
     assert refresh.await_args.args[1] == "lock:k"
 
 
-@pytest.mark.asyncio
 async def test_releases_even_when_body_raises():
     redis_mock = _redis(set_result=True)
 
@@ -91,7 +87,6 @@ async def test_releases_even_when_body_raises():
     release.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_watchdog_cancels_body_when_lease_lost():
     redis_mock = _redis(set_result=True)
 
@@ -116,7 +111,6 @@ async def test_watchdog_cancels_body_when_lease_lost():
     release.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_can_redact_sensitive_lock_key_when_lease_is_lost():
     redis_mock = _redis(set_result=True)
     logger = MagicMock()
@@ -142,7 +136,6 @@ async def test_can_redact_sensitive_lock_key_when_lease_is_lost():
     assert "sensitive-lock-key" not in repr(logger.method_calls)
 
 
-@pytest.mark.asyncio
 async def test_watchdog_cancels_body_when_ownership_unconfirmed_for_ttl():
     redis_mock = _redis(set_result=True)
 

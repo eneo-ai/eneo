@@ -195,7 +195,6 @@ async def _fail_and_detach(
         )
 
 
-@pytest.mark.asyncio
 async def test_final_reference_creates_irreversible_delete_intent(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -223,7 +222,6 @@ async def test_final_reference_creates_irreversible_delete_intent(
             await session.flush()
 
 
-@pytest.mark.asyncio
 async def test_active_hold_retains_content_and_release_schedules_delete(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -261,7 +259,6 @@ async def test_active_hold_retains_content_and_release_schedules_delete(
         assert content.state == ContentState.DELETE_PENDING.value
 
 
-@pytest.mark.asyncio
 async def test_retained_content_and_active_hold_reject_hard_delete(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -302,7 +299,6 @@ async def test_retained_content_and_active_hold_reject_hard_delete(
         assert hold.released_at is None
 
 
-@pytest.mark.asyncio
 async def test_elapsed_tombstone_purge_cascades_released_hold(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -348,7 +344,6 @@ async def test_elapsed_tombstone_purge_cascades_released_hold(
 
 
 @pytest.mark.parametrize("purge_horizon", ["missing", "future"])
-@pytest.mark.asyncio
 async def test_tombstone_purge_requires_approved_elapsed_horizon(
     object_content_database: DatabaseSessionManager,
     purge_horizon: str,
@@ -380,7 +375,6 @@ async def test_tombstone_purge_requires_approved_elapsed_horizon(
         assert await session.get(ObjectContents, owned.content_id) is not None
 
 
-@pytest.mark.asyncio
 async def test_deleting_hold_actor_preserves_hold_and_content_state(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -430,7 +424,6 @@ async def test_deleting_hold_actor_preserves_hold_and_content_state(
         assert hold.released_at is None
 
 
-@pytest.mark.asyncio
 async def test_hold_policy_is_immutable_until_explicit_release(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -454,7 +447,6 @@ async def test_hold_policy_is_immutable_until_explicit_release(
             await session.flush()
 
 
-@pytest.mark.asyncio
 async def test_hold_expiry_cannot_predate_its_creation(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -472,7 +464,6 @@ async def test_hold_expiry_cannot_predate_its_creation(
             )
 
 
-@pytest.mark.asyncio
 async def test_minimum_retention_is_monotonic_and_blocks_final_delete(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -497,7 +488,6 @@ async def test_minimum_retention_is_monotonic_and_blocks_final_delete(
             await session.flush()
 
 
-@pytest.mark.asyncio
 async def test_failed_content_respects_active_hold_until_release(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -537,7 +527,6 @@ async def test_failed_content_respects_active_hold_until_release(
         assert content.state == ContentState.DELETE_PENDING.value
 
 
-@pytest.mark.asyncio
 async def test_failed_content_respects_future_minimum_retention(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -557,7 +546,6 @@ async def test_failed_content_respects_future_minimum_retention(
         assert content.state == ContentState.FAILED.value
 
 
-@pytest.mark.asyncio
 async def test_reference_count_is_trigger_owned_and_parent_cascade_is_fenced(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -582,7 +570,6 @@ async def test_reference_count_is_trigger_owned_and_parent_cascade_is_fenced(
         assert content.state == ContentState.DELETE_PENDING.value
 
 
-@pytest.mark.asyncio
 async def test_content_identity_and_integrity_facts_are_immutable(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -596,7 +583,6 @@ async def test_content_identity_and_integrity_facts_are_immutable(
             await session.flush()
 
 
-@pytest.mark.asyncio
 async def test_only_the_current_pending_worker_can_renew_its_bounded_lease(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -635,7 +621,6 @@ async def test_only_the_current_pending_worker_can_renew_its_bounded_lease(
         assert content.lease_until > original_lease_until
 
 
-@pytest.mark.asyncio
 async def test_integrity_failure_keeps_live_owner_recovery_options_open(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -671,7 +656,6 @@ async def test_integrity_failure_keeps_live_owner_recovery_options_open(
         assert hold_id is not None
 
 
-@pytest.mark.asyncio
 async def test_concurrent_attach_and_final_detach_preserve_reference_invariant(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -745,7 +729,6 @@ async def test_concurrent_attach_and_final_detach_preserve_reference_invariant(
             assert content.state == ContentState.AVAILABLE.value
 
 
-@pytest.mark.asyncio
 async def test_concurrent_hold_and_final_detach_have_one_serialized_winner(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -857,7 +840,6 @@ async def _assert_cross_references_fully_detached(
         }
 
 
-@pytest.mark.asyncio
 async def test_opposite_order_reference_detaches_both_complete(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -889,7 +871,6 @@ async def test_opposite_order_reference_detaches_both_complete(
     )
 
 
-@pytest.mark.asyncio
 async def test_opposite_order_parent_cascades_both_complete(
     object_content_database: DatabaseSessionManager,
 ) -> None:

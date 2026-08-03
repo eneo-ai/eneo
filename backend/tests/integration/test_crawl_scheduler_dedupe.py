@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.ai_models_table import EmbeddingModels
@@ -17,8 +16,6 @@ from eneo.websites.domain.website_sparse_repo import WebsiteSparseRepository
 from eneo.worker.crawl_tasks import _get_primary_active_job_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_scheduler_skips_websites_with_active_jobs(
     db_session,
     admin_user,
@@ -77,8 +74,6 @@ async def test_scheduler_skips_websites_with_active_jobs(
     assert website_id not in due_ids
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_primary_active_job_id_selects_oldest_active_job(
     db_session,
     admin_user,

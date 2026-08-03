@@ -12,7 +12,6 @@ import json
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-import pytest
 import redis.asyncio as aioredis
 
 from eneo.worker.feeder.capacity import CapacityManager
@@ -20,8 +19,6 @@ from eneo.worker.feeder.election import LeaderElection
 from eneo.worker.feeder.queues import JobEnqueuer, PendingQueue
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestZombieLeaderScenario:
     """Tests for leader lock expiry during processing.
 
@@ -104,8 +101,6 @@ class TestZombieLeaderScenario:
         await redis_client.delete("crawl_feeder:leader")
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestEnqueueStateLag:
     """Tests for thundering herd / capacity overshoot scenario.
 
@@ -178,8 +173,6 @@ class TestEnqueueStateLag:
         await redis_client.delete(f"tenant:{tenant_id}:active_jobs")
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestCrashBeforeLremRecovery:
     """Tests for idempotent recovery when crash occurs after enqueue but before LREM.
 
@@ -318,8 +311,6 @@ class TestCrashBeforeLremRecovery:
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestPendingQueueIdempotency:
     """Tests for pending queue operations and idempotency."""
 

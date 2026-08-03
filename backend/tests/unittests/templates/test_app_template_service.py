@@ -64,7 +64,6 @@ def service(
     )
 
 
-@pytest.mark.asyncio
 async def test_create_template_requires_feature_flag_enabled(
     service,
     mock_feature_flag_service,
@@ -86,7 +85,6 @@ async def test_create_template_requires_feature_flag_enabled(
         await service.create_template(data=data, tenant_id=tenant_id)
 
 
-@pytest.mark.asyncio
 async def test_create_template_checks_duplicate_name(
     service,
     mock_feature_flag_service,
@@ -110,7 +108,6 @@ async def test_create_template_checks_duplicate_name(
         await service.create_template(data=data, tenant_id=tenant_id)
 
 
-@pytest.mark.asyncio
 async def test_update_template_validates_ownership(service, mock_repo):
     template_id = uuid4()
     tenant_id = uuid4()
@@ -124,7 +121,6 @@ async def test_update_template_validates_ownership(service, mock_repo):
         )
 
 
-@pytest.mark.asyncio
 async def test_create_template_persists_completion_model_id_and_snapshot(
     service,
     mock_feature_flag_service,
@@ -168,7 +164,6 @@ async def test_create_template_persists_completion_model_id_and_snapshot(
     )
 
 
-@pytest.mark.asyncio
 async def test_rollback_template_restores_completion_model_id(
     service,
     mock_repo,

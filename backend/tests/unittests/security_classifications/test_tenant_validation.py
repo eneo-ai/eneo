@@ -30,7 +30,6 @@ def _session_returning(scalar_value):
     return session
 
 
-@pytest.mark.asyncio
 async def test_returns_none_when_reference_is_none():
     session = MagicMock()
     session.execute = AsyncMock()  # would fail the test if invoked
@@ -43,7 +42,6 @@ async def test_returns_none_when_reference_is_none():
     session.execute.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_returns_classification_id_when_match():
     classification_id = uuid4()
     session = _session_returning(classification_id)
@@ -58,7 +56,6 @@ async def test_returns_classification_id_when_match():
     session.execute.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_raises_when_classification_not_found():
     session = _session_returning(None)
 
@@ -70,7 +67,6 @@ async def test_raises_when_classification_not_found():
         )
 
 
-@pytest.mark.asyncio
 async def test_cross_tenant_reference_treated_as_not_found():
     """A classification that exists in another tenant is invisible from
     here — the WHERE clause filters by tenant_id, so the lookup returns

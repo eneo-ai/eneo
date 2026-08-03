@@ -224,7 +224,6 @@ class TestAuthPrecedence:
             "Bearer token branch must NOT call _resolve_api_key"
         )
 
-    @pytest.mark.asyncio
     async def test_invalid_bearer_does_not_fallback_to_valid_api_key(self):
         """Invalid bearer + valid API key must fail by bearer precedence."""
         from eneo.main.exceptions import AuthenticationException
@@ -248,7 +247,6 @@ class TestAuthPrecedence:
 
         svc._resolve_api_key.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_bearer_token_ignores_api_key_resource_guards(self):
         """Session-token callers are unaffected by API-key resource guards."""
         from eneo.users.user_service import UserService
@@ -311,7 +309,6 @@ class TestContractMatrixBoundaries:
 
     # -- Layer 3: Scope enforcement --
 
-    @pytest.mark.asyncio
     async def test_assistant_scoped_key_admin_route_denied(self):
         """8. assistant-scoped key + GET /admin → 403 (scope denial)."""
         assistant_id = uuid4()
@@ -327,7 +324,6 @@ class TestContractMatrixBoundaries:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_tenant_scoped_key_admin_route_passes(self):
         """9. tenant-scoped key + GET /admin → 200."""
         svc = _make_user_service()
@@ -341,7 +337,6 @@ class TestContractMatrixBoundaries:
         # Should not raise
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_space_scoped_key_other_space_resource_denied(self):
         """10. space-scoped key + GET /assistants/{other-space-assistant} → 403."""
         space_id = uuid4()
@@ -441,7 +436,6 @@ class TestScenarioSpaceScopedAutomation:
             scope_id=space_id,
         )
 
-    @pytest.mark.asyncio
     async def test_can_access_resource_in_own_space(self):
         space_id = self._space_id()
         svc = _make_user_service(session_scalar_return=space_id)
@@ -451,7 +445,6 @@ class TestScenarioSpaceScopedAutomation:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_denied_resource_in_other_space(self):
         space_id = self._space_id()
         other_space_id = uuid4()
@@ -464,7 +457,6 @@ class TestScenarioSpaceScopedAutomation:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_denied_admin_endpoint(self):
         space_id = self._space_id()
         svc = _make_user_service()
@@ -503,7 +495,6 @@ class TestScenarioAdminManagement:
         request = _fake_request("DELETE")
         _check_method_resource_permission(request, key, _config("assistants"))
 
-    @pytest.mark.asyncio
     async def test_can_access_admin_routes(self):
         svc = _make_user_service()
         key = self._make_admin_tenant_key()
@@ -527,7 +518,6 @@ class TestScenarioAssistantChatbot:
             scope_id=assistant_id,
         )
 
-    @pytest.mark.asyncio
     async def test_can_access_own_assistant(self):
         assistant_id = uuid4()
         svc = _make_user_service()
@@ -537,7 +527,6 @@ class TestScenarioAssistantChatbot:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_denied_other_assistant(self):
         assistant_id = uuid4()
         other_assistant_id = uuid4()
@@ -550,7 +539,6 @@ class TestScenarioAssistantChatbot:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
-    @pytest.mark.asyncio
     async def test_can_list_conversations(self):
         assistant_id = uuid4()
         svc = _make_user_service()
@@ -561,7 +549,6 @@ class TestScenarioAssistantChatbot:
         # No path_params means list endpoint → assistant-scoped key allowed for conversations
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
     async def test_denied_admin_routes(self):
         assistant_id = uuid4()
         svc = _make_user_service()
@@ -615,7 +602,6 @@ class TestGuardrailIndependence:
             _check_basic_method_permission(request, key)
         assert exc_info.value.code == "insufficient_permission"
 
-    @pytest.mark.asyncio
     async def test_scope_guard_blocks_correct_permission_wrong_scope(self):
         """Scope guard fires even when permission level is sufficient."""
         space_id = uuid4()
@@ -666,7 +652,6 @@ class TestGuardrailIndependence:
             assert isinstance(exc.value.code, str)
             assert len(exc.value.code) > 0
 
-    @pytest.mark.asyncio
     async def test_scope_error_code_is_insufficient_scope(self):
         """Layer 3 (scope) produces 'insufficient_scope' code."""
         space_id = uuid4()
@@ -866,7 +851,6 @@ class TestModelProvidersBearerRoleContract:
             "updated_at": datetime.now(timezone.utc),
         }
 
-    @pytest.mark.asyncio
     async def test_non_admin_denied_on_list(self):
         from eneo.main.exceptions import UnauthorizedException
         from eneo.model_providers.presentation.model_provider_router import (
@@ -880,7 +864,6 @@ class TestModelProvidersBearerRoleContract:
             await list_providers(user=user, service=service)
         service.get_all.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_admin_allowed_on_list(self):
         from eneo.model_providers.presentation.model_provider_router import (
             list_providers,
@@ -898,7 +881,6 @@ class TestModelProvidersBearerRoleContract:
         assert len(response) == 1
         assert response[0].name == "Provider"
 
-    @pytest.mark.asyncio
     async def test_non_admin_denied_on_get(self):
         from eneo.main.exceptions import UnauthorizedException
         from eneo.model_providers.presentation.model_provider_router import (
@@ -912,7 +894,6 @@ class TestModelProvidersBearerRoleContract:
             await get_provider(provider_id=uuid4(), user=user, service=service)
         service.get_by_id.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_admin_allowed_on_get(self):
         from eneo.model_providers.presentation.model_provider_router import (
             get_provider,

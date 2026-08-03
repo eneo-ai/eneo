@@ -209,7 +209,6 @@ class TestMethodAwarePermissionCheck:
             _check_method_resource_permission(request, key, _config("apps"))
         assert exc_info.value.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_guard_stores_config_on_request_state(self):
         """8. Router guard stores config on request.state, does not check permissions."""
         request = SimpleNamespace(state=SimpleNamespace())
@@ -228,7 +227,6 @@ class TestMethodAwarePermissionCheck:
             }
         ]
 
-    @pytest.mark.asyncio
     async def test_guard_accumulates_multiple_resource_configs(self):
         """Routes can require a router-level and endpoint-level resource check."""
         request = SimpleNamespace(state=SimpleNamespace())
@@ -370,7 +368,6 @@ class TestEndpointPermissionTransitions:
 class TestPolicyMaxRateLimit:
     """Test 13: max_rate_limit_override blocks rate_limit=-1."""
 
-    @pytest.mark.asyncio
     async def test_max_rate_limit_override_blocks_unlimited(self):
         from eneo.authentication.api_key_policy import ApiKeyPolicyService
 
@@ -628,7 +625,6 @@ class TestResourceDenialContext:
 class TestAuthFailureAuditEnrichment:
     """Verify auth failure audit includes request metadata and denial context."""
 
-    @pytest.mark.asyncio
     async def test_auth_failed_audit_includes_route_origin_and_context(self):
         audit = AsyncMock()
         user = SimpleNamespace(
@@ -757,7 +753,6 @@ class TestHTTPIntegration:
 
         return app
 
-    @pytest.mark.asyncio
     async def test_read_key_post_returns_403(self, monkeypatch):
         """18. Read-only API key + POST to guarded route → 403."""
         monkeypatch.setattr(
@@ -779,7 +774,6 @@ class TestHTTPIntegration:
         body = resp.json()
         assert body["code"] == "insufficient_resource_permission"
 
-    @pytest.mark.asyncio
     async def test_bearer_token_post_passes(self, monkeypatch):
         """19. Bearer-token auth (no API key) + POST to guarded route → 200."""
         monkeypatch.setattr(
@@ -799,7 +793,6 @@ class TestHTTPIntegration:
         )
         assert resp.json() == {"ok": True}
 
-    @pytest.mark.asyncio
     async def test_rate_limited_returns_429_with_headers(self, monkeypatch):
         """20. Rate-limited request → 429 with Retry-After and X-RateLimit-* headers."""
         monkeypatch.setattr(
@@ -1542,7 +1535,6 @@ class TestManagementEndpointGuard:
 
         return app
 
-    @pytest.mark.asyncio
     async def test_write_key_cannot_create_api_key(self, monkeypatch):
         """ESCALATION PREVENTION: write key + POST /api-keys → 403.
 
@@ -1566,7 +1558,6 @@ class TestManagementEndpointGuard:
         body = resp.json()
         assert body["code"] == "insufficient_permission"
 
-    @pytest.mark.asyncio
     async def test_read_key_cannot_create_api_key(self, monkeypatch):
         """Read key + POST /api-keys → 403."""
         monkeypatch.setattr(
@@ -1584,7 +1575,6 @@ class TestManagementEndpointGuard:
             resp = await client.post("/api-keys")
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_admin_key_can_create_api_key(self, monkeypatch):
         """Admin key + POST /api-keys → 200."""
         monkeypatch.setattr(
@@ -1603,7 +1593,6 @@ class TestManagementEndpointGuard:
         assert resp.status_code == 200
         assert resp.json()["action"] == "create"
 
-    @pytest.mark.asyncio
     async def test_bearer_token_can_create_api_key(self, monkeypatch):
         """Bearer token (no API key) + POST /api-keys → 200.
 
@@ -1623,7 +1612,6 @@ class TestManagementEndpointGuard:
             resp = await client.post("/api-keys")
         assert resp.status_code == 200
 
-    @pytest.mark.asyncio
     async def test_write_key_cannot_revoke(self, monkeypatch):
         """Write key + DELETE /api-keys/{id} → 403."""
         monkeypatch.setattr(
@@ -1641,7 +1629,6 @@ class TestManagementEndpointGuard:
             resp = await client.delete("/api-keys/some-id")
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_write_key_cannot_rotate(self, monkeypatch):
         """Write key + POST /api-keys/{id}/rotate → 403."""
         monkeypatch.setattr(
@@ -1659,7 +1646,6 @@ class TestManagementEndpointGuard:
             resp = await client.post("/api-keys/some-id/rotate")
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_write_key_cannot_suspend(self, monkeypatch):
         """Write key + POST /api-keys/{id}/suspend → 403."""
         monkeypatch.setattr(
@@ -1677,7 +1663,6 @@ class TestManagementEndpointGuard:
             resp = await client.post("/api-keys/some-id/suspend")
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_write_key_cannot_reactivate(self, monkeypatch):
         """Write key + POST /api-keys/{id}/reactivate → 403."""
         monkeypatch.setattr(
@@ -1695,7 +1680,6 @@ class TestManagementEndpointGuard:
             resp = await client.post("/api-keys/some-id/reactivate")
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_write_key_cannot_update(self, monkeypatch):
         """Write key + PATCH /api-keys/{id} → 403."""
         monkeypatch.setattr(
@@ -1713,7 +1697,6 @@ class TestManagementEndpointGuard:
             resp = await client.patch("/api-keys/some-id")
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_admin_key_can_do_all_mutations(self, monkeypatch):
         """Admin key can perform all management operations."""
         monkeypatch.setattr(
@@ -1742,7 +1725,6 @@ class TestManagementEndpointGuard:
                 )
                 assert resp.json()["action"] == expected_action
 
-    @pytest.mark.asyncio
     async def test_read_endpoints_not_blocked_for_read_key(self, monkeypatch):
         """Read key can access GET endpoints (no management guard on reads)."""
         monkeypatch.setattr(
@@ -1767,7 +1749,6 @@ class TestManagementEndpointGuard:
             assert resp.status_code == 200
             assert resp.json()["action"] == "get"
 
-    @pytest.mark.asyncio
     async def test_error_message_includes_actionable_guidance(self, monkeypatch):
         """403 response from management guard includes upgrade instructions."""
         monkeypatch.setattr(
@@ -1788,7 +1769,6 @@ class TestManagementEndpointGuard:
         assert "admin" in msg.lower()
         assert "bearer token" in msg.lower()
 
-    @pytest.mark.asyncio
     async def test_error_message_does_not_leak_granted_permission(self, monkeypatch):
         """403 from management guard does NOT reveal the key's actual permission."""
         monkeypatch.setattr(
@@ -1868,7 +1848,6 @@ class TestManagementGuardFailClosed:
         with pytest.raises(ApiKeyValidationError):
             _check_management_permission(write_key, "unknown_perm")
 
-    @pytest.mark.asyncio
     async def test_guard_stashes_required_permission_on_state(self):
         """The config-stash guard should set _required_api_key_permission."""
         guard_fn = require_api_key_permission(ApiKeyPermission.ADMIN)
@@ -1876,7 +1855,6 @@ class TestManagementGuardFailClosed:
         await guard_fn(request)
         assert request.state._required_api_key_permission == "admin"
 
-    @pytest.mark.asyncio
     async def test_guard_stashes_write_permission(self):
         """Different permission levels are stashed correctly."""
         guard_fn = require_api_key_permission(ApiKeyPermission.WRITE)
@@ -1884,7 +1862,6 @@ class TestManagementGuardFailClosed:
         await guard_fn(request)
         assert request.state._required_api_key_permission == "write"
 
-    @pytest.mark.asyncio
     async def test_bearer_token_bypasses_management_check(self, monkeypatch):
         """Bearer token (no API key) + management guard → 200.
 
@@ -1927,7 +1904,6 @@ class TestManagementGuardNotFeatureFlagged:
     escalation when the kill switch is active.
     """
 
-    @pytest.mark.asyncio
     async def test_write_key_blocked_even_with_flag_off(self, monkeypatch):
         """Feature flag OFF + write key + POST /api-keys → still 403."""
         monkeypatch.setattr(
@@ -1946,7 +1922,6 @@ class TestManagementGuardNotFeatureFlagged:
         # The management guard is NOT gated by feature flag
         assert resp.status_code == 403
 
-    @pytest.mark.asyncio
     async def test_read_key_blocked_even_with_flag_off(self, monkeypatch):
         """Feature flag OFF + read key + DELETE /api-keys/{id} → still 403."""
         monkeypatch.setattr(
@@ -1982,7 +1957,6 @@ class TestManagementGuardPermissionMatrix:
     ]
 
     @pytest.mark.parametrize("method,path", _MUTATIONS)
-    @pytest.mark.asyncio
     async def test_read_key_blocked_on_all_mutations(
         self,
         monkeypatch,
@@ -2005,7 +1979,6 @@ class TestManagementGuardPermissionMatrix:
         assert resp.status_code == 403, f"Read key should be blocked on {method} {path}"
 
     @pytest.mark.parametrize("method,path", _MUTATIONS)
-    @pytest.mark.asyncio
     async def test_write_key_blocked_on_all_mutations(
         self,
         monkeypatch,
@@ -2030,7 +2003,6 @@ class TestManagementGuardPermissionMatrix:
         )
 
     @pytest.mark.parametrize("method,path", _MUTATIONS)
-    @pytest.mark.asyncio
     async def test_admin_key_passes_all_mutations(
         self,
         monkeypatch,

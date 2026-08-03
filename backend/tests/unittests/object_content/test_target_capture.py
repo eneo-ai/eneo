@@ -42,7 +42,6 @@ def _service(
     )
 
 
-@pytest.mark.asyncio
 async def test_inline_target_accepts_operator_maximum_and_rejects_maximum_plus_one() -> (
     None
 ):
@@ -69,7 +68,6 @@ async def test_inline_target_accepts_operator_maximum_and_rejects_maximum_plus_o
     assert error.value.maximum_size_bytes == 6
 
 
-@pytest.mark.asyncio
 async def test_object_store_target_uses_configured_multipart_part_size() -> None:
     service = _service(multipart_part_bytes=5)
     async with service.capture_for_target(
@@ -83,7 +81,6 @@ async def test_object_store_target_uses_configured_multipart_part_size() -> None
         assert len(captured.part_sha256) == 3
 
 
-@pytest.mark.asyncio
 async def test_object_store_target_rejects_portable_multipart_maximum_plus_one() -> (
     None
 ):
@@ -112,7 +109,6 @@ async def test_object_store_target_rejects_portable_multipart_maximum_plus_one()
     assert error.value.maximum_size_bytes == portable_maximum
 
 
-@pytest.mark.asyncio
 async def test_object_store_generated_content_uses_operator_ceiling_without_business_limit() -> (
     None
 ):
@@ -139,7 +135,6 @@ async def test_object_store_generated_content_uses_operator_ceiling_without_busi
     assert error.value.maximum_size_bytes == portable_maximum
 
 
-@pytest.mark.asyncio
 async def test_inline_generated_content_uses_operator_ceiling_without_business_limit() -> (
     None
 ):

@@ -17,7 +17,6 @@ from eneo.server.exception_handlers import add_exception_handlers
 from eneo.settings.encryption_service import EncryptionService
 
 
-@pytest.mark.asyncio
 async def test_create_provider_without_encryption_key_fails_before_persistence():
     repository = MagicMock()
     repository.get_by_name = AsyncMock(return_value=None)

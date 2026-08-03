@@ -1,6 +1,5 @@
 """Integration tests for GDPR Article 15 export functionality."""
 
-import pytest
 from uuid import uuid4
 
 from eneo.audit.application.audit_export_service import AuditExportService
@@ -9,10 +8,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-pytestmark = pytest.mark.integration
 
-
-@pytest.mark.asyncio
 async def test_gdpr_export_includes_actor_and_target(
     db_session, test_tenant, test_user
 ):
@@ -62,7 +58,6 @@ async def test_gdpr_export_includes_actor_and_target(
         assert log2.id in log_ids
 
 
-@pytest.mark.asyncio
 async def test_csv_export_format(db_session, test_tenant, test_user):
     """Test that CSV export produces valid GDPR-compliant CSV."""
     async with db_session() as session:
@@ -101,7 +96,6 @@ async def test_csv_export_format(db_session, test_tenant, test_user):
         assert len(rows) >= 2  # Header + at least one data row
 
 
-@pytest.mark.asyncio
 async def test_csv_export_with_metadata(db_session, test_tenant, test_user):
     """Test that CSV export includes metadata correctly."""
     async with db_session() as session:

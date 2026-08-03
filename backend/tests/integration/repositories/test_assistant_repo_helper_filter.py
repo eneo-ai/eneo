@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.assistant_table import Assistants
@@ -113,8 +112,6 @@ async def _record_helper_history(
     )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_for_user_excludes_active_helper(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -143,8 +140,6 @@ async def test_get_for_user_excludes_active_helper(db_container, admin_user):
         assert non_helper_id in returned_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_for_tenant_excludes_active_helper(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -175,8 +170,6 @@ async def test_get_for_tenant_excludes_active_helper(db_container, admin_user):
         assert non_helper_id in returned_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_excludes_former_helper_with_history_only(db_container, admin_user):
     """Former helper: history row exists, no active role.
 
@@ -214,8 +207,6 @@ async def test_excludes_former_helper_with_history_only(db_container, admin_user
         assert non_helper_id in for_tenant_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_returns_published_non_helper(db_container, admin_user):
     """A published assistant that is not a helper must still appear.
 
@@ -244,8 +235,6 @@ async def test_returns_published_non_helper(db_container, admin_user):
         assert published_id in for_tenant_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_returns_regular_personal_assistant(db_container, admin_user):
     """Plain personal (unpublished, non-helper) assistant passes through."""
     async with db_container() as container:
@@ -270,8 +259,6 @@ async def test_returns_regular_personal_assistant(db_container, admin_user):
         assert personal_id in for_tenant_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_published_does_not_override_helper_exclusion(db_container, admin_user):
     """Regression guard for PRD §4: ``published=true`` does NOT override.
 

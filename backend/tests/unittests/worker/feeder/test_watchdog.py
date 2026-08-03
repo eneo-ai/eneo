@@ -8,13 +8,10 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-import pytest
-
 
 class TestWatchdogPhase0ZombieReconciliation:
     """Tests for Phase 0: Zombie counter reconciliation."""
 
-    @pytest.mark.asyncio
     async def test_reconciles_inflated_redis_counter(self):
         """Should reset Redis counter when it exceeds actual DB active jobs."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -44,7 +41,6 @@ class TestWatchdogPhase0ZombieReconciliation:
             assert result["reconciled"] is True
             mock_reconcile.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_skips_reconciliation_when_counts_match(self):
         """Should not reconcile when Redis counter matches DB."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -60,7 +56,6 @@ class TestWatchdogPhase0ZombieReconciliation:
 
         assert result["reconciled"] is False
 
-    @pytest.mark.asyncio
     async def test_handles_cas_mismatch_gracefully(self):
         """Should handle CAS mismatch (concurrent modification) gracefully."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -90,7 +85,6 @@ class TestWatchdogPhase0ZombieReconciliation:
 class TestWatchdogPhase1KillExpired:
     """Tests for Phase 1: Kill expired QUEUED jobs."""
 
-    @pytest.mark.asyncio
     async def test_identifies_expired_jobs_by_created_at(self):
         """Should identify jobs where created_at exceeds max_age."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -118,7 +112,6 @@ class TestWatchdogPhase1KillExpired:
         assert len(result.expired_job_ids) == 1
         assert expired_job.job_id in result.expired_job_ids
 
-    @pytest.mark.asyncio
     async def test_returns_empty_when_no_expired_jobs(self):
         """Should return empty list when no jobs exceed max_age."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -137,7 +130,6 @@ class TestWatchdogPhase1KillExpired:
 
         assert len(result.expired_job_ids) == 0
 
-    @pytest.mark.asyncio
     async def test_tracks_jobs_for_slot_release(self):
         """Should track expired jobs with tenant_id for post-commit slot release."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -169,7 +161,6 @@ class TestWatchdogPhase1KillExpired:
 class TestWatchdogPhase2RescueStuck:
     """Tests for Phase 2: Rescue stuck QUEUED jobs."""
 
-    @pytest.mark.asyncio
     async def test_identifies_stuck_jobs_by_stale_updated_at(self):
         """Should identify jobs with stale updated_at but fresh created_at."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -209,7 +200,6 @@ class TestWatchdogPhase2RescueStuck:
         assert len(result.jobs_to_requeue) == 1
         watchdog._requeue_job.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_excludes_expired_jobs_from_rescue(self):
         """Should NOT rescue jobs that are already expired (created_at > max_age)."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -241,7 +231,6 @@ class TestWatchdogPhase2RescueStuck:
 class TestWatchdogPhase3FailLongRunning:
     """Tests for Phase 3: Fail long-running IN_PROGRESS jobs."""
 
-    @pytest.mark.asyncio
     async def test_identifies_long_running_in_progress_jobs(self):
         """Should identify IN_PROGRESS jobs exceeding timeout."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -273,7 +262,6 @@ class TestWatchdogPhase3FailLongRunning:
 class TestWatchdogSlotRelease:
     """Tests for post-transaction slot release."""
 
-    @pytest.mark.asyncio
     async def test_releases_slots_after_transaction_commit(self):
         """Should release slots OUTSIDE the DB transaction."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog, SlotReleaseJob
@@ -300,7 +288,6 @@ class TestWatchdogSlotRelease:
             assert released == 1
             mock_release.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_slot_release_is_best_effort(self):
         """Should not raise on Redis errors (best effort)."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog, SlotReleaseJob
@@ -326,7 +313,6 @@ class TestWatchdogSlotRelease:
 class TestWatchdogOrchestration:
     """Tests for the main run_cleanup orchestration."""
 
-    @pytest.mark.asyncio
     async def test_runs_all_phases_in_order(self):
         """Should execute phases 0, 1, 2, 3.5, 3 in order within transaction."""
         from eneo.worker.feeder.watchdog import OrphanWatchdog
@@ -401,7 +387,6 @@ class TestWatchdogOrchestration:
 
         assert execution_order == ["phase0", "phase1", "phase2", "phase3.5", "phase3"]
 
-    @pytest.mark.asyncio
     async def test_slot_release_happens_after_db_commit(self):
         """Should release slots only AFTER transaction commits."""
         from eneo.worker.feeder.watchdog import (

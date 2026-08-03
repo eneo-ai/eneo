@@ -43,9 +43,6 @@ from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
-
-
 _STUB_ANSWER = "Helper would say something polite here."
 
 

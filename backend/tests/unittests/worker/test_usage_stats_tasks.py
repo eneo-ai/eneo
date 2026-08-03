@@ -6,8 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
-import pytest
-
 from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import UpdateUsageStatsTaskParams
 from eneo.tenants.tenant import TenantInDB, TenantState
@@ -205,7 +203,6 @@ def build_user(tenant_id, tenant=None):
     )
 
 
-@pytest.mark.asyncio
 async def test_recalculate_tenant_usage_stats_success():
     tenant = build_tenant()
     user = build_user(tenant.id, tenant)
@@ -228,7 +225,6 @@ async def test_recalculate_tenant_usage_stats_success():
     assert container.tenant() is None
 
 
-@pytest.mark.asyncio
 async def test_recalculate_tenant_usage_stats_rejects_user_mismatch():
     tenant = build_tenant()
     wrong_tenant = build_tenant()  # different tenant
@@ -246,7 +242,6 @@ async def test_recalculate_tenant_usage_stats_rejects_user_mismatch():
     assert not job_service.calls
 
 
-@pytest.mark.asyncio
 async def test_recalculate_tenant_usage_stats_handles_missing_user():
     tenant = build_tenant()
     user_row = None  # session will return no user rows
@@ -261,7 +256,6 @@ async def test_recalculate_tenant_usage_stats_handles_missing_user():
     assert not job_service.calls
 
 
-@pytest.mark.asyncio
 async def test_recalculate_tenant_usage_stats_isolated_between_tenants():
     tenant_a = build_tenant()
     tenant_b = build_tenant()
@@ -306,7 +300,6 @@ async def test_recalculate_tenant_usage_stats_isolated_between_tenants():
     assert container_b.user() is None
 
 
-@pytest.mark.asyncio
 async def test_recalculate_all_tenants_usage_stats_processes_active_tenants_only():
     tenant_a = build_tenant()
     tenant_b = build_tenant()
@@ -365,7 +358,6 @@ async def test_recalculate_all_tenants_usage_stats_processes_active_tenants_only
     assert suspended_tenant.id not in processed_ids
 
 
-@pytest.mark.asyncio
 async def test_recalculate_all_tenants_usage_stats_balances_multiple_tenants():
     tenants = [build_tenant() for _ in range(5)]
     users = [build_user(t.id, t) for t in tenants]

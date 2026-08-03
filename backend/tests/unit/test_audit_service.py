@@ -55,7 +55,6 @@ def audit_service_with_config(
 class TestBasicLogging:
     """Tests for basic audit log creation."""
 
-    @pytest.mark.asyncio
     async def test_log_creates_audit_log_when_action_enabled(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -81,7 +80,6 @@ class TestBasicLogging:
         assert result is not None
         mock_repository.create.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_log_returns_none_when_feature_flag_disabled(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -107,7 +105,6 @@ class TestBasicLogging:
         assert result is None
         mock_repository.create.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_log_returns_none_when_action_disabled(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -133,7 +130,6 @@ class TestBasicLogging:
         assert result is None
         mock_repository.create.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_log_without_config_service_always_logs(self, mock_repository):
         """When audit_config_service is None, all actions are logged."""
         mock_repository.create.return_value = MagicMock(spec=AuditLog)
@@ -157,7 +153,6 @@ class TestBasicLogging:
 class TestTwoStageFiltering:
     """Tests for 2-stage filtering logic."""
 
-    @pytest.mark.asyncio
     async def test_should_log_action_stage1_feature_flag_check(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -177,7 +172,6 @@ class TestTwoStageFiltering:
         # Stage 2 should NOT be called if stage 1 returns False
         mock_config_service.is_action_enabled.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_should_log_action_stage2_action_config_check(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -197,7 +191,6 @@ class TestTwoStageFiltering:
         mock_feature_flag_service.check_is_feature_enabled.assert_called_once()
         mock_config_service.is_action_enabled.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_should_log_action_graceful_degradation_on_flag_error(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -219,7 +212,6 @@ class TestTwoStageFiltering:
         assert result is True
         mock_config_service.is_action_enabled.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_should_log_action_without_feature_flag_service(
         self, mock_repository, mock_config_service
     ):
@@ -242,7 +234,6 @@ class TestTwoStageFiltering:
 class TestGetLogs:
     """Tests for get_logs method."""
 
-    @pytest.mark.asyncio
     async def test_get_logs_delegates_to_repository(
         self, audit_service, mock_repository
     ):
@@ -271,7 +262,6 @@ class TestGetLogs:
             page_size=50,
         )
 
-    @pytest.mark.asyncio
     async def test_get_logs_default_pagination(self, audit_service, mock_repository):
         """get_logs() should use page=1, page_size=100 by default."""
         mock_repository.get_logs.return_value = ([], 0)
@@ -287,7 +277,6 @@ class TestGetLogs:
 class TestGetUserLogs:
     """Tests for get_user_logs method (GDPR export)."""
 
-    @pytest.mark.asyncio
     async def test_get_user_logs_delegates_to_repository(
         self, audit_service, mock_repository
     ):
@@ -319,7 +308,6 @@ class TestGetUserLogs:
 class TestErrorHandling:
     """Tests for error handling paths."""
 
-    @pytest.mark.asyncio
     async def test_log_propagates_validation_errors(
         self, audit_service, mock_repository
     ):
@@ -342,7 +330,6 @@ class TestErrorHandling:
 class TestLogAsync:
     """Tests for async logging (ARQ integration)."""
 
-    @pytest.mark.asyncio
     async def test_log_async_returns_none_when_feature_flag_disabled(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -368,7 +355,6 @@ class TestLogAsync:
 
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_log_async_returns_none_when_action_disabled(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -394,7 +380,6 @@ class TestLogAsync:
 
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_log_async_checks_filtering_before_enqueue(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
@@ -424,7 +409,6 @@ class TestLogAsync:
         # job_manager should NOT be called when action is disabled
         mock_job_manager.enqueue.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_log_async_failure_with_error_message_succeeds(self, audit_service):
         """FAILURE outcome with error_message should enqueue successfully."""
         mock_job_manager = AsyncMock()

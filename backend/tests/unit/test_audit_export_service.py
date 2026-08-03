@@ -95,7 +95,6 @@ class TestExportCsv:
             metadata={"email": "test@example.com"},
         )
 
-    @pytest.mark.asyncio
     async def test_export_csv_header_row(self, export_service, mock_repository):
         """export_csv() should include correct header row."""
         # Uses default empty stream from fixture
@@ -112,7 +111,6 @@ class TestExportCsv:
         assert "Error Message" in result
         assert "Metadata" in result
 
-    @pytest.mark.asyncio
     async def test_export_csv_with_logs(
         self, export_service, mock_repository, sample_log_dict
     ):
@@ -126,7 +124,6 @@ class TestExportCsv:
         assert "success" in result
         assert "User test@example.com created" in result
 
-    @pytest.mark.asyncio
     async def test_export_csv_sanitizes_description(
         self, export_service, mock_repository
     ):
@@ -139,7 +136,6 @@ class TestExportCsv:
         # Should be prefixed with single quote
         assert "'=SUM(A1:A10)" in result
 
-    @pytest.mark.asyncio
     async def test_export_csv_empty_result(self, export_service, mock_repository):
         """export_csv() should return header-only CSV when no logs exist."""
         # Uses default empty stream from fixture
@@ -149,7 +145,6 @@ class TestExportCsv:
         assert len(lines) == 1  # Header only
         assert "Timestamp" in lines[0]
 
-    @pytest.mark.asyncio
     async def test_export_csv_with_user_id_filter(
         self, export_service, mock_repository, sample_log_dict
     ):
@@ -162,7 +157,6 @@ class TestExportCsv:
         mock_repository.stream_user_logs_raw.assert_called()
         mock_repository.stream_logs_raw.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_export_csv_respects_max_records_limit(
         self, export_service, mock_repository, sample_log_dict
     ):
@@ -189,7 +183,6 @@ class TestExportJsonl:
             metadata={"key": "value"},
         )
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_format(
         self, export_service, mock_repository, sample_log_dict
     ):
@@ -208,7 +201,6 @@ class TestExportJsonl:
             assert "timestamp" in parsed
             assert "actor_id" in parsed
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_includes_all_fields(
         self, export_service, mock_repository, sample_log_dict
     ):
@@ -234,7 +226,6 @@ class TestExportJsonl:
         for field in expected_fields:
             assert field in parsed
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_empty_result(self, export_service, mock_repository):
         """export_jsonl() should return empty string when no logs exist."""
         # Uses default empty stream from fixture
@@ -242,7 +233,6 @@ class TestExportJsonl:
 
         assert result == ""
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_respects_max_records(
         self, export_service, mock_repository, sample_log_dict
     ):
@@ -255,7 +245,6 @@ class TestExportJsonl:
         lines = result.strip().split("\n")
         assert len(lines) == 5
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_with_user_id_filter(
         self, export_service, mock_repository, sample_log_dict
     ):
@@ -272,7 +261,6 @@ class TestExportJsonl:
 class TestCsvSanitization:
     """Tests for CSV injection prevention."""
 
-    @pytest.mark.asyncio
     async def test_sanitizes_equals_prefix(self, export_service, mock_repository):
         """Should sanitize values starting with '='."""
         log = make_raw_log_dict(description="=1+1")
@@ -281,7 +269,6 @@ class TestCsvSanitization:
         result = await export_service.export_csv(tenant_id=uuid4())
         assert "'=1+1" in result
 
-    @pytest.mark.asyncio
     async def test_sanitizes_plus_prefix(self, export_service, mock_repository):
         """Should sanitize values starting with '+'."""
         log = make_raw_log_dict(description="+1234567890")
@@ -290,7 +277,6 @@ class TestCsvSanitization:
         result = await export_service.export_csv(tenant_id=uuid4())
         assert "'+1234567890" in result
 
-    @pytest.mark.asyncio
     async def test_sanitizes_minus_prefix(self, export_service, mock_repository):
         """Should sanitize values starting with '-'."""
         log = make_raw_log_dict(description="-1234567890")
@@ -299,7 +285,6 @@ class TestCsvSanitization:
         result = await export_service.export_csv(tenant_id=uuid4())
         assert "'-1234567890" in result
 
-    @pytest.mark.asyncio
     async def test_sanitizes_at_prefix(self, export_service, mock_repository):
         """Should sanitize values starting with '@'."""
         log = make_raw_log_dict(description="@SUM(A1)")
@@ -331,7 +316,6 @@ class TestDatetimeHandling:
             "metadata": {},
         }
 
-    @pytest.mark.asyncio
     async def test_handles_native_datetime_objects(
         self, export_service, mock_repository
     ):
@@ -345,7 +329,6 @@ class TestDatetimeHandling:
         # Should contain ISO format timestamp
         assert "2024-06-15T14:30:45" in result
 
-    @pytest.mark.asyncio
     async def test_handles_iso_string_timestamps(self, export_service, mock_repository):
         """export_csv() should pass through ISO string timestamps unchanged."""
         log = make_raw_log_dict(
@@ -358,7 +341,6 @@ class TestDatetimeHandling:
         # Should contain ISO format timestamp
         assert "2024-06-15T14:30:45" in result
 
-    @pytest.mark.asyncio
     async def test_consistent_output_format_regardless_of_input_type(
         self, export_service, mock_repository
     ):
@@ -388,7 +370,6 @@ class TestGeneratorExports:
         """Create sample logs for testing."""
         return [make_raw_log_dict() for _ in range(5)]
 
-    @pytest.mark.asyncio
     async def test_export_csv_stream_yields_header_first(
         self, export_service, mock_repository
     ):
@@ -403,7 +384,6 @@ class TestGeneratorExports:
         assert "Timestamp" in chunks[0]
         assert "Actor ID" in chunks[0]
 
-    @pytest.mark.asyncio
     async def test_export_csv_stream_yields_data(
         self, export_service, mock_repository, sample_logs
     ):
@@ -422,7 +402,6 @@ class TestGeneratorExports:
         full_content = "".join(chunks)
         assert full_content.count("\n") >= 6  # Header + 5 data rows
 
-    @pytest.mark.asyncio
     async def test_export_csv_stream_batches_large_datasets(
         self, export_service, mock_repository
     ):
@@ -438,7 +417,6 @@ class TestGeneratorExports:
         # Should have multiple batches: header + at least 2 data batches
         assert len(chunks) >= 3  # header + 1000-row batch + 500-row batch
 
-    @pytest.mark.asyncio
     async def test_export_csv_stream_respects_max_records(
         self, export_service, mock_repository
     ):
@@ -456,7 +434,6 @@ class TestGeneratorExports:
         lines = full_content.strip().split("\n")
         assert len(lines) == 6  # Header + 5 data rows
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_stream_yields_data(
         self, export_service, mock_repository, sample_logs
     ):
@@ -482,7 +459,6 @@ class TestGeneratorExports:
             assert "timestamp" in parsed
             assert "actor_id" in parsed
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_stream_empty_result(
         self, export_service, mock_repository
     ):
@@ -495,7 +471,6 @@ class TestGeneratorExports:
 
         assert len(chunks) == 0
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_stream_batches_large_datasets(
         self, export_service, mock_repository
     ):
@@ -510,7 +485,6 @@ class TestGeneratorExports:
         # Should have multiple batches
         assert len(chunks) >= 2  # 1000-row batch + 500-row batch
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_stream_respects_max_records(
         self, export_service, mock_repository
     ):
@@ -528,7 +502,6 @@ class TestGeneratorExports:
         lines = full_content.strip().split("\n")
         assert len(lines) == 5
 
-    @pytest.mark.asyncio
     async def test_export_csv_stream_with_user_id_filter(
         self, export_service, mock_repository, sample_logs
     ):
@@ -545,7 +518,6 @@ class TestGeneratorExports:
         mock_repository.stream_user_logs_raw.assert_called()
         mock_repository.stream_logs_raw.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_stream_with_user_id_filter(
         self, export_service, mock_repository, sample_logs
     ):
@@ -566,7 +538,6 @@ class TestGeneratorExports:
 class TestOomProtection:
     """Tests for OOM protection in in-memory exports."""
 
-    @pytest.mark.asyncio
     async def test_export_csv_raises_when_exceeds_limit(self, mock_repository):
         """export_csv() should raise ExportTooLargeError when count exceeds limit."""
         # Configure mock to return count exceeding limit
@@ -583,7 +554,6 @@ class TestOomProtection:
         # Stream should not be called when count check fails
         mock_repository.stream_logs_raw.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_raises_when_exceeds_limit(self, mock_repository):
         """export_jsonl() should raise ExportTooLargeError when count exceeds limit."""
         mock_repository.count_logs = AsyncMock(return_value=200_000)
@@ -597,7 +567,6 @@ class TestOomProtection:
         assert "200,000 found" in str(exc_info.value)
         assert "Use streaming export" in str(exc_info.value)
 
-    @pytest.mark.asyncio
     async def test_export_csv_skips_check_with_max_records(self, mock_repository):
         """export_csv() should skip OOM check when max_records is set."""
         mock_repository.count_logs = AsyncMock(return_value=500_000)  # Would fail
@@ -614,7 +583,6 @@ class TestOomProtection:
         # count_logs should NOT be called when max_records is set
         mock_repository.count_logs.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_export_jsonl_skips_check_with_max_records(self, mock_repository):
         """export_jsonl() should skip OOM check when max_records is set."""
         mock_repository.count_logs = AsyncMock(return_value=500_000)  # Would fail
@@ -630,7 +598,6 @@ class TestOomProtection:
         assert result  # Should have content
         mock_repository.count_logs.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_export_csv_proceeds_when_under_limit(self, mock_repository):
         """export_csv() should proceed when count is under limit."""
         mock_repository.count_logs = AsyncMock(return_value=50_000)  # Under 100k limit
@@ -643,7 +610,6 @@ class TestOomProtection:
         assert "Timestamp" in result
         mock_repository.stream_logs_raw.assert_called()
 
-    @pytest.mark.asyncio
     async def test_export_too_large_error_message_format(self):
         """ExportTooLargeError should have clear, actionable message."""
         error = ExportTooLargeError(record_count=150_000, limit=100_000)

@@ -147,7 +147,6 @@ async def _assert_family_hidden(
         await repository.get_by_id_for_update(root_id)
 
 
-@pytest.mark.asyncio
 async def test_file_family_appears_only_after_its_final_content_promotion(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -251,7 +250,6 @@ async def test_file_family_appears_only_after_its_final_content_promotion(
         } == {root_id, derivative_id}
 
 
-@pytest.mark.asyncio
 async def test_failed_family_disappears_but_lifecycle_and_references_remain(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -356,7 +354,6 @@ def _explain_nodes(plan: dict[str, object]):
         yield from _explain_nodes(child)
 
 
-@pytest.mark.asyncio
 async def test_family_visibility_is_one_query_with_indexed_content_lookups(
     object_content_database: DatabaseSessionManager,
 ) -> None:

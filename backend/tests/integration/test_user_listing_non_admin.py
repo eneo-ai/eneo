@@ -29,8 +29,6 @@ from eneo.main.models import ModelId
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
-
 
 @pytest.fixture
 async def non_admin_role(db_container, admin_user):

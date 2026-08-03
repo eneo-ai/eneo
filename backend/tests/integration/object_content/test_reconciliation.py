@@ -298,7 +298,6 @@ def _reconciler(
     )
 
 
-@pytest.mark.asyncio
 async def test_reconciler_promotes_ambiguous_upload_fails_missing_and_tombstones(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -349,7 +348,6 @@ async def test_reconciler_promotes_ambiguous_upload_fails_missing_and_tombstones
         await real_object_store.store.head(complete.object_key)
 
 
-@pytest.mark.asyncio
 async def test_reconciliation_preserves_bytes_behind_an_active_hold(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -403,7 +401,6 @@ async def test_reconciliation_preserves_bytes_behind_an_active_hold(
         await real_object_store.store.delete_and_confirm(pending.object_key)
 
 
-@pytest.mark.asyncio
 async def test_completed_inventory_reports_missing_retained_bytes_once(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -456,7 +453,6 @@ async def test_completed_inventory_reports_missing_retained_bytes_once(
         assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
 
 
-@pytest.mark.asyncio
 async def test_multipart_outage_preserves_committed_object_inventory_result(
     monkeypatch: pytest.MonkeyPatch,
     object_content_database: DatabaseSessionManager,
@@ -515,7 +511,6 @@ async def test_multipart_outage_preserves_committed_object_inventory_result(
         assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
 
 
-@pytest.mark.asyncio
 async def test_invalid_truncated_inventory_cannot_complete_a_cycle(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -559,7 +554,6 @@ async def test_invalid_truncated_inventory_cannot_complete_a_cycle(
         await real_object_store.store.delete_and_confirm(pending.object_key)
 
 
-@pytest.mark.asyncio
 async def test_reconciler_reclaims_a_stale_delete_after_worker_crash(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -604,7 +598,6 @@ async def test_reconciler_reclaims_a_stale_delete_after_worker_crash(
         await real_object_store.store.head(pending.object_key)
 
 
-@pytest.mark.asyncio
 async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
     monkeypatch: pytest.MonkeyPatch,
     object_content_database: DatabaseSessionManager,
@@ -692,7 +685,6 @@ async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
         assert row.payload_deleted_at is not None
 
 
-@pytest.mark.asyncio
 async def test_reconciler_converges_multipart_crashes_before_and_after_completion(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -796,7 +788,6 @@ async def test_reconciler_converges_multipart_crashes_before_and_after_completio
         client.close()
 
 
-@pytest.mark.asyncio
 async def test_multipart_abort_rechecks_and_fences_a_stale_uploader(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -913,7 +904,6 @@ async def test_multipart_abort_rechecks_and_fences_a_stale_uploader(
         assert content.lease_until is None
 
 
-@pytest.mark.asyncio
 async def test_slow_abort_renews_only_the_lease_confirmed_for_failed_content(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1005,7 +995,6 @@ async def test_slow_abort_renews_only_the_lease_confirmed_for_failed_content(
         raw_client.close()
 
 
-@pytest.mark.asyncio
 async def test_publication_reservation_stays_live_until_adoption(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1125,7 +1114,6 @@ async def test_publication_reservation_stays_live_until_adoption(
             await real_object_store.store.delete_and_confirm(object_key)
 
 
-@pytest.mark.asyncio
 async def test_publication_renewal_failure_blocks_adoption_and_leaves_bounded_orphan(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1229,7 +1217,6 @@ async def test_publication_renewal_failure_blocks_adoption_and_leaves_bounded_or
             await real_object_store.store.delete_and_confirm(object_key)
 
 
-@pytest.mark.asyncio
 async def test_publication_reservation_is_not_an_inventory_observation(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1265,7 +1252,6 @@ async def test_publication_reservation_is_not_an_inventory_observation(
         assert candidate.completed_observations == 0
 
 
-@pytest.mark.asyncio
 async def test_known_orphan_waits_for_a_cycle_started_after_registration(
     object_content_database: DatabaseSessionManager,
     monkeypatch: pytest.MonkeyPatch,
@@ -1363,7 +1349,6 @@ async def test_known_orphan_waits_for_a_cycle_started_after_registration(
         assert candidate.completed_observations == 0
 
 
-@pytest.mark.asyncio
 async def test_expired_publication_reservation_converges_through_orphan_inventory(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1435,7 +1420,6 @@ async def test_expired_publication_reservation_converges_through_orphan_inventor
             pass
 
 
-@pytest.mark.asyncio
 async def test_two_complete_cycles_and_grace_delete_object_and_multipart_orphans(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1499,7 +1483,6 @@ async def test_two_complete_cycles_and_grace_delete_object_and_multipart_orphans
         client.close()
 
 
-@pytest.mark.asyncio
 async def test_reintroduced_bytes_for_a_tombstone_use_guarded_orphan_deletion(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1565,7 +1548,6 @@ async def test_reintroduced_bytes_for_a_tombstone_use_guarded_orphan_deletion(
         assert restored_tombstone.state == ContentState.TOMBSTONED.value
 
 
-@pytest.mark.asyncio
 async def test_reference_drift_fails_closed_and_is_reported_by_health(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
