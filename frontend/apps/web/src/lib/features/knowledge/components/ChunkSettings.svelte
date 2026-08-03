@@ -143,19 +143,26 @@
 
   <div class="border-default flex gap-4 border-b p-4">
     <div class="flex-1" on:input={() => (sizeIsDefault = false)}>
-      <Input.Number
-        bind:value={sizeValue}
-        min={sizeMin}
-        max={sizeMax}
-        step={10}
-        labelClass="text-sm">{m.chunk_size_label()}</Input.Number
-      >
-      <p class="text-secondary mt-1 pl-3 text-xs">
-        {m.chunk_size_description()}
-        {#if ceiling}
-          {m.chunk_size_ceiling_note({ ceiling })}
-        {/if}
-      </p>
+      {#if sizeMax >= sizeMin}
+        <Input.Number
+          bind:value={sizeValue}
+          min={sizeMin}
+          max={sizeMax}
+          step={10}
+          labelClass="text-sm">{m.chunk_size_label()}</Input.Number
+        >
+        <p class="text-secondary mt-1 pl-3 text-xs">
+          {m.chunk_size_description()}
+          {#if ceiling}
+            {m.chunk_size_ceiling_note({ ceiling })}
+          {/if}
+        </p>
+      {:else}
+        <p class="text-sm">{m.chunk_size_label()}</p>
+        <p class="text-secondary mt-1 pl-3 text-xs">
+          {m.chunk_size_no_valid_range({ ceiling: sizeMax })}
+        </p>
+      {/if}
     </div>
 
     <div class="flex-1">

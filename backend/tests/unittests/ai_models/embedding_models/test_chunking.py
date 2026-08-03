@@ -296,6 +296,23 @@ class TestSourceChunkConfig:
                 chunk_size=None, chunk_overlap=60, max_input=None
             )
 
+    def test_a_model_that_forces_the_size_below_the_floor_is_refused(self):
+        # max_input=64 clamps every explicit size to 38, under the public minimum of
+        # 50. Persisting 38 would store a value the API contract itself refuses on
+        # the next save; delegation to platform defaults must remain available.
+        with pytest.raises(BadRequestException, match="below the"):
+            resolve_source_chunk_config(chunk_size=50, chunk_overlap=0, max_input=64)
+
+        assert resolve_source_chunk_config(
+            chunk_size=None, chunk_overlap=None, max_input=64
+        ) == (None, None)
+
+    def test_a_model_whose_clamp_stays_on_the_floor_is_accepted(self):
+        # max_input=84 clamps to exactly 50 — the boundary is inclusive.
+        assert resolve_source_chunk_config(
+            chunk_size=200, chunk_overlap=0, max_input=84
+        ) == (50, 0)
+
     def test_the_model_ceiling_is_applied_before_the_overlap_is_judged(self):
         # max_input 1000 caps the size at 600, so the overlap ceiling is 150, not 250.
         assert resolve_source_chunk_config(

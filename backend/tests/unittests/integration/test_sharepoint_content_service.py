@@ -47,6 +47,8 @@ def mock_integration_knowledge():
     ik.last_synced_at = None
     ik.selected_item_type = None
     ik.embedding_model = MagicMock()
+    ik.chunk_size = None
+    ik.chunk_overlap = None
     return ik
 
 
@@ -402,6 +404,8 @@ class TestProcessInfoBlobSizeAccounting:
         existing_blob.content_hash = hashlib.sha256(
             sanitize_text_for_db(text).encode("utf-8")
         ).digest()
+        existing_blob.chunk_size = None
+        existing_blob.chunk_overlap = None
 
         repo = mock_dependencies["info_blob_service"].repo
         repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
@@ -429,6 +433,101 @@ class TestProcessInfoBlobSizeAccounting:
         repo.update.assert_not_called()
         mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
 
+    async def test_hash_match_still_publishes_when_chunking_changed(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        """The fast return must not outrun a changed chunk configuration.
+
+        It sits in front of the generic publisher, so its own comparison is the only
+        chance for a new per-source chunking to reach unchanged documents.
+        """
+        import hashlib
+
+        from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+            sanitize_text_for_db,
+        )
+
+        text = "Identical content"
+        existing_blob = MagicMock()
+        existing_blob.id = uuid4()
+        existing_blob.size = 100
+        existing_blob.title = "Doc"
+        existing_blob.url = "https://example.com"
+        existing_blob.content_hash = hashlib.sha256(
+            sanitize_text_for_db(text).encode("utf-8")
+        ).digest()
+        # Stamped with the old chunking; the integration now asks for 1000/200.
+        existing_blob.chunk_size = 200
+        existing_blob.chunk_overlap = 40
+        mock_integration_knowledge.chunk_size = 1000
+        mock_integration_knowledge.chunk_overlap = 200
+
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
+        )
+        publish = AsyncMock(return_value=MagicMock(size=100))
+        mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation = publish
+        mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
+
+        await service._process_info_blob(
+            title="Doc",
+            text=text,
+            url="https://example.com",
+            integration_knowledge=mock_integration_knowledge,
+            sharepoint_item_id="item-123",
+        )
+
+        publish.assert_called_once()
+        assert publish.call_args.kwargs["chunk_size"] == 1000
+        assert publish.call_args.kwargs["chunk_overlap"] == 200
+
+    async def test_hash_match_skips_when_stamps_match_the_requested_chunking(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        import hashlib
+
+        from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+            sanitize_text_for_db,
+        )
+
+        text = "Identical content"
+        existing_blob = MagicMock()
+        existing_blob.id = uuid4()
+        existing_blob.size = 100
+        existing_blob.title = "Doc"
+        existing_blob.url = "https://example.com"
+        existing_blob.content_hash = hashlib.sha256(
+            sanitize_text_for_db(text).encode("utf-8")
+        ).digest()
+        existing_blob.chunk_size = 1000
+        existing_blob.chunk_overlap = 200
+        mock_integration_knowledge.chunk_size = 1000
+        mock_integration_knowledge.chunk_overlap = 200
+
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
+        )
+        repo.update = AsyncMock()
+        mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation = AsyncMock()
+
+        await service._process_info_blob(
+            title="Doc",
+            text=text,
+            url="https://example.com",
+            integration_knowledge=mock_integration_knowledge,
+            sharepoint_item_id="item-123",
+        )
+
+        mock_dependencies[
+            "info_blob_service"
+        ].publish_info_blob_without_validation.assert_not_called()
+
     async def test_refreshes_metadata_on_hash_match_when_renamed(
         self, service, mock_dependencies, mock_integration_knowledge
     ):
@@ -449,6 +548,8 @@ class TestProcessInfoBlobSizeAccounting:
         existing_blob.content_hash = hashlib.sha256(
             sanitize_text_for_db(text).encode("utf-8")
         ).digest()
+        existing_blob.chunk_size = None
+        existing_blob.chunk_overlap = None
 
         repo = mock_dependencies["info_blob_service"].repo
         repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(

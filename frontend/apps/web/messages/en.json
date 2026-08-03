@@ -4231,5 +4231,6 @@
   "chunk_settings_reembed_note": "Changes apply when a source is next processed: websites at their next crawl, uploaded material when it is uploaded again. Content that is not reprocessed keeps its current chunking.",
   "chunk_size_ceiling_note": "Capped at {ceiling} tokens for the selected embedding model.",
   "chunk_overlap_value": "{percent}% · {tokens} tokens",
-  "chunk_overlap_value_default": "Platform default · {tokens} tokens"
+  "chunk_overlap_value_default": "Platform default · {tokens} tokens",
+  "chunk_size_no_valid_range": "This embedding model caps chunks at {ceiling} tokens, below the platform minimum — the platform default chunking is used."
 }

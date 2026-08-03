@@ -4231,5 +4231,6 @@
   "chunk_settings_reembed_note": "Ändringar slår igenom när källan bearbetas nästa gång: webbplatser vid nästa crawl, uppladdat material när det laddas upp igen. Innehåll som inte bearbetas om behåller sin nuvarande chunkning.",
   "chunk_size_ceiling_note": "Begränsas till {ceiling} tokens för den valda embedding-modellen.",
   "chunk_overlap_value": "{percent} % · {tokens} tokens",
-  "chunk_overlap_value_default": "Plattformens standard · {tokens} tokens"
+  "chunk_overlap_value_default": "Plattformens standard · {tokens} tokens",
+  "chunk_size_no_valid_range": "Den här embedding-modellen begränsar bitar till {ceiling} tokens, under plattformens minimum — plattformens standardchunkning används."
 }

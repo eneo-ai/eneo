@@ -110,6 +110,16 @@ def resolve_source_chunk_config(
                 f"chunk_size must not exceed {MAX_CHUNK_SIZE} tokens"
             )
         chunk_size = clamp_chunk_size(chunk_size, max_input)
+        if chunk_size < MIN_CHUNK_SIZE:
+            # The model's input limit forces every explicit size below the public
+            # floor. Persisting the clamped value would store a configuration the
+            # API contract itself refuses on the next save; delegation to platform
+            # defaults remains available for such models.
+            raise BadRequestException(
+                f"this embedding model caps chunks at {chunk_size} tokens, below the "
+                f"minimum of {MIN_CHUNK_SIZE}; leave the chunk settings on the "
+                "platform defaults for this model"
+            )
 
     # Judge the pair the splitter will really use, including a defaulted side. A size
     # small enough that the platform's default overlap breaks the ceiling has to be

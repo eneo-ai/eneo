@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import event
 
+from eneo.embedding_models.domain.chunking import chunking_is_unchanged
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.entities.sync_log import SyncLog
@@ -1180,10 +1181,21 @@ class SharePointContentService:
         # unchanged. SharePoint emits delta changes for metadata edits, moves and
         # co-author saves that do not alter the extracted text; re-embedding those
         # wastes embedding cost for no retrieval benefit.
+        #
+        # The chunking has to agree too: this return sits in front of the generic
+        # publisher, whose own chunk-aware guard is never reached from here. Without
+        # this check a changed chunk configuration never reached unchanged SharePoint
+        # documents, unlike the same configuration on every other knowledge source.
         if (
             existing_blob is not None
             and existing_blob.content_hash is not None
             and existing_blob.content_hash == content_hash
+            and chunking_is_unchanged(
+                stored_chunk_size=existing_blob.chunk_size,
+                stored_chunk_overlap=existing_blob.chunk_overlap,
+                requested_chunk_size=integration_knowledge.chunk_size,
+                requested_chunk_overlap=integration_knowledge.chunk_overlap,
+            )
         ):
             # Content is byte-for-byte unchanged: skip the expensive re-chunk +
             # re-embed. Still cheaply refresh title/url if they drifted (e.g. a
