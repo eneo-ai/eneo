@@ -48,6 +48,11 @@
    * slider is moved. */
   let overlapIsDefault = chunkOverlap === null;
 
+  /** Same for the size. Toggling the section open is disclosure, not an edit: it must
+   * submit (null, null), or a deployment whose defaults sit outside the per-source
+   * ceiling gets its own configuration rejected the moment the switch is used. */
+  let sizeIsDefault = chunkSize === null;
+
   function toPercent(tokens: number, size: number): number {
     if (size <= 0) return 0;
     const percent = Math.round((tokens / size) * 100);
@@ -71,9 +76,10 @@
       sizeValue = policy.default_chunk_size;
       overlapPercent = toPercent(policy.default_chunk_overlap, policy.default_chunk_size);
       exactOverlapTokens = null;
-      // Turning the switch on is not editing the overlap: it must go back to meaning
-      // "platform default" so nothing is submitted for a field nobody touched.
+      // Turning the switch on is not editing either field: both go back to meaning
+      // "platform default" so nothing is submitted for controls nobody touched.
       overlapIsDefault = true;
+      sizeIsDefault = true;
     }
     wasCustomizing = on;
   }
@@ -82,7 +88,7 @@
   // that limit is unknown the backend accepts any size, so this must not invent a cap
   // of its own — doing so would rewrite a stored value the administrator never edited.
   $: ceiling = maxInput ? Math.floor(maxInput * policy.max_chunk_fraction) : null;
-  $: if (ceiling !== null && sizeValue > ceiling) sizeValue = ceiling;
+  $: if (!sizeIsDefault && ceiling !== null && sizeValue > ceiling) sizeValue = ceiling;
   $: sizeMax = ceiling !== null ? Math.min(ceiling, policy.max_chunk_size) : policy.max_chunk_size;
 
   // While the overlap is defaulted, the smallest usable size is the one where that
@@ -110,9 +116,11 @@
   // The thumb can only sit on a step, so a defaulted overlap gets the nearest one. Any
   // other value would be snapped by the slider, and that snap fires onInput and would
   // mark the overlap explicit without anyone touching it.
-  $: defaultPercentOnStep =
+  $: defaultPercentOnStep = Math.min(
     Math.round(((policy.default_chunk_overlap / sizeValue) * 100) / OVERLAP_STEP_PERCENT) *
-    OVERLAP_STEP_PERCENT;
+      OVERLAP_STEP_PERCENT,
+    maxOverlapPercent
+  );
 
   // Report the share the tokens really represent, which can differ from the slider
   // position while an exact value is being preserved.
@@ -120,7 +128,7 @@
     sizeValue > 0 ? Math.round((overlapTokens / sizeValue) * 100) : overlapPercent;
 
   // Derive the nullable props: null when off (use defaults), the value when on.
-  $: chunkSize = customize ? sizeValue : null;
+  $: chunkSize = customize && !sizeIsDefault ? sizeValue : null;
   $: chunkOverlap = customize && !overlapIsDefault ? overlapTokens : null;
 </script>
 
@@ -134,7 +142,7 @@
   </p>
 
   <div class="border-default flex gap-4 border-b p-4">
-    <div class="flex-1">
+    <div class="flex-1" on:input={() => (sizeIsDefault = false)}>
       <Input.Number
         bind:value={sizeValue}
         min={sizeMin}
