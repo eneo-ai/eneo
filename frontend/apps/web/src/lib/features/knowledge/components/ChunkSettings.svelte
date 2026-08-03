@@ -38,7 +38,7 @@
    * count instead of snapping, so the value shown never disagrees with the value
    * indexed. Cleared only when the user moves the slider. */
   let exactOverlapTokens: number | null = offStepTokens(
-    chunkOverlap ?? policy.default_chunk_overlap,
+    chunkOverlap,
     chunkSize ?? policy.default_chunk_size
   );
 
@@ -70,9 +70,10 @@
     if (on && !wasCustomizing) {
       sizeValue = policy.default_chunk_size;
       overlapPercent = toPercent(policy.default_chunk_overlap, policy.default_chunk_size);
-      // Keep the deployment's exact default rather than a value rebuilt from a
-      // rounded percentage — enabling the switch must not move the other control.
-      exactOverlapTokens = offStepTokens(policy.default_chunk_overlap, policy.default_chunk_size);
+      exactOverlapTokens = null;
+      // Turning the switch on is not editing the overlap: it must go back to meaning
+      // "platform default" so nothing is submitted for a field nobody touched.
+      overlapIsDefault = true;
     }
     wasCustomizing = on;
   }
@@ -95,10 +96,23 @@
 
   // Tokens are what the API and the index actually use. Floor, and never above the
   // backend's own integer ceiling — rounding up would offer a pair the API refuses.
-  $: overlapTokens = Math.min(
-    exactOverlapTokens ?? Math.floor((sizeValue * overlapPercent) / 100),
-    Math.floor(sizeValue * policy.max_overlap_fraction)
-  );
+  //
+  // While the overlap is defaulted the request carries null, which the backend resolves
+  // to the platform's token default regardless of the size chosen here. Deriving the
+  // preview from the slider instead would show one number and index another.
+  $: overlapTokens = overlapIsDefault
+    ? policy.default_chunk_overlap
+    : Math.min(
+        exactOverlapTokens ?? Math.floor((sizeValue * overlapPercent) / 100),
+        Math.floor(sizeValue * policy.max_overlap_fraction)
+      );
+
+  // The thumb can only sit on a step, so a defaulted overlap gets the nearest one. Any
+  // other value would be snapped by the slider, and that snap fires onInput and would
+  // mark the overlap explicit without anyone touching it.
+  $: defaultPercentOnStep =
+    Math.round(((policy.default_chunk_overlap / sizeValue) * 100) / OVERLAP_STEP_PERCENT) *
+    OVERLAP_STEP_PERCENT;
 
   // Report the share the tokens really represent, which can differ from the slider
   // position while an exact value is being preserved.
@@ -140,7 +154,7 @@
       <p class="text-sm">{m.chunk_overlap_label()}</p>
       <div class="flex items-center gap-3 pt-3">
         <Input.Slider
-          value={overlapPercent}
+          value={overlapIsDefault ? defaultPercentOnStep : overlapPercent}
           min={0}
           max={maxOverlapPercent}
           step={OVERLAP_STEP_PERCENT}
@@ -152,7 +166,11 @@
           }}
         />
         <span class="text-secondary w-28 shrink-0 text-right text-xs">
-          {m.chunk_overlap_value({ percent: displayPercent, tokens: overlapTokens })}
+          {#if overlapIsDefault}
+            {m.chunk_overlap_value_default({ tokens: overlapTokens })}
+          {:else}
+            {m.chunk_overlap_value({ percent: displayPercent, tokens: overlapTokens })}
+          {/if}
         </span>
       </div>
       <p class="text-secondary mt-1 pl-3 text-xs">{m.chunk_overlap_description()}</p>
