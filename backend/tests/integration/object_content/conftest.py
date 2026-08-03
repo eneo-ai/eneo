@@ -26,6 +26,21 @@ from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.s3_object_store import S3ObjectStore
 from init_db import add_tenant_user
 
+
+def pytest_collection_modifyitems(config, items):
+    """Pin this directory's tests to one xdist worker.
+
+    The fixtures here boot a second Postgres (pg13) and a SeaweedFS S3
+    container per worker that touches them. Under ``--dist loadgroup`` the
+    shared group keeps that to a single stack per run.
+    """
+    conftest_root = Path(__file__).parent.resolve()
+    group_marker = pytest.mark.xdist_group("object_content")
+    for item in items:
+        if Path(item.path).resolve().is_relative_to(conftest_root):
+            item.add_marker(group_marker)
+
+
 POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"
     "sha256:751a89c96f7c32cb8133472f711c274853378fb5f8b55dd9fa0e9d3f1471bfc3"
