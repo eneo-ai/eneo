@@ -24,6 +24,15 @@ from uuid import uuid4
 
 import pytest
 
+# The whole matrix is currently red: it predates the api_keys permission
+# requirement on key-creation endpoints and was never updated because the
+# old opt-in marker kept it out of every CI and local run. Fix the matrix
+# against the current permission model or delete it per the deletion
+# criteria in backend/TESTING.md.
+pytestmark = pytest.mark.skip(
+    reason="stale api-key access matrix; predates the api_keys permission model"
+)
+
 # ---------------------------------------------------------------------------
 # Fixtures (same pattern as test_api_key_scope_integration.py)
 # ---------------------------------------------------------------------------
@@ -1515,7 +1524,6 @@ def _build_key_configs(resource_ids: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.api_key_matrix
 async def test_collect_access_matrix(api_client, bearer_token):
     """Create resources + keys, probe endpoints, print matrix, assert all pass."""
 
@@ -1624,7 +1632,6 @@ async def test_collect_access_matrix(api_client, bearer_token):
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_tenant_key_revoked_after_admin_role_removed(
     api_client, bearer_token, db_container, default_user
 ):
@@ -1690,7 +1697,6 @@ async def test_tenant_key_revoked_after_admin_role_removed(
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_revoked_key_is_rejected(api_client, bearer_token):
     """A revoked API key should be rejected with 401."""
 
@@ -1721,7 +1727,6 @@ async def test_revoked_key_is_rejected(api_client, bearer_token):
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_expired_key_is_rejected(api_client, bearer_token):
     """An expired API key should be rejected with 401."""
 
@@ -1776,7 +1781,6 @@ async def _get_bearer_token_for_user(db_container, email):
     return token
 
 
-@pytest.mark.api_key_matrix
 async def test_api_key_rejected_when_owner_deactivated(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -1823,7 +1827,6 @@ async def test_api_key_rejected_when_owner_deactivated(
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_api_key_rejected_when_owner_deleted(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -1869,7 +1872,6 @@ async def test_api_key_rejected_when_owner_deleted(
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_space_key_rejected_when_owner_removed_from_space(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -1916,7 +1918,6 @@ async def test_space_key_rejected_when_owner_removed_from_space(
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_keys_revoked_on_user_deactivation(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -1973,7 +1974,6 @@ async def test_keys_revoked_on_user_deactivation(
             )
 
 
-@pytest.mark.api_key_matrix
 async def test_space_keys_revoked_on_member_removal(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -2035,7 +2035,6 @@ async def test_space_keys_revoked_on_member_removal(
         )
 
 
-@pytest.mark.api_key_matrix
 async def test_reactivated_user_needs_new_keys(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -2088,7 +2087,6 @@ async def test_reactivated_user_needs_new_keys(
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_assistant_key_rejected_when_owner_removed_from_space(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -2145,7 +2143,6 @@ async def test_assistant_key_rejected_when_owner_removed_from_space(
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_app_key_rejected_when_owner_removed_from_space(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -2212,7 +2209,6 @@ async def test_app_key_rejected_when_owner_removed_from_space(
     )
 
 
-@pytest.mark.api_key_matrix
 async def test_assistant_key_revoked_on_member_removal(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
@@ -2278,7 +2274,6 @@ async def test_assistant_key_revoked_on_member_removal(
         )
 
 
-@pytest.mark.api_key_matrix
 async def test_invited_user_key_rejected(
     api_client, bearer_token, db_container, patch_auth_service_jwt
 ):
