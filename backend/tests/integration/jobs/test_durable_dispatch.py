@@ -26,12 +26,14 @@ from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
+    KnowledgeOriginalAdmission,
     Transcription,
     UploadInfoBlob,
     build_dispatch_envelope,
     validate_dispatch_envelope,
 )
 from eneo.main.models import Status
+from eneo.object_content.content import StorageKind
 
 pytestmark = pytest.mark.integration
 
@@ -44,6 +46,11 @@ def _params(task: Task, user_id: UUID) -> UploadInfoBlob | Transcription:
         group_id=uuid4(),
         space_id=uuid4(),
         mimetype="text/plain",
+        original_storage=KnowledgeOriginalAdmission(
+            policy_revision=1,
+            storage_target=StorageKind.POSTGRES_INLINE,
+            maximum_bytes=1_000_000,
+        ),
     )
 
 
@@ -133,7 +140,7 @@ async def test_redispatch_recovers_lost_delivery_with_real_redis(
         assert isinstance(dispatched_params, (UploadInfoBlob, Transcription))
         assert type(dispatched_params) is type(params)
         assert dispatched_params.model_dump() == envelope.params.model_dump()
-        assert getattr(dispatched_params, "filepath") == str(job_staging_path(job_id))
+        assert not hasattr(dispatched_params, "filepath")
     finally:
         await job_manager.close()
 

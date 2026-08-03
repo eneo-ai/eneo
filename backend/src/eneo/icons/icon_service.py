@@ -101,7 +101,7 @@ class IconService:
         media_type = upload_file.content_type
         assert media_type is not None
 
-        storage_kind = self.upload_admission.session_storage_target
+        storage_kind = self.upload_admission.new_write_storage_target
         ambient_transaction = self.icon_repo.session.in_transaction()
         if ambient_transaction and storage_kind is StorageKind.OBJECT_STORE:
             raise RuntimeError(

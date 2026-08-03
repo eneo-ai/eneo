@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
@@ -6,20 +7,29 @@ from eneo.actors import SpaceAction
 from eneo.admin.quota_service import QuotaService
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob import (
+    CapturedKnowledgeOriginal,
     InfoBlobAdd,
     InfoBlobInDB,
     InfoBlobInDBNoText,
     InfoBlobMetadataFilter,
     InfoBlobMetadataFilterPublic,
     InfoBlobUpdate,
+    PreparedKnowledgeOriginal,
 )
-from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.info_blobs.info_blob_repo import InfoBlobPublication, InfoBlobRepository
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.object_content.content import (
+    ContentAccessClass,
+    ContentIntent,
+    StorageKind,
+)
+from eneo.object_content.content_repository import PreparedContent
+from eneo.object_content.content_service import ObjectContentService
 from eneo.spaces.utils.space_utils import effective_space_ids
 from eneo.users.user import UserInDB
 
@@ -32,6 +42,13 @@ if TYPE_CHECKING:
     from eneo.websites.infrastructure.update_website_size_service import (
         UpdateWebsiteSizeService,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicationMatch:
+    publication: InfoBlobPublication | None
+    same_searchable_content: bool
+    same_original: bool
 
 
 class InfoBlobService:
@@ -47,6 +64,7 @@ class InfoBlobService:
         space_service: "SpaceService",
         actor_manager: "ActorManager",
         datastore: "Datastore",
+        object_content: ObjectContentService,
     ) -> None:
         super().__init__()
         self.repo = repo
@@ -58,6 +76,173 @@ class InfoBlobService:
         self.space_service = space_service
         self.actor_manager = actor_manager
         self.datastore = datastore
+        self.object_content = object_content
+
+    async def _prepare_original(
+        self,
+        info_blob: InfoBlobAdd,
+        original: PreparedKnowledgeOriginal,
+    ) -> PreparedContent:
+        intent = ContentIntent(
+            tenant_id=info_blob.tenant_id,
+            created_by_user_id=info_blob.user_id,
+            access_class=ContentAccessClass.PRIVATE_RESOURCE,
+            idempotency_key=f"knowledge-original-job:{original.job_id}",
+            producer_receipt=(
+                f"knowledge-job:{original.job_id}:original:"
+                f"policy-revision:{original.policy_revision}"
+            ),
+        )
+        if original.storage_kind is StorageKind.POSTGRES_INLINE:
+            return await self.object_content.prepare_in_transaction(
+                self.repo.session,
+                intent=intent,
+                content=original.captured,
+                storage_kind=original.storage_kind,
+            )
+
+        assert original.publication is not None
+        (prepared,) = await self.object_content.adopt_verified_in_transaction(
+            self.repo.session,
+            intents=(intent,),
+            contents=(original.captured,),
+            publication=original.publication,
+        )
+        return prepared
+
+    async def precheck_knowledge_upload_capacity(
+        self,
+        *,
+        group_id: UUID,
+        title: str,
+        embedding_model_id: UUID,
+        original: CapturedKnowledgeOriginal,
+    ) -> None:
+        """Reject known quota failures before costly processing.
+
+        This is deliberately weaker than the final transactional check. An
+        identical retained original bypasses it so exact refreshes and repairs
+        remain possible at full quota; final publication stays authoritative.
+        """
+        matching_original = await self.repo.has_matching_active_upload_original(
+            group_id=group_id,
+            title=title,
+            embedding_model_id=embedding_model_id,
+            original_sha256=original.captured.sha256,
+        )
+        if not matching_original:
+            await self.quota_service.ensure_capacity(original.captured.size_bytes)
+
+    async def precheck_knowledge_publication_capacity(
+        self,
+        info_blob: InfoBlobAdd,
+        *,
+        embedding_model: "EmbeddingModel",
+        original: CapturedKnowledgeOriginal,
+    ) -> None:
+        """Reject combined original and text growth before remote publication.
+
+        Chunks and concurrent quota changes remain protected by the final
+        transactional check. Exact refreshes and repairs add no retained size
+        and therefore bypass this preliminary check.
+        """
+        text_bytes = info_blob.text.encode("utf-8")
+        if info_blob.content_hash is None:
+            info_blob.content_hash = sha256(text_bytes).digest()
+
+        async with self.repo.session.begin_nested():
+            match = await self._lock_publication_match(
+                info_blob,
+                embedding_model=embedding_model,
+                original=original,
+            )
+            if match.same_searchable_content and match.same_original:
+                return
+            await self.quota_service.ensure_capacity(
+                original.captured.size_bytes + len(text_bytes)
+            )
+
+    async def _lock_publication_match(
+        self,
+        info_blob: InfoBlobAdd,
+        *,
+        embedding_model: "EmbeddingModel",
+        original: CapturedKnowledgeOriginal | None,
+    ) -> _PublicationMatch:
+        original_sha256 = original.captured.sha256 if original is not None else None
+        await self.repo.lock_publication_identity(
+            info_blob,
+            original_sha256=original_sha256,
+        )
+        active_publication = await self.repo.get_active_for_publication(
+            info_blob,
+            original_sha256=original_sha256,
+        )
+        active = (
+            active_publication.info_blob if active_publication is not None else None
+        )
+        same_searchable_content = (
+            active is not None
+            and active.content_hash == info_blob.content_hash
+            and active.embedding_model_id == embedding_model.id
+        )
+        existing_original = (
+            active_publication.original if active_publication is not None else None
+        )
+        same_original = (
+            original is not None
+            and existing_original is not None
+            and existing_original.sha256 == original.captured.sha256
+        )
+        return _PublicationMatch(
+            publication=active_publication,
+            same_searchable_content=same_searchable_content,
+            same_original=same_original,
+        )
+
+    async def _refresh_healthy_reupload(
+        self,
+        info_blob: InfoBlobAdd,
+        *,
+        active: InfoBlobInDB,
+        original: CapturedKnowledgeOriginal,
+    ) -> InfoBlobInDB:
+        refreshed = await self.repo.refresh_publication_metadata(active.id, info_blob)
+        await self.repo.refresh_original_filename(
+            info_blob_id=active.id,
+            original_filename=original.original_filename,
+        )
+        return refreshed
+
+    async def try_refresh_healthy_reupload(
+        self,
+        info_blob: InfoBlobAdd,
+        *,
+        embedding_model: "EmbeddingModel",
+        original: CapturedKnowledgeOriginal,
+    ) -> InfoBlobInDB | None:
+        if info_blob.content_hash is None:
+            info_blob.content_hash = sha256(info_blob.text.encode("utf-8")).digest()
+
+        async with self.repo.session.begin_nested():
+            match = await self._lock_publication_match(
+                info_blob,
+                embedding_model=embedding_model,
+                original=original,
+            )
+            if not match.same_searchable_content or not match.same_original:
+                return None
+            assert match.publication is not None
+            if (
+                match.publication.original is None
+                or not match.publication.original.usable
+            ):
+                return None
+            return await self._refresh_healthy_reupload(
+                info_blob,
+                active=match.publication.info_blob,
+                original=original,
+            )
 
     async def _get_actor(
         self, info_blob: Optional[InfoBlobInDB], group_id: Optional[UUID]
@@ -124,22 +309,49 @@ class InfoBlobService:
         info_blob: InfoBlobAdd,
         *,
         embedding_model: "EmbeddingModel",
+        original: PreparedKnowledgeOriginal | None = None,
     ) -> InfoBlobInDB:
         if info_blob.content_hash is None:
             info_blob.content_hash = sha256(info_blob.text.encode("utf-8")).digest()
 
         async with self.repo.session.begin_nested():
-            await self.repo.lock_publication_identity(info_blob)
-            active = await self.repo.get_active_for_publication(info_blob)
-            if (
-                active is not None
-                and active.content_hash == info_blob.content_hash
-                and active.embedding_model_id == embedding_model.id
-            ):
+            match = await self._lock_publication_match(
+                info_blob,
+                embedding_model=embedding_model,
+                original=original,
+            )
+            active_publication = match.publication
+            active = (
+                active_publication.info_blob if active_publication is not None else None
+            )
+            if match.same_searchable_content and original is None:
+                assert active is not None
                 return await self.repo.refresh_publication_metadata(
-                    active.id,
-                    info_blob,
+                    active.id, info_blob
                 )
+
+            existing_original = (
+                active_publication.original if active_publication is not None else None
+            )
+            if match.same_searchable_content and match.same_original:
+                assert active is not None
+                assert original is not None
+                assert existing_original is not None
+                if existing_original.usable:
+                    return await self._refresh_healthy_reupload(
+                        info_blob,
+                        active=active,
+                        original=original,
+                    )
+
+                prepared = await self._prepare_original(info_blob, original)
+                await self.repo.replace_original_reference(
+                    info_blob_id=active.id,
+                    content_id=prepared.id,
+                    original_filename=original.original_filename,
+                )
+                await self.repo.refresh_publication_metadata(active.id, info_blob)
+                return await self.update_info_blob_size(active.id)
 
             source_id = active.source_id if active is not None else None
             if active is not None and not await self.repo.supersede(active.id):
@@ -154,6 +366,13 @@ class InfoBlobService:
                 info_blob=published,
                 embedding_model=embedding_model,
             )
+            if original is not None:
+                prepared = await self._prepare_original(info_blob, original)
+                await self.repo.add_original_reference(
+                    info_blob_id=published.id,
+                    content_id=prepared.id,
+                    original_filename=original.original_filename,
+                )
             updated = await self.update_info_blob_size(published.id)
             await self.quota_service.ensure_capacity(0)
             return updated

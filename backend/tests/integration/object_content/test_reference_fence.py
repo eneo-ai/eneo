@@ -240,7 +240,7 @@ async def test_info_blob_pending_content_accepts_its_first_reference_at_creation
             InfoBlobContentReferences(
                 info_blob_id=owner.id,
                 content_id=content.id,
-                variant="extracted_text",
+                original_filename="owned-original.txt",
             )
         )
 

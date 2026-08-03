@@ -1,6 +1,7 @@
+import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from secrets import token_hex
 from time import monotonic
@@ -84,6 +85,74 @@ class VerifiedObjectUpload:
 class VerifiedObjectPublication:
     lease_owner: str
     uploads: tuple[VerifiedObjectUpload, ...]
+    _reservation_lease: "_PublicationReservationLease" = field(
+        repr=False,
+        compare=False,
+    )
+
+    async def finish_for_adoption(self) -> None:
+        await self._reservation_lease.finish_for_adoption()
+
+
+class _PublicationReservationLease:
+    """Keep verified but unadopted objects fenced from orphan cleanup."""
+
+    def __init__(
+        self,
+        checkpoint: OperationLeaseCheckpoint,
+        *,
+        heartbeat_seconds: float,
+    ) -> None:
+        self._checkpoint = checkpoint
+        self._heartbeat_seconds = heartbeat_seconds
+        self._heartbeat: asyncio.Task[None] | None = None
+        self._adoption_started = False
+
+    def start(self) -> None:
+        if self._heartbeat is not None:
+            raise RuntimeError("Publication reservation heartbeat already started")
+        self._heartbeat = asyncio.create_task(self._keep_alive())
+
+    async def _keep_alive(self) -> None:
+        while True:
+            await asyncio.sleep(self._heartbeat_seconds)
+            await self._checkpoint.renew_now()
+
+    async def _stop_heartbeat(self) -> BaseException | None:
+        heartbeat = self._heartbeat
+        self._heartbeat = None
+        if heartbeat is None:
+            return None
+        if not heartbeat.done():
+            heartbeat.cancel()
+        try:
+            await heartbeat
+        except asyncio.CancelledError:
+            return None
+        except BaseException as error:
+            return error
+        return None
+
+    async def finish_for_adoption(self) -> None:
+        if self._adoption_started:
+            raise ObjectContentStateError(
+                "Verified publication can be adopted only once"
+            )
+        self._adoption_started = True
+        heartbeat_error = await self._stop_heartbeat()
+        if heartbeat_error is not None:
+            raise ObjectContentUnavailableError(
+                "Durable object publication reservation could not be renewed"
+            ) from heartbeat_error
+        try:
+            await self._checkpoint.renew_now()
+        except (ObjectContentBusyError, OSError, SQLAlchemyError) as error:
+            raise ObjectContentUnavailableError(
+                "Durable object publication reservation could not be renewed"
+            ) from error
+
+    async def close(self) -> None:
+        await self._stop_heartbeat()
 
 
 class ObjectContentService:
@@ -329,6 +398,10 @@ class ObjectContentService:
             request_budget_seconds=settings.sdk_request_budget_seconds,
             renew=renew_publication_reservations,
         )
+        reservation_lease = _PublicationReservationLease(
+            checkpoint,
+            heartbeat_seconds=settings.reconciliation_lease_seconds / 2,
+        )
         try:
             try:
                 uploads: list[VerifiedObjectUpload] = []
@@ -360,11 +433,14 @@ class ObjectContentService:
                     "Unable to renew durable object publication"
                 ) from error
 
+            reservation_lease.start()
             yield VerifiedObjectPublication(
                 lease_owner=lease_owner,
                 uploads=tuple(uploads),
+                _reservation_lease=reservation_lease,
             )
         finally:
+            await reservation_lease.close()
             try:
                 async with self._database.session() as session, session.begin():
                     await ObjectContentReconciliationRepository(
@@ -409,6 +485,7 @@ class ObjectContentService:
                 )
             )
 
+        await publication.finish_for_adoption()
         await ObjectContentReconciliationRepository(
             session
         ).consume_publication_reservations(

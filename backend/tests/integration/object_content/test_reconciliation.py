@@ -35,6 +35,7 @@ from eneo.object_content.content import (
     ContentIntent,
     ContentState,
     ObjectContentBusyError,
+    ObjectContentUnavailableError,
     StorageKind,
     capture_content,
 )
@@ -1005,11 +1006,20 @@ async def test_slow_abort_renews_only_the_lease_confirmed_for_failed_content(
 
 
 @pytest.mark.asyncio
-async def test_active_publication_reservation_wins_orphan_delete_race(
+async def test_publication_reservation_stays_live_until_adoption(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
 ) -> None:
-    settings = real_object_store.settings
+    settings = ObjectContentSettings.model_validate(
+        real_object_store.settings.model_dump()
+        | {
+            "connect_timeout_seconds": 0.01,
+            "read_timeout_seconds": 0.01,
+            "sdk_max_attempts": 1,
+            "reconciliation_lease_seconds": 6,
+            "orphan_grace_seconds": 1,
+        }
+    )
     payload = b"verified-publication-race"
     content_service = ObjectContentService(
         settings,
@@ -1043,22 +1053,20 @@ async def test_active_publication_reservation_wins_orphan_delete_race(
                     )
                     assert candidate is not None
                     assert candidate.lease_owner == publication.lease_owner
-                    candidate.eligible_after = datetime.now(UTC) - timedelta(minutes=1)
-                    candidate.last_observed_at = datetime.now(UTC)
-                    candidate.completed_observations = 2
 
-                async with (
-                    object_content_database.session() as session,
-                    session.begin(),
-                ):
-                    claimed = await ObjectContentReconciliationRepository(
-                        session
-                    ).claim_orphan_deletes(
-                        lease_owner="competing-reconciler",
-                        lease_seconds=settings.reconciliation_lease_seconds,
-                        limit=1,
-                    )
-                    assert claimed == ()
+                await asyncio.sleep(settings.reconciliation_lease_seconds + 0.1)
+                first_inventory = await _reconciler(
+                    settings,
+                    real_object_store.store,
+                    object_content_database,
+                ).run_once()
+                second_inventory = await _reconciler(
+                    settings,
+                    real_object_store.store,
+                    object_content_database,
+                ).run_once()
+                assert first_inventory.orphan_objects_deleted == 0
+                assert second_inventory.orphan_objects_deleted == 0
 
                 async with (
                     object_content_database.session() as session,
@@ -1113,6 +1121,110 @@ async def test_active_publication_reservation_wins_orphan_delete_race(
             assert content.state == ContentState.AVAILABLE.value
             assert content.reference_count == 1
     finally:
+        if object_key is not None:
+            await real_object_store.store.delete_and_confirm(object_key)
+
+
+@pytest.mark.asyncio
+async def test_publication_renewal_failure_blocks_adoption_and_leaves_bounded_orphan(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = ObjectContentSettings.model_validate(
+        real_object_store.settings.model_dump()
+        | {
+            "connect_timeout_seconds": 0.01,
+            "read_timeout_seconds": 0.01,
+            "sdk_max_attempts": 1,
+            "reconciliation_lease_seconds": 6,
+            "orphan_grace_seconds": 1,
+        }
+    )
+    payload = b"publication-renewal-failure"
+    content_service = ObjectContentService(
+        settings,
+        object_content_database,
+        object_store_settings=settings,
+        object_store=real_object_store.store,
+    )
+    object_key: str | None = None
+
+    original_renew = (
+        ObjectContentReconciliationRepository.renew_publication_reservations
+    )
+
+    async def fail_renewal(*_args, **_kwargs) -> None:
+        raise OSError("injected publication renewal failure")
+
+    try:
+        with pytest.raises(
+            ObjectContentUnavailableError,
+            match="reservation could not be renewed",
+        ):
+            async with capture_content(
+                _source(payload),
+                declared_media_type="application/octet-stream",
+                verified_media_type="application/octet-stream",
+                maximum_size_bytes=len(payload),
+                spool_memory_bytes=settings.spool_memory_bytes,
+                multipart_part_bytes=settings.multipart_part_bytes,
+            ) as captured:
+                async with content_service.upload_for_publication(
+                    (captured,)
+                ) as publication:
+                    object_key = publication.uploads[0].object_key
+                    monkeypatch.setattr(
+                        ObjectContentReconciliationRepository,
+                        "renew_publication_reservations",
+                        fail_renewal,
+                    )
+                    await asyncio.sleep(settings.reconciliation_lease_seconds / 2 + 0.1)
+                    async with (
+                        object_content_database.session() as session,
+                        session.begin(),
+                    ):
+                        tenant_id = (await session.scalars(select(Tenants.id))).one()
+                        user_id = (await session.scalars(select(Users.id))).one()
+                        await content_service.adopt_verified_in_transaction(
+                            session,
+                            intents=(
+                                ContentIntent(
+                                    tenant_id=tenant_id,
+                                    created_by_user_id=user_id,
+                                    access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                                    idempotency_key=uuid4().hex,
+                                    producer_receipt="renewal-failure-test",
+                                ),
+                            ),
+                            contents=(captured,),
+                            publication=publication,
+                        )
+
+        monkeypatch.setattr(
+            ObjectContentReconciliationRepository,
+            "renew_publication_reservations",
+            original_renew,
+        )
+        first_inventory = await _reconciler(
+            settings,
+            real_object_store.store,
+            object_content_database,
+        ).run_once()
+        second_inventory = await _reconciler(
+            settings,
+            real_object_store.store,
+            object_content_database,
+        ).run_once()
+        assert first_inventory.orphan_objects_deleted == 0
+        assert second_inventory.orphan_objects_deleted == 1
+        object_key = None
+    finally:
+        monkeypatch.setattr(
+            ObjectContentReconciliationRepository,
+            "renew_publication_reservations",
+            original_renew,
+        )
         if object_key is not None:
             await real_object_store.store.delete_and_confirm(object_key)
 
