@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from hashlib import sha256
 from secrets import token_hex
 from tempfile import SpooledTemporaryFile
@@ -18,7 +19,11 @@ from botocore.exceptions import (
     BotoCoreError,
     ChecksumError,
     ClientError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
     FlexibleChecksumError,
+    ReadTimeoutError,
+    SSLError,
 )
 from botocore.response import StreamingBody
 from botocore.session import get_session
@@ -63,6 +68,13 @@ class ObjectStoreIntegrityError(ObjectStoreError):
 
 class ObjectStoreBindingError(ObjectStoreError):
     pass
+
+
+class ObjectStoreFailureKind(StrEnum):
+    AUTHENTICATION = "authentication"
+    TLS = "tls"
+    CONNECTION = "connection"
+    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +198,34 @@ def _client_error_code(error: ClientError) -> str:
     typed_detail = cast(Mapping[str, object], detail)
     code = typed_detail.get("Code")
     return str(code) if code is not None else "unknown"
+
+
+def classify_object_store_failure(error: BaseException) -> ObjectStoreFailureKind:
+    """Classify an SDK failure without exposing provider messages or credentials."""
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, ClientError):
+            if _client_error_code(current) in {
+                "401",
+                "403",
+                "AccessDenied",
+                "AuthorizationHeaderMalformed",
+                "ExpiredToken",
+                "InvalidAccessKeyId",
+                "InvalidToken",
+                "SignatureDoesNotMatch",
+            }:
+                return ObjectStoreFailureKind.AUTHENTICATION
+            return ObjectStoreFailureKind.UNAVAILABLE
+        if isinstance(current, SSLError):
+            return ObjectStoreFailureKind.TLS
+        if isinstance(
+            current,
+            (ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError),
+        ):
+            return ObjectStoreFailureKind.CONNECTION
+        current = current.__cause__
+    return ObjectStoreFailureKind.UNAVAILABLE
 
 
 def _create_client(

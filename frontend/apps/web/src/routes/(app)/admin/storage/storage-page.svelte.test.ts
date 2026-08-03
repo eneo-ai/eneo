@@ -9,6 +9,9 @@ const getMoves = vi.hoisted(() => vi.fn());
 const queueMoves = vi.hoisted(() => vi.fn());
 const setMovesPaused = vi.hoisted(() => vi.fn());
 const replacePolicy = vi.hoisted(() => vi.fn());
+const getObjectStoreConnection = vi.hoisted(() => vi.fn());
+const createObjectStoreConnection = vi.hoisted(() => vi.fn());
+const rotateObjectStoreCredentials = vi.hoisted(() => vi.fn());
 const testUser = vi.hoisted(() => ({ isPlatformAdmin: false }));
 
 vi.mock("$lib/core/AppContext.js", () => ({
@@ -28,6 +31,11 @@ vi.mock("$lib/core/Eneo", () => ({
       queueMoves,
       setMovesPaused,
       replace: replacePolicy
+    },
+    objectStoreConnection: {
+      get: getObjectStoreConnection,
+      create: createObjectStoreConnection,
+      rotateCredentials: rotateObjectStoreCredentials
     }
   })
 }));
@@ -175,6 +183,20 @@ describe("admin storage settings page", () => {
     queueMoves.mockReset();
     setMovesPaused.mockReset();
     replacePolicy.mockReset();
+    getObjectStoreConnection.mockReset();
+    getObjectStoreConnection.mockResolvedValue({
+      source: "unconfigured",
+      configured: false,
+      credentials_can_be_managed: true,
+      revision: null,
+      endpoint_url: null,
+      region: null,
+      bucket: null,
+      addressing_style: null,
+      updated_at: null
+    });
+    createObjectStoreConnection.mockReset();
+    rotateObjectStoreCredentials.mockReset();
   });
 
   test("shows a loading state before rendering the sanitized deployment policy", async () => {
@@ -317,6 +339,45 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByRole("link", { name: "storage_settings_object_store_docs" }))
       .toHaveAttribute("href", "https://docs.eneo.ai/guides/object-content-storage");
+  });
+
+  test("tests and saves the first connection without changing the storage target", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    createObjectStoreConnection.mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_add_action" }).click();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://objects.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_save" }).click();
+
+    expect(createObjectStoreConnection).toHaveBeenCalledWith({
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      access_key_id: "access-key",
+      secret_access_key: "secret-key",
+      addressing_style: "path"
+    });
+    await expect.element(page.getByText("storage_connection_created_title")).toBeVisible();
+    await expect
+      .element(page.getByRole("radio", { name: /storage_target_postgres_inline/ }))
+      .toBeChecked();
   });
 
   test("refreshes move progress and inventory independently without reloading policy", async () => {
@@ -1390,7 +1451,10 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByText("storage_readiness_object_store_not_configured").first())
       .toBeVisible();
-    await page.getByRole("button", { name: "storage_capabilities_caption" }).click();
+    const connectionSection = page.getByRole("region", { name: "storage_connection_title" });
+    await expect
+      .element(connectionSection.getByText("storage_connection_empty_title"))
+      .toBeVisible();
     await page.getByRole("button", { name: "storage_inventory_caption" }).click();
     await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
     await expect

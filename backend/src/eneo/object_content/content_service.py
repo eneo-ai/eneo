@@ -41,6 +41,10 @@ from eneo.object_content.content_repository import (
 )
 from eneo.object_content.inline_content_store import InlineContentStore
 from eneo.object_content.lease import OperationLeaseCheckpoint
+from eneo.object_content.object_store_provider import (
+    ObjectStoreLease,
+    ObjectStoreProvider,
+)
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
     PublicationReservation,
@@ -163,16 +167,10 @@ class ObjectContentService:
         core_settings: ObjectContentCoreSettings,
         database: DatabaseSessionManager = sessionmanager,
         *,
-        object_store_settings: ObjectContentSettings | None = None,
-        object_store: S3ObjectStore | None = None,
+        object_store_provider: ObjectStoreProvider | None = None,
     ) -> None:
-        if (object_store_settings is None) != (object_store is None):
-            raise ValueError(
-                "Object-store settings and adapter must be supplied together"
-            )
         self._core_settings = core_settings
-        self._object_store_settings = object_store_settings
-        self._object_store = object_store
+        self._object_store_provider = object_store_provider
         self._inline_store = InlineContentStore(
             maximum_size_bytes=core_settings.inline_maximum_bytes,
             io_chunk_bytes=core_settings.inline_io_chunk_bytes,
@@ -181,10 +179,18 @@ class ObjectContentService:
 
     @property
     def object_store_configured(self) -> bool:
-        return self._object_store is not None
+        provider = self._object_store_provider
+        return provider is not None and provider.configured
 
     async def check_object_store_ready(self) -> None:
-        settings, store = self._require_object_store()
+        async with self._object_store() as lease:
+            await self._check_object_store_ready(lease.settings, lease.store)
+
+    async def _check_object_store_ready(
+        self,
+        settings: ObjectContentSettings,
+        store: S3ObjectStore,
+    ) -> None:
         try:
             await store.check_ready()
         except ObjectStoreUnavailableError as error:
@@ -321,17 +327,20 @@ class ObjectContentService:
             spool_memory_bytes = self._core_settings.inline_io_chunk_bytes
             multipart_part_bytes = self._core_settings.inline_io_chunk_bytes
         else:
-            settings, _store = self._require_object_store()
-            maximum_size_bytes = (
-                settings.maximum_multipart_bytes
-                if business_maximum_bytes is None
-                else min(
-                    business_maximum_bytes,
-                    settings.maximum_multipart_bytes,
+            # Capture sizing is fixed operator configuration. Copy it from one
+            # current snapshot without retaining a credential-bearing client
+            # while an upload stream is still arriving.
+            async with self._object_store() as lease:
+                maximum_size_bytes = (
+                    lease.settings.maximum_multipart_bytes
+                    if business_maximum_bytes is None
+                    else min(
+                        business_maximum_bytes,
+                        lease.settings.maximum_multipart_bytes,
+                    )
                 )
-            )
-            spool_memory_bytes = settings.spool_memory_bytes
-            multipart_part_bytes = settings.multipart_part_bytes
+                spool_memory_bytes = lease.settings.spool_memory_bytes
+                multipart_part_bytes = lease.settings.multipart_part_bytes
         async with capture_content(
             source,
             declared_media_type=declared_media_type,
@@ -351,9 +360,24 @@ class ObjectContentService:
         self,
         contents: Sequence[CapturedContent],
     ) -> AsyncGenerator[VerifiedObjectPublication]:
+        async with self._object_store() as lease:
+            async with self._upload_for_publication_with_store(
+                contents,
+                settings=lease.settings,
+                store=lease.store,
+            ) as publication:
+                yield publication
+
+    @asynccontextmanager
+    async def _upload_for_publication_with_store(
+        self,
+        contents: Sequence[CapturedContent],
+        *,
+        settings: ObjectContentSettings,
+        store: S3ObjectStore,
+    ) -> AsyncGenerator[VerifiedObjectPublication]:
         if not contents:
             raise ValueError("Object publication requires at least one content item")
-        settings, store = self._require_object_store()
         lease_owner = token_hex(16)
         reservations = tuple(
             PublicationReservation(
@@ -547,13 +571,13 @@ class ObjectContentService:
                 # Keep PENDING for persisted rows and explicit store_and_verify
                 # recovery. Delete it only after a database audit finds no such
                 # rows and every live producer/cutover uses verified publication.
-                settings, _store = self._require_object_store()
-                return await repository.prepare_object_store(
-                    intent=intent,
-                    content=content,
-                    object_key=new_object_key(settings),
-                    request_fingerprint=request_fingerprint,
-                )
+                async with self._object_store() as lease:
+                    return await repository.prepare_object_store(
+                        intent=intent,
+                        content=content,
+                        object_key=new_object_key(lease.settings),
+                        request_fingerprint=request_fingerprint,
+                    )
 
     async def store_and_verify(
         self,
@@ -561,7 +585,22 @@ class ObjectContentService:
         content_id: UUID,
         content: CapturedContent,
     ) -> ReadableContent:
-        settings, store = self._require_object_store()
+        async with self._object_store() as lease:
+            return await self._store_and_verify_with_store(
+                content_id=content_id,
+                content=content,
+                settings=lease.settings,
+                store=lease.store,
+            )
+
+    async def _store_and_verify_with_store(
+        self,
+        *,
+        content_id: UUID,
+        content: CapturedContent,
+        settings: ObjectContentSettings,
+        store: S3ObjectStore,
+    ) -> ReadableContent:
         lease_owner = token_hex(16)
         lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
@@ -705,65 +744,83 @@ class ObjectContentService:
                     raise RuntimeError(
                         "Object-store content dispatch lost its descriptor"
                     )
-                _settings, store = self._require_object_store()
-                try:
-                    verification_chunk_sha256: tuple[bytes, ...] = ()
-                    descriptor = source.object_store_descriptor
-                    if byte_range is not None:
-                        window = verification_chunk_window(
-                            byte_range,
-                            chunk_size_bytes=(descriptor.verification_chunk_size_bytes),
-                            chunk_count=descriptor.verification_chunk_count,
-                        )
-                        async with self._database.session() as session, session.begin():
-                            verification_chunk_sha256 = await (
-                                ObjectContentRepository(session)
-                            ).get_object_store_verification_chunks(
-                                content_id=content.content_id,
-                                first_chunk_index=window.first_chunk_index,
-                                chunk_count=window.chunk_count,
-                            )
-                    async with store.open_verified_read(
-                        descriptor.object_key,
-                        expected_sha256=content.sha256,
-                        expected_size_bytes=content.size_bytes,
-                        expected_media_type=content.media_type,
+                async with self._object_store() as lease:
+                    async with self._open_object_store_source(
+                        source,
+                        lease=lease,
                         byte_range=byte_range,
-                        verification_chunk_size_bytes=(
-                            descriptor.verification_chunk_size_bytes
-                        ),
-                        verification_chunk_count=(descriptor.verification_chunk_count),
-                        verification_chunk_sha256=verification_chunk_sha256,
                     ) as opened:
                         yield opened
-                except (ValueError, ObjectContentStateError) as error:
-                    await self._mark_backend_failure(
-                        content.content_id,
-                        ContentFailureCode.BACKEND_CORRUPT,
+
+    @asynccontextmanager
+    async def _open_object_store_source(
+        self,
+        source: ReadableContentSource,
+        *,
+        lease: ObjectStoreLease,
+        byte_range: ByteRange | None,
+    ) -> AsyncGenerator[ContentRead]:
+        content = source.content
+        descriptor = source.object_store_descriptor
+        if descriptor is None:
+            raise RuntimeError("Object-store content dispatch lost its descriptor")
+        try:
+            verification_chunk_sha256: tuple[bytes, ...] = ()
+            if byte_range is not None:
+                window = verification_chunk_window(
+                    byte_range,
+                    chunk_size_bytes=descriptor.verification_chunk_size_bytes,
+                    chunk_count=descriptor.verification_chunk_count,
+                )
+                async with self._database.session() as session, session.begin():
+                    verification_chunk_sha256 = await ObjectContentRepository(
+                        session
+                    ).get_object_store_verification_chunks(
+                        content_id=content.content_id,
+                        first_chunk_index=window.first_chunk_index,
+                        chunk_count=window.chunk_count,
                     )
-                    raise ObjectContentIntegrityError(
-                        "Durable object verification metadata is invalid"
-                    ) from error
-                except ObjectStoreNotFoundError as error:
-                    await self._mark_backend_failure(
-                        content.content_id,
-                        ContentFailureCode.BACKEND_MISSING,
-                    )
-                    raise ObjectContentUnavailableError(
-                        "Durable object content is unavailable"
-                    ) from error
-                except ObjectStoreIntegrityError as error:
-                    await self._mark_backend_failure(
-                        content.content_id,
-                        ContentFailureCode.BACKEND_CORRUPT,
-                    )
-                    raise ObjectContentIntegrityError(
-                        "Durable object verification failed"
-                    ) from error
-                except ObjectStoreUnavailableError as error:
-                    raise ObjectContentUnavailableError(
-                        "Durable object content is temporarily unavailable"
-                    ) from error
+            async with lease.store.open_verified_read(
+                descriptor.object_key,
+                expected_sha256=content.sha256,
+                expected_size_bytes=content.size_bytes,
+                expected_media_type=content.media_type,
+                byte_range=byte_range,
+                verification_chunk_size_bytes=(
+                    descriptor.verification_chunk_size_bytes
+                ),
+                verification_chunk_count=descriptor.verification_chunk_count,
+                verification_chunk_sha256=verification_chunk_sha256,
+            ) as opened:
+                yield opened
+        except (ValueError, ObjectContentStateError) as error:
+            await self._mark_backend_failure(
+                content.content_id,
+                ContentFailureCode.BACKEND_CORRUPT,
+            )
+            raise ObjectContentIntegrityError(
+                "Durable object verification metadata is invalid"
+            ) from error
+        except ObjectStoreNotFoundError as error:
+            await self._mark_backend_failure(
+                content.content_id,
+                ContentFailureCode.BACKEND_MISSING,
+            )
+            raise ObjectContentUnavailableError(
+                "Durable object content is unavailable"
+            ) from error
+        except ObjectStoreIntegrityError as error:
+            await self._mark_backend_failure(
+                content.content_id,
+                ContentFailureCode.BACKEND_CORRUPT,
+            )
+            raise ObjectContentIntegrityError(
+                "Durable object verification failed"
+            ) from error
+        except ObjectStoreUnavailableError as error:
+            raise ObjectContentUnavailableError(
+                "Durable object content is temporarily unavailable"
+            ) from error
 
     async def read_content_bytes(
         self,
@@ -793,12 +850,44 @@ class ObjectContentService:
                     page
                 )
 
-            for grant in page:
-                source = sources[grant.content_id]
-                payloads[grant.content_id] = await self._read_source_bytes(
-                    source,
-                )
+            remote_page = any(
+                sources[grant.content_id].content.storage_kind
+                is StorageKind.OBJECT_STORE
+                for grant in page
+            )
+            if remote_page:
+                async with self._object_store() as lease:
+                    for grant in page:
+                        source = sources[grant.content_id]
+                        if source.content.storage_kind is StorageKind.OBJECT_STORE:
+                            payloads[
+                                grant.content_id
+                            ] = await self._read_object_store_source_bytes(
+                                source,
+                                lease=lease,
+                            )
+                        else:
+                            payloads[grant.content_id] = await self._read_source_bytes(
+                                source
+                            )
+            else:
+                for grant in page:
+                    source = sources[grant.content_id]
+                    payloads[grant.content_id] = await self._read_source_bytes(source)
         return payloads
+
+    async def _read_object_store_source_bytes(
+        self,
+        source: ReadableContentSource,
+        *,
+        lease: ObjectStoreLease,
+    ) -> bytes:
+        async with self._open_object_store_source(
+            source,
+            lease=lease,
+            byte_range=None,
+        ) as opened:
+            return b"".join([chunk async for chunk in opened.chunks])
 
     async def _read_source_bytes(
         self,
@@ -881,11 +970,12 @@ class ObjectContentService:
                 failure_code=failure_code,
             )
 
-    def _require_object_store(self) -> tuple[ObjectContentSettings, S3ObjectStore]:
-        settings = self._object_store_settings
-        store = self._object_store
-        if settings is None or store is None:
+    @asynccontextmanager
+    async def _object_store(self) -> AsyncGenerator[ObjectStoreLease]:
+        provider = self._object_store_provider
+        if provider is None:
             raise ObjectContentConfigurationError(
                 "Object-store content is not configured for this deployment"
             )
-        return settings, store
+        async with provider.acquire() as lease:
+            yield lease

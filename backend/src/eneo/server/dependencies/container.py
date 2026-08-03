@@ -133,6 +133,7 @@ def get_container(
 async def load_container_upload_admission(
     container: Container,
 ) -> UploadAdmissionSnapshot:
+    await object_content_runtime.refresh_object_store_configuration()
     session = cast(AsyncSession, container.session())
     snapshot = await load_upload_admission_snapshot(
         session,

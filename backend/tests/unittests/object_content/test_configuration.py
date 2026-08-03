@@ -9,6 +9,7 @@ from eneo.object_content.configuration import (
     ObjectContentSettings,
     load_object_content_core_settings,
     load_object_content_settings,
+    load_object_store_operator_settings,
 )
 
 
@@ -45,6 +46,16 @@ def test_inline_tuning_does_not_require_object_store_configuration(
         inline_maximum_bytes=2 * 1024**2,
         inline_io_chunk_bytes=64 * 1024,
     )
+
+
+def test_operator_guardrails_do_not_trigger_legacy_connection_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_object_content_environment(monkeypatch)
+    monkeypatch.setenv("OBJECT_CONTENT_CONNECT_TIMEOUT_SECONDS", "7")
+
+    assert load_object_content_settings() is None
+    assert load_object_store_operator_settings().connect_timeout_seconds == 7
 
 
 def test_partial_object_content_environment_fails_closed(

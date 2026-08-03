@@ -44,8 +44,8 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import ByteLimitField from "./ByteLimitField.svelte";
+  import StorageConnectionSection from "./StorageConnectionSection.svelte";
   import StorageInventorySection from "./StorageInventorySection.svelte";
-  import StorageReadinessSection from "./StorageReadinessSection.svelte";
 
   type InventoryStatus = "idle" | "loading" | "error";
   type MoveAction = "queue" | "pause" | null;
@@ -587,6 +587,14 @@
             </Alert.Root>
           {/if}
 
+          <StorageConnectionSection
+            capability={objectStoreCapability}
+            {canEdit}
+            {readinessLabel}
+            onConnectionChanged={() => loadPolicy(dirty)}
+            onAuthorityRevoked={() => (authorityRevoked = true)}
+          />
+
           <form
             class="flex flex-col gap-6"
             onsubmit={(event) => {
@@ -962,12 +970,6 @@
               {/if}
             </PolicySection>
           </form>
-
-          <StorageReadinessSection
-            capabilities={deploymentPolicy.capabilities}
-            {storageTargetLabel}
-            {readinessLabel}
-          />
 
           {#if user.is_platform_admin === true && !authorityRevoked}
             <PolicySection

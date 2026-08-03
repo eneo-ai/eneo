@@ -10,6 +10,9 @@ from eneo.object_content.content import (
     ObjectContentIntegrityError,
     ObjectContentUnavailableError,
 )
+from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionDatabaseUnavailable,
+)
 from eneo.server.exception_handlers import add_exception_handlers
 
 
@@ -46,6 +49,17 @@ def test_integrity_failure_has_stable_typed_503_contract() -> None:
 
     assert response.status_code == 503
     assert response.json()["code"] == "object_content_integrity_failure"
+
+
+def test_connection_database_failure_has_stable_typed_503_contract() -> None:
+    response = _client_for(
+        ObjectStoreConnectionDatabaseUnavailable(
+            "Object-store connection data is temporarily unavailable"
+        )
+    ).get("/failure")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "object_store_connection_database_unavailable"
 
 
 def test_idempotency_conflict_is_not_reported_as_server_failure() -> None:

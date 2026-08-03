@@ -34,6 +34,7 @@ from eneo.object_content.content_service import (
     VerifiedObjectPublication,
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.users.user import UserInDB
 from tests.integration.object_content.conftest import RealObjectStore
 
@@ -141,8 +142,10 @@ def _content_service(
             inline_io_chunk_bytes=64 * 1024,
         ),
         database,
-        object_store_settings=real_object_store.settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
     )
 
 

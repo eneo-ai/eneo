@@ -39,6 +39,7 @@ from eneo.object_content.content_service import (
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.object_content.lease import OperationCheckpoint
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.s3_object_store import (
     MultipartStarted,
     ObjectHead,
@@ -85,8 +86,10 @@ class _ControlledObjectContentService(ObjectContentService):
         super().__init__(
             real_object_store.settings,
             database,
-            object_store_settings=real_object_store.settings,
-            object_store=real_object_store.store,
+            object_store_provider=ObjectStoreProvider.fixed(
+                real_object_store.settings,
+                real_object_store.store,
+            ),
         )
         self._pause_before_publication = pause_before_publication
         self._cancel_after_publication = cancel_after_publication

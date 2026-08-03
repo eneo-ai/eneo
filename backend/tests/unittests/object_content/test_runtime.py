@@ -23,6 +23,9 @@ from eneo.object_content.configuration import (
 from eneo.object_content.content import (
     ObjectContentUnavailableError,
 )
+from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionDatabaseUnavailable,
+)
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
@@ -92,7 +95,7 @@ class _ReadinessDatabase(DatabaseSessionManager):
         async def scalar(statement: object) -> object:
             if "now()" in str(statement).lower():
                 return datetime.now(UTC)
-            return False
+            return None
 
         session.scalar = AsyncMock(side_effect=scalar)
         session.flush = AsyncMock()
@@ -305,6 +308,30 @@ async def test_readiness_reports_database_outage_and_recovers_after_cache_expiry
     assert database.connect_count == 2
     assert recovered.ready is True
     assert recovered.code is ObjectContentReadinessCode.READY
+
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_connection_table_outage_is_database_unavailable_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+    runtime.start(settings=_settings(), store=cast("S3ObjectStore", _ReadinessStore()))
+    monkeypatch.setattr(
+        runtime,
+        "refresh_object_store_configuration",
+        AsyncMock(
+            side_effect=ObjectStoreConnectionDatabaseUnavailable(
+                "test connection-table outage"
+            )
+        ),
+    )
+
+    readiness = await runtime.readiness()
+
+    assert readiness.ready is False
+    assert readiness.code is ObjectContentReadinessCode.DATABASE_UNAVAILABLE
 
     await runtime.stop()
 
