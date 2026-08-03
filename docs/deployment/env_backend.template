@@ -101,6 +101,17 @@ OIDC_TENANT_ID=
 # ----------------------------------------------------------------------------
 FEDERATION_PER_TENANT_ENABLED=false
 
+# MCP OAuth token broker
+# ----------------------------------------------------------------------------
+# [OPTIONAL] Enable the per_user / per_tenant auth scopes on MCP servers
+# (default: false). The broker mints audience-restricted tokens for MCP
+# servers via the tenant IdP: the ID-JAG Enterprise-Managed Authorization
+# flow when the server's authorization server supports it, otherwise a
+# same-IdP RFC 8693 token exchange. Requires ENCRYPTION_KEY (IdP tokens are
+# encrypted at rest) and a configured federation for the tenant. Servers
+# with the default static_bearer scope are unaffected.
+MCP_OAUTH_ENABLED=false
+
 # OIDC Safety Controls
 # ----------------------------------------------------------------------------
 # [OPTIONAL] OIDC state JWT lifetime (default: 600 = 10 minutes)
