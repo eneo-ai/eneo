@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_input_reference_instruction_hint,
     compile_new_step_draft,
@@ -11,86 +9,73 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     StructuredFieldDraft,
 )
-from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    SourceCaptureField,
+)
 from eneo.flows.flow_authoring_spec import InputSource, InputType, OutputType
-
-_LOGGER_NAME = "eneo.flows.ai_builder.ai_builder_new_step_compiler"
 
 
 def _compile_source_capture_instructions(
     source_capture_fields: tuple[SourceCaptureField, ...],
+    *,
+    instructions: str = "Read the source material.",
+    ui_language: str | None = None,
 ) -> str:
     step = compile_new_step_draft(
         step_draft=NewStepDraft(
             name="Extract source",
-            instructions="Read the source material.",
+            instructions=instructions,
             input_type=InputType.DOCUMENT,
             output_type=OutputType.JSON,
         ),
         plan_step_ref="step_a",
         prior_steps=[],
         source_capture_fields=source_capture_fields,
+        ui_language=ui_language,
     )
     return step.assistant_spec.instructions
 
 
-def test_source_capture_guidance_logs_when_field_count_cap_binds(caplog) -> None:
-    caplog.set_level(logging.WARNING, logger=_LOGGER_NAME)
+def test_source_capture_guidance_renders_every_admitted_field_in_order() -> None:
+    authored_description = f"{'a' * 500}\n{'b' * 500}"
+    complete_description = " ".join(authored_description.split())
+    source_capture_fields = tuple(
+        SourceCaptureField(
+            f"field_{index}",
+            authored_description if index == 8 else None,
+        )
+        for index in range(9)
+    )
 
+    instructions = _compile_source_capture_instructions(source_capture_fields)
+
+    field_lines = [f"- field_{index}" for index in range(8)]
+    field_lines.append(f"- field_8: {complete_description}")
+    expected_guidance = "\n".join(
+        [
+            "Bevara följande uppgifter eftersom senare steg behöver dem:",
+            *field_lines,
+            "Om en uppgift saknas i källmaterialet, skriv att den inte framgår "
+            "istället för att utelämna den.",
+        ]
+    )
+    assert instructions == f"Read the source material.\n\n{expected_guidance}"
+
+
+def test_source_capture_guidance_keeps_field_named_inside_instructions() -> None:
     instructions = _compile_source_capture_instructions(
-        tuple(SourceCaptureField(f"field_{index}") for index in range(9))
+        (SourceCaptureField("id", "Stable source identifier."),),
+        instructions="Validate the candidate record.",
+        ui_language="en",
     )
 
-    record = next(
-        item
-        for item in caplog.records
-        if item.message == "ai_builder_source_capture_guidance_cap_bound"
+    assert instructions == (
+        "Validate the candidate record.\n\n"
+        "Preserve these facts because later steps need them:\n"
+        "- id: Stable source identifier.\n"
+        "If a fact is missing from the source material, state that it is not "
+        "present instead of omitting it."
     )
-    assert record.cap_reason == "field_count"
-    assert record.field_cap == 8
-    assert record.eligible_field_count == 9
-    assert record.rendered_field_count == 8
-    assert "- field_7" in instructions
-    assert "- field_8" not in instructions
-
-
-def test_source_capture_guidance_logs_when_block_char_cap_binds(caplog) -> None:
-    caplog.set_level(logging.WARNING, logger=_LOGGER_NAME)
-
-    instructions = _compile_source_capture_instructions(
-        (SourceCaptureField(f"field_{'x' * 900}"),)
-    )
-
-    record = next(
-        item
-        for item in caplog.records
-        if item.message == "ai_builder_source_capture_guidance_cap_bound"
-    )
-    assert record.cap_reason == "block_chars"
-    assert record.block_char_cap == 900
-    assert record.eligible_field_count == 1
-    assert record.rendered_field_count == 0
-    assert instructions == "Read the source material."
-
-
-def test_source_capture_guidance_logs_when_description_truncates(caplog) -> None:
-    caplog.set_level(logging.WARNING, logger=_LOGGER_NAME)
-
-    instructions = _compile_source_capture_instructions(
-        (SourceCaptureField("summary", "a" * 120),)
-    )
-
-    record = next(
-        item
-        for item in caplog.records
-        if item.message == "ai_builder_source_capture_description_truncated"
-    )
-    assert record.field_names == ["summary"]
-    assert record.description_char_cap == 96
-    assert record.truncated_field_count == 1
-    assert "- summary: " in instructions
-    assert "..." in instructions
-    assert "a" * 120 not in instructions
 
 
 def test_output_field_guidance_keeps_field_named_in_instructions() -> None:

@@ -47,9 +47,6 @@ from eneo.flows.input_binding_contract_rules import (
 
 logger = logging.getLogger(__name__)
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
-MAX_SOURCE_CAPTURE_FIELDS = 8
-MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS = 96
-MAX_SOURCE_CAPTURE_BLOCK_CHARS = 900
 
 
 def derive_position_input_source(step_index: int) -> InputSource:
@@ -632,69 +629,13 @@ def _append_source_capture_guidance(
         return instructions
 
     heading, absence_instruction = _source_capture_copy(ui_language)
-    normalized_instructions = instructions.casefold()
-    eligible_lines: list[str] = []
-    suppressed_field_names: list[str] = []
-    truncated_description_field_names: list[str] = []
+    field_lines: list[str] = []
     for field in source_capture_fields:
         name = field.name.strip()
         if not name:
             continue
-        if name.casefold() in normalized_instructions:
-            suppressed_field_names.append(name)
-            continue
-        description, description_truncated = _truncate_source_capture_description(
-            field.description
-        )
-        if description_truncated:
-            truncated_description_field_names.append(name)
-        eligible_lines.append(
-            f"- {name}: {description}" if description else f"- {name}"
-        )
-
-    if suppressed_field_names:
-        logger.info(
-            "ai_builder_source_capture_guidance_field_suppressed",
-            extra={
-                "field_names": suppressed_field_names,
-                "source_capture_field_count": len(source_capture_fields),
-                "suppressed_field_count": len(suppressed_field_names),
-            },
-        )
-    if truncated_description_field_names:
-        logger.warning(
-            "ai_builder_source_capture_description_truncated",
-            extra={
-                "field_names": truncated_description_field_names,
-                "description_char_cap": MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS,
-                "truncated_field_count": len(truncated_description_field_names),
-            },
-        )
-
-    field_lines: list[str] = []
-    cap_reason: str | None = None
-    for line in eligible_lines:
-        if len(field_lines) == MAX_SOURCE_CAPTURE_FIELDS:
-            cap_reason = "field_count"
-            break
-        candidate_lines = [*field_lines, line]
-        candidate_block = "\n".join([heading, *candidate_lines, absence_instruction])
-        if len(candidate_block) > MAX_SOURCE_CAPTURE_BLOCK_CHARS:
-            cap_reason = "block_chars"
-            break
-        field_lines.append(line)
-
-    if cap_reason is not None:
-        logger.warning(
-            "ai_builder_source_capture_guidance_cap_bound",
-            extra={
-                "cap_reason": cap_reason,
-                "field_cap": MAX_SOURCE_CAPTURE_FIELDS,
-                "block_char_cap": MAX_SOURCE_CAPTURE_BLOCK_CHARS,
-                "eligible_field_count": len(eligible_lines),
-                "rendered_field_count": len(field_lines),
-            },
-        )
+        description = " ".join(field.description.split()) if field.description else ""
+        field_lines.append(f"- {name}: {description}" if description else f"- {name}")
 
     if not field_lines:
         return instructions
@@ -714,18 +655,6 @@ def _source_capture_copy(ui_language: str | None) -> tuple[str, str]:
         "Preserve these facts because later steps need them:",
         "If a fact is missing from the source material, state that it is not "
         "present instead of omitting it.",
-    )
-
-
-def _truncate_source_capture_description(description: str | None) -> tuple[str, bool]:
-    if not description:
-        return "", False
-    normalized = " ".join(description.split())
-    if len(normalized) <= MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS:
-        return normalized, False
-    return (
-        f"{normalized[: MAX_SOURCE_CAPTURE_DESCRIPTION_CHARS - 3].rstrip()}...",
-        True,
     )
 
 
