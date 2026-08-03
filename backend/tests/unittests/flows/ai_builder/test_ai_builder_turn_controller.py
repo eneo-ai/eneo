@@ -354,6 +354,14 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         "Metadata vid körning: Inga extra fält",
         "Syfte med bearbetningen: Strukturera materialet",
     } <= set(payload.assumptions)
+    assert (
+        "Planen ska följa kraven och underlaget i konversationen."
+        not in payload.assumptions
+    )
+    assert (
+        "Användaren ska kunna granska och ändra planen innan den tillämpas."
+        not in payload.assumptions
+    )
     assert "Docx Output Mode" not in {
         decision.topic for decision in payload.key_decisions
     }

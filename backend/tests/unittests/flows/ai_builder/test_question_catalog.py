@@ -35,12 +35,14 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
+    Locale,
     QuestionOption,
     QuestionTemplate,
     RenderedOption,
     RenderedQuestion,
     legal_slot_values,
     render_question,
+    render_summary_label,
 )
 
 _SLOT_DERIVED_ISSUE_IDS = KNOWN_REQUIREMENT_SLOT_NAMES
@@ -509,6 +511,36 @@ class TestBilingualContract:
         for template in all_templates:
             assert template.help_sv.strip(), f"{template.id}: empty help_sv"
             assert template.help_en.strip(), f"{template.id}: empty help_en"
+
+    @pytest.mark.parametrize("locale", ("sv", "en"))
+    def test_every_slot_has_a_unique_summary_label(self, locale: Locale) -> None:
+        labels = [
+            render_summary_label(slot_name, locale) for slot_name in QUESTION_CATALOG
+        ]
+
+        assert all(label.strip() for label in labels)
+        assert len(labels) == len(set(labels))
+
+    @pytest.mark.parametrize(
+        ("slot_name", "label_sv", "label_en"),
+        (
+            ("comparison_scope", "Jämförelse", "Comparison"),
+            ("structured_io_contract", "JSON-bearbetning", "JSON processing"),
+            (
+                "mapped_file_limit",
+                "Filgräns för upprepade steg",
+                "File limit for repeated steps",
+            ),
+        ),
+    )
+    def test_summary_labels_use_product_language(
+        self,
+        slot_name: str,
+        label_sv: str,
+        label_en: str,
+    ) -> None:
+        assert render_summary_label(slot_name, "sv") == label_sv
+        assert render_summary_label(slot_name, "en") == label_en
 
     def test_every_template_has_worked_examples_in_both_languages(
         self, all_templates: list[QuestionTemplate]

@@ -35,14 +35,10 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_EN,
     DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_SV,
-    DEFAULT_PLAN_FOLLOWS_REQUIREMENTS_EN,
-    DEFAULT_PLAN_FOLLOWS_REQUIREMENTS_SV,
     DEFAULT_REQUIREMENTS_SUMMARY_EN,
     DEFAULT_REQUIREMENTS_SUMMARY_SV,
     DEFAULT_RUNTIME_INPUT_NEEDS_REVIEW_EN,
     DEFAULT_RUNTIME_INPUT_NEEDS_REVIEW_SV,
-    DEFAULT_USER_REVIEWS_PLAN_EN,
-    DEFAULT_USER_REVIEWS_PLAN_SV,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     DeclaredSchemaCandidate,
@@ -62,6 +58,7 @@ from eneo.flows.ai_builder.question_catalog import (
     Locale,
     legal_slot_values,
     render_question,
+    render_summary_label,
 )
 
 _MAX_CONFIRMATION_ATTACHMENT_DETAILS = 10
@@ -367,7 +364,7 @@ def _confirm_requirements_payload(
     resolved = session_state.resolved_slots
     key_decisions = [
         KeyDecisionPayload(
-            topic=_slot_label(slot_name, locale),
+            topic=render_summary_label(slot_name, locale),
             decision=_slot_value_for_slot(
                 slot_name,
                 resolved[slot_name].value,
@@ -410,7 +407,6 @@ def _confirm_requirements_payload(
             *discovery_assumptions,
             *_attachment_assumptions(session_state, locale),
             *_example_output_assumptions(session_state, locale),
-            *_assumptions(locale),
         ],
         manual_setup_notes=[],
     )
@@ -720,7 +716,7 @@ def _slot_assumption(
     locale: Locale,
 ) -> str:
     return (
-        f"{_slot_label(slot_name, locale)}: "
+        f"{render_summary_label(slot_name, locale)}: "
         f"{_slot_value_for_slot(slot_name, slot.value, locale)}"
     )
 
@@ -804,18 +800,6 @@ def _output_description(
     )
 
 
-def _assumptions(locale: Locale) -> list[str]:
-    if locale == "sv":
-        return [
-            DEFAULT_PLAN_FOLLOWS_REQUIREMENTS_SV,
-            DEFAULT_USER_REVIEWS_PLAN_SV,
-        ]
-    return [
-        DEFAULT_PLAN_FOLLOWS_REQUIREMENTS_EN,
-        DEFAULT_USER_REVIEWS_PLAN_EN,
-    ]
-
-
 def _architecture_decision(
     session_state: PlanningState,
     locale: Locale,
@@ -887,31 +871,6 @@ def _resolved_value(resolved: Mapping[str, object], slot_name: str) -> str:
     slot = resolved.get(slot_name)
     value = getattr(slot, "value", "")
     return value if isinstance(value, str) else ""
-
-
-def _slot_label(slot_name: str, locale: Locale) -> str:
-    labels_sv = {
-        "primary_runtime_input": "Indata vid körning",
-        "terminal_output": "Slutresultat",
-        "document_material_scope": "Dokumentunderlag",
-        "report_disposition": "Rapportupplägg",
-        "runtime_metadata_fields": "Metadata vid körning",
-        "docx_output_mode": "DOCX-resultat",
-        "pdf_generation_mode": "PDF-resultat",
-        "post_processing_goal": "Syfte med bearbetningen",
-    }
-    labels_en = {
-        "primary_runtime_input": "Runtime input",
-        "terminal_output": "Final output",
-        "document_material_scope": "Document source material",
-        "report_disposition": "Report structure",
-        "runtime_metadata_fields": "Runtime metadata",
-        "docx_output_mode": "DOCX output",
-        "pdf_generation_mode": "PDF output",
-        "post_processing_goal": "Processing purpose",
-    }
-    labels = labels_sv if locale == "sv" else labels_en
-    return labels.get(slot_name, slot_name.replace("_", " ").title())
 
 
 def _slot_value(value: str) -> str:

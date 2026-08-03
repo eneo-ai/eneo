@@ -872,10 +872,58 @@ def _build_catalog() -> Mapping[str, QuestionTemplate]:
 
 QUESTION_CATALOG: Mapping[str, QuestionTemplate] = _build_catalog()
 
+_SUMMARY_LABELS_BY_LOCALE: Mapping[Locale, Mapping[str, str]] = MappingProxyType(
+    {
+        "sv": MappingProxyType(
+            {
+                "primary_runtime_input": "Indata vid körning",
+                "mapped_file_limit": "Filgräns för upprepade steg",
+                "terminal_output": "Slutresultat",
+                "docx_output_mode": "DOCX-resultat",
+                "pdf_generation_mode": "PDF-resultat",
+                "document_material_scope": "Dokumentunderlag",
+                "comparison_scope": "Jämförelse",
+                "report_disposition": "Rapportupplägg",
+                "post_processing_goal": "Syfte med bearbetningen",
+                "structured_io_contract": "JSON-bearbetning",
+                "runtime_metadata_fields": "Metadata vid körning",
+            }
+        ),
+        "en": MappingProxyType(
+            {
+                "primary_runtime_input": "Runtime input",
+                "mapped_file_limit": "File limit for repeated steps",
+                "terminal_output": "Final output",
+                "docx_output_mode": "DOCX output",
+                "pdf_generation_mode": "PDF output",
+                "document_material_scope": "Document source material",
+                "comparison_scope": "Comparison",
+                "report_disposition": "Report structure",
+                "post_processing_goal": "Processing purpose",
+                "structured_io_contract": "JSON processing",
+                "runtime_metadata_fields": "Runtime metadata",
+            }
+        ),
+    }
+)
+
+for _locale, _summary_labels in _SUMMARY_LABELS_BY_LOCALE.items():
+    if _summary_labels.keys() != QUESTION_CATALOG.keys():
+        raise ValueError(
+            f"Summary labels for {_locale!r} must cover every question catalog slot."
+        )
+
 
 def legal_slot_values(slot_name: str) -> frozenset[str]:
     template = QUESTION_CATALOG[slot_name]
     return frozenset(option.value for option in template.options)
+
+
+def render_summary_label(slot_name: str, locale: Locale) -> str:
+    """Return the concise bilingual label used in requirements summaries."""
+    if locale not in ("sv", "en"):
+        raise ValueError(f"Unsupported locale: {locale!r}. Expected 'sv' or 'en'.")
+    return _SUMMARY_LABELS_BY_LOCALE[locale][slot_name]
 
 
 @dataclass(frozen=True, slots=True)
