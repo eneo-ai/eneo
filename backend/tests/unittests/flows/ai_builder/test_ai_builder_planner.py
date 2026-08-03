@@ -835,6 +835,7 @@ async def test_prepare_planner_request_asks_when_attachment_schema_direction_is_
             ),
         ],
         before_provider_call=provider_callback,
+        max_input_tokens=100_000,
     )
 
     assert isinstance(prepared, ServerOutputPrepared)
@@ -946,6 +947,7 @@ async def test_prepare_planner_request_reuses_checked_empty_attachment_context(
         attachment_files=[],
         prepared_attachment_context=None,
         prepared_schema_candidates=(),
+        max_input_tokens=100_000,
     )
 
     assert isinstance(prepared, ServerOutputPrepared)
@@ -1262,8 +1264,12 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
             name="terminal_output",
             value="structured_text",
             source="model",
-            evidence=["model:terminal_output:" + "a" * 64],
+            evidence=[
+                "model:terminal_output:" + "a" * 64,
+                "quote:user_message:test:structured_text",
+            ],
             confidence="medium",
+            evidence_level="inferred",
         ),
     }
     assert planning_state.resolved_slots["terminal_output"].source == "model"
@@ -1333,8 +1339,12 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
             name="terminal_output",
             value="structured_text",
             source="model",
-            evidence=["model:terminal_output:" + "a" * 64],
+            evidence=[
+                "model:terminal_output:" + "a" * 64,
+                "quote:user_message:test:structured_text",
+            ],
             confidence="medium",
+            evidence_level="inferred",
         ),
     }
     attachment_context = AIBuilderAttachmentContext(
@@ -1390,6 +1400,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
         build_discovery_runtime_result.call_args.kwargs["attachment_context"]
         is attachment_context
     )
+    assert build_discovery_runtime_result.call_args.kwargs["max_output_tokens"] == 1024
 
 
 @pytest.mark.asyncio

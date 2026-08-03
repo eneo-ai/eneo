@@ -9,11 +9,13 @@ layer, not two containers deep.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
 import pytest
 
+from eneo.flows.ai_builder import ai_builder_schema_evidence as schema_evidence_module
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
 )
@@ -27,6 +29,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     ResolvedRequirementPayload,
@@ -36,17 +42,21 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
+    canonical_schema_bytes,
     derive_freeform_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
+    ClassifiedOutputSchemaFields,
     ClassifiedSlot,
     SlotClassificationConfidence,
+    SlotClassificationEvidenceLevel,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
+    parse_slot_classification_response,
 )
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -307,8 +317,13 @@ def _slot(
         name=name,
         value=value,
         source=source,
-        evidence=[f"{source}:{name}"],
+        evidence=[
+            f"quote:user_message:test:{name}"
+            if source == "model"
+            else f"{source}:{name}"
+        ],
         confidence=resolved_confidence,
+        evidence_level="inferred" if source == "model" else None,
     )
 
 
@@ -318,6 +333,7 @@ def _classified(
     confidence: SlotClassificationConfidence,
     *,
     evidence: tuple[str, ...] | None = None,
+    evidence_level: SlotClassificationEvidenceLevel = "inferred",
 ) -> ClassifiedSlot:
     return ClassifiedSlot(
         slot_name=slot_name,
@@ -325,6 +341,7 @@ def _classified(
         confidence=confidence,
         reason=f"{slot_name} classified",
         evidence=_model_evidence(*(evidence or (f"{slot_name} evidence",))),
+        evidence_level=evidence_level,
     )
 
 
@@ -1859,8 +1876,18 @@ class TestSlotClassificationMetadataReplay:
                         "case type, and analysis request before receiving a report."
                     ),
                     metadata=_slot_classification_metadata(
-                        _classified("primary_runtime_input", "documents", "high"),
-                        _classified("terminal_output", "structured_text", "high"),
+                        _classified(
+                            "primary_runtime_input",
+                            "documents",
+                            "medium",
+                            evidence_level="explicit",
+                        ),
+                        _classified(
+                            "terminal_output",
+                            "structured_text",
+                            "medium",
+                            evidence_level="explicit",
+                        ),
                         _classified(
                             "runtime_metadata_fields",
                             "detailed_runtime_metadata",
@@ -1873,6 +1900,7 @@ class TestSlotClassificationMetadataReplay:
 
         assert state.resolved_slots["terminal_output"].value == "structured_text"
         assert state.resolved_slots["terminal_output"].source == "model"
+        assert state.resolved_slots["terminal_output"].evidence_level == "explicit"
         assert state.resolved_slots["runtime_metadata_fields"].value == (
             "detailed_runtime_metadata"
         )
@@ -2118,6 +2146,429 @@ class TestSlotClassificationMetadataReplay:
 
 
 class TestModelSlotMerge:
+    def test_mixed_attachment_evidence_cannot_enter_output_schema_provenance(
+        self,
+    ) -> None:
+        user_source = SlotClassificationSource(
+            source_id="user_message:user-1",
+            kind="user_message",
+            text="JSON output field: case_id.",
+            message_id="user-1",
+        )
+        attachment_source = SlotClassificationSource(
+            source_id="uploaded_file:00000000-0000-0000-0000-000000000001",
+            kind="uploaded_file",
+            text="The attachment also mentions case_id.",
+            file_id=UUID("00000000-0000-0000-0000-000000000001"),
+        )
+        parsed = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [],
+                    "file_roles": [],
+                    "form_intake": None,
+                    "output_schema_fields": {
+                        "operation": "update",
+                        "field_names": ["case_id"],
+                        "removed_field_names": [],
+                        "confidence": "high",
+                        "reason": "The user explicitly named the JSON field.",
+                        "evidence": [
+                            {
+                                "source_id": user_source.source_id,
+                                "quote": user_source.text,
+                            },
+                            {
+                                "source_id": attachment_source.source_id,
+                                "quote": attachment_source.text,
+                            },
+                        ],
+                    },
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=SlotClassificationInput(
+                sources=(user_source, attachment_source)
+            ),
+        )
+        assert parsed is not None
+        assert parsed.output_schema_fields is not None
+        assert parsed.output_schema_fields.evidence == (
+            ClassifiedEvidence(
+                source_id=user_source.source_id,
+                quote=user_source.text,
+            ),
+        )
+
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+        )
+        merge_llm_resolved_slots(
+            state,
+            parsed,
+            prompt_hash="a" * 64,
+            freeform_text=user_source.text,
+        )
+
+        evidence = state.output_schema_evidence
+        assert evidence is not None
+        assert evidence.evidence == [
+            "quote:user_message:user-1:JSON output field: case_id."
+        ]
+
+    def test_cited_output_field_names_become_terminal_schema_evidence(self) -> None:
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                output_schema_fields=ClassifiedOutputSchemaFields(
+                    operation="update",
+                    field_names=("case_id", "status"),
+                    confidence="high",
+                    reason="The user explicitly named the JSON result fields.",
+                    evidence=_model_evidence(
+                        "JSON-resultatet ska innehålla case_id och status."
+                    ),
+                )
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="JSON-resultatet ska innehålla case_id och status.",
+        )
+
+        evidence = state.output_schema_evidence
+        assert evidence is not None
+        assert evidence.source == "prose_field_names"
+        assert evidence.strength == "explicit"
+        assert evidence.json_schema == {
+            "type": "object",
+            "properties": {"case_id": {}, "status": {}},
+        }
+        assert evidence.evidence == [
+            "quote:user_message:test-source:JSON-resultatet ska innehålla "
+            "case_id och status."
+        ]
+
+    def test_accumulated_output_fields_report_typed_schema_limit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+        )
+        current_schema = {
+            "type": "object",
+            "properties": {"case_id": {}},
+        }
+        state.output_schema_evidence = build_schema_evidence(
+            json_schema=current_schema,
+            source="prose_field_names",
+            confidence="high",
+            evidence=("quote:user_message:user-1:case_id",),
+        )
+        current_size = len(canonical_schema_bytes(current_schema))
+        monkeypatch.setattr(
+            schema_evidence_module,
+            "SCHEMA_MAX_JSON_BYTES",
+            current_size,
+        )
+
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            merge_llm_resolved_slots(
+                state,
+                SlotClassificationResult(
+                    output_schema_fields=ClassifiedOutputSchemaFields(
+                        operation="update",
+                        field_names=("status",),
+                        confidence="high",
+                        reason="The user added a field.",
+                        evidence=_model_evidence("Add status."),
+                    )
+                ),
+                prompt_hash="a" * 64,
+                freeform_text="Add status.",
+            )
+
+        assert exc_info.value.code is AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
+        assert exc_info.value.context == {
+            "reason": "canonical_bytes",
+            "max_value": current_size,
+            "actual_value": exc_info.value.context["actual_value"],
+        }
+        assert exc_info.value.context["actual_value"] > current_size
+
+    def test_cited_output_field_names_do_not_replace_declared_schema(self) -> None:
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+        )
+        declared = build_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"official_id": {"type": "string"}},
+            },
+            source="declared_schema",
+            confidence="high",
+            evidence=("message:user-1",),
+        )
+        state.replace_schema_resolution(
+            input_evidence=None,
+            output_evidence=declared,
+            example_inference=None,
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                output_schema_fields=ClassifiedOutputSchemaFields(
+                    operation="update",
+                    field_names=("case_id", "status"),
+                    confidence="high",
+                    reason="The user also mentioned field names in prose.",
+                    evidence=_model_evidence("case_id och status"),
+                )
+            ),
+            prompt_hash="b" * 64,
+            freeform_text="case_id och status",
+        )
+
+        assert state.output_schema_evidence == declared
+
+    def test_explicit_clear_removes_only_prose_field_schema(self) -> None:
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+        )
+        state.output_schema_evidence = build_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"case_id": {}, "status": {}},
+            },
+            source="prose_field_names",
+            confidence="high",
+            evidence=("quote:user_message:user-1:case_id and status",),
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                output_schema_fields=ClassifiedOutputSchemaFields(
+                    operation="clear",
+                    field_names=(),
+                    confidence="high",
+                    reason="The user removed all named field constraints.",
+                    evidence=_model_evidence(
+                        "Ta bort alla särskilt namngivna JSON-fält."
+                    ),
+                )
+            ),
+            prompt_hash="c" * 64,
+            freeform_text="Ta bort alla särskilt namngivna JSON-fält.",
+        )
+
+        assert state.output_schema_evidence is None
+
+    def test_terminal_transition_clears_prose_schema_without_resurrection(self) -> None:
+        state = _state()
+        state.resolved_slots["terminal_output"] = _slot(
+            name="terminal_output",
+            value="structured_json",
+            source="model",
+        )
+        state.output_schema_evidence = build_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"case_id": {}, "status": {}},
+            },
+            source="prose_field_names",
+            confidence="high",
+            evidence=("quote:user_message:user-1:case_id and status",),
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(_classified("terminal_output", "pdf_document", "high"),)
+            ),
+            prompt_hash="d" * 64,
+            freeform_text="",
+        )
+
+        assert state.resolved_slots["terminal_output"].value == "pdf_document"
+        assert state.output_schema_evidence is None
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(_classified("terminal_output", "structured_json", "high"),)
+            ),
+            prompt_hash="e" * 64,
+            freeform_text="",
+        )
+
+        assert state.resolved_slots["terminal_output"].value == "structured_json"
+        assert state.output_schema_evidence is None
+
+    def test_explicit_medium_core_slots_are_admitted_without_redundant_questions(
+        self,
+    ) -> None:
+        state = _state()
+        source_text = "Användaren skriver text och vill få ett läsbart textresultat."
+        classification_input = SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:user-1",
+                    kind="user_message",
+                    text=source_text,
+                    message_id="user-1",
+                ),
+            )
+        )
+        classification_result = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [
+                        {
+                            "slot_name": "primary_runtime_input",
+                            "value": "text",
+                            "confidence": "medium",
+                            "reason": "The user explicitly supplies text.",
+                            "evidence": [
+                                {
+                                    "source_id": "user_message:user-1",
+                                    "quote": "skriver text",
+                                }
+                            ],
+                            "evidence_level": "explicit",
+                        },
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "structured_text",
+                            "confidence": "medium",
+                            "reason": "The user explicitly requests readable text.",
+                            "evidence": [
+                                {
+                                    "source_id": "user_message:user-1",
+                                    "quote": "läsbart textresultat",
+                                }
+                            ],
+                            "evidence_level": "explicit",
+                        },
+                    ],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            ),
+            allowed_slot_values=llm_resolvable_slot_values_for_state(state),
+            classification_input=classification_input,
+        )
+        assert classification_result is not None
+
+        merge_llm_resolved_slots(
+            state,
+            classification_result,
+            prompt_hash="a" * 64,
+            freeform_text="",
+        )
+
+        assert {
+            name: slot.evidence_level for name, slot in state.resolved_slots.items()
+        } == {
+            "primary_runtime_input": "explicit",
+            "terminal_output": "explicit",
+        }
+        policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=(),
+        )
+        assert policy.allowed_action_kinds == ("commit_architecture",)
+        assert policy.allowed_ask_question_targets == ()
+
+    def test_mismatched_structured_answer_cannot_confirm_a_different_slot(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        )
+        classification_result = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "structured_text",
+                            "confidence": "medium",
+                            "reason": "The answer says text.",
+                            "evidence": [
+                                {
+                                    "source_id": "structured_answer:input",
+                                    "quote": "text",
+                                }
+                            ],
+                            "evidence_level": "explicit",
+                        }
+                    ],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            ),
+            allowed_slot_values=llm_resolvable_slot_values_for_state(state),
+            classification_input=SlotClassificationInput(
+                sources=(
+                    SlotClassificationSource(
+                        source_id="structured_answer:input",
+                        kind="structured_answer",
+                        text="text",
+                        message_id="user-1",
+                        question_id="primary_runtime_input",
+                        selected_value="text",
+                    ),
+                )
+            ),
+        )
+        assert classification_result is not None
+
+        merge_llm_resolved_slots(
+            state,
+            classification_result,
+            prompt_hash="b" * 64,
+            freeform_text="",
+        )
+
+        terminal_slot = state.resolved_slots["terminal_output"]
+        assert terminal_slot.evidence_level == "inferred"
+        assert terminal_slot.is_commit_grade is False
+        policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=(),
+        )
+        assert policy.allowed_action_kinds == ("ask_question",)
+        assert policy.allowed_ask_question_targets == ("terminal_output",)
+
     def test_comparison_scope_is_classified_only_until_input_is_known_non_document(
         self,
     ) -> None:

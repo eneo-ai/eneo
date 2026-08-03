@@ -266,7 +266,6 @@ async def test_classifier_outage_reopens_heuristic_architecture_slots(
     assert policy.allowed_ask_question_targets == (
         "primary_runtime_input",
         "terminal_output",
-        "document_material_scope",
     )
 
 

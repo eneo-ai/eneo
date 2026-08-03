@@ -311,6 +311,55 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
     assert "additionalProperties" not in prompt
 
 
+def test_plan_proposal_prompt_preserves_named_fields_without_inventing_types() -> None:
+    state = _state_with_slot("terminal_output", "structured_json")
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"case_id": {}, "status": {}},
+        },
+        source="prose_field_names",
+        confidence="high",
+        evidence=["quote:user_message:user-1:case_id and status"],
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(summary="Return case_id and status."),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "explicitly named top-level fields: case_id, status" in prompt
+    assert "types, nesting, requiredness" in prompt
+
+
+def test_plan_proposal_prompt_labels_lossy_named_field_projection_as_preview() -> None:
+    exact_name = "municipal_case_" + "x" * 100
+    state = _state_with_slot("terminal_output", "structured_json")
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema={"type": "object", "properties": {exact_name: {}}},
+        source="prose_field_names",
+        confidence="high",
+        evidence=[f"quote:user_message:user-1:{exact_name}"],
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(summary="Return named JSON fields."),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "explicitly named top-level field preview" in prompt
+    assert "canonical schema retains the exact user-named fields" in prompt
+    assert exact_name not in prompt
+
+
 def test_plan_proposal_prompt_describes_input_schema_without_directing_docx_output() -> (
     None
 ):

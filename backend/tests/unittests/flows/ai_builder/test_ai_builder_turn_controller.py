@@ -62,6 +62,7 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
     SchemaResolution,
     SlotConfidence,
+    SlotEvidenceLevel,
     SlotSource,
     StepTriple,
 )
@@ -73,13 +74,23 @@ def _slot(
     *,
     source: SlotSource = "structured_answer",
     confidence: SlotConfidence = "high",
+    evidence_level: SlotEvidenceLevel | None = None,
 ) -> ResolvedSlot:
     return ResolvedSlot(
         name=name,
         value=value,
         source=source,
-        evidence=[f"{source}:{name}"],
+        evidence=[
+            f"quote:user_message:test:{name}"
+            if source == "model"
+            else f"{source}:{name}"
+        ],
         confidence=confidence,
+        evidence_level=(
+            evidence_level
+            if evidence_level is not None or source != "model"
+            else "inferred"
+        ),
     )
 
 
@@ -343,6 +354,14 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         "Metadata vid körning: Inga extra fält",
         "Syfte med bearbetningen: Strukturera materialet",
     } <= set(payload.assumptions)
+    assert (
+        "Planen ska följa kraven och underlaget i konversationen."
+        not in payload.assumptions
+    )
+    assert (
+        "Användaren ska kunna granska och ändra planen innan den tillämpas."
+        not in payload.assumptions
+    )
     assert "Docx Output Mode" not in {
         decision.topic for decision in payload.key_decisions
     }
@@ -410,6 +429,64 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_swedis
         "Mallen innehåller 12 unika platshållare; 8 visas i planeringsunderlaget."
         in decision.payload.summary
     )
+
+
+@pytest.mark.parametrize(
+    ("ui_language", "expected"),
+    [
+        ("sv", "Fälttyper och struktur är inte fastställda."),
+        ("en", "Field types and structure are not yet fixed."),
+    ],
+)
+def test_server_confirmation_distinguishes_named_json_fields_from_full_schema(
+    ui_language: str,
+    expected: str,
+) -> None:
+    state = _state(primary_runtime_input="text", terminal_output="structured_json")
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"case_id": {}, "status": {}},
+        },
+        source="prose_field_names",
+        confidence="high",
+        evidence=("quote:user_message:user-1:case_id and status",),
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language=ui_language)
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert expected in decision.payload.summary
+
+
+@pytest.mark.parametrize(
+    ("ui_language", "expected"),
+    [
+        ("sv", "Förhandsvisning av namngivna JSON-fält (visar 8 av 9)"),
+        ("en", "Named JSON field preview (showing 8 of 9)"),
+    ],
+)
+def test_server_confirmation_discloses_bounded_named_field_preview(
+    ui_language: str,
+    expected: str,
+) -> None:
+    state = _state(primary_runtime_input="text", terminal_output="structured_json")
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {f"field_{index}": {} for index in range(9)},
+        },
+        source="prose_field_names",
+        confidence="high",
+        evidence=("quote:user_message:user-1:named JSON fields",),
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language=ui_language)
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert expected in decision.payload.summary
 
 
 def test_server_confirmation_discloses_truncated_template_placeholders_in_english() -> (
@@ -948,7 +1025,7 @@ def test_server_keeps_pinned_commit_when_only_weak_output_slot_conflicts() -> No
     assert isinstance(decision, GenerateProposal)
 
 
-def test_server_confirmation_separates_decisions_from_assumptions() -> None:
+def test_server_confirmation_uses_model_evidence_level_for_summary_bucket() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {
         "primary_runtime_input": _slot("primary_runtime_input", "audio"),
@@ -957,6 +1034,7 @@ def test_server_confirmation_separates_decisions_from_assumptions() -> None:
             "structured_text",
             source="model",
             confidence="high",
+            evidence_level="explicit",
         ),
         "runtime_metadata_fields": _slot(
             "runtime_metadata_fields",
@@ -968,6 +1046,7 @@ def test_server_confirmation_separates_decisions_from_assumptions() -> None:
             "summarize_or_overview",
             source="model",
             confidence="high",
+            evidence_level="inferred",
         ),
     }
     state.resolved_slots["terminal_output"].evidence = [
@@ -987,9 +1066,11 @@ def test_server_confirmation_separates_decisions_from_assumptions() -> None:
     assert "Indata vid körning" in decisions
     assert "Metadata vid körning" in decisions
     assert "Planerad bearbetning" in decisions
-    assert "Slutresultat" not in decisions
+    assert "Slutresultat" in decisions
     assert "Syfte med bearbetningen" not in decisions
-    assert "Slutresultat: Strukturerat textresultat" in decision.payload.assumptions
+    assert "Slutresultat: Strukturerat textresultat" not in (
+        decision.payload.assumptions
+    )
     assert "Syfte med bearbetningen: Sammanfatta eller ge överblick" in (
         decision.payload.assumptions
     )
@@ -1055,3 +1136,13 @@ def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:
         "heuristic": "assumption",
         "model": "assumption",
     }
+    assert _slot_is_key_decision(
+        ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="model",
+            confidence="high",
+            evidence=["quote:user_message:test:structured_text"],
+            evidence_level="explicit",
+        )
+    )

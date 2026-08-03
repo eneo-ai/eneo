@@ -272,13 +272,14 @@ def _schema_at_projection_path(
                 f"source_ref field_path '{'.'.join(field_path)}' for "
                 f"'{source_step_ref}' crosses a non-object schema."
             )
-        properties = current.get("properties")
-        if not isinstance(properties, Mapping):
+        raw_properties = current.get("properties")
+        if not isinstance(raw_properties, Mapping):
             raise InputBindingContractError(
                 f"source_ref field_path '{'.'.join(field_path)}' for "
                 f"'{source_step_ref}' crosses an object without properties."
             )
-        next_schema = properties.get(segment)
+        properties = cast(Mapping[str, object], raw_properties)
+        next_schema: object | None = properties.get(segment)
         if not isinstance(next_schema, Mapping):
             raise InputBindingContractError(
                 f"source_ref field_path '{'.'.join(field_path)}' is absent from "
@@ -300,16 +301,17 @@ def _insert_projected_schema(
     traversed: tuple[str, ...] = ()
     for segment in field_path[:-1]:
         traversed = (*traversed, segment)
-        properties = cast(dict[str, Any], current["properties"])
-        existing = properties.get(segment)
+        properties = cast(dict[str, object], current["properties"])
+        existing: object | None = properties.get(segment)
         if existing is None:
-            existing = {
+            new_container: dict[str, object] = {
                 "type": "object",
-                "properties": {},
-                "required": [],
+                "properties": dict[str, object](),
+                "required": list[str](),
                 "additionalProperties": False,
             }
-            properties[segment] = existing
+            properties[segment] = new_container
+            existing = new_container
             projection_containers.add(traversed)
         elif traversed not in projection_containers:
             raise InputBindingContractError(

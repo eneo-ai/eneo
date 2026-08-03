@@ -41,17 +41,20 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
 )
+from eneo.flows.ai_builder.ai_builder_schema_evidence import canonical_schema_bytes
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     CLASSIFICATION_NOTE_MAX_LENGTH,
     CLASSIFICATION_NOTES_MAX_ITEMS,
     CLASSIFICATION_REASON_MAX_LENGTH,
+    OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
+    ClassifiedOutputSchemaFields,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
     SlotClassificationConfidence,
@@ -107,6 +110,7 @@ ClassifierRetentionClass: TypeAlias = Literal[
     "slot",
     "file_role",
     "form_intake",
+    "output_schema_fields",
     "example_output_constraint",
     "secondary_obligation",
     "schema_direction",
@@ -117,6 +121,7 @@ CLASSIFIER_RETENTION_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
         "slot",
         "file_role",
         "form_intake",
+        "output_schema_fields",
         "example_output_constraint",
         "secondary_obligation",
         "schema_direction",
@@ -275,6 +280,52 @@ class SlotClassificationFormIntakeMetadata(BaseModel):
         )
 
 
+class SlotClassificationOutputSchemaFieldsMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["replace", "clear"]
+    field_names: list[str]
+    confidence: SlotClassificationConfidence
+    reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
+    evidence: list[SlotClassificationEvidence] = Field(
+        min_length=1,
+        max_length=OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS,
+    )
+
+    @field_validator("field_names")
+    @classmethod
+    def require_unique_nonempty_names(cls, field_names: list[str]) -> list[str]:
+        if any(not name.strip() or name != name.strip() for name in field_names):
+            raise ValueError("output schema field names must be non-empty and stripped")
+        if len(field_names) != len(set(field_names)):
+            raise ValueError("output schema field names must be unique")
+        return field_names
+
+    @model_validator(mode="after")
+    def require_operation_shape(self) -> "SlotClassificationOutputSchemaFieldsMetadata":
+        if self.operation == "replace" and not self.field_names:
+            raise ValueError("replace output schema fields requires field names")
+        if self.operation == "clear" and self.field_names:
+            raise ValueError("clear output schema fields must not contain field names")
+        if self.operation == "replace":
+            canonical_schema_bytes(
+                {
+                    "type": "object",
+                    "properties": {name: {} for name in self.field_names},
+                }
+            )
+        return self
+
+    def to_classified_output_schema_fields(self) -> ClassifiedOutputSchemaFields:
+        return ClassifiedOutputSchemaFields(
+            operation=self.operation,
+            field_names=tuple(self.field_names),
+            confidence=self.confidence,
+            reason=self.reason,
+            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
+        )
+
+
 SchemaFingerprint: TypeAlias = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
@@ -382,6 +433,7 @@ class SlotClassificationMetadata(BaseModel):
         max_length=_MAX_RESULT_OBLIGATIONS,
     )
     form_intake: SlotClassificationFormIntakeMetadata | None = None
+    output_schema_fields: SlotClassificationOutputSchemaFieldsMetadata | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     schema_direction: SlotClassificationSchemaDirectionMetadata | None = None
     assumptions: list[SlotClassificationNote] = Field(
@@ -445,6 +497,8 @@ class SlotClassificationMetadata(BaseModel):
         )
         if self.form_intake is not None:
             evidence_items.extend(self.form_intake.evidence)
+        if self.output_schema_fields is not None:
+            evidence_items.extend(self.output_schema_fields.evidence)
         if self.schema_direction is not None:
             evidence_items.extend(self.schema_direction.evidence)
         if any(evidence.source_id not in source_ids for evidence in evidence_items):
@@ -472,6 +526,14 @@ class SlotClassificationMetadata(BaseModel):
             )
         ):
             raise ValueError("schema direction requires user-owned evidence")
+        if (
+            self.output_schema_fields is not None
+            and not classification_evidence_has_user_owned_source(
+                (evidence.source_id for evidence in self.output_schema_fields.evidence),
+                source_kinds_by_id=source_kinds_by_id,
+            )
+        ):
+            raise ValueError("output schema fields require user-owned evidence")
         file_ids = {
             source.file_id
             for source in self.source_inventory
@@ -532,6 +594,11 @@ class SlotClassificationMetadata(BaseModel):
             form_intake=self.form_intake.to_classified_form_intake()
             if self.form_intake is not None
             else None,
+            output_schema_fields=(
+                self.output_schema_fields.to_classified_output_schema_fields()
+                if self.output_schema_fields is not None
+                else None
+            ),
             example_output_constraints=self.example_output_constraints,
             schema_direction=(
                 self.schema_direction.to_classified_schema_direction()
@@ -568,6 +635,12 @@ class SlotClassificationMetadata(BaseModel):
             and self.example_output_constraints.citations
         ):
             identities.add(("example_output_constraint", "current"))
+        if (
+            self.output_schema_fields is not None
+            and self.output_schema_fields.confidence != "low"
+            and self.output_schema_fields.evidence
+        ):
+            identities.add(("output_schema_fields", "current"))
         identities.update(
             ("secondary_obligation", obligation)
             for obligation in self.secondary_obligations
@@ -591,6 +664,11 @@ class SlotClassificationMetadata(BaseModel):
         ]
         form_intake = (
             self.form_intake if ("form_intake", "form_intake") in identities else None
+        )
+        output_schema_fields = (
+            self.output_schema_fields
+            if ("output_schema_fields", "current") in identities
+            else None
         )
         example_output_constraints = (
             self.example_output_constraints
@@ -617,6 +695,11 @@ class SlotClassificationMetadata(BaseModel):
                     for evidence in file_role.evidence
                 ],
                 *([] if form_intake is None else form_intake.evidence),
+                *(
+                    []
+                    if output_schema_fields is None
+                    else output_schema_fields.evidence
+                ),
                 *(
                     []
                     if example_output_constraints is None
@@ -656,6 +739,7 @@ class SlotClassificationMetadata(BaseModel):
                 "file_roles": file_roles,
                 "secondary_obligations": secondary_obligations,
                 "form_intake": form_intake,
+                "output_schema_fields": output_schema_fields,
                 "example_output_constraints": example_output_constraints,
                 "schema_direction": schema_direction,
                 # Free-form model notes are diagnostics, not rebuild facts. Compaction
@@ -1046,6 +1130,7 @@ def slot_classification_metadata_from_result(
     classification_input: SlotClassificationInput,
     model: str,
     provider: str,
+    retained_source_inventory: Sequence[SlotClassificationSourceMetadata] = (),
 ) -> SlotClassificationMetadata | None:
     slot_payloads: list[dict[str, object]] = []
     seen_slot_names: set[str] = set()
@@ -1059,6 +1144,9 @@ def slot_classification_metadata_from_result(
         slot_payloads.append(payload)
         seen_slot_names.add(slot_name)
     form_intake_payload = _slot_classification_form_intake_payload(result.form_intake)
+    output_schema_fields_payload = _slot_classification_output_schema_fields_payload(
+        result.output_schema_fields
+    )
     file_role_payloads = [
         _slot_classification_file_role_payload(file_role)
         for file_role in result.file_roles
@@ -1068,6 +1156,25 @@ def slot_classification_metadata_from_result(
         for obligation in result.secondary_obligations
         if obligation in RESULT_OBLIGATION_VALUES
     ][:_MAX_RESULT_OBLIGATIONS]
+    retained_source_ids = {
+        item.source_id
+        for item in (
+            result.output_schema_fields.evidence
+            if result.output_schema_fields is not None
+            else ()
+        )
+    }
+    source_inventory_by_id: dict[str, dict[str, object]] = {
+        source.source_id: source.model_dump(mode="python", exclude_none=True)
+        for source in retained_source_inventory
+        if source.source_id in retained_source_ids
+    }
+    source_inventory_by_id.update(
+        {
+            source.source_id: _slot_classification_source_payload(source)
+            for source in classification_input.sources
+        }
+    )
     try:
         return SlotClassificationMetadata.model_validate(
             {
@@ -1075,14 +1182,12 @@ def slot_classification_metadata_from_result(
                 "prompt_hash": prompt_hash,
                 "model": model,
                 "provider": provider,
-                "source_inventory": [
-                    _slot_classification_source_payload(source)
-                    for source in classification_input.sources
-                ],
+                "source_inventory": list(source_inventory_by_id.values()),
                 "slots": slot_payloads,
                 "file_roles": file_role_payloads,
                 "secondary_obligations": secondary_obligations,
                 "form_intake": form_intake_payload,
+                "output_schema_fields": output_schema_fields_payload,
                 "example_output_constraints": (
                     result.example_output_constraints.model_dump(mode="python")
                     if result.example_output_constraints is not None
@@ -1145,6 +1250,25 @@ def _slot_classification_form_intake_payload(
         ),
         "evidence": _slot_classification_evidence_payloads(form_intake.evidence),
         "evidence_level": form_intake.evidence_level,
+    }
+
+
+def _slot_classification_output_schema_fields_payload(
+    output_schema_fields: ClassifiedOutputSchemaFields | None,
+) -> dict[str, object] | None:
+    if output_schema_fields is None or output_schema_fields.operation == "update":
+        return None
+    return {
+        "operation": output_schema_fields.operation,
+        "field_names": list(output_schema_fields.field_names),
+        "confidence": output_schema_fields.confidence,
+        "reason": _bounded_metadata_text(
+            output_schema_fields.reason,
+            fallback="output schema field classification",
+        ),
+        "evidence": _slot_classification_evidence_payloads(
+            output_schema_fields.evidence
+        ),
     }
 
 

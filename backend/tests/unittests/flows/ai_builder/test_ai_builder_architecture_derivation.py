@@ -34,6 +34,7 @@ def _slot(
         source=source,
         evidence=([f"quote:user_message:test:{name}"] if source == "model" else []),
         confidence=confidence,
+        evidence_level="inferred" if source == "model" else None,
     )
 
 

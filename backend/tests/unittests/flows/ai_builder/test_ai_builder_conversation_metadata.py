@@ -39,6 +39,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
+    ClassifiedOutputSchemaFields,
     ClassifiedSlot,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -424,6 +425,13 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
             evidence=(_classified_evidence("fritext under varje rubrik"),),
             evidence_level="explicit",
         ),
+        output_schema_fields=ClassifiedOutputSchemaFields(
+            operation="replace",
+            field_names=("case_id", "status"),
+            confidence="high",
+            reason="explicit JSON field names",
+            evidence=(_classified_evidence("JSON fields: case_id and status"),),
+        ),
         file_roles=(
             ClassifiedFileRole(
                 file_id=file_id,
@@ -451,6 +459,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
                         [
                             *(f"{slot_name} quote" for slot_name in values_by_slot),
                             "fritext under varje rubrik",
+                            "JSON fields: case_id and status",
                             "use the attached template",
                         ]
                     ),
@@ -477,6 +486,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert set(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
     assert parsed.to_result().slots == result.slots
     assert parsed.to_result().form_intake == result.form_intake
+    assert parsed.to_result().output_schema_fields == result.output_schema_fields
     assert parsed.to_result().file_roles == result.file_roles
     assert parsed.to_result().secondary_obligations == ("risks", "actions")
     assert parsed.model == "openai/gpt-test"

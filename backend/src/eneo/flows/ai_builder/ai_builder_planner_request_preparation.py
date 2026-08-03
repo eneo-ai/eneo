@@ -225,6 +225,9 @@ async def prepare_planner_request(
         prepared_schema_candidates=schema_candidates,
         persisted_planning_state=request.persisted_planning_state,
         attached_file_ids={file.id for file in request.attachment_files},
+        max_input_tokens=request.max_input_tokens,
+        max_output_tokens=request.max_output_tokens,
+        safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
     )
     discovery_analysis = discovery_runtime.discovery_analysis
     rebuilt_planning_state = discovery_runtime.planning_state

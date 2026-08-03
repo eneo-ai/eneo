@@ -199,6 +199,7 @@ def _resolved_slot(
         source=source,
         confidence=confidence,
         evidence=["quote:test"],
+        evidence_level="inferred" if source == "model" else None,
     )
 
 

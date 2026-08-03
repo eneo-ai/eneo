@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
@@ -16,6 +17,8 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 )
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
@@ -23,7 +26,10 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultObligation,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    SCHEMA_PROVENANCE_MAX_ITEMS,
     DeclaredSchemaCandidate,
+    SchemaLimitExceeded,
+    canonical_schema_bytes,
     project_schema_fields,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
@@ -34,8 +40,10 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputConstraintEvidence,
     ExampleOutputStyleCategory,
     FileRole,
+    SlotEvidenceLevel,
 )
 from eneo.main.logging import get_logger
+from eneo.tokens.token_utils import count_message_tokens, count_tokens
 
 logger = get_logger(__name__)
 
@@ -48,7 +56,7 @@ if TYPE_CHECKING:
     )
 
 SlotClassificationConfidence = Literal["high", "medium", "low"]
-SlotClassificationEvidenceLevel = Literal["explicit", "inferred"]
+SlotClassificationEvidenceLevel = SlotEvidenceLevel
 SlotClassificationSourceKind = Literal[
     "user_message",
     "structured_answer",
@@ -57,15 +65,19 @@ SlotClassificationSourceKind = Literal[
 _USER_OWNED_CLASSIFICATION_SOURCE_KINDS: frozenset[SlotClassificationSourceKind] = (
     frozenset({"user_message", "structured_answer"})
 )
+_FIELD_STRUCTURAL_BOUNDARIES = frozenset(
+    {"$", "@", "#", "/", "\\", ":", "[", "]", "{", "}", "."}
+)
 
 # Tenant id is intentionally log-only; classification depends on typed sources and slots.
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 15
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 17
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
+OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS = SCHEMA_PROVENANCE_MAX_ITEMS
 CLASSIFICATION_NOTE_MAX_LENGTH = 500
 CLASSIFICATION_NOTES_MAX_ITEMS = 10
 _PROVIDER_EXECUTION_IDENTITY_FIELDS = (
@@ -151,10 +163,21 @@ class ClassifiedFormIntake:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassifiedOutputSchemaFields:
+    operation: Literal["update", "replace", "clear"]
+    field_names: tuple[str, ...]
+    confidence: SlotClassificationConfidence
+    reason: str
+    removed_field_names: tuple[str, ...] = ()
+    evidence: tuple[ClassifiedEvidence, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SlotClassificationResult:
     slots: tuple[ClassifiedSlot, ...] = ()
     file_roles: tuple[ClassifiedFileRole, ...] = ()
     form_intake: ClassifiedFormIntake | None = None
+    output_schema_fields: ClassifiedOutputSchemaFields | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     schema_direction: ClassifiedSchemaDirection | None = None
     secondary_obligations: tuple[ResultObligation, ...] = ()
@@ -200,16 +223,22 @@ async def classify_slots(
     bias: SlotClassificationBias | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    safety_buffer_tokens: int = 0,
 ) -> SlotClassificationResult | None:
+    if max_input_tokens is not None and max_input_tokens < 1:
+        raise ValueError("Slot classification max input tokens must be positive")
+    if max_output_tokens is not None and max_output_tokens < 1:
+        raise ValueError("Slot classification max output tokens must be positive")
+    if safety_buffer_tokens < 0:
+        raise ValueError("Slot classification safety buffer cannot be negative")
     slot_values = _normalize_allowed_slot_values(allowed_slot_values)
     if not _classification_input_is_valid(classification_input):
         return None
     schema_candidate_fingerprints = tuple(
         sorted(candidate.fingerprint for candidate in schema_candidates)
     )
-    if not slot_values and not schema_candidate_fingerprints:
-        return None
-
     slot_names = tuple(slot_values.keys())
     litellm_model = completion_model_route.litellm_model
     provider = slot_classification_provider_identity(
@@ -236,6 +265,9 @@ async def classify_slots(
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
         bias=bias,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
     )
     cached = _SLOT_CLASSIFICATION_CACHE.get(cache_key)
     if cached is not None:
@@ -255,6 +287,16 @@ async def classify_slots(
         ModelKwargs(temperature=0.0)
     )
     completion_kwargs["response_format"] = response_format
+    _ensure_slot_classification_request_fits_model(
+        messages=messages,
+        response_format=response_format,
+        litellm_model=litellm_model,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
+    )
+    if max_output_tokens is not None:
+        completion_kwargs["max_tokens"] = max_output_tokens
     if before_provider_call is not None:
         await before_provider_call()
     call = (
@@ -268,7 +310,6 @@ async def classify_slots(
             messages=messages,
             stream=False,
             drop_params=True,
-            max_tokens=900,
             **completion_kwargs,
         )
     except Exception as error:
@@ -336,6 +377,43 @@ def _classification_input_is_valid(
     return all(
         _classification_source_is_valid(source)
         for source in classification_input.sources
+    )
+
+
+def _ensure_slot_classification_request_fits_model(
+    *,
+    messages: list[dict[str, Any]],
+    response_format: dict[str, object],
+    litellm_model: str,
+    max_input_tokens: int | None,
+    max_output_tokens: int | None,
+    safety_buffer_tokens: int,
+) -> None:
+    if max_input_tokens is None:
+        return
+    request_tokens = count_message_tokens(messages, litellm_model) + count_tokens(
+        json.dumps(response_format, ensure_ascii=False, separators=(",", ":")),
+        litellm_model,
+    )
+    output_reserve_tokens = max_output_tokens or 0
+    required_context_tokens = (
+        request_tokens + output_reserve_tokens + safety_buffer_tokens
+    )
+    if required_context_tokens <= max_input_tokens:
+        return
+    raise AIBuilderBadRequestException(
+        "The selected Builder model cannot fit the requirement-classification "
+        "request. Choose a model with a larger context window or shorten the "
+        "conversation.",
+        code=AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED,
+        context={
+            "phase": "slot_classification",
+            "request_tokens": request_tokens,
+            "output_reserve_tokens": output_reserve_tokens,
+            "safety_buffer_tokens": safety_buffer_tokens,
+            "required_context_tokens": required_context_tokens,
+            "max_input_tokens": max_input_tokens,
+        },
     )
 
 
@@ -456,6 +534,10 @@ def parse_slot_classification_response(
         raw_dict.get("form_intake"),
         classification_input=classification_input,
     )
+    output_schema_fields = _parse_output_schema_fields(
+        raw_dict.get("output_schema_fields"),
+        classification_input=classification_input,
+    )
     example_output_constraints = _parse_example_output_constraints(
         raw_dict.get("example_output_constraints"),
         classification_input=classification_input,
@@ -473,12 +555,343 @@ def parse_slot_classification_response(
         slots=tuple(slots),
         file_roles=file_roles,
         form_intake=form_intake,
+        output_schema_fields=output_schema_fields,
         example_output_constraints=example_output_constraints,
         schema_direction=schema_direction,
         secondary_obligations=secondary_obligations,
         assumptions=assumptions,
         contradictions=contradictions,
     )
+
+
+def _parse_output_schema_fields(
+    raw_value: object,
+    *,
+    classification_input: SlotClassificationInput,
+) -> ClassifiedOutputSchemaFields | None:
+    if not isinstance(raw_value, dict):
+        return None
+    item = cast(dict[str, Any], raw_value)
+    operation = item.get("operation")
+    if operation not in {"update", "clear"}:
+        return None
+    raw_field_names = item.get("field_names")
+    raw_removed_field_names = item.get("removed_field_names")
+    if not isinstance(raw_field_names, list) or not isinstance(
+        raw_removed_field_names, list
+    ):
+        return None
+    raw_field_name_items = cast(list[object], raw_field_names)
+    raw_removed_field_name_items = cast(list[object], raw_removed_field_names)
+    if operation == "update" and not (
+        raw_field_name_items or raw_removed_field_name_items
+    ):
+        return None
+    if operation == "clear" and (raw_field_name_items or raw_removed_field_name_items):
+        return None
+    confidence = item.get("confidence")
+    if confidence not in {"high", "medium", "low"}:
+        return None
+    evidence = _parse_classification_evidence(
+        item.get("evidence", []),
+        classification_input=classification_input,
+        max_items=OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS,
+    )
+    source_kinds = {
+        source.source_id: source.kind for source in classification_input.sources
+    }
+    source_texts = {
+        source.source_id: source.text for source in classification_input.sources
+    }
+    user_owned_evidence = tuple(
+        cited
+        for cited in evidence
+        if source_kinds[cited.source_id] in _USER_OWNED_CLASSIFICATION_SOURCE_KINDS
+    )
+    if not user_owned_evidence:
+        return None
+    field_names = _parse_cited_output_schema_field_names(
+        raw_field_name_items,
+        evidence=user_owned_evidence,
+        source_texts=source_texts,
+    )
+    removed_field_names = _parse_cited_output_schema_field_names(
+        raw_removed_field_name_items,
+        evidence=user_owned_evidence,
+        source_texts=source_texts,
+    )
+    if field_names is None or removed_field_names is None:
+        return None
+    if set(field_names).intersection(removed_field_names):
+        return None
+    if operation == "update":
+        try:
+            canonical_schema_bytes(
+                {
+                    "type": "object",
+                    "properties": {
+                        name: {} for name in (*field_names, *removed_field_names)
+                    },
+                }
+            )
+        except (SchemaLimitExceeded, ValueError):
+            return None
+    reason = item.get("reason")
+    return ClassifiedOutputSchemaFields(
+        operation=cast(Literal["update", "clear"], operation),
+        field_names=field_names,
+        confidence=cast(SlotClassificationConfidence, confidence),
+        reason=(
+            reason.strip()
+            if isinstance(reason, str) and reason.strip()
+            else "output schema field classification"
+        ),
+        removed_field_names=removed_field_names,
+        evidence=user_owned_evidence,
+    )
+
+
+def _parse_cited_output_schema_field_names(
+    raw_names: list[object],
+    *,
+    evidence: tuple[ClassifiedEvidence, ...],
+    source_texts: Mapping[str, str],
+) -> tuple[str, ...] | None:
+    names: list[str] = []
+    for raw_name in raw_names:
+        if (
+            not isinstance(raw_name, str)
+            or not raw_name
+            or raw_name != raw_name.strip()
+            or any(character.isspace() for character in raw_name)
+        ):
+            return None
+        name = _cited_output_schema_field_name(
+            raw_name,
+            evidence=evidence,
+            source_texts=source_texts,
+        )
+        if name is None or name in names:
+            return None
+        names.append(name)
+    return tuple(names)
+
+
+def _cited_output_schema_field_name(
+    raw_name: str,
+    *,
+    evidence: tuple[ClassifiedEvidence, ...],
+    source_texts: Mapping[str, str],
+) -> str | None:
+    occurrence_kinds = {
+        kind
+        for cited in evidence
+        for kind in _cited_field_occurrence_kinds(
+            source_text=source_texts[cited.source_id],
+            quote=cited.quote,
+            field_name=raw_name,
+        )
+    }
+    if not occurrence_kinds:
+        return None
+    if "quoted" in occurrence_kinds:
+        return raw_name
+    normalized = raw_name
+    while normalized.endswith(("[]", "{}")):
+        normalized = normalized[:-2]
+    return normalized or None
+
+
+def _cited_field_occurrence_kinds(
+    *,
+    source_text: str,
+    quote: str,
+    field_name: str,
+) -> frozenset[Literal["quoted", "unquoted"]]:
+    """Validate quoted field occurrences against their complete source context."""
+    kinds: set[Literal["quoted", "unquoted"]] = set()
+    quote_start = 0
+    while (quote_index := source_text.find(quote, quote_start)) >= 0:
+        field_start = 0
+        while (field_index := quote.find(field_name, field_start)) >= 0:
+            absolute_start = quote_index + field_index
+            kind = _valid_field_occurrence_kind(
+                source_text,
+                start_index=absolute_start,
+                end_index=absolute_start + len(field_name),
+            )
+            if kind is not None:
+                kinds.add(kind)
+            field_start = field_index + 1
+        quote_start = quote_index + 1
+    return frozenset(kinds)
+
+
+def _valid_field_occurrence_kind(
+    text: str,
+    *,
+    start_index: int,
+    end_index: int,
+) -> Literal["quoted", "unquoted"] | None:
+    before = text[start_index - 1] if start_index > 0 else None
+    after = text[end_index] if end_index < len(text) else None
+    before_is_quote = before is not None and _is_quotation_mark(before)
+    after_is_quote = after is not None and _is_quotation_mark(after)
+    if before_is_quote != after_is_quote:
+        return None
+    if before_is_quote and after_is_quote:
+        assert before is not None and after is not None
+        if not _quotation_marks_form_pair(before, after):
+            return None
+        outside_before_index = _field_outer_boundary_index(
+            text,
+            start_index=start_index - 2,
+            direction=-1,
+        )
+        outside_after_index = _field_outer_boundary_index(
+            text,
+            start_index=end_index + 1,
+            direction=1,
+        )
+        outside_before = (
+            text[outside_before_index] if outside_before_index is not None else None
+        )
+        outside_after = (
+            text[outside_after_index] if outside_after_index is not None else None
+        )
+        if _field_boundary_is_ambiguous(
+            outside_before,
+            side="before",
+            allow_declaration_colon=(
+                outside_before == ":"
+                and outside_before_index is not None
+                and outside_before_index < start_index - 2
+            ),
+        ) or (
+            _field_boundary_is_ambiguous(
+                outside_after,
+                side="after",
+                text=text,
+                index=(outside_after_index if outside_after_index is not None else 0),
+            )
+        ):
+            return None
+        return "quoted"
+    outside_before_index = _field_outer_boundary_index(
+        text,
+        start_index=start_index - 1,
+        direction=-1,
+    )
+    outside_after_index = _field_outer_boundary_index(
+        text,
+        start_index=end_index,
+        direction=1,
+    )
+    outside_before = (
+        text[outside_before_index] if outside_before_index is not None else before
+    )
+    outside_after = (
+        text[outside_after_index] if outside_after_index is not None else after
+    )
+    if _field_boundary_is_ambiguous(
+        outside_before,
+        side="before",
+        allow_declaration_colon=(
+            outside_before == ":"
+            and outside_before_index is not None
+            and outside_before_index < start_index - 1
+        ),
+    ) or (
+        _field_boundary_is_ambiguous(
+            outside_after,
+            side="after",
+            text=text,
+            index=(
+                outside_after_index if outside_after_index is not None else end_index
+            ),
+        )
+    ):
+        return None
+    return "unquoted"
+
+
+def _nearest_non_whitespace_index(
+    text: str,
+    *,
+    start_index: int,
+    direction: Literal[-1, 1],
+) -> int | None:
+    index = start_index
+    while 0 <= index < len(text):
+        if not text[index].isspace():
+            return index
+        index += direction
+    return None
+
+
+def _field_outer_boundary_index(
+    text: str,
+    *,
+    start_index: int,
+    direction: Literal[-1, 1],
+) -> int | None:
+    if not 0 <= start_index < len(text):
+        return None
+    if not text[start_index].isspace():
+        return start_index
+    nearest = _nearest_non_whitespace_index(
+        text,
+        start_index=start_index,
+        direction=direction,
+    )
+    if nearest is None or text[nearest] not in _FIELD_STRUCTURAL_BOUNDARIES:
+        return None
+    return nearest
+
+
+def _field_boundary_is_ambiguous(
+    value: str | None,
+    *,
+    side: Literal["before", "after"],
+    text: str = "",
+    index: int = 0,
+    allow_declaration_colon: bool = False,
+) -> bool:
+    if value is None:
+        return False
+    if _is_identifier_continuation(value):
+        return True
+    if value in _FIELD_STRUCTURAL_BOUNDARIES - {".", ":"}:
+        return True
+    if value == ":":
+        return side == "after" or not allow_declaration_colon
+    if value != ".":
+        return False
+    if side == "before":
+        return True
+    next_index = _nearest_non_whitespace_index(
+        text,
+        start_index=index + 1,
+        direction=1,
+    )
+    return next_index is not None and _is_identifier_continuation(text[next_index])
+
+
+def _is_identifier_continuation(value: str) -> bool:
+    category = unicodedata.category(value)
+    return category[0] in {"L", "M", "N", "S"} or category in {"Pc", "Pd", "Cf"}
+
+
+def _is_quotation_mark(value: str) -> bool:
+    return value in {'"', "'", "`"} or unicodedata.category(value) in {"Pi", "Pf"}
+
+
+def _quotation_marks_form_pair(before: str, after: str) -> bool:
+    if before == after:
+        return True
+    if before in {'"', "'", "`"} or after in {'"', "'", "`"}:
+        return False
+    return unicodedata.category(before) == "Pi" and unicodedata.category(after) == "Pf"
 
 
 def _parse_schema_direction(
@@ -897,6 +1310,7 @@ def _slot_classification_json_schema(
             "slots",
             "file_roles",
             "form_intake",
+            "output_schema_fields",
             "example_output_constraints",
             "schema_direction",
             "secondary_obligations",
@@ -916,6 +1330,12 @@ def _slot_classification_json_schema(
             "form_intake": {
                 "anyOf": [
                     _classified_form_intake_schema(),
+                    {"type": "null"},
+                ],
+            },
+            "output_schema_fields": {
+                "anyOf": [
+                    _classified_output_schema_fields_schema(),
                     {"type": "null"},
                 ],
             },
@@ -942,6 +1362,45 @@ def _slot_classification_json_schema(
             },
             "assumptions": _classification_note_array_schema(),
             "contradictions": _classification_note_array_schema(),
+        },
+    }
+
+
+def _classified_output_schema_fields_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "operation",
+            "field_names",
+            "removed_field_names",
+            "confidence",
+            "reason",
+            "evidence",
+        ],
+        "properties": {
+            "operation": {"type": "string", "enum": ["update", "clear"]},
+            "field_names": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+                },
+            },
+            "removed_field_names": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+                },
+            },
+            "confidence": _classification_confidence_schema(),
+            "reason": _classification_reason_schema(),
+            "evidence": _classification_evidence_array_schema(
+                max_items=OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS
+            ),
         },
     }
 
@@ -1181,6 +1640,9 @@ def slot_classification_prompt_hash(
     supported_model_kwargs: SupportedModelKwargs,
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     bias: SlotClassificationBias | None = None,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    safety_buffer_tokens: int = 0,
 ) -> str:
     return hashlib.sha256(
         _classification_cache_payload(
@@ -1196,6 +1658,9 @@ def slot_classification_prompt_hash(
                 )
             ),
             bias=bias,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
+            safety_buffer_tokens=safety_buffer_tokens,
         ).encode("utf-8")
     ).hexdigest()
 
@@ -1291,8 +1756,9 @@ def _build_slot_classification_prompt(
         "Every slot, file_role, and form_intake classification must include "
         "evidence objects with a listed source_id and an exact, case-sensitive "
         "quote from that source's content. "
-        f"Use 1-{CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes per "
-        f"classification, each at most {CLASSIFICATION_EVIDENCE_MAX_LENGTH} "
+        f"Use 1-{CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes for each "
+        "slot, file_role, and form_intake classification, each at most "
+        f"{CLASSIFICATION_EVIDENCE_MAX_LENGTH} "
         "characters. Shorten by selecting a shorter exact span, never by "
         "paraphrasing. "
         "If you cannot cite exact evidence, emit confidence low. "
@@ -1336,6 +1802,23 @@ def _build_slot_classification_prompt(
         "on meaning in exact user_message or structured_answer quotes. Uploaded-file "
         "content proves schema shape, never direction. Return null when direction is "
         "unresolved. "
+        "For output_schema_fields, return only cited changes to exact open-vocabulary "
+        "JSON property names for the final machine-readable JSON result. Use update "
+        "with field_names for additions and removed_field_names for removals. Cite "
+        "current user_message or structured_answer evidence containing every changed "
+        f"name using up to {OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
+        "quotes, and use only as many quotes as needed. "
+        "Report only additions or removals explicitly requested in the cited "
+        "current evidence; do not attempt to reconstruct a complete field snapshot. "
+        "Treat unquoted trailing [] or {} as JSON shape notation "
+        "and emit the base property name; preserve that punctuation only when the "
+        "user quotes or backticks it as part of the literal property name. Return a "
+        "clear operation with both arrays empty only when current user-owned evidence "
+        "explicitly removes every previously named field constraint. Return null "
+        "for report headings, document sections, runtime form/input fields, examples, "
+        "ordinary lists, implied fields, ambiguous enumerations, or non-JSON final "
+        "outputs. Do not infer types, nesting, renamed identifiers, or additional "
+        "fields. "
         "An example guides structure and style but does not promise exact visual "
         "layout. Return null when no supported example constraint exists. "
         "A requested final document is terminal_output, not primary input. "
@@ -1417,6 +1900,7 @@ def _build_slot_classification_prompt(
         '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
+        '"output_schema_fields": {"operation": "update"|"clear", "field_names": [str], "removed_field_names": [str], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"schema_direction": {"input_fingerprint": str|null, "output_fingerprint": str|null, "reference_only": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"secondary_obligations": [str], '
@@ -1458,6 +1942,9 @@ def _classification_cache_payload(
     provider: str,
     effective_optional_kwargs_fingerprint: str,
     bias: SlotClassificationBias | None = None,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    safety_buffer_tokens: int = 0,
 ) -> str:
     normalized_values = _normalize_allowed_slot_values(allowed_slot_values)
     prompt = _build_slot_classification_prompt(
@@ -1476,6 +1963,9 @@ def _classification_cache_payload(
         "effective_optional_kwargs_fingerprint": (
             effective_optional_kwargs_fingerprint
         ),
+        "max_input_tokens": max_input_tokens,
+        "max_output_tokens": max_output_tokens,
+        "safety_buffer_tokens": safety_buffer_tokens,
         "model": litellm_model,
         "prompt": prompt,
         "provider": provider,
