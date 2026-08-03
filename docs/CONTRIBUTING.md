@@ -198,7 +198,7 @@ frontend/
 - **Style**: PEP 8 compliance with Black formatting
 - **Type Safety**: Full type hints for all functions
 - **Documentation**: Docstrings for public APIs
-- **Testing**: Unit tests with pytest, ≥80% coverage target
+- **Testing**: pytest; coverage is enforced on changed lines (diff-cover, 80% in CI). See `backend/TESTING.md` for layout and conventions.
 
 **TypeScript (Frontend):**
 - **Style**: ESLint configuration with strict rules
@@ -328,21 +328,21 @@ async def test_create_assistant():
     assert repo.saved_assistant == assistant
 ```
 
-**Run Tests:**
+**Run Tests:** (see `backend/TESTING.md` for the full guide and `task test:*` presets)
 ```bash
 cd backend
 
-# Run all tests
-uv run pytest
+# Fast unit loop (explicit paths skip integration collection)
+uv run pytest tests/unit tests/unittests -n auto -q
 
-# Run specific domain tests
-uv run pytest tests/unittests/assistants/
-
-# Run with coverage
-uv run pytest --cov=src --cov-report=html
+# Run one integration domain
+uv run pytest tests/integration/skills
 
 # Run specific test
-uv run pytest tests/unittests/assistants/test_assistant.py::test_assistant_update_system_prompt
+uv run pytest tests/unit/spaces/test_space.py::test_name
+
+# Full run (unit + integration; integration needs Docker)
+uv run pytest
 ```
 
 ### Frontend Testing
