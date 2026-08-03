@@ -68,6 +68,7 @@ def _classification_input(
                 message_id="user-1",
             ),
         ),
+        current_user_message_id="user-1",
     )
 
 
@@ -130,42 +131,64 @@ async def test_non_string_response_records_parse_failure_with_usage_telemetry() 
     assert usage_tracker.token_usages[0].source == "litellm_estimate"
 
 
-def test_parser_accepts_exact_user_cited_output_schema_fields() -> None:
-    quote = "JSON output fields must be case_id, status, and assigned_team."
+def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
+    def parse_fields(
+        *,
+        quote: str,
+        field_names: list[str],
+    ) -> tuple[str, ...] | None:
+        result = parse_slot_classification_response(
+            json.dumps(
+                {
+                    **_VALID_CLASSIFICATION_RESPONSE,
+                    "output_schema_fields": {
+                        "operation": "update",
+                        "field_names": field_names,
+                        "removed_field_names": [],
+                        "confidence": "high",
+                        "reason": "The user explicitly enumerated JSON fields.",
+                        "evidence": [_evidence(quote)],
+                    },
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=_classification_input(quote),
+        )
+        assert result is not None
+        return (
+            result.output_schema_fields.field_names
+            if result.output_schema_fields is not None
+            else None
+        )
 
-    result = parse_slot_classification_response(
-        json.dumps(
-            {
-                "slots": [],
-                "file_roles": [],
-                "form_intake": None,
-                "output_schema_fields": {
-                    "operation": "update",
-                    "field_names": ["case_id", "status", "assigned_team"],
-                    "removed_field_names": [],
-                    "confidence": "high",
-                    "reason": "The user explicitly enumerated JSON fields.",
-                    "evidence": [_evidence(quote)],
-                },
-                "example_output_constraints": None,
-                "schema_direction": None,
-                "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
-            }
-        ),
-        allowed_slot_values={},
-        classification_input=_classification_input(quote),
+    quote = (
+        "JSON-resultatet ska innehålla sökta insatser, mottagna uppgifter, "
+        "Åtgärd ٢ och den bokstavliga nyckeln `Case ID`."
     )
-
-    assert result is not None
-    assert result.output_schema_fields is not None
-    assert result.output_schema_fields.operation == "update"
-    assert result.output_schema_fields.field_names == (
-        "case_id",
-        "status",
-        "assigned_team",
+    assert parse_fields(
+        quote=quote,
+        field_names=[
+            "sökta insatser",
+            "mottagna uppgifter",
+            "Åtgärd ٢",
+            "Case ID",
+        ],
+    ) == ("sokta_insatser", "mottagna_uppgifter", "atgard_٢", "Case ID")
+    assert (
+        parse_fields(
+            quote="JSON-resultatet ska innehålla sökta insatser och sokta-insatser.",
+            field_names=["sökta insatser", "sokta-insatser"],
+        )
+        is None
     )
+    assert (
+        parse_fields(
+            quote='JSON-resultatet ska innehålla "Case ID" och Case ID.',
+            field_names=["Case ID"],
+        )
+        is None
+    )
+    assert parse_fields(quote=quote, field_names=["sökta insatser", "beslut"]) is None
 
 
 @pytest.mark.parametrize(
@@ -279,7 +302,6 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
         (["id"], "Return id[0] in the JSON output."),
         (["id"], "Return user:id in the JSON output."),
         (["id"], "Return id\N{COMBINING ACUTE ACCENT} in the JSON output."),
-        ([" id "], 'Return the literal field " id ".'),
     ],
 )
 def test_parser_refuses_unverified_output_schema_fields(
@@ -438,7 +460,7 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
     assert result.output_schema_fields.field_names == ()
 
 
-def test_parser_accepts_many_cited_field_additions_across_user_sources() -> None:
+def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> None:
     field_names = tuple(f"field_{index}" for index in range(4))
     sources = tuple(
         SlotClassificationSource(
@@ -461,7 +483,7 @@ def test_parser_accepts_many_cited_field_additions_across_user_sources() -> None
                     "field_names": list(field_names),
                     "removed_field_names": [],
                     "confidence": "high",
-                    "reason": "Current complete JSON field set.",
+                    "reason": "Reconstructed complete JSON field set.",
                     "evidence": [
                         {
                             "source_id": source.source_id,
@@ -482,8 +504,7 @@ def test_parser_accepts_many_cited_field_additions_across_user_sources() -> None
     )
 
     assert result is not None
-    assert result.output_schema_fields is not None
-    assert result.output_schema_fields.field_names == field_names
+    assert result.output_schema_fields is None
 
 
 def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries() -> (

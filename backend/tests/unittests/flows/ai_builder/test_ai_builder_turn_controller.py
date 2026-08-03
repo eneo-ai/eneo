@@ -432,15 +432,24 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_swedis
 
 
 @pytest.mark.parametrize(
-    ("ui_language", "expected"),
+    ("ui_language", "normalization_text", "schema_text"),
     [
-        ("sv", "Fälttyper och struktur är inte fastställda."),
-        ("en", "Field types and structure are not yet fixed."),
+        (
+            "sv",
+            "normaliserats från citerade fält som användaren namngett",
+            "Fälttyper och struktur är inte fastställda.",
+        ),
+        (
+            "en",
+            "normalized from cited user-named fields",
+            "Field types and structure are not yet fixed.",
+        ),
     ],
 )
 def test_server_confirmation_distinguishes_named_json_fields_from_full_schema(
     ui_language: str,
-    expected: str,
+    normalization_text: str,
+    schema_text: str,
 ) -> None:
     state = _state(primary_runtime_input="text", terminal_output="structured_json")
     state.output_schema_evidence = build_schema_evidence(
@@ -457,14 +466,22 @@ def test_server_confirmation_distinguishes_named_json_fields_from_full_schema(
     decision = _decision(state=state, ui_language=ui_language)
 
     assert isinstance(decision, ConfirmRequirements)
-    assert expected in decision.payload.summary
+    assert normalization_text in decision.payload.summary
+    assert schema_text in decision.payload.summary
 
 
 @pytest.mark.parametrize(
     ("ui_language", "expected"),
     [
-        ("sv", "Förhandsvisning av namngivna JSON-fält (visar 8 av 9)"),
-        ("en", "Named JSON field preview (showing 8 of 9)"),
+        (
+            "sv",
+            "Förhandsvisning av JSON-nycklar som normaliserats från citerade fält "
+            "som användaren namngett (visar 8 av 9)",
+        ),
+        (
+            "en",
+            "JSON key preview normalized from cited user-named fields (showing 8 of 9)",
+        ),
     ],
 )
 def test_server_confirmation_discloses_bounded_named_field_preview(

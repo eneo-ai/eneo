@@ -571,25 +571,28 @@ def _output_schema_summary_line(
             visible_count = len(projection.fields)
             if locale == "sv":
                 return (
-                    "Förhandsvisning av namngivna JSON-fält "
+                    "Förhandsvisning av JSON-nycklar som normaliserats från citerade "
+                    "fält som användaren namngett "
                     f"(visar {visible_count} av {projection.total_count}): "
-                    f"{field_text}. Exakta fältnamn bevaras i schemat; "
-                    "fälttyper och struktur är inte fastställda."
+                    f"{field_text}. Nycklar inom citattecken eller backticks bevaras "
+                    "ordagrant i schemat. Fälttyper och struktur är inte fastställda."
                 )
             return (
-                "Named JSON field preview "
+                "JSON key preview normalized from cited user-named fields "
                 f"(showing {visible_count} of {projection.total_count}): "
-                f"{field_text}. Exact field names remain in the schema; "
-                "field types and structure are not yet fixed."
+                f"{field_text}. Quoted or backticked keys remain literal in the schema. "
+                "Field types and structure are not yet fixed."
             )
         if locale == "sv":
             return (
-                "Användaren har uttryckligen namngett fält som JSON-resultatet ska "
-                f"innehålla: {field_text}. Fälttyper och struktur är inte fastställda."
+                "JSON-nycklarna har normaliserats från citerade fält som användaren "
+                f"namngett: {field_text}. Nycklar inom citattecken eller backticks "
+                "bevaras ordagrant. Fälttyper och struktur är inte fastställda."
             )
         return (
-            "The user explicitly named fields that the JSON result must contain: "
-            f"{field_text}. Field types and structure are not yet fixed."
+            "The JSON keys were normalized from cited user-named fields: "
+            f"{field_text}. Quoted or backticked keys remain literal. Field types and "
+            "structure are not yet fixed."
         )
     if evidence.strength == "explicit":
         if locale == "sv":

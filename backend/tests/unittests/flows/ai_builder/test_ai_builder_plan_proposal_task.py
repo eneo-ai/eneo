@@ -332,8 +332,11 @@ def test_plan_proposal_prompt_preserves_named_fields_without_inventing_types() -
         resource_catalog=_empty_catalog(),
     )
 
-    assert "explicitly named top-level fields: case_id, status" in prompt
-    assert "types, nesting, requiredness" in prompt
+    assert (
+        "top-level keys normalized from cited user-named fields: case_id, status"
+        in prompt
+    )
+    assert "Types, nesting, requiredness" in prompt
 
 
 def test_plan_proposal_prompt_labels_lossy_named_field_projection_as_preview() -> None:
@@ -355,8 +358,8 @@ def test_plan_proposal_prompt_labels_lossy_named_field_projection_as_preview() -
         resource_catalog=_empty_catalog(),
     )
 
-    assert "explicitly named top-level field preview" in prompt
-    assert "canonical schema retains the exact user-named fields" in prompt
+    assert "top-level key preview normalized from cited user-named fields" in prompt
+    assert "canonical schema retains the normalized keys" in prompt
     assert exact_name not in prompt
 
 
@@ -575,8 +578,8 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
     assert "do not invent input_fields from defaults" in prompt
     assert "explicit no-extra-fields decision" in prompt
     assert "source-reading JSON output_fields" in prompt
-    assert "JSON output field names are schema keys" in prompt
-    assert "ASCII English names" in prompt
+    assert "JSON output fields not fixed by schema evidence" in prompt
+    assert "ASCII English keys" in prompt
     assert "Do not leave user-named facts only in instructions" in prompt
     assert "generic facts/notes fields" in prompt
     assert "instead of introducing new source-derived facts only in prose" in prompt

@@ -116,6 +116,7 @@ class SlotClassificationSource:
 @dataclass(frozen=True, slots=True)
 class SlotClassificationInput:
     sources: tuple[SlotClassificationSource, ...]
+    current_user_message_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,8 +170,8 @@ class ClassifiedFormIntake:
 
 
 @dataclass(frozen=True, slots=True)
-class ClassifiedOutputSchemaFields:
-    operation: Literal["update", "replace", "clear"]
+class ClassifiedOutputSchemaFieldDelta:
+    operation: Literal["update", "clear"]
     field_names: tuple[str, ...]
     confidence: SlotClassificationConfidence
     reason: str
@@ -183,7 +184,7 @@ class SlotClassificationResult:
     slots: tuple[ClassifiedSlot, ...] = ()
     file_roles: tuple[ClassifiedFileRole, ...] = ()
     form_intake: ClassifiedFormIntake | None = None
-    output_schema_fields: ClassifiedOutputSchemaFields | None = None
+    output_schema_fields: ClassifiedOutputSchemaFieldDelta | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     schema_direction: ClassifiedSchemaDirection | None = None
     secondary_obligations: tuple[ResultObligation, ...] = ()
@@ -393,6 +394,9 @@ async def classify_slots(
 def _classification_input_is_valid(
     classification_input: SlotClassificationInput,
 ) -> bool:
+    current_user_message_id = classification_input.current_user_message_id
+    if current_user_message_id is not None and not current_user_message_id.strip():
+        return False
     source_ids = [source.source_id for source in classification_input.sources]
     if not source_ids or len(source_ids) != len(set(source_ids)):
         return False
@@ -617,7 +621,7 @@ def _parse_output_schema_fields(
     raw_value: object,
     *,
     classification_input: SlotClassificationInput,
-) -> ClassifiedOutputSchemaFields | None:
+) -> ClassifiedOutputSchemaFieldDelta | None:
     if not isinstance(raw_value, dict):
         return None
     item = cast(dict[str, Any], raw_value)
@@ -649,13 +653,20 @@ def _parse_output_schema_fields(
     source_kinds = {
         source.source_id: source.kind for source in classification_input.sources
     }
+    current_user_message_id = classification_input.current_user_message_id
+    if current_user_message_id is None:
+        return None
     source_texts = {
         source.source_id: source.text for source in classification_input.sources
+    }
+    source_message_ids = {
+        source.source_id: source.message_id for source in classification_input.sources
     }
     user_owned_evidence = tuple(
         cited
         for cited in evidence
         if source_kinds[cited.source_id] in _USER_OWNED_CLASSIFICATION_SOURCE_KINDS
+        and source_message_ids[cited.source_id] == current_user_message_id
     )
     if not user_owned_evidence:
         return None
@@ -686,7 +697,7 @@ def _parse_output_schema_fields(
         except (SchemaLimitExceeded, ValueError):
             return None
     reason = item.get("reason")
-    return ClassifiedOutputSchemaFields(
+    return ClassifiedOutputSchemaFieldDelta(
         operation=cast(Literal["update", "clear"], operation),
         field_names=field_names,
         confidence=cast(SlotClassificationConfidence, confidence),
@@ -708,12 +719,7 @@ def _parse_cited_output_schema_field_names(
 ) -> tuple[str, ...] | None:
     names: list[str] = []
     for raw_name in raw_names:
-        if (
-            not isinstance(raw_name, str)
-            or not raw_name
-            or raw_name != raw_name.strip()
-            or any(character.isspace() for character in raw_name)
-        ):
+        if not isinstance(raw_name, str) or not raw_name:
             return None
         name = _cited_output_schema_field_name(
             raw_name,
@@ -741,14 +747,33 @@ def _cited_output_schema_field_name(
             field_name=raw_name,
         )
     }
-    if not occurrence_kinds:
-        return None
-    if "quoted" in occurrence_kinds:
+    if occurrence_kinds == {"quoted"}:
         return raw_name
-    normalized = raw_name
-    while normalized.endswith(("[]", "{}")):
-        normalized = normalized[:-2]
-    return normalized or None
+    if occurrence_kinds != {"unquoted"}:
+        return None
+    phrase = raw_name
+    while phrase.endswith(("[]", "{}")):
+        phrase = phrase[:-2]
+    return _normalize_unquoted_output_schema_field_name(phrase)
+
+
+def _normalize_unquoted_output_schema_field_name(phrase: str) -> str | None:
+    normalized = unicodedata.normalize("NFKD", phrase).casefold()
+    field_name_parts: list[str] = []
+    separating = False
+    for character in normalized:
+        category = unicodedata.category(character)
+        if category.startswith("M"):
+            continue
+        if category.startswith(("L", "N")):
+            if separating and field_name_parts:
+                field_name_parts.append("_")
+            field_name_parts.append(character)
+            separating = False
+        else:
+            separating = True
+    field_name = "".join(field_name_parts).strip("_")
+    return field_name or None
 
 
 def _cited_field_occurrence_kinds(
@@ -1853,14 +1878,17 @@ def _build_slot_classification_prompt(
         "on meaning in exact user_message or structured_answer quotes. Uploaded-file "
         "content proves schema shape, never direction. Return null when direction is "
         "unresolved. "
-        "For output_schema_fields, return only cited changes to exact open-vocabulary "
-        "JSON property names for the final machine-readable JSON result. Use update "
+        "For output_schema_fields, return only cited changes to open-vocabulary "
+        "JSON property names or noun phrases for the final machine-readable JSON "
+        "result. Use update "
         "with field_names for additions and removed_field_names for removals. Cite "
         "current user_message or structured_answer evidence containing every changed "
         f"name using up to {OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
         "quotes, and use only as many quotes as needed. "
         "Report only additions or removals explicitly requested in the cited "
         "current evidence; do not attempt to reconstruct a complete field snapshot. "
+        "For unquoted names, emit the exact cited phrase and let the server normalize "
+        "it to a stable key. Preserve a quoted or backticked literal without changes. "
         "Treat unquoted trailing [] or {} as JSON shape notation "
         "and emit the base property name; preserve that punctuation only when the "
         "user quotes or backticks it as part of the literal property name. Return a "
@@ -2048,7 +2076,7 @@ def _effective_optional_kwargs_fingerprint(model_kwargs: ModelKwargs) -> str:
 
 def _classification_input_payload(
     classification_input: SlotClassificationInput,
-) -> list[dict[str, object]]:
+) -> dict[str, object]:
     payload: list[dict[str, object]] = []
     for source in classification_input.sources:
         item: dict[str, object] = {
@@ -2068,7 +2096,10 @@ def _classification_input_payload(
             item["coverage"] = source.coverage
         item["truncated"] = source.truncated
         payload.append(item)
-    return payload
+    return {
+        "current_user_message_id": classification_input.current_user_message_id,
+        "sources": payload,
+    }
 
 
 def _parse_secondary_obligations(raw_value: object) -> tuple[ResultObligation, ...]:

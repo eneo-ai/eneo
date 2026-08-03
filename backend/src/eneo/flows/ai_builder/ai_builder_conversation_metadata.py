@@ -54,7 +54,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFields,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
     SlotClassificationAttempt,
@@ -297,8 +296,8 @@ class SlotClassificationOutputSchemaFieldsMetadata(BaseModel):
     @field_validator("field_names")
     @classmethod
     def require_unique_nonempty_names(cls, field_names: list[str]) -> list[str]:
-        if any(not name.strip() or name != name.strip() for name in field_names):
-            raise ValueError("output schema field names must be non-empty and stripped")
+        if any(not name for name in field_names):
+            raise ValueError("output schema field names must be non-empty")
         if len(field_names) != len(set(field_names)):
             raise ValueError("output schema field names must be unique")
         return field_names
@@ -318,13 +317,31 @@ class SlotClassificationOutputSchemaFieldsMetadata(BaseModel):
             )
         return self
 
-    def to_classified_output_schema_fields(self) -> ClassifiedOutputSchemaFields:
-        return ClassifiedOutputSchemaFields(
-            operation=self.operation,
-            field_names=tuple(self.field_names),
-            confidence=self.confidence,
-            reason=self.reason,
-            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
+    @classmethod
+    def from_materialized_state(
+        cls,
+        *,
+        operation: Literal["replace", "clear"],
+        field_names: Sequence[str],
+        confidence: SlotClassificationConfidence,
+        reason: str,
+        evidence: Sequence[ClassifiedEvidence],
+    ) -> "SlotClassificationOutputSchemaFieldsMetadata":
+        return cls(
+            operation=operation,
+            field_names=list(field_names),
+            confidence=confidence,
+            reason=_bounded_metadata_text(
+                reason,
+                fallback="output schema field classification",
+            ),
+            evidence=[
+                SlotClassificationEvidence(
+                    source_id=item.source_id,
+                    quote=item.quote,
+                )
+                for item in evidence
+            ],
         )
 
 
@@ -626,11 +643,6 @@ class SlotClassificationMetadata(BaseModel):
             form_intake=self.form_intake.to_classified_form_intake()
             if self.form_intake is not None
             else None,
-            output_schema_fields=(
-                self.output_schema_fields.to_classified_output_schema_fields()
-                if self.output_schema_fields is not None
-                else None
-            ),
             example_output_constraints=self.example_output_constraints,
             schema_direction=(
                 self.schema_direction.to_classified_schema_direction()
@@ -1165,8 +1177,17 @@ def slot_classification_metadata_from_attempt(
     model: str,
     provider: str,
     retained_source_inventory: Sequence[SlotClassificationSourceMetadata] = (),
+    output_schema_fields_snapshot: SlotClassificationOutputSchemaFieldsMetadata
+    | None = None,
 ) -> SlotClassificationMetadata:
     result = attempt.result or SlotClassificationResult()
+    if (
+        result.output_schema_fields is not None
+        and output_schema_fields_snapshot is None
+    ):
+        raise ValueError(
+            "Live output schema field deltas require a materialized replay snapshot"
+        )
     slot_payloads: list[dict[str, object]] = []
     seen_slot_names: set[str] = set()
     for slot in result.slots:
@@ -1179,9 +1200,6 @@ def slot_classification_metadata_from_attempt(
         slot_payloads.append(payload)
         seen_slot_names.add(slot_name)
     form_intake_payload = _slot_classification_form_intake_payload(result.form_intake)
-    output_schema_fields_payload = _slot_classification_output_schema_fields_payload(
-        result.output_schema_fields
-    )
     file_role_payloads = [
         _slot_classification_file_role_payload(file_role)
         for file_role in result.file_roles
@@ -1194,8 +1212,8 @@ def slot_classification_metadata_from_attempt(
     retained_source_ids = {
         item.source_id
         for item in (
-            result.output_schema_fields.evidence
-            if result.output_schema_fields is not None
+            output_schema_fields_snapshot.evidence
+            if output_schema_fields_snapshot is not None
             else ()
         )
     }
@@ -1222,7 +1240,11 @@ def slot_classification_metadata_from_attempt(
             "file_roles": file_role_payloads,
             "secondary_obligations": secondary_obligations,
             "form_intake": form_intake_payload,
-            "output_schema_fields": output_schema_fields_payload,
+            "output_schema_fields": (
+                output_schema_fields_snapshot.model_dump(mode="python")
+                if output_schema_fields_snapshot is not None
+                else None
+            ),
             "example_output_constraints": (
                 result.example_output_constraints.model_dump(mode="python")
                 if result.example_output_constraints is not None
@@ -1283,25 +1305,6 @@ def _slot_classification_form_intake_payload(
         ),
         "evidence": _slot_classification_evidence_payloads(form_intake.evidence),
         "evidence_level": form_intake.evidence_level,
-    }
-
-
-def _slot_classification_output_schema_fields_payload(
-    output_schema_fields: ClassifiedOutputSchemaFields | None,
-) -> dict[str, object] | None:
-    if output_schema_fields is None or output_schema_fields.operation == "update":
-        return None
-    return {
-        "operation": output_schema_fields.operation,
-        "field_names": list(output_schema_fields.field_names),
-        "confidence": output_schema_fields.confidence,
-        "reason": _bounded_metadata_text(
-            output_schema_fields.reason,
-            fallback="output schema field classification",
-        ),
-        "evidence": _slot_classification_evidence_payloads(
-            output_schema_fields.evidence
-        ),
     }
 
 

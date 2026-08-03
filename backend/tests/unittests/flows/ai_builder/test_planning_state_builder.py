@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationOutputSchemaFieldsMetadata,
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
 )
@@ -49,7 +50,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFields,
+    ClassifiedOutputSchemaFieldDelta,
     ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationConfidence,
@@ -2196,7 +2197,8 @@ class TestModelSlotMerge:
             ),
             allowed_slot_values={},
             classification_input=SlotClassificationInput(
-                sources=(user_source, attachment_source)
+                sources=(user_source, attachment_source),
+                current_user_message_id="user-1",
             ),
         )
         assert parsed is not None
@@ -2227,7 +2229,7 @@ class TestModelSlotMerge:
             "quote:user_message:user-1:JSON output field: case_id."
         ]
 
-    def test_cited_output_field_names_become_terminal_schema_evidence(self) -> None:
+    def test_cited_output_fields_survive_replay_and_declared_schema_wins(self) -> None:
         state = _state()
         state.resolved_slots["terminal_output"] = _slot(
             name="terminal_output",
@@ -2238,7 +2240,7 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFields(
+                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
                     operation="update",
                     field_names=("case_id", "status"),
                     confidence="high",
@@ -2264,6 +2266,87 @@ class TestModelSlotMerge:
             "quote:user_message:test-source:JSON-resultatet ska innehålla "
             "case_id och status."
         ]
+
+        source = SlotClassificationSource(
+            source_id="user_message:test-source",
+            kind="user_message",
+            text="JSON-resultatet ska innehålla case_id och status.",
+            message_id="test-source",
+        )
+        snapshot = SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+            operation="replace",
+            field_names=("case_id", "status"),
+            confidence="high",
+            reason="The current complete user-named field snapshot.",
+            evidence=_model_evidence(source.text),
+        )
+        classification = slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(
+                outcome="resolved",
+                result=SlotClassificationResult(
+                    slots=(
+                        ClassifiedSlot(
+                            slot_name="terminal_output",
+                            value="structured_json",
+                            confidence="high",
+                            reason="The user explicitly requested JSON.",
+                            evidence=_model_evidence(source.text),
+                            evidence_level="explicit",
+                        ),
+                    ),
+                ),
+            ),
+            prompt_hash="b" * 64,
+            classification_input=SlotClassificationInput(sources=(source,)),
+            model="openai/gpt-test",
+            provider="openai",
+            output_schema_fields_snapshot=snapshot,
+        )
+        metadata = metadata_with_slot_classification(None, classification)
+        assert metadata is not None
+        replayed = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="test-source",
+                    role="user",
+                    content=source.text,
+                    metadata=metadata,
+                )
+            ]
+        )
+        replayed_evidence = replayed.output_schema_evidence
+        assert replayed_evidence is not None
+        assert replayed_evidence.json_schema == evidence.json_schema
+
+        declared = build_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"official_id": {"type": "string"}},
+            },
+            source="declared_schema",
+            confidence="high",
+            evidence=("message:user-2",),
+        )
+        replayed.replace_schema_resolution(
+            input_evidence=None,
+            output_evidence=declared,
+            example_inference=None,
+        )
+        merge_llm_resolved_slots(
+            replayed,
+            SlotClassificationResult(
+                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
+                    operation="update",
+                    field_names=("priority",),
+                    confidence="high",
+                    reason="The user named another field.",
+                    evidence=_model_evidence("Lägg även till priority."),
+                )
+            ),
+            prompt_hash="c" * 64,
+            freeform_text="Lägg även till priority.",
+        )
+        assert replayed.output_schema_evidence == declared
 
     def test_accumulated_output_fields_report_typed_schema_limit(
         self,
@@ -2296,7 +2379,7 @@ class TestModelSlotMerge:
             merge_llm_resolved_slots(
                 state,
                 SlotClassificationResult(
-                    output_schema_fields=ClassifiedOutputSchemaFields(
+                    output_schema_fields=ClassifiedOutputSchemaFieldDelta(
                         operation="update",
                         field_names=("status",),
                         confidence="high",
@@ -2341,7 +2424,7 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFields(
+                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
                     operation="update",
                     field_names=("case_id", "status"),
                     confidence="high",
@@ -2375,7 +2458,7 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFields(
+                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
                     operation="clear",
                     field_names=(),
                     confidence="high",

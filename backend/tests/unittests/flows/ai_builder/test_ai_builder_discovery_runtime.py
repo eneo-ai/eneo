@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentSchemaDiscovery,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationOutputSchemaFieldsMetadata,
     metadata_with_slot_classification,
     slot_classification_metadata_from_attempt,
 )
@@ -51,6 +52,12 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
+    build_plan_proposal_system_prompt,
+)
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SchemaDirectionSelection,
     build_declared_schema_candidate,
@@ -60,14 +67,19 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
     ClassifiedFileRole,
-    ClassifiedOutputSchemaFields,
+    ClassifiedOutputSchemaFieldDelta,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
+    parse_slot_classification_response,
     slot_classification_provider_identity,
+)
+from eneo.flows.ai_builder.ai_builder_turn_controller import (
+    ConfirmRequirements,
+    resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -80,6 +92,9 @@ from eneo.flows.ai_builder.planning_state import (
     MappedFileLimit,
     PlanningState,
     ResolvedSlot,
+)
+from eneo.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 
@@ -397,6 +412,7 @@ def test_slot_classification_input_preserves_typed_source_chronology() -> None:
     )
 
     assert classification_input.sources[0].source_id == "user_message:user-1"
+    assert classification_input.current_user_message_id == "user-2"
     assert classification_input.sources[0].text == "Behåll OriginalCase i rapporten."
     assert classification_input.sources[1].source_id == "structured_answer:user-2:0"
     assert classification_input.sources[1].question_id == "terminal_output"
@@ -409,6 +425,58 @@ def test_slot_classification_input_preserves_typed_source_chronology() -> None:
         "internal planner prose" not in source.text
         for source in classification_input.sources
     )
+
+
+def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
+    classification_input = build_slot_classification_input(
+        [
+            ConversationMessage(
+                message_id="user-prior",
+                role="user",
+                content="JSON-resultatet ska innehålla sökta insatser.",
+            ),
+            ConversationMessage(
+                message_id="user-current",
+                role="user",
+                content="   ",
+            ),
+        ],
+        None,
+    )
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": ["sökta insatser"],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The earlier turn named the field.",
+                    "evidence": [
+                        {
+                            "source_id": "user_message:user-prior",
+                            "quote": "sökta insatser",
+                        }
+                    ],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=classification_input,
+    )
+
+    assert classification_input.current_user_message_id == "user-current"
+    assert result is not None
+    assert result.output_schema_fields is None
 
 
 def test_slot_classification_input_rejects_attachment_inventory_over_limit() -> None:
@@ -1467,14 +1535,14 @@ async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
-                    "field_names": ["case_id", "status"],
+                    "field_names": ["sökta insatser", "status"],
                     "removed_field_names": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON fields.",
                     "evidence": [
                         {
                             "source_id": "user_message:user-1",
-                            "quote": "case_id och status",
+                            "quote": "sökta insatser och status",
                         }
                     ],
                 },
@@ -1497,7 +1565,7 @@ async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
             ConversationMessage(
                 message_id="user-1",
                 role="user",
-                content="JSON-resultatet ska innehålla case_id och status.",
+                content="JSON-resultatet ska innehålla sökta insatser och status.",
             )
         ],
         litellm_client=litellm_client,
@@ -1509,7 +1577,64 @@ async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
     evidence = context.planning_state.output_schema_evidence
     assert evidence is not None
     assert evidence.source == "prose_field_names"
-    assert evidence.json_schema["properties"] == {"case_id": {}, "status": {}}
+    assert evidence.json_schema["properties"] == {
+        "sokta_insatser": {},
+        "status": {},
+    }
+
+    assert context.slot_classification_metadata is not None
+    persisted_metadata = metadata_with_slot_classification(
+        {
+            "question_answer": {
+                "question_id": "terminal_output",
+                "selected_option_id": "structured_json",
+                "selected_value": "structured_json",
+            }
+        },
+        context.slot_classification_metadata,
+    )
+    assert persisted_metadata is not None
+    replayed = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="JSON-resultatet ska innehålla sökta insatser och status.",
+                metadata=persisted_metadata,
+            )
+        ]
+    )
+    assert replayed.output_schema_evidence is not None
+    assert replayed.output_schema_evidence.json_schema["properties"] == {
+        "sokta_insatser": {},
+        "status": {},
+    }
+
+    replayed.resolved_slots = context.planning_state.resolved_slots.copy()
+    draft = derive_architecture_commit_draft(replayed)
+    assert draft is not None
+    replayed.architecture_commit = finalize_architecture_commit(draft)
+    confirmation = resolve_turn_control(
+        session_state=replayed,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="sv",
+    ).decision
+    assert isinstance(confirmation, ConfirmRequirements)
+    assert "sokta_insatser" in confirmation.payload.summary
+
+    proposal_prompt = build_plan_proposal_system_prompt(
+        planning_state=replayed,
+        confirmed_requirements=confirmation.payload,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        ),
+    )
+    assert "sokta_insatser" in proposal_prompt
 
 
 @pytest.mark.asyncio
@@ -1613,7 +1738,9 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
                 evidence_level="explicit",
             ),
         ),
-        output_schema_fields=ClassifiedOutputSchemaFields(
+    )
+    prior_snapshot = (
+        SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
             operation="replace",
             field_names=("case_id", "status"),
             confidence="high",
@@ -1624,7 +1751,7 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
                     quote=prior_source.text,
                 ),
             ),
-        ),
+        )
     )
     prior_classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="resolved", result=result),
@@ -1632,6 +1759,7 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
         classification_input=SlotClassificationInput(sources=(prior_source,)),
         model="openai/gpt-test",
         provider="openai",
+        output_schema_fields_snapshot=prior_snapshot,
     )
     assert prior_classification is not None
     prior_metadata = metadata_with_slot_classification(None, prior_classification)
@@ -1713,7 +1841,7 @@ def test_runtime_does_not_materialize_low_confidence_output_field_snapshot() -> 
         "terminal_output",
         "structured_json",
     )
-    classified = ClassifiedOutputSchemaFields(
+    classified = ClassifiedOutputSchemaFieldDelta(
         operation="update",
         field_names=("case_id",),
         confidence="low",
@@ -1727,7 +1855,7 @@ def test_runtime_does_not_materialize_low_confidence_output_field_snapshot() -> 
     )
 
     assert (
-        runtime._materialized_output_schema_field_classification(
+        runtime._materialized_output_schema_field_snapshot(
             state,
             classified_fields=classified,
             prior_classification=None,

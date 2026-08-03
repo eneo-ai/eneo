@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     CLASSIFIER_RETENTION_CLASSES,
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
+    SlotClassificationOutputSchemaFieldsMetadata,
     SlotClassificationSchemaDirectionMetadata,
     loose_tool_call_name,
     loose_tool_call_names_from_message,
@@ -39,7 +40,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFields,
     ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationInput,
@@ -427,13 +427,6 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
             evidence=(_classified_evidence("fritext under varje rubrik"),),
             evidence_level="explicit",
         ),
-        output_schema_fields=ClassifiedOutputSchemaFields(
-            operation="replace",
-            field_names=("case_id", "status"),
-            confidence="high",
-            reason="explicit JSON field names",
-            evidence=(_classified_evidence("JSON fields: case_id and status"),),
-        ),
         file_roles=(
             ClassifiedFileRole(
                 file_id=file_id,
@@ -447,6 +440,15 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
         secondary_obligations=("risks", "actions"),
         assumptions=("User wants runtime form fields.",),
         contradictions=("No contradiction.",),
+    )
+    output_schema_fields_snapshot = (
+        SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+            operation="replace",
+            field_names=("case_id", "status"),
+            confidence="high",
+            reason="explicit JSON field names",
+            evidence=(_classified_evidence("JSON fields: case_id and status"),),
+        )
     )
 
     classification = slot_classification_metadata_from_attempt(
@@ -478,6 +480,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
         ),
         model="openai/gpt-test",
         provider="openai",
+        output_schema_fields_snapshot=output_schema_fields_snapshot,
     )
     metadata = metadata_with_slot_classification(None, classification)
     parsed = slot_classification_from_metadata(metadata)
@@ -488,7 +491,8 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert set(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
     assert parsed.to_result().slots == result.slots
     assert parsed.to_result().form_intake == result.form_intake
-    assert parsed.to_result().output_schema_fields == result.output_schema_fields
+    assert parsed.output_schema_fields == output_schema_fields_snapshot
+    assert parsed.to_result().output_schema_fields is None
     assert parsed.to_result().file_roles == result.file_roles
     assert parsed.to_result().secondary_obligations == ("risks", "actions")
     assert parsed.model == "openai/gpt-test"
