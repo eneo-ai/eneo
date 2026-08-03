@@ -130,6 +130,18 @@ CATEGORY_MAPPINGS = {
     ActionType.HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE.value: "admin_actions",
     ActionType.HELP_ASSISTANT_INSTALLED.value: "admin_actions",
     ActionType.HELP_ASSISTANT_UNINSTALLED.value: "admin_actions",
+    # OIDC delegated-identity token lifecycle (3 actions)
+    ActionType.OIDC_TOKEN_STORED.value: "security_events",
+    ActionType.OIDC_TOKEN_REFRESHED.value: "security_events",
+    ActionType.OIDC_TOKEN_REVOKED.value: "security_events",
+    # MCP token-exchange broker (2 actions)
+    ActionType.MCP_TOKEN_EXCHANGED.value: "integration_events",
+    ActionType.MCP_TOKEN_EXCHANGE_DENIED.value: "integration_events",
+    # MCP tenant credential configuration (4 actions)
+    ActionType.MCP_SERVICE_ACCOUNT_SET.value: "admin_actions",
+    ActionType.MCP_SERVICE_ACCOUNT_CLEARED.value: "admin_actions",
+    ActionType.MCP_SSO_DEFAULT_TARGET_SET.value: "admin_actions",
+    ActionType.MCP_SSO_DEFAULT_TARGET_CLEARED.value: "admin_actions",
     # System Actions (3 actions)
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",

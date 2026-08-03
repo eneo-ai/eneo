@@ -327,6 +327,10 @@ class Settings(BaseSettings):
         description="Deprecated alias for federation_enabled.",
     )
 
+    # MCP OAuth token broker. Gates the per_user / per_tenant auth scopes on
+    # MCP servers at the API layer; static_bearer keeps working when off.
+    mcp_oauth_enabled: bool = False
+
     # OIDC redirect safety controls
     oidc_state_ttl_seconds: int = 600
     oidc_redirect_grace_period_seconds: int = 900

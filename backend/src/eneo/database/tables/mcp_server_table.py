@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,6 +35,57 @@ class MCPServers(BasePublic):
         String, nullable=False, server_default="none"
     )
     http_auth_config_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+
+    # OAuth / token-exchange discriminator. ``static_bearer`` preserves the
+    # legacy ``http_auth_config_schema`` path. ``per_user`` and ``per_tenant``
+    # drive the token broker; they are gated by the ``MCP_OAUTH_ENABLED``
+    # setting at the API layer.
+    auth_scope: Mapped[str] = mapped_column(
+        PgEnum(
+            "per_user",
+            "per_tenant",
+            "static_bearer",
+            name="mcp_auth_scope",
+            create_type=False,
+        ),
+        nullable=False,
+        server_default="static_bearer",
+    )
+    # Issuer assertion gate: when set, the broker requires the server's
+    # published authorization-server issuer to match this value.
+    expected_idp_issuer: Mapped[Optional[str]] = mapped_column(Text)
+    # Identity used to populate the tool catalog (``MCPServerTools``). The
+    # catalog describes the server's surface, not what a specific user can
+    # do, so the discovery principal is decoupled from ``auth_scope``.
+    tool_discovery_principal: Mapped[str] = mapped_column(
+        PgEnum(
+            "anonymous",
+            "tenant_service_account",
+            "admin_user",
+            name="mcp_discovery_principal",
+            create_type=False,
+        ),
+        nullable=False,
+        server_default="anonymous",
+    )
+    # Strategy-target hint: the RFC 8707 ``resource`` / RFC 8693 ``audience``
+    # value for the exchange.
+    target_resource_or_scope: Mapped[Optional[str]] = mapped_column(Text)
+    # Token-exchange strategy. ``auto`` picks id_jag when the server's
+    # authorization server advertises the id-jag grant profile, else falls
+    # back to the same-IdP rfc8693 exchange. Explicit values pin a strategy
+    # for IdPs with broken or absent metadata.
+    exchange_protocol: Mapped[str] = mapped_column(
+        PgEnum(
+            "auto",
+            "id_jag",
+            "rfc8693",
+            name="mcp_exchange_protocol",
+            create_type=False,
+        ),
+        nullable=False,
+        server_default="auto",
+    )
 
     # Tenant enablement and credentials
     is_enabled: Mapped[bool] = mapped_column(
