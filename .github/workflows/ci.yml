@@ -174,8 +174,12 @@ jobs:
       - name: Pyright type check
         run: uv run pyright
 
-  backend-tests:
-    name: Backend tests
+  # Unit and integration run as parallel jobs: wall clock is max() of the two
+  # instead of their sum. Each job produces a raw .coverage data file; the
+  # coverage-diff job combines them (pyproject sets relative_files=true so the
+  # data merges across runners).
+  backend-unit:
+    name: Backend unit tests
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -225,24 +229,107 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run unit tests
-        run: uv run pytest -v -n 2 -m "not integration" --cov=src/eneo --cov-report=term:skip-covered tests/
+        # Explicit paths instead of -m "not integration": pytest never visits
+        # the integration tree, so collection stays cheap.
+        run: >-
+          uv run pytest -v -n 4
+          --durations=25 --durations-min=1.0 --junitxml=pytest-unit.xml
+          --cov=src/eneo --cov-report=term:skip-covered
+          tests/unit tests/unittests tests/test_settings_override.py
+
+      - name: Report slowest tests
+        if: ${{ !cancelled() }}
+        run: node ../.github/scripts/render-slowest-tests.mjs pytest-unit.xml >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stash coverage data for the combine step
+        run: mv .coverage .coverage.unit
+
+      - name: Upload unit coverage data
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-unit
+          path: backend/.coverage.unit
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: warn
+
+  backend-integration:
+    name: Backend integration tests
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        # uv downloads a prebuilt CPython from GitHub releases; that CDN
+        # occasionally returns 504s. Retry with backoff so a transient
+        # blip doesn't fail the whole run.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
+
+      - name: Verify lockfile consistency
+        run: uv lock --check
+
+      - name: Install dependencies
+        run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run integration tests
-        # --cov-append: add integration coverage on top of the unit run, then
-        # emit the combined xml (for diff-cover) + html (human artifact).
-        run: uv run pytest -v -n 2 -m integration --cov=src/eneo --cov-append --cov-report=xml --cov-report=html --cov-report=term:skip-covered tests/integration/
+        # --dist loadgroup honors the xdist_group pin that keeps the
+        # object_content SeaweedFS/pg13 stack on a single worker.
+        run: >-
+          uv run pytest -v -n 4 --dist loadgroup
+          --durations=25 --durations-min=1.0 --junitxml=pytest-integration.xml
+          --cov=src/eneo --cov-report=term:skip-covered
+          tests/integration/
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Upload backend coverage
+      - name: Report slowest tests
+        if: ${{ !cancelled() }}
+        run: node ../.github/scripts/render-slowest-tests.mjs pytest-integration.xml >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stash coverage data for the combine step
+        run: mv .coverage .coverage.integration
+
+      - name: Upload integration coverage data
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: backend-coverage
-          path: |
-            backend/coverage.xml
-            backend/htmlcov
+          name: backend-coverage-integration
+          path: backend/.coverage.integration
+          include-hidden-files: true
           retention-days: 14
           if-no-files-found: warn
 
@@ -265,6 +352,7 @@ jobs:
           node .github/scripts/project-intake.mjs --self-test
           node .github/scripts/ci-change-scope.mjs --self-test
           node .github/scripts/render-diff-coverage.mjs --self-test
+          node .github/scripts/render-slowest-tests.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
 
   route-metadata:
@@ -352,6 +440,12 @@ jobs:
       # version explicitly: a bare `bun x playwright` fetches the latest and
       # installs a browser build that @vitest/browser (on the pinned playwright)
       # can't find. Keep this in sync with apps/web's playwright dependency.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.61.1-chromium-headless
+
       - name: Install Playwright Chromium
         run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
 
@@ -403,6 +497,12 @@ jobs:
       # Pin to match apps/web's @playwright/test dependency; a bare
       # `bun x playwright` fetches the latest and installs a browser build the
       # pinned runner can't find ("Executable doesn't exist").
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.61.1-chromium
+
       - name: Install Playwright Chromium
         working-directory: frontend/apps/web
         run: bun x playwright@1.61.1 install --with-deps chromium
@@ -556,17 +656,19 @@ jobs:
           echo "::endgroup::"
           exit 1
 
-  # Reports how well the tests cover the lines THIS PR changed (patch coverage),
-  # for frontend and backend separately. Report-only: never fails the PR and is
-  # not part of the aggregate `CI` gate below. Writes a compact report to the
-  # job summary and uploads the same markdown as an artifact.
+  # Patch coverage on the lines THIS PR changed. The backend gate is BLOCKING:
+  # changed backend lines must be >=80% covered (legacy code is never
+  # penalized, only the diff). Frontend stays report-only while its suite grows
+  # (see frontend/TESTING.md). Also posts the tests-added/deleted delta so
+  # suite growth is visible on every PR.
   coverage-diff:
     name: Coverage diff
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.frontend.result == 'success' || needs.backend-tests.result == 'success') }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.frontend.result == 'success' || (needs.backend-unit.result == 'success' && needs.backend-integration.result == 'success')) }}
     runs-on: ubuntu-latest
     needs:
       - frontend
-      - backend-tests
+      - backend-unit
+      - backend-integration
     permissions:
       contents: read
     steps:
@@ -582,31 +684,71 @@ jobs:
           name: frontend-coverage
           path: frontend/apps/web/coverage
 
-      - name: Download backend coverage
+      - name: Download backend coverage data
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: backend-coverage
+          pattern: backend-coverage-*
           path: backend
+          merge-multiple: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install diff-cover
-        run: pip install diff-cover
+      - name: Install coverage tooling
+        run: pip install 'coverage[toml]' diff-cover
 
-      - name: Compute diff coverage
-        continue-on-error: true # report-only; never block the PR
+      - name: Combine backend coverage
+        # relative_files=true (backend/pyproject.toml) is what lets data files
+        # from two runners merge; paths are stored relative to backend/.
+        working-directory: backend
+        run: |
+          shopt -s nullglob
+          data=(.coverage.*)
+          if [ ${#data[@]} -gt 0 ]; then
+            coverage combine "${data[@]}"
+            coverage xml
+            coverage html
+          else
+            echo "::warning::no backend coverage data downloaded"
+          fi
+
+      - name: Upload combined backend coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.xml
+            backend/htmlcov
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Report test-count delta
         env:
           BASE: ${{ github.base_ref }}
         run: |
           git fetch --no-tags origin "$BASE"
+          added=$(git diff "origin/$BASE"...HEAD -- 'backend/tests/**' | grep -cE '^\+\s*(async )?def test_' || true)
+          removed=$(git diff "origin/$BASE"...HEAD -- 'backend/tests/**' | grep -cE '^-\s*(async )?def test_' || true)
+          files_added=$(git diff --name-status "origin/$BASE"...HEAD -- 'backend/tests/**' | grep -c '^A' || true)
+          files_removed=$(git diff --name-status "origin/$BASE"...HEAD -- 'backend/tests/**' | grep -c '^D' || true)
+          {
+            echo "### Backend test delta"
+            echo ""
+            echo "Test functions: +${added} / -${removed} — test files: +${files_added} / -${files_removed}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Compute diff coverage
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
           # diff-cover matches the git diff (repo-root-relative paths) against each
           # coverage report. The reports use package-relative paths, so rewrite them
           # to repo-root-relative, then emit JSON for the comment step to render.
+          # Frontend is report-only (--fail-under 0); backend BLOCKS below 80.
           if [ -f frontend/apps/web/coverage/lcov.info ]; then
             sed 's|^SF:|SF:frontend/apps/web/|' frontend/apps/web/coverage/lcov.info > fe.lcov
             diff-cover fe.lcov --compare-branch "origin/$BASE" --fail-under 0 --format json:fe.json || true
@@ -616,7 +758,7 @@ jobs:
             sed -e 's|<source>.*</source>|<source>.</source>|' \
                 -e 's|filename="|filename="backend/src/eneo/|g' \
                 backend/coverage.xml > be.xml
-            diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 0 --format json:be.json || true
+            diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 80 --format json:be.json
           fi
 
       - name: Write diff coverage summary
@@ -697,7 +839,9 @@ jobs:
       - changes
       - branch-policy
       - backend-quality
-      - backend-tests
+      - backend-unit
+      - backend-integration
+      - coverage-diff
       - script-tests
       - route-metadata
       - no-intric
@@ -713,7 +857,9 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           BRANCH_POLICY_RESULT: ${{ needs.branch-policy.result }}
           BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
-          BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
+          BACKEND_UNIT_RESULT: ${{ needs.backend-unit.result }}
+          BACKEND_INTEGRATION_RESULT: ${{ needs.backend-integration.result }}
+          COVERAGE_DIFF_RESULT: ${{ needs.coverage-diff.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
           NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
@@ -743,7 +889,9 @@ jobs:
           check_result "Change scope" "$CHANGES_RESULT"
           check_result "Branch policy" "$BRANCH_POLICY_RESULT"
           check_result "Backend quality" "$BACKEND_QUALITY_RESULT"
-          check_result "Backend tests" "$BACKEND_TESTS_RESULT"
+          check_result "Backend unit tests" "$BACKEND_UNIT_RESULT"
+          check_result "Backend integration tests" "$BACKEND_INTEGRATION_RESULT"
+          check_result "Coverage diff" "$COVERAGE_DIFF_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
           check_result "No intric references" "$NO_INTRIC_RESULT"

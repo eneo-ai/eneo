@@ -1,0 +1,100 @@
+name: Migration tests
+
+# The migration_isolation suite (Alembic downgrade/upgrade round-trips, one
+# Postgres container per test file) is excluded from default pytest runs via
+# addopts. It runs here: on any change to migrations or the suite itself, and
+# on a weekly cron so drift can't hide between migration PRs.
+on:
+  push:
+    branches:
+      - develop
+      - 'release/**'
+    paths:
+      - 'backend/alembic/**'
+      - 'backend/tests/integration/migrations/**'
+  pull_request:
+    branches:
+      - develop
+      - 'release/**'
+    paths:
+      - 'backend/alembic/**'
+      - 'backend/tests/integration/migrations/**'
+  schedule:
+    # Mondays 04:12 UTC
+    - cron: '12 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  POSTGRES_USER: placeholder
+  POSTGRES_HOST: placeholder
+  POSTGRES_PASSWORD: placeholder
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: placeholder
+  REDIS_HOST: localhost
+  REDIS_PORT: 6379
+  MAX_IN_QUESTION: 1
+  API_PREFIX: /api/v1
+  API_KEY_LENGTH: 64
+  API_KEY_HEADER_NAME: X-API-Key
+  JWT_AUDIENCE: test
+  JWT_ISSUER: test
+  JWT_EXPIRY_TIME: 3600
+  JWT_ALGORITHM: HS256
+  JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
+  JWT_TOKEN_PREFIX: Bearer
+  URL_SIGNING_KEY: test_key
+  ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
+  OPENAI_API_KEY: test-api-key
+
+jobs:
+  migration-tests:
+    name: Alembic round-trips
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        # uv downloads a prebuilt CPython from GitHub releases; that CDN
+        # occasionally returns 504s. Retry with backoff so a transient
+        # blip doesn't fail the whole run.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
+
+      - name: Install dependencies
+        run: uv sync --python 3.11 --frozen --all-groups
+
+      - name: Run migration isolation tests
+        # Serial on purpose: each file boots its own Postgres container and
+        # walks the schema down and back up.
+        run: >-
+          uv run pytest -v -m migration_isolation
+          --durations=25 --durations-min=1.0
+          tests/integration/migrations/
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock

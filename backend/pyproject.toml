@@ -130,6 +130,9 @@ indent-style = "space"
 [tool.coverage.run]
 source = ["src/eneo"]
 branch = true
+# Paths are stored relative to backend/ so .coverage data files produced on
+# different CI runners (unit + integration jobs) can be combined.
+relative_files = true
 omit = [
     "*/tests/*",
     "*/migrations/*",
