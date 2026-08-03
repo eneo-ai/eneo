@@ -88,7 +88,17 @@ def resolve_source_chunk_config(
     The model's size ceiling is applied first, so an overlap is judged against the
     size that will really be used. Anything that cannot be honoured raises instead of
     being adjusted later, and ``None`` is preserved as "use the platform default".
+
+    A fully defaulted source is exempt: it delegates the whole pair to the deployment,
+    and the env-configured defaults were never subject to the per-source ceiling —
+    the splitter has always accepted any overlap up to the size. Judging them here
+    made a deployment with CHUNK_OVERLAP above 25% of CHUNK_SIZE unable to create
+    websites or save a default-configured source at all, while its ingestion kept
+    using that very pair.
     """
+    if chunk_size is None and chunk_overlap is None:
+        return None, None
+
     if chunk_size is not None:
         if chunk_size < MIN_CHUNK_SIZE:
             raise BadRequestException(

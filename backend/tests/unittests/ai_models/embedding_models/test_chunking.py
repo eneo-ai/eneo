@@ -253,6 +253,36 @@ class TestSourceChunkConfig:
             chunk_size=None, chunk_overlap=None, max_input=8191
         ) == (None, None)
 
+    def test_a_fully_defaulted_source_is_exempt_from_the_ceiling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # A deployment may configure CHUNK_OVERLAP above 25% of CHUNK_SIZE — the
+        # splitter has always accepted it, and develop feeds it straight through.
+        # A source that delegates to those defaults must not be refused for them:
+        # judging the pair here made such a deployment unable to create websites
+        # or save a default-configured source after upgrading.
+        monkeypatch.setattr(
+            chunking, "settings", ChunkSettings(chunk_size=200, chunk_overlap=100)
+        )
+
+        assert resolve_source_chunk_config(
+            chunk_size=None, chunk_overlap=None, max_input=None
+        ) == (None, None)
+
+    def test_explicit_choices_are_still_governed_under_permissive_defaults(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # The exemption covers delegation, not choices: asking for the same 200/100
+        # pair explicitly is a per-source decision and stays inside the policy.
+        monkeypatch.setattr(
+            chunking, "settings", ChunkSettings(chunk_size=200, chunk_overlap=100)
+        )
+
+        with pytest.raises(BadRequestException, match="must not exceed"):
+            resolve_source_chunk_config(
+                chunk_size=200, chunk_overlap=100, max_input=None
+            )
+
     def test_an_explicit_overlap_is_judged_against_the_default_size(
         self, platform_defaults: ChunkSettings
     ):
