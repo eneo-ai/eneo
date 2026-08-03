@@ -238,16 +238,14 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
             expected_type=ConfirmRequirements,
         ),
         TurnDecisionCase(
-            id="commit-grade document drift asks report disposition before revision",
+            id="commit-grade document drift revises before later discovery",
             state=_committed_state_with_commit_grade_output_drift(),
-            expected_type=AskCanonicalQuestion,
-            expected_slot_name="report_disposition",
+            expected_type=ReviseArchitecture,
         ),
         TurnDecisionCase(
-            id="weak architecture drift reopens canonical output question",
+            id="weak architecture drift cannot reopen confirmed architecture",
             state=_committed_state_with_weak_output_drift(),
-            expected_type=AskCanonicalQuestion,
-            expected_slot_name="terminal_output",
+            expected_type=GenerateProposal,
             requirements_confirmed=True,
         ),
         TurnDecisionCase(

@@ -419,6 +419,12 @@ def _make_committed_planning_state() -> PlanningState:
             source="requirements_summary",
             confidence="high",
         ),
+        "post_processing_goal": ResolvedSlot(
+            name="post_processing_goal",
+            value="summarize_or_overview",
+            source="requirements_summary",
+            confidence="high",
+        ),
     }
     architecture_draft = derive_architecture_commit_draft(state)
     assert architecture_draft is not None
@@ -2179,78 +2185,6 @@ class TestRevisePlan:
 
 class TestSendMessageStructuredQuestion:
     @pytest.mark.anyio
-    async def test_spent_budget_emits_required_report_disposition_question(self):
-        user = _make_user()
-        repo = AsyncMock()
-        session = _make_session(
-            status=SessionStatus.CHATTING,
-            tenant_id=user.tenant_id,
-            conversation=[
-                ConversationMessage(
-                    role="user",
-                    content="Jag vill bygga ett flöde som analyserar dokument.",
-                    metadata={"ui_language": "sv"},
-                ),
-                _requirement_answer_message(
-                    question_id="processing_scope",
-                    value="single_case",
-                    content="Ett dokument åt gången",
-                ),
-                _requirement_answer_message(
-                    question_id="primary_runtime_input",
-                    value="documents",
-                    content="Dokument",
-                ),
-                _requirement_answer_message(
-                    question_id="document_material_scope",
-                    value="multiple_documents_case",
-                    content="Flera relaterade dokument för samma ärende",
-                ),
-                _requirement_answer_message(
-                    question_id="terminal_output",
-                    value="docx_document",
-                    content="DOCX-dokument",
-                ),
-                _requirement_answer_message(
-                    question_id="docx_output_mode",
-                    value="generated_docx",
-                    content="Genererad DOCX utan mall",
-                ),
-                _requirement_answer_message(
-                    question_id="runtime_metadata_fields",
-                    value="basic_runtime_metadata",
-                    content="Grundläggande metadata",
-                ),
-            ],
-        )
-        repo.get_session.return_value = session
-        service = _make_service(user=user, repo=repo)
-
-        with patch(
-            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
-            new=AsyncMock(return_value=None),
-        ):
-            events = await _collect_events(
-                service.send_message(
-                    session_id=session.id,
-                    client_turn_id=_TEST_CLIENT_TURN_ID,
-                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("Fortsätt"),
-                    message="Fortsätt",
-                    question_answer=None,
-                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                )
-            )
-
-        question_events = [
-            event for event in events if event["event"] == SSE_EVENT_QUESTION
-        ]
-        assert len(question_events) == 1
-        assert json.loads(question_events[0]["data"])["question_id"] == (
-            "report_disposition"
-        )
-
-    @pytest.mark.anyio
     async def test_spent_budget_runtime_default_reaches_requirements_confirmation(self):
         user = _make_user()
         repo = AsyncMock()
@@ -2337,14 +2271,14 @@ class TestSendMessageStructuredQuestion:
         assert expected_assumption in persisted_summary["assumptions"]
 
     @pytest.mark.anyio
-    async def test_duplicate_output_question_alias_allows_report_disposition_followup(
+    async def test_duplicate_output_question_alias_is_suppressed_without_fallback(
         self,
     ):
         """A duplicate terminal-output question is suppressed.
 
-        Generated multi-source document reports still get the server-owned
-        report-disposition follow-up because it changes the final document
-        contract, not just polish.
+        Discovery owns the next consequential question. The model-question path
+        must not reconstruct a different framework question after suppressing a
+        duplicate.
         """
         user = _make_user()
         repo = AsyncMock()
@@ -2474,10 +2408,7 @@ class TestSendMessageStructuredQuestion:
             )
 
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
-        assert len(question_events) == 1
-        assert json.loads(question_events[0]["data"])["question_id"] == (
-            "report_disposition"
-        )
+        assert question_events == []
 
     @pytest.mark.anyio
     async def test_unsupported_model_question_is_replaced_by_framework_question(self):
