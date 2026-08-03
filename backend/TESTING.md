@@ -100,6 +100,12 @@ no-op, and the guard rejects it.
   boots.
 - In devcontainer mode the compose-provided `db`/`redis` are reused instead of
   testcontainers; each xdist worker gets its own Redis DB index.
+- Digest-pinned images (`pgvector/pgvector:pg13@sha256:...`,
+  `chrislusf/seaweedfs@sha256:...` in the object_content conftest) must be
+  pulled **on the host** before the first run: image pulls from inside the
+  devcontainer fail on the dev-containers credential helper, and a tag-pulled
+  image does not satisfy a digest reference. Symptom: every object_content
+  test errors with `ImageNotFound`/`404 ... containers/create`.
 
 Warnings are errors (`filterwarnings = error`). If you must ignore one, add a
 structured entry to `tests/warning_filters.py`; each entry declares a reason
