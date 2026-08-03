@@ -93,6 +93,7 @@ def _valid_template(
     family: DiscoveryFamily = "input_shape",
     priority_base: int = 20,
     impact: DiscoveryImpact = "architecture",
+    allow_custom: bool = False,
 ) -> QuestionTemplate:
     return QuestionTemplate(
         id=template_id,
@@ -106,6 +107,7 @@ def _valid_template(
         family=family,
         priority_base=priority_base,
         impact=impact,
+        allow_custom=allow_custom,
     )
 
 
@@ -189,6 +191,10 @@ class TestQuestionTemplate:
         assert template.id == "primary_runtime_input"
         with pytest.raises(FrozenInstanceError):
             template.id = "mutated"  # type: ignore[misc]
+
+    def test_custom_answers_are_opt_in(self) -> None:
+        assert _valid_template().allow_custom is False
+        assert _valid_template(allow_custom=True).allow_custom is True
 
     def test_template_rejects_empty_id(self) -> None:
         with pytest.raises(ValueError, match="id"):
@@ -817,7 +823,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("comparison_scope", "en"): {
@@ -844,7 +850,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("primary_runtime_input", "sv"): {
@@ -878,7 +884,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("primary_runtime_input", "en"): {
@@ -907,7 +913,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("mapped_file_limit", "sv"): {
@@ -970,7 +976,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("terminal_output", "en"): {
@@ -1003,7 +1009,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("docx_output_mode", "sv"): {
@@ -1024,7 +1030,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("docx_output_mode", "en"): {
@@ -1045,7 +1051,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("pdf_generation_mode", "sv"): {
@@ -1067,7 +1073,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("pdf_generation_mode", "en"): {
@@ -1089,7 +1095,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("document_material_scope", "sv"): {
@@ -1116,7 +1122,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("document_material_scope", "en"): {
@@ -1143,7 +1149,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("report_disposition", "sv"): {
@@ -1170,7 +1176,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("report_disposition", "en"): {
@@ -1197,7 +1203,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("post_processing_goal", "sv"): {
@@ -1254,7 +1260,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("post_processing_goal", "en"): {
@@ -1311,7 +1317,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("structured_io_contract", "sv"): {
@@ -1356,7 +1362,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("structured_io_contract", "en"): {
@@ -1401,7 +1407,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("runtime_metadata_fields", "sv"): {
@@ -1429,7 +1435,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
     ("runtime_metadata_fields", "en"): {
@@ -1457,7 +1463,7 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
             ),
         ),
         "selection_mode": "single",
-        "allow_custom": True,
+        "allow_custom": False,
         "exposure": "user_requirement",
     },
 }

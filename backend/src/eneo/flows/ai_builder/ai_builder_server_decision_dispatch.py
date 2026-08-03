@@ -146,6 +146,7 @@ async def _dispatch_question(
         question_id,
         request.conversation,
         flow=request.flow,
+        planning_state=request.planning_state,
     )
 
     telemetry = _server_turn_telemetry(

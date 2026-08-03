@@ -75,6 +75,57 @@ def test_explicit_ui_answer_is_the_only_source_of_question_answer_metadata() -> 
     }
 
 
+def test_fixed_choice_catalog_question_rejects_custom_answer() -> None:
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        prepare_user_question_metadata(
+            conversation=_pending_question_conversation(),
+            message="A spreadsheet",
+            question_answer={
+                "kind": "structured_question_answer",
+                "question_id": "terminal_output",
+                "custom_value": "spreadsheet",
+            },
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+    assert exc_info.value.context == {"reason": "unsupported_question_value"}
+
+
+def test_mapped_file_limit_accepts_catalog_supported_custom_answer() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_pending_question_conversation("mapped_file_limit"),
+        message="3",
+        question_answer={
+            "kind": "structured_question_answer",
+            "question_id": "mapped_file_limit",
+            "custom_value": "3",
+        },
+    )
+
+    assert prepared.metadata == {
+        "question_answer": {
+            "question_id": "mapped_file_limit",
+            "custom_value": "3",
+        }
+    }
+
+
+def test_non_catalog_fixed_question_rejects_custom_answer() -> None:
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        prepare_user_question_metadata(
+            conversation=_pending_question_conversation("processing_scope"),
+            message="Process each department separately",
+            question_answer={
+                "kind": "structured_question_answer",
+                "question_id": "processing_scope",
+                "custom_value": "separate_departments",
+            },
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+    assert exc_info.value.context == {"reason": "unsupported_question_value"}
+
+
 def test_invalid_schema_direction_selection_is_rejected_before_persistence() -> None:
     first = "a" * 64
     second = "b" * 64

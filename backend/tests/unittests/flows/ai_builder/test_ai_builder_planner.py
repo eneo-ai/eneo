@@ -475,7 +475,6 @@ def _server_output_prepared() -> ServerOutputPrepared:
         slot_classification_metadata=None,
         server_decision=AskCanonicalQuestion(
             slot_name="terminal_output",
-            prompt="What should the flow produce?",
         ),
         discovery_analysis=DiscoveryAnalysis(issues=()),
         planning_state=PlanningState.empty(),

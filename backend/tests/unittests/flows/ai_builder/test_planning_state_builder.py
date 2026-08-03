@@ -2470,6 +2470,86 @@ class TestModelSlotMerge:
         assert slot.value == "generated_docx"
         assert slot.source == "policy_default"
 
+    def test_policy_defaults_prune_weak_slots_after_input_changes_to_audio(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="heuristic",
+            ),
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="structured_text",
+                source="structured_answer",
+            ),
+            "document_material_scope": _slot(
+                name="document_material_scope",
+                value="flexible_document_case",
+                source="policy_default",
+            ),
+            "comparison_scope": _slot(
+                name="comparison_scope",
+                value="same_run_compare",
+                source="heuristic",
+            ),
+            "report_disposition": _slot(
+                name="report_disposition",
+                value="both",
+                source="heuristic",
+            ),
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(_classified("primary_runtime_input", "audio", "high"),)
+            ),
+            prompt_hash="c" * 64,
+            freeform_text="The runtime input is an audio recording.",
+        )
+        apply_policy_defaults_from_resolved_slots(
+            state,
+            freeform_text="The runtime input is an audio recording.",
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+        assert "document_material_scope" not in state.resolved_slots
+        assert "comparison_scope" not in state.resolved_slots
+        assert "report_disposition" not in state.resolved_slots
+
+    def test_rebuild_prunes_explicit_dependent_slots_after_input_changes(
+        self,
+    ) -> None:
+        def answer(question_id: str, value: str) -> ConversationMessage:
+            return ConversationMessage(
+                role="user",
+                content=value,
+                metadata={
+                    "question_answer": {
+                        "question_id": question_id,
+                        "selected_option_id": value,
+                        "selected_value": value,
+                    }
+                },
+            )
+
+        state = build_planning_state_from_conversation(
+            [
+                answer("primary_runtime_input", "documents"),
+                answer("terminal_output", "structured_text"),
+                answer("document_material_scope", "multiple_documents_case"),
+                answer("comparison_scope", "same_run_compare"),
+                answer("primary_runtime_input", "audio"),
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+        assert "document_material_scope" not in state.resolved_slots
+        assert "comparison_scope" not in state.resolved_slots
+
     def test_policy_defaults_do_not_mask_explicit_docx_template_mode(self) -> None:
         state = _state()
         state.resolved_slots = {

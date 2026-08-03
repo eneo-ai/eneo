@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
-    _ARCHITECTURE_IMPACT_SLOT_NAMES,
     build_planner_action_policy,
 )
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
@@ -21,9 +20,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
-    KNOWN_REQUIREMENT_SLOT_NAMES,
-)
 from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
@@ -31,7 +27,6 @@ from eneo.flows.ai_builder.planning_state import (
     SlotSource,
 )
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
-from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 
 
 def _slot_value(slot_name: str) -> str:
@@ -131,7 +126,7 @@ def test_policy_asks_for_model_medium_core_slot_before_commit() -> None:
     )
 
 
-def test_policy_blocks_model_medium_pattern_required_slot() -> None:
+def test_policy_asks_weak_pattern_slot_only_when_discovery_selects_it() -> None:
     state = PlanningState.empty()
     state.resolved_slots["primary_runtime_input"] = _slot(
         "primary_runtime_input",
@@ -150,7 +145,7 @@ def test_policy_blocks_model_medium_pattern_required_slot() -> None:
 
     policy = build_planner_action_policy(
         session_state=state,
-        selected_discovery_question_ids=(),
+        selected_discovery_question_ids=("document_material_scope",),
     )
 
     assert policy.allowed_action_kinds == ("ask_question",)
@@ -254,7 +249,7 @@ def test_policy_prioritizes_missing_core_slots_before_discovery_targets() -> Non
     )
 
 
-def test_policy_asks_for_inferred_no_metadata_before_commit() -> None:
+def test_policy_does_not_force_inferred_metadata_default_into_questions() -> None:
     state = _state_with_resolved_slots(
         "primary_runtime_input",
         "terminal_output",
@@ -272,19 +267,11 @@ def test_policy_asks_for_inferred_no_metadata_before_commit() -> None:
         selected_discovery_question_ids=(),
     )
 
-    assert policy.allowed_action_kinds == ("ask_question",)
-    assert policy.allowed_ask_question_targets == ("runtime_metadata_fields",)
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
 
 
-def test_every_architecture_impact_slot_is_an_askable_user_requirement() -> None:
-    assert _ARCHITECTURE_IMPACT_SLOT_NAMES <= KNOWN_REQUIREMENT_SLOT_NAMES
-    assert all(
-        QUESTION_CATALOG[slot_name].exposure == "user_requirement"
-        for slot_name in _ARCHITECTURE_IMPACT_SLOT_NAMES
-    )
-
-
-def test_policy_reopens_heuristic_comparison_scope_before_commit() -> None:
+def test_policy_does_not_force_heuristic_comparison_scope_into_questions() -> None:
     state = _state_with_resolved_slots(
         "primary_runtime_input",
         "terminal_output",
@@ -302,8 +289,47 @@ def test_policy_reopens_heuristic_comparison_scope_before_commit() -> None:
         selected_discovery_question_ids=(),
     )
 
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
+def test_policy_keeps_selected_comparison_question_askable() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+    )
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope",
+        "same_run_compare",
+        source="heuristic",
+        confidence="high",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=("comparison_scope",),
+    )
+
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == ("comparison_scope",)
+
+
+def test_policy_prioritizes_missing_core_without_reordering_discovery() -> None:
+    policy = build_planner_action_policy(
+        session_state=PlanningState.empty(),
+        selected_discovery_question_ids=(
+            "runtime_metadata_fields",
+            "post_processing_goal",
+        ),
+    )
+
+    assert policy.allowed_ask_question_targets == (
+        "primary_runtime_input",
+        "terminal_output",
+        "runtime_metadata_fields",
+        "post_processing_goal",
+    )
 
 
 @pytest.mark.parametrize("primary_runtime_input", ["audio", "text", "json"])
@@ -364,7 +390,7 @@ def test_policy_ignores_weak_report_disposition_for_non_document_input(
     assert policy.allowed_ask_question_targets == ()
 
 
-def test_policy_asks_for_policy_default_docx_mode_before_commit() -> None:
+def test_policy_does_not_force_policy_default_docx_mode_into_questions() -> None:
     state = _state_with_resolved_slots(
         "primary_runtime_input",
         "document_material_scope",
@@ -385,8 +411,8 @@ def test_policy_asks_for_policy_default_docx_mode_before_commit() -> None:
         selected_discovery_question_ids=(),
     )
 
-    assert policy.allowed_action_kinds == ("ask_question",)
-    assert policy.allowed_ask_question_targets == ("docx_output_mode",)
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
 
 
 def test_policy_allows_commit_after_core_slots_and_selected_questions_resolve() -> None:
@@ -403,7 +429,7 @@ def test_policy_allows_commit_after_core_slots_and_selected_questions_resolve() 
     assert policy.allowed_ask_question_targets == ()
 
 
-def test_policy_blocks_commit_when_derived_pattern_requires_unresolved_slot() -> None:
+def test_policy_does_not_use_pattern_metadata_as_question_selection() -> None:
     policy = build_planner_action_policy(
         session_state=_state_with_resolved_slots(
             "primary_runtime_input",
@@ -412,11 +438,11 @@ def test_policy_blocks_commit_when_derived_pattern_requires_unresolved_slot() ->
         selected_discovery_question_ids=(),
     )
 
-    assert "commit_architecture" not in policy.allowed_action_kinds
-    assert policy.allowed_ask_question_targets == ("document_material_scope",)
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
 
 
-def test_policy_asks_report_disposition_for_multi_source_pdf_report() -> None:
+def test_policy_asks_selected_report_disposition_for_multi_source_pdf_report() -> None:
     state = _state_with_resolved_slots("primary_runtime_input")
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
@@ -433,7 +459,7 @@ def test_policy_asks_report_disposition_for_multi_source_pdf_report() -> None:
 
     policy = build_planner_action_policy(
         session_state=state,
-        selected_discovery_question_ids=(),
+        selected_discovery_question_ids=("report_disposition",),
     )
 
     assert policy.allowed_action_kinds == ("ask_question",)
@@ -642,6 +668,31 @@ def test_policy_allows_requirements_confirmation_after_architecture_commit() -> 
     assert policy.allowed_action_kinds == ("confirm_requirements",)
 
 
+def test_policy_keeps_discovery_selected_question_after_architecture_commit() -> None:
+    policy = build_planner_action_policy(
+        session_state=_state_with_architecture_commit(),
+        selected_discovery_question_ids=("runtime_metadata_fields",),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("runtime_metadata_fields",)
+
+
+def test_policy_keeps_renderable_non_slot_discovery_question() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=("flow_input_architecture",),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("flow_input_architecture",)
+
+
 def test_policy_revises_committed_architecture_when_commit_grade_slots_drift() -> None:
     state = _state_with_architecture_commit()
     state.resolved_slots["terminal_output"] = _slot(
@@ -709,7 +760,7 @@ def test_policy_revises_commit_when_report_disposition_changes() -> None:
     assert policy.allowed_ask_question_targets == ()
 
 
-def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -> None:
+def test_policy_keeps_pinned_commit_when_only_weak_slot_conflicts() -> None:
     state = _state_with_architecture_commit()
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
@@ -724,8 +775,8 @@ def test_policy_reopens_question_when_pinned_commit_conflicts_with_weak_slot() -
         requirements_confirmed=True,
     )
 
-    assert policy.allowed_action_kinds == ("ask_question",)
-    assert policy.allowed_ask_question_targets == ("terminal_output",)
+    assert policy.allowed_action_kinds == ("propose_plan",)
+    assert policy.allowed_ask_question_targets == ()
 
 
 def test_policy_ignores_stale_weak_report_disposition_after_commit() -> None:

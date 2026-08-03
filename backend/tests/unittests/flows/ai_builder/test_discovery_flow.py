@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -16,10 +15,17 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
     build_discovery_followup_text,
+    build_registry_question_followup,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_runtime_discovery_context,
@@ -67,20 +73,17 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
 from eneo.flows.ai_builder.planning_state import (
-    ArchitectureCommit,
     FileRoleEvidence,
     MappedFileLimit,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
     SlotSource,
-    StepTriple,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
-from eneo.flows.enums import FlowAuthoringInputType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -93,38 +96,47 @@ def _classifier_evidence(quote: str) -> tuple[ClassifiedEvidence, ...]:
 
 def test_mapped_file_limit_question_displays_current_policy_ceiling() -> None:
     planning_state = PlanningState.empty()
-    planning_state.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type=FlowAuthoringInputType.DOCUMENT,
-                output_type="json",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_document"],
-        committed_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
-        architecture_hash="a" * 64,
-    )
+    planning_state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:primary_runtime_input"],
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_json",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:terminal_output"],
+        ),
+        "document_material_scope": ResolvedSlot(
+            name="document_material_scope",
+            value="multiple_documents_case",
+            source="structured_answer",
+            confidence="high",
+            evidence=["question_answer:document_material_scope"],
+        ),
+    }
+    draft = derive_architecture_commit_draft(planning_state)
+    assert draft is not None
+    planning_state.architecture_commit = finalize_architecture_commit(draft)
     planning_state.mapped_file_limit = MappedFileLimit(
         proposed_value=8,
         diagnostic="confirmation_required",
     )
 
-    analysis = analyze_discovery(
+    followup = build_registry_question_followup(
+        "mapped_file_limit",
         [ConversationMessage(role="user", content="Process documents")],
         planning_state=planning_state,
     )
 
-    issue = next(
-        issue
-        for issue in analysis.issues
-        if issue.issue_id == "mapped_file_limit_confirmation_required"
-    )
-    assert issue.suggestion is not None
+    assert followup is not None
     organization_option = next(
         option
-        for option in issue.suggestion.options
+        for option in followup.question_data.options
         if option.id == "organization_limit"
     )
     assert organization_option.label == "Use organization limit (8)"
@@ -3094,7 +3106,6 @@ class TestPlannerDiscoveryQuestionDispatch:
         ]
         decision = AskCanonicalQuestion(
             slot_name="structured_analysis_need",
-            prompt="Should the flow use structured analysis?",
         )
 
         result = await dispatch_server_decision(

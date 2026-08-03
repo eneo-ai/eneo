@@ -57,7 +57,12 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
 )
-from eneo.flows.ai_builder.question_catalog import Locale, render_question
+from eneo.flows.ai_builder.question_catalog import (
+    QUESTION_CATALOG,
+    Locale,
+    legal_slot_values,
+    render_question,
+)
 
 _MAX_CONFIRMATION_ATTACHMENT_DETAILS = 10
 _MAX_CONFIRMATION_EXAMPLE_HEADINGS = 8
@@ -69,7 +74,6 @@ _ATTACHMENT_ASSUMPTION_PREFIX_SV = "Bilageunderlag – "
 @dataclass(frozen=True, slots=True)
 class AskCanonicalQuestion:
     slot_name: str
-    prompt: str
     question: BackendQuestion | None = None
 
 
@@ -130,7 +134,6 @@ def resolve_turn_control(
         return BuilderTurnControl(
             decision=AskCanonicalQuestion(
                 slot_name="schema_direction",
-                prompt=question.assistant_text,
                 question=question,
             )
         )
@@ -153,7 +156,6 @@ def resolve_turn_control(
             session_state=session_state,
             requirements_payload=requirements_payload,
             attachment_evidence_fingerprint=attachment_evidence_fingerprint,
-            ui_language=ui_language,
         ),
     )
 
@@ -220,15 +222,11 @@ def _decision_from_policy(
     session_state: PlanningState,
     requirements_payload: RequirementsSummaryPayload,
     attachment_evidence_fingerprint: str,
-    ui_language: str | None,
 ) -> BuilderTurnDecision:
     if "ask_question" in action_policy.allowed_action_kinds:
         target = _first(action_policy.allowed_ask_question_targets)
         if target is not None:
-            return AskCanonicalQuestion(
-                slot_name=target,
-                prompt=_question_prompt(target, ui_language),
-            )
+            return AskCanonicalQuestion(slot_name=target)
 
     if (
         "commit_architecture" in action_policy.allowed_action_kinds
@@ -256,16 +254,6 @@ def _decision_from_policy(
         "No Builder turn decision can be derived from action policy "
         f"{action_policy.allowed_action_kinds!r}"
     )
-
-
-def _question_prompt(target: str, ui_language: str | None) -> str:
-    rendered = render_question(target, _locale(ui_language))
-    option_lines = "\n".join(
-        f"- {option.label}: {option.description}" for option in rendered.options
-    )
-    if not option_lines:
-        return rendered.question
-    return f"{rendered.question}\n\n{option_lines}"
 
 
 def _schema_direction_question(
@@ -409,8 +397,9 @@ def _confirm_requirements_payload(
                 selected_value=resolved[slot_name].value,
             )
             for slot_name in sorted(resolved)
-            if resolved[slot_name].is_commit_grade
+            if slot_name in QUESTION_CATALOG
             and resolved[slot_name].source != "attachment_structure"
+            and resolved[slot_name].value in legal_slot_values(slot_name)
         ],
         assumptions=[
             *[

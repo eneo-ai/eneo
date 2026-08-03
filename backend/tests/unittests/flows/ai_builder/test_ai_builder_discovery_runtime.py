@@ -15,6 +15,12 @@ from eneo.completion_models.infrastructure.completion_service import (
 )
 from eneo.files.file_models import FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_MAX_ATTACHMENTS,
     AIBuilderAttachmentContext,
@@ -68,9 +74,11 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
     FileRoleEvidence,
+    MappedFileLimit,
     PlanningState,
     ResolvedSlot,
 )
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 
 
 def _make_response(content: str) -> MagicMock:
@@ -129,6 +137,74 @@ def _resolved_state() -> PlanningState:
             ),
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_discovery_analyzes_carried_commit_before_mapped_limit_gate() -> None:
+    persisted = PlanningState.empty()
+    persisted.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "structured_text"),
+        "document_material_scope": _slot(
+            "document_material_scope",
+            "multiple_documents_case",
+        ),
+    }
+    draft = derive_architecture_commit_draft(persisted)
+    assert draft is not None
+    persisted.architecture_commit = finalize_architecture_commit(draft)
+    persisted.mapped_file_limit = MappedFileLimit(
+        proposed_value=8,
+        diagnostic="confirmation_required",
+    )
+
+    result = await build_discovery_runtime_result(
+        [
+            ConversationMessage(
+                role="user",
+                content="documents",
+                metadata={
+                    "question_answer": {
+                        "question_id": "primary_runtime_input",
+                        "selected_option_id": "documents",
+                        "selected_value": "documents",
+                    }
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="structured text",
+                metadata={
+                    "question_answer": {
+                        "question_id": "terminal_output",
+                        "selected_option_id": "structured_text",
+                        "selected_value": "structured_text",
+                    }
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="multiple documents",
+                metadata={
+                    "question_answer": {
+                        "question_id": "document_material_scope",
+                        "selected_option_id": "multiple_documents_case",
+                        "selected_value": "multiple_documents_case",
+                    }
+                },
+            ),
+        ],
+        tenant_id=uuid4(),
+        allow_classification=False,
+        mapped_execution_policy=FlowMappedExecutionPolicy(
+            max_provider_calls_per_mapped_step=8,
+        ),
+        persisted_planning_state=persisted,
+        attached_file_ids=frozenset(),
+    )
+
+    assert result.planning_state.architecture_commit == persisted.architecture_commit
+    assert "mapped_file_limit" in result.discovery_analysis.selected_question_ids
 
 
 def test_classifier_schema_direction_preserves_shape_and_assignment_evidence() -> None:

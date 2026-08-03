@@ -68,6 +68,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     apply_model_blocked_slots,
     apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
+    carry_forward_persisted_planner_state,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
 )
@@ -673,6 +674,8 @@ async def build_discovery_runtime_result(
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
+    persisted_planning_state: PlanningState | None = None,
+    attached_file_ids: Collection[UUID] = frozenset(),
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -687,6 +690,11 @@ async def build_discovery_runtime_result(
         before_provider_call=before_provider_call,
         mapped_execution_policy=mapped_execution_policy,
         prepared_schema_candidates=prepared_schema_candidates,
+    )
+    carry_forward_persisted_planner_state(
+        context.planning_state,
+        persisted_planning_state,
+        attached_file_ids=attached_file_ids,
     )
     analysis = analyze_discovery(
         conversation,
