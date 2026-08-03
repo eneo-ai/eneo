@@ -62,6 +62,16 @@ class ResolvedRequirementPayload(BaseModel):
     selected_value: str
 
 
+def _resolved_requirements_are_empty(
+    value: list[ResolvedRequirementPayload],
+) -> bool:
+    return not value
+
+
+def _empty_resolved_requirements() -> list[ResolvedRequirementPayload]:
+    return []
+
+
 class RequirementsSummaryPayload(BaseModel):
     requirements_version: str | None = None
     summary: str
@@ -71,9 +81,9 @@ class RequirementsSummaryPayload(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     manual_setup_notes: list[str] = Field(default_factory=list)
     resolved_requirements: list[ResolvedRequirementPayload] = Field(
-        default_factory=list,
+        default_factory=_empty_resolved_requirements,
         max_length=len(KNOWN_REQUIREMENT_SLOT_NAMES),
-        exclude_if=lambda value: not value,
+        exclude_if=_resolved_requirements_are_empty,
     )
 
     @field_validator("key_decisions", mode="after")
