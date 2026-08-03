@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
+    MappedFileLimit,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -249,6 +250,192 @@ async def test_outline_assembly_rejection_returns_validation_failure_code() -> N
     )
     assert result.feedback is not None
     assert "first semantic step" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_corrupt_report_context_fails_closed_without_model_repair() -> None:
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="pdf",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["text_to_artifact_report"],
+            aggregation_intent="aggregate",
+            report_disposition="both",
+        )
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        await process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Build a PDF report from the supplied text.",
+                )
+            ],
+            arguments={
+                "flow_name": "Corrupt report context",
+                "plan_rationale": "Write and render the report.",
+                "steps": [
+                    {
+                        "name": "Write report",
+                        "instructions": "Write the report from the supplied text.",
+                        "output_type": "text",
+                    }
+                ],
+            },
+            tool_call_id="call-corrupt-report-context",
+            available_model_refs=None,
+            available_kb_refs=None,
+            planning_state=state,
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_document_report_compose_topology_missing"
+    )
+
+
+@pytest.mark.asyncio
+async def test_unsupported_report_citations_fail_without_model_repair() -> None:
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="document",
+                    output_type="pdf",
+                    output_mode="render_verbatim",
+                )
+            ],
+            chosen_patterns=["document_to_pdf_report"],
+            aggregation_intent="linear",
+            report_disposition="both",
+        )
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        await process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Build a cited PDF report from each uploaded document.",
+                )
+            ],
+            arguments={
+                "flow_name": "Cited source report",
+                "plan_rationale": "Write and render the cited report.",
+                "steps": [
+                    {
+                        "name": "Write cited report",
+                        "instructions": "Write the report with citations.",
+                        "output_type": "text",
+                        "citations_requested": True,
+                    }
+                ],
+            },
+            tool_call_id="call-cited-report",
+            available_model_refs=None,
+            available_kb_refs=None,
+            planning_state=state,
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_document_report_citations_unsupported"
+    )
+
+
+@pytest.mark.asyncio
+async def test_conflicting_report_models_fail_without_model_repair() -> None:
+    state = PlanningState.empty()
+    state.mapped_file_limit = MappedFileLimit(
+        proposed_value=4,
+        accepted_value=4,
+        provenance="authored",
+    )
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="document",
+                    output_type="pdf",
+                    output_mode="render_verbatim",
+                )
+            ],
+            chosen_patterns=["document_to_pdf_report"],
+            aggregation_intent="linear",
+            report_disposition="synthesized_overview",
+        )
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        await process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="Use the selected models to build the source report.",
+                )
+            ],
+            arguments={
+                "flow_name": "Model-specific source report",
+                "plan_rationale": "Extract evidence and write the final report.",
+                "steps": [
+                    {
+                        "name": "Read source",
+                        "instructions": "Extract source evidence.",
+                        "output_type": "json",
+                        "output_fields": [
+                            {
+                                "name": "documents",
+                                "field_type": "array",
+                                "description": "Source evidence.",
+                                "item_fields": [
+                                    {
+                                        "name": "summary",
+                                        "field_type": "string",
+                                        "description": "Source summary.",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "name": "Write overview",
+                        "instructions": "Write the overview.",
+                        "output_type": "json",
+                        "model_ref": "model.overview",
+                        "output_fields": [
+                            {
+                                "name": "overall_conclusion",
+                                "field_type": "string",
+                                "description": "Overall conclusion.",
+                            }
+                        ],
+                    },
+                    {
+                        "name": "Compose report",
+                        "instructions": "Compose the final report.",
+                        "output_type": "text",
+                        "model_ref": "model.body",
+                    },
+                ],
+            },
+            tool_call_id="call-conflicting-report-models",
+            available_model_refs=None,
+            available_kb_refs=None,
+            planning_state=state,
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_document_report_model_ref_conflict"
+    )
 
 
 @pytest.mark.asyncio

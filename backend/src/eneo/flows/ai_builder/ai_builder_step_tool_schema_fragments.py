@@ -4,6 +4,7 @@ from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     MAX_STRUCTURED_FIELD_DEPTH,
+    STRUCTURED_FIELD_NAME_PATTERN,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
@@ -117,13 +118,19 @@ def _structured_field_schema(*, depth: int) -> dict[str, Any]:
         "properties": {
             "name": {
                 "type": "string",
+                "pattern": STRUCTURED_FIELD_NAME_PATTERN,
                 "description": (
                     "ASCII English JSON schema key, for example `summary` or "
                     "`date_or_year`. Put localized wording in the description."
                 ),
             },
             "field_type": {"type": "string", "enum": field_type_enum},
-            "description": {"type": "string"},
+            "description": {
+                "type": "string",
+                "description": (
+                    "Human-readable field meaning. Do not include template variables."
+                ),
+            },
             "required": {"type": "boolean"},
             "fields": (
                 False

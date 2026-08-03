@@ -15,9 +15,6 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from eneo.flows.ai_builder.ai_builder_assembly import (
-    try_compile_create_intent_with_assembly,
-)
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     CreateCompileContext,
     compile_create_intent_to_spec,
@@ -26,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     FlowInputFieldIntent,
+    ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
@@ -53,6 +51,7 @@ from eneo.flows.ai_builder.planning_state import (
     MappedFileLimit,
     PlanningSignal,
     PlanningState,
+    ReportDisposition,
     ResolvedSlot,
     SchemaResolution,
 )
@@ -438,7 +437,8 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
     assert compiled.steps[1].input_contract == compiled.steps[0].output_contract
     assert compiled.steps[1].input_contract != input_schema
     assert compiled.steps[1].output_contract == output_schema
-    assert validate_spec(compiled).valid
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
 
 
 def test_related_document_package_compiles_to_declared_json_contract() -> None:
@@ -968,82 +968,105 @@ def test_translated_obligation_survives_dropped_terminal_render_helper() -> None
     assert validate_spec(compiled).valid
 
 
-def test_missing_document_report_compose_topology_is_typed_architecture_failure() -> (
-    None
-):
+@pytest.mark.parametrize(
+    ("report_disposition", "expected_contract_fields"),
+    [
+        ("per_source_sections", {"source_sections"}),
+        ("synthesized_overview", {"report_title", "overall_overview"}),
+        (
+            "both",
+            {"source_sections", "report_title", "overall_overview"},
+        ),
+    ],
+)
+def test_committed_report_disposition_lowers_minimal_semantic_intent(
+    report_disposition: ReportDisposition,
+    expected_contract_fields: set[str],
+) -> None:
     intent = parse_create_flow_intent_arguments(
         {
-            "flow_name": "Broken report",
-            "plan_rationale": "No source-section topology can be derived.",
+            "flow_name": "Source report",
+            "plan_rationale": "Summarize the source material in the confirmed shape.",
             "steps": [
                 {
-                    "name": "Write report body",
-                    "instructions": "Write the report body.",
+                    "name": "Summarize findings",
+                    "instructions": (
+                        "Summarize the confirmed findings and identify open questions."
+                    ),
                     "output_type": "text",
                 }
             ],
         }
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        compile_create_intent_to_spec(
-            intent,
-            context=CreateCompileContext(
-                runtime_input_type=InputType.TEXT,
-                final_output_type=OutputType.PDF,
-                final_output_mode=OutputMode.RENDER_VERBATIM,
-                aggregation_intent=cast(AggregationIntent, "aggregate"),
-                report_disposition="both",
-            ),
-        )
-
-    assert exc_info.value.public_code == "architecture_materialization_failed"
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_document_report_compose_topology_missing"
-    )
-    assert "deterministic compose_text body writer" in exc_info.value.detail
-
-
-def test_assembly_fails_closed_when_document_report_compose_topology_is_missing() -> (
-    None
-):
-    intent = parse_create_flow_intent_arguments(
-        {
-            "flow_name": "Broken report",
-            "plan_rationale": "No source-section topology can be derived.",
-            "steps": [
-                {
-                    "name": "Write report body",
-                    "instructions": "Write the report body.",
-                    "output_type": "text",
-                }
-            ],
-        }
-    )
-
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        try_compile_create_intent_with_assembly(
-            intent,
-            runtime_input_type=InputType.TEXT,
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.PDF,
             final_output_mode=OutputMode.RENDER_VERBATIM,
-            form_fields=(),
-            pattern_ids=(),
-            chain_steps=(),
-            aggregation_intent=cast(AggregationIntent, "aggregate"),
-            terminal_output_schema=None,
-            source_reader_required_fields=(),
-            result_contract_output_fields=(),
-            report_disposition="both",
-            runtime_required=True,
-            runtime_max_files=None,
-            ui_language="sv",
-        )
-
-    assert exc_info.value.public_code == "architecture_materialization_failed"
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_document_report_compose_topology_missing"
+            aggregation_intent="linear",
+            report_disposition=report_disposition,
+            result_contract_output_fields=(
+                StructuredFieldDraft(
+                    name="open_questions",
+                    field_type="string",
+                    description="Questions about {source} that remain unresolved.",
+                ),
+                StructuredFieldDraft(
+                    name="key_points",
+                    field_type="array",
+                    description="Key points from the report.",
+                    item_fields=[
+                        StructuredFieldDraft(
+                            name="point",
+                            field_type="string",
+                            description="One report point.",
+                        )
+                    ],
+                ),
+            ),
+            runtime_max_files=4,
+            ui_language="en",
+        ),
     )
+
+    assert compiled.steps[0].input_config is not None
+    runtime_input = compiled.steps[0].input_config["runtime_input"]
+    assert runtime_input["required"] is True
+    assert runtime_input["max_files"] == 4
+    assert runtime_input["execution_mode"] == "per_source"
+    source_properties = compiled.steps[0].output_contract["properties"]["documents"][
+        "items"
+    ]["properties"]
+    assert "source_material" in source_properties
+    assert compiled.steps[-2].output_mode == OutputMode.COMPOSE_TEXT
+    assert compiled.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
+    assert compiled.steps[-1].output_type == OutputType.PDF
+    report_contract_fields = {
+        "source_sections",
+        "report_title",
+        "overall_overview",
+    }
+    contract_fields = {
+        field_name
+        for step in compiled.steps
+        for field_name in (step.output_contract or {}).get("properties", {})
+        if field_name in report_contract_fields
+    }
+    assert contract_fields == expected_contract_fields
+    assert any(
+        "identify open questions" in step.assistant_spec.instructions
+        for step in compiled.steps
+    )
+    assert any("open_questions" in str(step.output_contract) for step in compiled.steps)
+    assert "open_questions" in str(compiled.steps[-2].input_bindings)
+    assert "key_points" in str(compiled.steps[-2].input_bindings)
+    assert all(
+        step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
+    )
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
 
 
 def test_compiler_strips_stale_previous_field_refs_and_uses_whole_object_underlag() -> (
@@ -3281,6 +3304,9 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                     "instructions": "Sätt ihop slutrapporten.",
                     "uses_form_fields": ["case_number"],
                     "output_type": "text",
+                    "model_ref": "model.report-writer",
+                    "knowledge_refs": ["knowledge.reporting-policy"],
+                    "review_mode": "view",
                 },
             ],
         }
@@ -3333,12 +3359,18 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
         "report_title",
         "overall_overview",
     ]
+    assert "Sätt ihop slutrapporten." in overview_step.assistant_spec.instructions
+    assert overview_step.assistant_spec.model_ref == "model.report-writer"
+    assert overview_step.assistant_spec.knowledge_refs == ["knowledge.reporting-policy"]
+    assert "{{ flow_input.case_number }}" in _question(overview_step.input_bindings)
 
     body_writer_step = compiled.steps[3]
     assert body_writer_step.input_source == InputSource.PREVIOUS_STEP
     assert body_writer_step.output_mode == OutputMode.COMPOSE_TEXT
     assert body_writer_step.input_bindings is not None
     assert "{{ flow_input.case_number }}" in _question(body_writer_step.input_bindings)
+    assert body_writer_step.review_policy is not None
+    assert body_writer_step.review_policy.mode.value == "view"
     assert body_writer_step.input_bindings["source_refs"] == [
         {
             "step_ref": "step_b",
@@ -3358,7 +3390,466 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
     assert all(
         step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
     )
-    assert validate_spec(compiled).valid
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+@pytest.mark.parametrize(
+    "report_disposition",
+    ["per_source_sections", "synthesized_overview", "both"],
+)
+def test_report_lowering_converts_intermediate_text_writer_without_repair(
+    report_disposition: ReportDisposition,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source report",
+            "plan_rationale": "Extract evidence, draft the findings, and render them.",
+            "steps": [
+                {
+                    "name": "Extract evidence",
+                    "instructions": "Extract grounded evidence from each source.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One evidence record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Grounded source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft findings",
+                    "instructions": "Draft the evidence-backed findings.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Refine findings",
+                    "instructions": "Refine the findings without losing source evidence.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the complete final report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="linear",
+            report_disposition=report_disposition,
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+
+    instructions = "\n".join(
+        step.assistant_spec.instructions for step in compiled.steps
+    )
+    assert "Draft the evidence-backed findings." in instructions
+    assert "Refine the findings without losing source evidence." in instructions
+    assert "Write the complete final report." in instructions
+    assert compiled.steps[-2].output_mode == OutputMode.COMPOSE_TEXT
+    assert compiled.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_create_intent_rejects_fields_outside_structured_contract() -> None:
+    with pytest.raises(
+        ProposalIntentArgumentError,
+        match="structured field names must be ASCII identifiers",
+    ):
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Invalid field name",
+                "plan_rationale": "Exercise the typed structured-field boundary.",
+                "steps": [
+                    {
+                        "name": "Extract risks",
+                        "instructions": "Extract the risks.",
+                        "output_type": "json",
+                        "output_fields": [
+                            {
+                                "name": "risk-level",
+                                "field_type": "string",
+                                "description": "Risk level.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+    with pytest.raises(
+        ProposalIntentArgumentError,
+        match="structured field descriptions must not contain template variables",
+    ):
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Invalid field description",
+                "plan_rationale": "Exercise the typed structured-field boundary.",
+                "steps": [
+                    {
+                        "name": "Extract risks",
+                        "instructions": "Extract the risks.",
+                        "output_type": "json",
+                        "output_fields": [
+                            {
+                                "name": "risk_level",
+                                "field_type": "string",
+                                "description": "Risk from {{source}}.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "report_disposition",
+    ["per_source_sections", "synthesized_overview"],
+)
+def test_report_lowering_rejects_multiple_reviews_for_one_producer(
+    report_disposition: ReportDisposition,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Reviewed source report",
+            "plan_rationale": "Extract, refine, and review source findings.",
+            "steps": [
+                {
+                    "name": "Extract evidence",
+                    "instructions": "Extract grounded evidence from each source.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One evidence record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Grounded source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft findings",
+                    "instructions": "Draft the evidence-backed findings.",
+                    "output_type": "text",
+                    "review_mode": "view",
+                },
+                {
+                    "name": "Refine findings",
+                    "instructions": "Refine the findings after review.",
+                    "output_type": "text",
+                    "review_mode": "edit",
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the complete final report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.PDF,
+                final_output_mode=OutputMode.RENDER_VERBATIM,
+                aggregation_intent="linear",
+                report_disposition=report_disposition,
+                runtime_max_files=4,
+                ui_language="en",
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_document_report_review_mode_conflict"
+    )
+
+
+def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Canonical report",
+            "plan_rationale": "Build sections and a synthesized overview.",
+            "steps": [
+                {
+                    "name": "Read sources",
+                    "instructions": "Extract one record per source.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Build sections",
+                    "instructions": "Build one section per source.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "source_sections",
+                            "field_type": "array",
+                            "description": "Report sections.",
+                            "item_fields": [
+                                {
+                                    "name": "section_title",
+                                    "field_type": "array",
+                                    "description": "Invalid title shape.",
+                                    "item_fields": [
+                                        {
+                                            "name": "value",
+                                            "field_type": "string",
+                                            "description": "Title value.",
+                                        }
+                                    ],
+                                },
+                                {
+                                    "name": "section_body",
+                                    "field_type": "array",
+                                    "description": "Invalid body shape.",
+                                    "item_fields": [
+                                        {
+                                            "name": "value",
+                                            "field_type": "string",
+                                            "description": "Body value.",
+                                        }
+                                    ],
+                                },
+                                {
+                                    "name": "open_questions",
+                                    "field_type": "string",
+                                    "description": "Questions about {source}.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write overview",
+                    "instructions": "Write the report overview.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "report_title",
+                            "field_type": "array",
+                            "description": "Invalid report title shape.",
+                            "item_fields": [
+                                {
+                                    "name": "value",
+                                    "field_type": "string",
+                                    "description": "Title value.",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "overview",
+                            "field_type": "string",
+                            "description": "Existing overview alias.",
+                        },
+                        {
+                            "name": "key_points",
+                            "field_type": "array",
+                            "description": "Key report points.",
+                            "item_fields": [
+                                {
+                                    "name": "point",
+                                    "field_type": "string",
+                                    "description": "One report point.",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "report_metadata",
+                            "field_type": "object",
+                            "description": "Report metadata.",
+                            "fields": [
+                                {
+                                    "name": "owner",
+                                    "field_type": "string",
+                                    "description": "Report owner.",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "confidence",
+                            "field_type": "number",
+                            "description": "Report confidence.",
+                        },
+                        {
+                            "name": "tags",
+                            "field_type": "array",
+                            "description": "Report tags.",
+                        },
+                    ],
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the final report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="linear",
+            report_disposition="both",
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+
+    section_properties = compiled.steps[1].output_contract["properties"][
+        "source_sections"
+    ]["items"]["properties"]
+    assert section_properties["section_title"]["type"] == "string"
+    assert section_properties["section_body"]["type"] == "string"
+    overview_properties = compiled.steps[2].output_contract["properties"]
+    assert overview_properties["report_title"]["type"] == "string"
+    assert overview_properties["overall_overview"]["type"] == "string"
+    assert "overview" not in overview_properties
+    compose_bindings = str(compiled.steps[-2].input_bindings)
+    assert compose_bindings.count("overall_overview") == 1
+    assert "Open questions: {open_questions}" in compose_bindings
+    assert "Point: {point}" in compose_bindings
+    assert "report_metadata" in compose_bindings
+    assert "confidence" in compose_bindings
+    assert "tags" in compose_bindings
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_report_lowering_rejects_conflicting_semantic_models() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Conflicting report models",
+            "plan_rationale": "Use a structured overview before composition.",
+            "steps": [
+                {
+                    "name": "Read source",
+                    "instructions": "Extract source evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Source evidence.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write overview",
+                    "instructions": "Write the overview.",
+                    "output_type": "json",
+                    "model_ref": "model.overview",
+                    "output_fields": [
+                        {
+                            "name": "overall_conclusion",
+                            "field_type": "string",
+                            "description": "Overall conclusion.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the final report.",
+                    "output_type": "text",
+                    "model_ref": "model.body",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError, match="model"):
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.PDF,
+                final_output_mode=OutputMode.RENDER_VERBATIM,
+                aggregation_intent="linear",
+                report_disposition="synthesized_overview",
+                runtime_max_files=4,
+                ui_language="en",
+            ),
+        )
+
+
+def test_report_lowering_rejects_citations_it_cannot_preserve() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Cited source report",
+            "plan_rationale": "Create a report with citation sidecars.",
+            "steps": [
+                {
+                    "name": "Write cited report",
+                    "instructions": "Write the report with citations.",
+                    "output_type": "text",
+                    "citations_requested": True,
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError, match="citation sidecar"):
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.PDF,
+                final_output_mode=OutputMode.RENDER_VERBATIM,
+                report_disposition="both",
+                ui_language="en",
+            ),
+        )
 
 
 def test_report_disposition_both_ignores_source_section_name_without_shape() -> None:
@@ -3670,6 +4161,13 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
             aggregation_intent=cast(AggregationIntent, "aggregate"),
             ui_language="sv",
             report_disposition="both",
+            result_contract_output_fields=(
+                StructuredFieldDraft(
+                    name="open_questions",
+                    field_type="string",
+                    description="Öppna frågor som behöver följas upp.",
+                ),
+            ),
         ),
     )
 
@@ -3695,8 +4193,10 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
 
     overview_step = compiled.steps[2]
     assert list(overview_step.output_contract["properties"]) == [
+        "overall_conclusion",
         "report_title",
         "overall_overview",
+        "open_questions",
     ]
 
     compose_step = compiled.steps[3]
@@ -3718,6 +4218,18 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
                 "output": "structured",
                 "field_path": "overall_overview",
                 "label": "Samlad översikt",
+            },
+            {
+                "step_ref": "step_c",
+                "output": "structured",
+                "field_path": "overall_conclusion",
+                "label": "Overall conclusion",
+            },
+            {
+                "step_ref": "step_c",
+                "output": "structured",
+                "field_path": "open_questions",
+                "label": "Open questions",
             },
         ],
     }
