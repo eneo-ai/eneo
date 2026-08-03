@@ -73,16 +73,16 @@ async def test_upsert_encrypts_and_persists_all_tokens(db_container, default_use
             )
         ).scalar_one()
 
-    # Plaintext must not be stored. Every ciphertext must use the
-    # versioned Fernet prefix the existing EncryptionService writes.
-    assert row.refresh_token_ciphertext != refresh
-    assert row.access_token_ciphertext != access
-    assert row.id_token_ciphertext != id_token
-    assert row.refresh_token_ciphertext.startswith("enc:fernet:v1:")
-    assert row.access_token_ciphertext.startswith("enc:fernet:v1:")
-    assert row.id_token_ciphertext.startswith("enc:fernet:v1:")
-    assert row.revoked_at is None
-    assert row.scopes_granted == ["openid", "offline_access"]
+        # Plaintext must not be stored. Every ciphertext must use the
+        # versioned Fernet prefix the existing EncryptionService writes.
+        assert row.refresh_token_ciphertext != refresh
+        assert row.access_token_ciphertext != access
+        assert row.id_token_ciphertext != id_token
+        assert row.refresh_token_ciphertext.startswith("enc:fernet:v1:")
+        assert row.access_token_ciphertext.startswith("enc:fernet:v1:")
+        assert row.id_token_ciphertext.startswith("enc:fernet:v1:")
+        assert row.revoked_at is None
+        assert row.scopes_granted == ["openid", "offline_access"]
 
 
 @pytest.mark.integration
@@ -324,11 +324,11 @@ async def test_logout_endpoint_revokes_all_user_tokens(
             .all()
         )
 
-    assert len(rows) == 2
-    for row in rows:
-        assert row.refresh_token_ciphertext is None
-        assert row.access_token_ciphertext is None
-        assert row.revoked_at is not None
+        assert len(rows) == 2
+        for row in rows:
+            assert row.refresh_token_ciphertext is None
+            assert row.access_token_ciphertext is None
+            assert row.revoked_at is not None
 
 
 @pytest.mark.integration

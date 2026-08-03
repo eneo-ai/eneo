@@ -139,6 +139,13 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             "redirect_path",
             "additional_redirect_uris",
         }
+        # Tenant-level MCP token-broker configuration. Valid with or without
+        # provider credentials: single-tenant deployments configure OIDC via
+        # environment variables yet still manage these per tenant.
+        mcp_broker_fields = {
+            "mcp_service_account",
+            "mcp_default_target",
+        }
 
         has_full_federation_config = any(field in v for field in required)
         if has_full_federation_config:
@@ -148,7 +155,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                     f"Federation config missing required fields: {missing}"
                 )
         else:
-            unexpected_fields = set(v.keys()) - redirect_only_fields
+            unexpected_fields = set(v.keys()) - redirect_only_fields - mcp_broker_fields
             if unexpected_fields:
                 raise ValueError(
                     "Federation config without provider credentials may only contain "

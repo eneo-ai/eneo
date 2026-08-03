@@ -241,10 +241,10 @@ async def test_per_user_happy_path_caches_token_for_subsequent_calls(
                 )
             )
         ).scalar_one()
-    assert row.token_ciphertext != "mcp-aud-token"
-    assert row.token_ciphertext.startswith("enc:fernet:v1:")
-    assert row.audience == server.http_url
-    assert row.idp_issuer == issuer
+        assert row.token_ciphertext != "mcp-aud-token"
+        assert row.token_ciphertext.startswith("enc:fernet:v1:")
+        assert row.audience == server.http_url
+        assert row.idp_issuer == issuer
 
 
 @pytest.mark.integration

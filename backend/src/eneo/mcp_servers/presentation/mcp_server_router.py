@@ -363,11 +363,14 @@ async def set_mcp_service_account(
         "client_id": data.client_id,
         "client_secret_ciphertext": encryption_service.encrypt(data.client_secret),
     }
+    # Purge before the config write: update_federation_config commits the
+    # request session, after which no further transaction can be opened
+    # inside the request scope. Purge + write land in the same commit.
+    await container.mcp_token_broker().purge_cache_for_tenant(tenant.id)
     await tenant_repo.update_federation_config(
         tenant_id=tenant.id,
         federation_config=federation_config,
     )
-    await container.mcp_token_broker().purge_cache_for_tenant(tenant.id)
 
     await audit_service.log_async(
         tenant_id=user.tenant_id,
@@ -423,11 +426,14 @@ async def clear_mcp_service_account(
         return  # 204, idempotent
 
     federation_config.pop("mcp_service_account", None)
+    # Purge before the config write: update_federation_config commits the
+    # request session, after which no further transaction can be opened
+    # inside the request scope. Purge + write land in the same commit.
+    await container.mcp_token_broker().purge_cache_for_tenant(tenant.id)
     await tenant_repo.update_federation_config(
         tenant_id=tenant.id,
         federation_config=federation_config,
     )
-    await container.mcp_token_broker().purge_cache_for_tenant(tenant.id)
 
     await audit_service.log_async(
         tenant_id=user.tenant_id,
@@ -470,11 +476,14 @@ async def set_mcp_sso_default_target(
     assert tenant is not None
     federation_config = dict(tenant.federation_config or {})
     federation_config["mcp_default_target"] = data.default_target.strip()
+    # Purge before the config write: update_federation_config commits the
+    # request session, after which no further transaction can be opened
+    # inside the request scope. Purge + write land in the same commit.
+    await container.mcp_token_broker().purge_cache_for_tenant(tenant.id)
     await tenant_repo.update_federation_config(
         tenant_id=tenant.id,
         federation_config=federation_config,
     )
-    await container.mcp_token_broker().purge_cache_for_tenant(tenant.id)
 
     await audit_service.log_async(
         tenant_id=user.tenant_id,
@@ -527,11 +536,14 @@ async def clear_mcp_sso_default_target(
         return  # idempotent
 
     federation_config.pop("mcp_default_target", None)
+    # Purge before the config write: update_federation_config commits the
+    # request session, after which no further transaction can be opened
+    # inside the request scope. Purge + write land in the same commit.
+    await container.mcp_token_broker().purge_cache_for_tenant(tenant.id)
     await tenant_repo.update_federation_config(
         tenant_id=tenant.id,
         federation_config=federation_config,
     )
-    await container.mcp_token_broker().purge_cache_for_tenant(tenant.id)
 
     await audit_service.log_async(
         tenant_id=user.tenant_id,

@@ -53,7 +53,6 @@ async def _insert_server(
             sa.insert(MCPServers)
             .values(
                 tenant_id=tenant_id,
-                space_id=None,
                 name=name,
                 http_url=f"https://mcp-{name}.example/srv",
                 http_auth_type="none",

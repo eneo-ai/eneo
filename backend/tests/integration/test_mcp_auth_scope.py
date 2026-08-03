@@ -100,9 +100,14 @@ async def test_existing_rows_default_to_static_bearer(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["per_user", "per_tenant"])
 async def test_create_rejects_oauth_scopes_when_flag_disabled(
-    client, default_user_token, scope
+    client, default_user_token, scope, monkeypatch
 ):
-    """POST /mcp-servers/ with per_user / per_tenant returns 501 by default."""
+    """POST /mcp-servers/ with per_user / per_tenant returns 501 while the
+    broker flag is off. Pinned explicitly: the surrounding environment may
+    run with MCP_OAUTH_ENABLED=true."""
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "mcp_oauth_enabled", False)
     response = await client.post(
         "/api/v1/mcp-servers/",
         json={
@@ -114,10 +119,9 @@ async def test_create_rejects_oauth_scopes_when_flag_disabled(
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert response.status_code == 501, response.text
-    body = response.json()
-    detail = body.get("detail")
-    assert isinstance(detail, dict)
-    assert detail.get("code") == "mcp_oauth_not_enabled"
+    # The HTTPException handler flattens {code, message} details to the
+    # top-level body.
+    assert response.json().get("code") == "mcp_oauth_not_enabled"
 
 
 @pytest.mark.integration
