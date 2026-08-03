@@ -16,7 +16,6 @@ describe("SkillsPolicySection", () => {
       bindingSummaries: [],
       summary: "0 Skills",
       skillsValid: true,
-      canSelectOnDemand: false,
       selectiveActivationEnabled: true,
       badgeVariant,
       onListCatalog: vi.fn(),
@@ -35,7 +34,6 @@ describe("SkillsPolicySection", () => {
       bindingSummaries: [],
       summary: "0 Skills",
       skillsValid: true,
-      canSelectOnDemand: false,
       selectiveActivationEnabled: true,
       badgeVariant,
       onListCatalog: vi.fn(),
@@ -52,14 +50,13 @@ describe("SkillsPolicySection", () => {
       .toHaveAttribute("href", "/spaces/organization/skills");
   });
 
-  test("enables activation modes when the policy has a bounded model set", async () => {
+  test("shows activation guidance when the tenant enables it", async () => {
     render(SkillsPolicySection, {
       skillBindings: [],
       initialCatalogPage: emptySkillBindingCatalogPage(),
       bindingSummaries: [],
       summary: "0 Skills",
       skillsValid: true,
-      canSelectOnDemand: true,
       selectiveActivationEnabled: true,
       badgeVariant,
       onListCatalog: vi.fn(),
@@ -82,7 +79,6 @@ describe("SkillsPolicySection", () => {
       bindingSummaries: [],
       summary: "0 Skills",
       skillsValid: true,
-      canSelectOnDemand: false,
       selectiveActivationEnabled: false,
       badgeVariant,
       onListCatalog: vi.fn(),
@@ -94,7 +90,7 @@ describe("SkillsPolicySection", () => {
       .toBeVisible();
   });
 
-  test("marks an on-demand policy invalid when its model selection is unbounded", async () => {
+  test("marks an on-demand policy invalid when the tenant disables it", async () => {
     render(SkillsPolicySection, {
       skillBindings: [
         {
@@ -107,8 +103,7 @@ describe("SkillsPolicySection", () => {
       bindingSummaries: [],
       summary: "1 Skill",
       skillsValid: false,
-      canSelectOnDemand: false,
-      selectiveActivationEnabled: true,
+      selectiveActivationEnabled: false,
       badgeVariant,
       onListCatalog: vi.fn(),
       onGetSkillPreview: vi.fn()

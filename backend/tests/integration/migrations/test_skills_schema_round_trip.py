@@ -40,6 +40,7 @@ SKILL_EXECUTION_BLOCK_REVISION = "202607231730"
 BINDING_ACTIVATION_MODE_REVISION = "202607240115"
 SKILL_RUNTIME_POLICY_REVISION = "202607240310"
 QUESTION_SKILL_ACTIVATION_REVISION = "202607241100"
+SELECTIVE_ACTIVATION_DEFAULT_REVISION = "202608031000"
 
 
 @dataclass(frozen=True)
@@ -2071,6 +2072,43 @@ def test_skill_runtime_policy_migration_backfills_tenants_and_round_trips(
             (tenant_id,),
         )
         assert cursor.fetchone() == (37,)
+
+
+def test_selective_activation_default_migration_updates_existing_tenants(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, BINDING_ACTIVATION_MODE_REVISION)
+
+    tenant_id = _insert_tenant(connection, "selective-activation-default")
+    command.upgrade(config, SKILL_RUNTIME_POLICY_REVISION)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT selective_activation_enabled FROM skill_runtime_policies "
+            "WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        assert cursor.fetchone() == (False,)
+
+    command.upgrade(config, SELECTIVE_ACTIVATION_DEFAULT_REVISION)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT selective_activation_enabled FROM skill_runtime_policies "
+            "WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        assert cursor.fetchone() == (True,)
+
+    command.downgrade(config, "202607301200")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT selective_activation_enabled FROM skill_runtime_policies "
+            "WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        assert cursor.fetchone() == (False,)
 
 
 def test_question_skill_activation_migration_is_nullable_and_round_trips(

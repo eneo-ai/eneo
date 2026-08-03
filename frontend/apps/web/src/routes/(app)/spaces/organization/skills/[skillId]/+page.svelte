@@ -26,7 +26,8 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import SkillAdoptionProjection, {
-    type SkillAdoptionRun
+    type SkillAdoptionRun,
+    type SkillBindingUpdateScope
   } from "$lib/features/skills/SkillAdoptionProjection.svelte";
   import { Info, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-svelte";
   import { onDestroy, tick, untrack } from "svelte";
@@ -51,7 +52,7 @@
   let publicationSaving = $state(false);
   let publicationError = $state<string | null>(null);
   let updateBindingsOnPublish = $state(true);
-  let updateAppsOnPublish = $state(false);
+  let updateAppsOnPublish = $state(true);
   let rollout = $state<RolloutState | null>(null);
   let rolloutGeneration = 0;
   let componentActive = true;
@@ -206,7 +207,7 @@
     publicationError = null;
     if (action === "publish") {
       updateBindingsOnPublish = true;
-      updateAppsOnPublish = false;
+      updateAppsOnPublish = true;
     }
   }
 
@@ -376,7 +377,7 @@
     publishedRevisionId: string,
     previousPublishedRevisionId: string | null,
     adoption: ReviewedAdoption,
-    scope: { assistants: boolean; apps: boolean }
+    scope: SkillBindingUpdateScope
   ) {
     const summary = adoption.status === "loaded" ? adoption.page.summary : null;
     const personalChat = summary?.personal_chat;
@@ -440,7 +441,10 @@
     rollout = { ...rollout, stopRequested: true };
   }
 
-  function startSavedBindingUpdate(adoption: SkillAdoptionProjectionPagePublic) {
+  function startSavedOutdatedBindingsUpdate(
+    adoption: SkillAdoptionProjectionPagePublic,
+    scope: SkillBindingUpdateScope
+  ) {
     const publishedRevisionId = data.published?.revision_id;
     if (
       publishedRevisionId === undefined ||
@@ -457,28 +461,7 @@
         status: "loaded",
         page: adoption
       },
-      {
-        assistants: true,
-        apps: false
-      }
-    );
-  }
-
-  function startSavedAppBindingUpdate(adoption: SkillAdoptionProjectionPagePublic) {
-    const publishedRevisionId = data.published?.revision_id;
-    if (
-      publishedRevisionId === undefined ||
-      rolloutMutationInFlight ||
-      executionBlock.block !== null
-    ) {
-      return;
-    }
-    startPublishedBindingUpdate(
-      data.skill.id,
-      publishedRevisionId,
-      null,
-      { status: "loaded", page: adoption },
-      { assistants: false, apps: true }
+      scope
     );
   }
 
@@ -607,12 +590,12 @@
     const skill = data.skill;
     const action = publicationAction;
     const updateBindings = action === "publish" && updateBindingsOnPublish;
-    const updateApps = updateBindings && updateAppsOnPublish;
+    const updateApps = action === "publish" && updateAppsOnPublish;
     const previousPublishedRevisionId = data.published?.revision_id ?? null;
     let adoption: ReviewedAdoption = { status: "unavailable" };
     publicationSaving = true;
     publicationError = null;
-    if (updateBindings) {
+    if (updateBindings || updateApps) {
       try {
         adoption = { status: "loaded", page: await data.adoptionPage };
       } catch {
@@ -649,13 +632,13 @@
     }
     publicationAction = null;
     publicationSaving = false;
-    if (updateBindings) {
+    if (updateBindings || updateApps) {
       startPublishedBindingUpdate(
         skill.id,
         skill.current_revision_id,
         previousPublishedRevisionId,
         adoption,
-        { assistants: true, apps: updateApps }
+        { assistants: updateBindings, apps: updateApps }
       );
       return;
     }
@@ -699,14 +682,9 @@
       ? openAdvanceDialog
       : undefined
   );
-  const onStartBindingUpdate = $derived(
+  const onStartOutdatedBindingsUpdate = $derived(
     data.published !== null && executionBlock.block === null && !rolloutMutationInFlight
-      ? startSavedBindingUpdate
-      : undefined
-  );
-  const onStartAppUpdate = $derived(
-    data.published !== null && executionBlock.block === null && !rolloutMutationInFlight
-      ? startSavedAppBindingUpdate
+      ? startSavedOutdatedBindingsUpdate
       : undefined
   );
 
@@ -1013,8 +991,7 @@
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
           publishedRevisionId={data.published?.revision_id ?? null}
-          {onStartBindingUpdate}
-          {onStartAppUpdate}
+          {onStartOutdatedBindingsUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}
@@ -1026,8 +1003,7 @@
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
           publishedRevisionId={data.published?.revision_id ?? null}
-          {onStartBindingUpdate}
-          {onStartAppUpdate}
+          {onStartOutdatedBindingsUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}
@@ -1041,8 +1017,7 @@
           {getOrganizationSkillAdoption}
           {onAdvancePersonalChat}
           publishedRevisionId={data.published?.revision_id ?? null}
-          {onStartBindingUpdate}
-          {onStartAppUpdate}
+          {onStartOutdatedBindingsUpdate}
           run={rollout}
           onStop={stopPublishedBindingUpdate}
           onRestart={restartPublishedBindingUpdate}
@@ -1118,7 +1093,7 @@
           <Checkbox
             id="update-apps-on-publish"
             bind:checked={updateAppsOnPublish}
-            disabled={publicationSaving || !updateBindingsOnPublish}
+            disabled={publicationSaving}
             aria-describedby="update-apps-on-publish-description"
           />
           <Field.Content>

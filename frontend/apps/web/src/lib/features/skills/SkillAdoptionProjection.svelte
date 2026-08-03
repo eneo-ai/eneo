@@ -19,6 +19,11 @@
     apps: AppSkillAdoptionRun | null;
     stopRequested?: boolean;
   };
+
+  export type SkillBindingUpdateScope = {
+    assistants: boolean;
+    apps: boolean;
+  };
 </script>
 
 <script lang="ts">
@@ -50,8 +55,10 @@
     ) => Promise<SkillAdoptionProjectionPagePublic>;
     onAdvancePersonalChat?: (pinned: PersonalChatPin) => void;
     publishedRevisionId?: string | null;
-    onStartBindingUpdate?: (projection: SkillAdoptionProjectionPagePublic) => void;
-    onStartAppUpdate?: (projection: SkillAdoptionProjectionPagePublic) => void;
+    onStartOutdatedBindingsUpdate?: (
+      projection: SkillAdoptionProjectionPagePublic,
+      scope: SkillBindingUpdateScope
+    ) => void;
     run?: SkillAdoptionRun | null;
     onStop?: () => void;
     onRestart?: () => void;
@@ -65,8 +72,7 @@
     getOrganizationSkillAdoption,
     onAdvancePersonalChat,
     publishedRevisionId = null,
-    onStartBindingUpdate,
-    onStartAppUpdate,
+    onStartOutdatedBindingsUpdate,
     run = null,
     onStop,
     onRestart
@@ -108,11 +114,11 @@
         (revision) => revision.revision_id !== publishedRevisionId && revision.assistant_count > 0
       )
   );
-  let bindingUpdateActionAvailable = $derived(
-    assistantUpdateAvailable &&
-      onStartBindingUpdate !== undefined &&
-      run?.status !== "running" &&
-      run?.personalChat !== "pending"
+  let personalChatUpdateAvailable = $derived(
+    publishedRevisionId !== null &&
+      summary?.personal_chat !== null &&
+      summary?.personal_chat !== undefined &&
+      summary.personal_chat.revision_id !== publishedRevisionId
   );
   let appUpdateAvailable = $derived(
     publishedRevisionId !== null &&
@@ -121,13 +127,16 @@
         (revision) => revision.revision_id !== publishedRevisionId && revision.app_count > 0
       )
   );
-  let appUpdateActionAvailable = $derived(
-    appUpdateAvailable &&
-      onStartAppUpdate !== undefined &&
+  let outdatedBindingScope = $derived<SkillBindingUpdateScope>({
+    assistants: personalChatUpdateAvailable || assistantUpdateAvailable,
+    apps: appUpdateAvailable
+  });
+  let recoveryActionAvailable = $derived(
+    (assistantUpdateAvailable || appUpdateAvailable) &&
+      onStartOutdatedBindingsUpdate !== undefined &&
       run?.status !== "running" &&
       run?.personalChat !== "pending"
   );
-  let recoveryActionAvailable = $derived(bindingUpdateActionAvailable || appUpdateActionAvailable);
 
   $effect(() => {
     const nextSkillId = skillId;
@@ -162,16 +171,10 @@
       : m.organization_skills_adoption_resource_app();
   }
 
-  function startBindingUpdate(): void {
+  function startOutdatedBindingsUpdate(): void {
     const projection = page;
-    if (projection === null || onStartBindingUpdate === undefined) return;
-    onStartBindingUpdate(projection);
-  }
-
-  function startAppUpdate(): void {
-    const projection = page;
-    if (projection === null || onStartAppUpdate === undefined) return;
-    onStartAppUpdate(projection);
+    if (projection === null || onStartOutdatedBindingsUpdate === undefined) return;
+    onStartOutdatedBindingsUpdate(projection, outdatedBindingScope);
   }
 
   function driftLabel(drift: AdoptionDrift): string {
@@ -557,29 +560,15 @@
 
     {@render rolloutReceipt()}
 
-    {#if bindingUpdateActionAvailable}
+    {#if recoveryActionAvailable}
       <Alert.Root>
         <Alert.Title>{m.organization_skills_rollout_recovery_title()}</Alert.Title>
         <Alert.Description>
           {m.organization_skills_rollout_recovery_description()}
         </Alert.Description>
         <div class="mt-3">
-          <Button variant="outline" size="sm" onclick={startBindingUpdate}>
+          <Button variant="outline" size="sm" onclick={startOutdatedBindingsUpdate}>
             {m.organization_skills_rollout_recovery_action()}
-          </Button>
-        </div>
-      </Alert.Root>
-    {/if}
-
-    {#if appUpdateActionAvailable}
-      <Alert.Root>
-        <Alert.Title>{m.organization_skills_rollout_apps_recovery_title()}</Alert.Title>
-        <Alert.Description>
-          {m.organization_skills_rollout_apps_recovery_description()}
-        </Alert.Description>
-        <div class="mt-3">
-          <Button variant="outline" size="sm" onclick={startAppUpdate}>
-            {m.organization_skills_rollout_apps_recovery_action()}
           </Button>
         </div>
       </Alert.Root>
@@ -618,7 +607,7 @@
                   {driftLabel(personalChat.drift)}
                 </Badge>
               </div>
-              {#if onAdvancePersonalChat !== undefined && personalChat.drift === "behind" && !bindingUpdateActionAvailable}
+              {#if onAdvancePersonalChat !== undefined && personalChat.drift === "behind" && !recoveryActionAvailable}
                 <Button
                   variant="outline"
                   size="sm"
