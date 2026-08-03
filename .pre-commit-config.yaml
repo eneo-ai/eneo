@@ -46,6 +46,15 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # Backend test-suite layout rules (backend/TESTING.md).
+      - id: test-layout
+        name: test-layout
+        entry: python3 scripts/check_test_layout.py --repo-root .
+        language: system
+        pass_filenames: false
+        files: ^(backend/tests/|scripts/test_layout_allowlist\.txt|scripts/check_test_layout\.py)
+        stages: [pre-commit]
+
       - id: pyright
         name: pyright
         entry: bash backend/scripts/run_pyright_in_devcontainer.sh

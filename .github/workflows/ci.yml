@@ -291,6 +291,19 @@ jobs:
       - name: Guard against re-introducing the old product name
         run: python3 scripts/check_no_intric.py --repo-root .
 
+  test-layout:
+    name: Backend test layout
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enforce backend test-suite layout rules
+        run: python3 scripts/check_test_layout.py --repo-root .
+
   frontend:
     name: Frontend
     needs: changes
@@ -688,6 +701,7 @@ jobs:
       - script-tests
       - route-metadata
       - no-intric
+      - test-layout
       - frontend
       - frontend-e2e
       - schema-drift
@@ -703,6 +717,7 @@ jobs:
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
           NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
+          TEST_LAYOUT_RESULT: ${{ needs.test-layout.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
           SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
@@ -732,6 +747,7 @@ jobs:
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
           check_result "No intric references" "$NO_INTRIC_RESULT"
+          check_result "Backend test layout" "$TEST_LAYOUT_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
           check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
