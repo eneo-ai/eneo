@@ -44,9 +44,13 @@ def _state_with_resolved_slot() -> PlanningState:
             "primary_runtime_input": ResolvedSlot(
                 name="primary_runtime_input",
                 value="documents",
-                source="heuristic",
-                evidence=["heuristic:role-aware freeform analysis"],
+                source="model",
+                evidence=[
+                    "model:primary_runtime_input:prompt-hash",
+                    "quote:user_message:test:documents",
+                ],
                 confidence="medium",
+                evidence_level="explicit",
             )
         },
     )
@@ -108,7 +112,7 @@ class TestSaveLoadRoundTrip:
     """
 
     def test_jsonb_payload_round_trips_through_model_validate(self) -> None:
-        state = _ready_state()
+        state = _state_with_resolved_slot()
         values = _planning_state_for_storage(state)
         loaded = PlanningState.model_validate(values["planning_state_jsonb"])
         assert loaded == state.validated_snapshot()

@@ -34,6 +34,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputConstraintEvidence,
     ExampleOutputStyleCategory,
     FileRole,
+    SlotEvidenceLevel,
 )
 from eneo.main.logging import get_logger
 
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
     )
 
 SlotClassificationConfidence = Literal["high", "medium", "low"]
-SlotClassificationEvidenceLevel = Literal["explicit", "inferred"]
+SlotClassificationEvidenceLevel = SlotEvidenceLevel
 SlotClassificationSourceKind = Literal[
     "user_message",
     "structured_answer",

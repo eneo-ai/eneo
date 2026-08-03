@@ -182,6 +182,7 @@ def test_compile_context_ignores_non_commit_grade_runtime_metadata() -> None:
         source="model",
         confidence="medium",
         evidence=["quote:user_message:example:no extra fields were mentioned"],
+        evidence_level="inferred",
     )
 
     context = create_compile_context_from_planning_state(state)

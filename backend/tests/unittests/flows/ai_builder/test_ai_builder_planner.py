@@ -1262,8 +1262,12 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
             name="terminal_output",
             value="structured_text",
             source="model",
-            evidence=["model:terminal_output:" + "a" * 64],
+            evidence=[
+                "model:terminal_output:" + "a" * 64,
+                "quote:user_message:test:structured_text",
+            ],
             confidence="medium",
+            evidence_level="inferred",
         ),
     }
     assert planning_state.resolved_slots["terminal_output"].source == "model"
@@ -1333,8 +1337,12 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
             name="terminal_output",
             value="structured_text",
             source="model",
-            evidence=["model:terminal_output:" + "a" * 64],
+            evidence=[
+                "model:terminal_output:" + "a" * 64,
+                "quote:user_message:test:structured_text",
+            ],
             confidence="medium",
+            evidence_level="inferred",
         ),
     }
     attachment_context = AIBuilderAttachmentContext(

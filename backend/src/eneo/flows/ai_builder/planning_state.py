@@ -54,7 +54,7 @@ from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 11
+BUILDER_SCHEMA_VERSION: int = 12
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -85,6 +85,7 @@ SlotSource = Literal[
 ]
 
 SlotConfidence = Literal["high", "medium", "low"]
+SlotEvidenceLevel = Literal["explicit", "inferred"]
 MappedFileLimitProvenance = Literal["policy_default", "authored"]
 MappedFileLimitDiagnostic = Literal[
     "confirmation_required",
@@ -200,6 +201,24 @@ class ResolvedSlot(_PlanningModel):
     source: SlotSource
     evidence: list[str] = Field(default_factory=list[str])
     confidence: SlotConfidence
+    evidence_level: SlotEvidenceLevel | None = None
+
+    @model_validator(mode="after")
+    def validate_model_provenance(self) -> ResolvedSlot:
+        if self.source != "model":
+            if self.evidence_level is not None:
+                raise ValueError(
+                    "evidence_level is only valid for model-resolved slots"
+                )
+            return self
+
+        if self.evidence_level is None:
+            raise ValueError("model-resolved slots require an evidence_level")
+        if self.confidence == "low":
+            raise ValueError("low-confidence model evidence cannot resolve a slot")
+        if not any(item.startswith("quote:") for item in self.evidence):
+            raise ValueError("model-resolved slots require cited evidence")
+        return self
 
     @property
     def is_commit_grade(self) -> bool:
@@ -216,8 +235,15 @@ class ResolvedSlot(_PlanningModel):
             case "policy_default" | "heuristic":
                 return False
             case "model":
-                return self.confidence == "high" and any(
+                has_cited_evidence = any(
                     item.startswith("quote:") for item in self.evidence
+                )
+                return has_cited_evidence and (
+                    self.confidence == "high"
+                    or (
+                        self.confidence == "medium"
+                        and self.evidence_level == "explicit"
+                    )
                 )
         return assert_never(self.source)
 

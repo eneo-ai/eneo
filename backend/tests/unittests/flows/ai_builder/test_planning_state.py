@@ -45,8 +45,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_eleven(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 11
+    def test_builder_schema_version_is_twelve(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 12
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
@@ -533,17 +533,48 @@ class TestFileRoleEvidenceValidation:
 
 
 class TestResolvedSlotValidation:
-    def test_resolved_slot_accepts_low_confidence_for_model_resolution(self) -> None:
+    def test_model_evidence_level_round_trips_with_the_resolved_slot(self) -> None:
         slot = ResolvedSlot(
-            name="runtime_metadata_fields",
-            value="basic_runtime_metadata",
+            name="terminal_output",
+            value="structured_json",
             source="model",
-            evidence=["msg_1"],
-            confidence="low",
+            evidence=["quote:user_message:test:JSON"],
+            confidence="medium",
+            evidence_level="explicit",
         )
 
-        assert slot.source == "model"
-        assert slot.confidence == "low"
+        restored = ResolvedSlot.model_validate_json(slot.model_dump_json())
+
+        assert restored == slot
+        assert restored.is_commit_grade is True
+
+    @pytest.mark.parametrize(
+        ("source", "evidence", "confidence", "evidence_level"),
+        [
+            ("model", ["quote:user_message:test:JSON"], "medium", None),
+            ("model", ["model:terminal_output:hash"], "medium", "explicit"),
+            ("model", ["quote:user_message:test:JSON"], "low", "explicit"),
+            ("heuristic", ["heuristic:terminal_output"], "medium", "explicit"),
+        ],
+    )
+    def test_resolved_slot_rejects_incoherent_model_provenance(
+        self,
+        source: str,
+        evidence: list[str],
+        confidence: str,
+        evidence_level: str | None,
+    ) -> None:
+        with pytest.raises(ValidationError):
+            ResolvedSlot.model_validate(
+                {
+                    "name": "terminal_output",
+                    "value": "structured_json",
+                    "source": source,
+                    "evidence": evidence,
+                    "confidence": confidence,
+                    "evidence_level": evidence_level,
+                }
+            )
 
 
 class TestStepTripleValidation:

@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
+    SlotClassificationEvidenceLevel,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.planning_state import (
@@ -44,6 +45,7 @@ def _slot(
     source: SlotSource = "structured_answer",
     confidence: SlotConfidence = "high",
     evidence: list[str] | None = None,
+    evidence_level: SlotClassificationEvidenceLevel | None = None,
 ) -> ResolvedSlot:
     return ResolvedSlot(
         name=slot_name,
@@ -61,6 +63,11 @@ def _slot(
             else evidence
         ),
         confidence=confidence,
+        evidence_level=(
+            evidence_level
+            if evidence_level is not None or source != "model"
+            else "inferred"
+        ),
     )
 
 
@@ -161,7 +168,8 @@ def test_policy_asks_weak_pattern_slot_only_when_discovery_selects_it() -> None:
                 "terminal_output",
                 "structured_text",
                 source="model",
-                evidence=[],
+                confidence="medium",
+                evidence_level="inferred",
             ),
             False,
         ),
@@ -171,17 +179,9 @@ def test_policy_asks_weak_pattern_slot_only_when_discovery_selects_it() -> None:
                 "structured_text",
                 source="model",
                 confidence="medium",
+                evidence_level="explicit",
             ),
-            False,
-        ),
-        (
-            _slot(
-                "terminal_output",
-                "structured_text",
-                source="model",
-                confidence="low",
-            ),
-            False,
+            True,
         ),
         (
             _slot(
@@ -555,8 +555,12 @@ def test_policy_can_ask_output_after_classifier_uncertainty_clears_guess() -> No
         name="terminal_output",
         value="structured_text",
         source="model",
-        evidence=["model:terminal_output:" + "a" * 64],
+        evidence=[
+            "model:terminal_output:" + "a" * 64,
+            "quote:user_message:test:structured_text",
+        ],
         confidence="medium",
+        evidence_level="inferred",
     )
 
     merge_llm_resolved_slots(

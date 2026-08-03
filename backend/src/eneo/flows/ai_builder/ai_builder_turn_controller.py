@@ -707,7 +707,9 @@ def _slot_is_key_decision(slot: ResolvedSlot) -> bool:
     match slot.source:
         case "structured_answer" | "requirements_summary" | "flow_default":
             return True
-        case "attachment_structure" | "policy_default" | "heuristic" | "model":
+        case "model":
+            return slot.evidence_level == "explicit" and slot.is_commit_grade
+        case "attachment_structure" | "policy_default" | "heuristic":
             return False
     return assert_never(slot.source)
 

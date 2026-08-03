@@ -608,6 +608,7 @@ def merge_llm_resolved_slots(
                 *[item.planning_reference() for item in classified_slot.evidence],
             ],
             confidence=classified_slot.confidence,
+            evidence_level=classified_slot.evidence_level,
         )
 
 

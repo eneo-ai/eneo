@@ -9,6 +9,7 @@ layer, not two containers deep.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -44,9 +45,11 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedFormIntake,
     ClassifiedSlot,
     SlotClassificationConfidence,
+    SlotClassificationEvidenceLevel,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
+    parse_slot_classification_response,
 )
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -307,8 +310,13 @@ def _slot(
         name=name,
         value=value,
         source=source,
-        evidence=[f"{source}:{name}"],
+        evidence=[
+            f"quote:user_message:test:{name}"
+            if source == "model"
+            else f"{source}:{name}"
+        ],
         confidence=resolved_confidence,
+        evidence_level="inferred" if source == "model" else None,
     )
 
 
@@ -318,6 +326,7 @@ def _classified(
     confidence: SlotClassificationConfidence,
     *,
     evidence: tuple[str, ...] | None = None,
+    evidence_level: SlotClassificationEvidenceLevel = "inferred",
 ) -> ClassifiedSlot:
     return ClassifiedSlot(
         slot_name=slot_name,
@@ -325,6 +334,7 @@ def _classified(
         confidence=confidence,
         reason=f"{slot_name} classified",
         evidence=_model_evidence(*(evidence or (f"{slot_name} evidence",))),
+        evidence_level=evidence_level,
     )
 
 
@@ -1859,8 +1869,18 @@ class TestSlotClassificationMetadataReplay:
                         "case type, and analysis request before receiving a report."
                     ),
                     metadata=_slot_classification_metadata(
-                        _classified("primary_runtime_input", "documents", "high"),
-                        _classified("terminal_output", "structured_text", "high"),
+                        _classified(
+                            "primary_runtime_input",
+                            "documents",
+                            "medium",
+                            evidence_level="explicit",
+                        ),
+                        _classified(
+                            "terminal_output",
+                            "structured_text",
+                            "medium",
+                            evidence_level="explicit",
+                        ),
                         _classified(
                             "runtime_metadata_fields",
                             "detailed_runtime_metadata",
@@ -1873,6 +1893,7 @@ class TestSlotClassificationMetadataReplay:
 
         assert state.resolved_slots["terminal_output"].value == "structured_text"
         assert state.resolved_slots["terminal_output"].source == "model"
+        assert state.resolved_slots["terminal_output"].evidence_level == "explicit"
         assert state.resolved_slots["runtime_metadata_fields"].value == (
             "detailed_runtime_metadata"
         )
@@ -2118,6 +2139,146 @@ class TestSlotClassificationMetadataReplay:
 
 
 class TestModelSlotMerge:
+    def test_explicit_medium_core_slots_are_admitted_without_redundant_questions(
+        self,
+    ) -> None:
+        state = _state()
+        source_text = "Användaren skriver text och vill få ett läsbart textresultat."
+        classification_input = SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id="user_message:user-1",
+                    kind="user_message",
+                    text=source_text,
+                    message_id="user-1",
+                ),
+            )
+        )
+        classification_result = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [
+                        {
+                            "slot_name": "primary_runtime_input",
+                            "value": "text",
+                            "confidence": "medium",
+                            "reason": "The user explicitly supplies text.",
+                            "evidence": [
+                                {
+                                    "source_id": "user_message:user-1",
+                                    "quote": "skriver text",
+                                }
+                            ],
+                            "evidence_level": "explicit",
+                        },
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "structured_text",
+                            "confidence": "medium",
+                            "reason": "The user explicitly requests readable text.",
+                            "evidence": [
+                                {
+                                    "source_id": "user_message:user-1",
+                                    "quote": "läsbart textresultat",
+                                }
+                            ],
+                            "evidence_level": "explicit",
+                        },
+                    ],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            ),
+            allowed_slot_values=llm_resolvable_slot_values_for_state(state),
+            classification_input=classification_input,
+        )
+        assert classification_result is not None
+
+        merge_llm_resolved_slots(
+            state,
+            classification_result,
+            prompt_hash="a" * 64,
+            freeform_text="",
+        )
+
+        assert {
+            name: slot.evidence_level for name, slot in state.resolved_slots.items()
+        } == {
+            "primary_runtime_input": "explicit",
+            "terminal_output": "explicit",
+        }
+        policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=(),
+        )
+        assert policy.allowed_action_kinds == ("commit_architecture",)
+        assert policy.allowed_ask_question_targets == ()
+
+    def test_mismatched_structured_answer_cannot_confirm_a_different_slot(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        )
+        classification_result = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "structured_text",
+                            "confidence": "medium",
+                            "reason": "The answer says text.",
+                            "evidence": [
+                                {
+                                    "source_id": "structured_answer:input",
+                                    "quote": "text",
+                                }
+                            ],
+                            "evidence_level": "explicit",
+                        }
+                    ],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            ),
+            allowed_slot_values=llm_resolvable_slot_values_for_state(state),
+            classification_input=SlotClassificationInput(
+                sources=(
+                    SlotClassificationSource(
+                        source_id="structured_answer:input",
+                        kind="structured_answer",
+                        text="text",
+                        message_id="user-1",
+                        question_id="primary_runtime_input",
+                        selected_value="text",
+                    ),
+                )
+            ),
+        )
+        assert classification_result is not None
+
+        merge_llm_resolved_slots(
+            state,
+            classification_result,
+            prompt_hash="b" * 64,
+            freeform_text="",
+        )
+
+        terminal_slot = state.resolved_slots["terminal_output"]
+        assert terminal_slot.evidence_level == "inferred"
+        assert terminal_slot.is_commit_grade is False
+        policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=(),
+        )
+        assert policy.allowed_action_kinds == ("ask_question",)
+        assert policy.allowed_ask_question_targets == ("terminal_output",)
+
     def test_comparison_scope_is_classified_only_until_input_is_known_non_document(
         self,
     ) -> None:
