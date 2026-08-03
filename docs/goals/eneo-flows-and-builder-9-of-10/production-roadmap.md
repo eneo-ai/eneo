@@ -393,6 +393,20 @@ external release gate (item 10); BM0.2 is external (item 10).
     landed at `85516be94`; it does not decide genuine compare/corpus-to-JSON
     support. Use the locked smoke plus the affected cohort between slices; save
     another full 120-case run for a multi-slice diagnostic checkpoint.
+    The affected 11-case related-document JSON cohort then ran once against
+    product behavior `85516be94` with the locked Luna route and the latest
+    harness. Seven journeys reached plans (three first pass, four repaired) and
+    five passed every configured case check. The former aggregate/JSON failure
+    remained in only the procurement journey, whose prompt explicitly requests
+    same-run comparison and therefore belongs to the unresolved B9(e2) product
+    decision rather than the related-package correction. Residual failures were
+    separately owned: one typed critic source-capture issue, one incomplete
+    self-correction payload, one prose-leaf miss, one allowed rather than
+    preferred first question, and one unanswered question. The cohort still
+    spent 36 model calls, 177,127 tokens, and eight repair attempts. Treat this
+    as directional proof that related-package admission is no longer the shared
+    blocker, not as a broad quality or efficiency win; later slices must remove
+    the newly exposed owner-specific failures before the next full diagnostic.
     The identical 12-case smoke ran once more on 2026-08-03 after explicit-
     evidence admission landed at `5e7956f8d`. The per-case prompt hashes and
     locked Luna route matched the preceding receipt. Plan creation rose from
