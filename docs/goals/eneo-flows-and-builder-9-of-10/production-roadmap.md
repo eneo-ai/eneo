@@ -47,9 +47,10 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-03 | **Explicit Builder evidence admission**: source-validated explicit requirements now retain their evidence level through replay into strict persisted planning state; cited medium-confidence facts can commit without a redundant question, inferred facts remain assumptions, incoherent model provenance fails validation, and confirmation uses the same provenance boundary. Parser-to-policy and JSONB round-trip proofs cover both admission and downgrade (`ef4a45416`; supporting type and test-contract corrections `f0a425b8c`, `74d014ad3`; Codex gate green 8/10, 2,988 Builder tests passed) |
 | 2026-08-03 | **Intent-led Builder questions and durable confirmation**: discovery now owns which unresolved consequential question is asked while action policy preserves its order instead of reconstructing heuristic or pattern questions; typed planning-state reconciliation removes stale document/comparison answers after input changes; visible legal assumptions survive confirmation through the existing requirements contract; fixed-choice questions no longer advertise unsupported custom answers, and the bounded mapped-file question appears only for a coherent document/file architecture with its actual organization ceiling. The duplicate forced-ask and prompt-reconstruction paths are deleted (`b1e9b3ae8`; Codex gate green 9/10, Claude Opus gate green 8/10, 493 changed-file behavior tests passed) |
 | 2026-08-02 | **Trustworthy Builder journey evaluation**: the 120-case v4 corpus now continues through bounded configured interviews, records ordered and reopened questions plus first-pass/repair outcomes, checks directional JSON contracts through applied flows, preserves one v2 case/failure identity across every receipt, and gates only the seven required cases; benchmark failures remain visible without blocking release (`22ece969a`; Codex and Claude gates green 8/10, no blockers) |
-| 2026-08-02 | **Evidence-backed Builder architecture admission**: architecture-changing slots now commit only from explicit answers, existing-flow defaults, a typed confirmed-requirements projection, deterministic attachment structure, or citation-backed high-confidence model evidence; policy defaults and heuristics remain visible assumptions but cannot silently shape topology. The create compiler consumes only the persisted architecture commit, and the language-specific requirements-summary parser and draft/raw-slot compiler fallbacks are deleted (`this change`) |
+| 2026-08-02 | **Evidence-backed Builder architecture admission**: architecture-changing slots now commit only from explicit answers, existing-flow defaults, a typed confirmed-requirements projection, deterministic attachment structure, or citation-backed high-confidence model evidence; policy defaults and heuristics remain visible assumptions but cannot silently shape topology. The create compiler consumes only the persisted architecture commit, and the language-specific requirements-summary parser and draft/raw-slot compiler fallbacks are deleted (`7fa0c6a16`) |
 | 2026-08-02 | **Language-neutral Builder discovery ownership**: `PlanningState` and typed input/output intent remain the semantic truth while the parallel phrase-derived `case_like_flow` flag, the unused document-category question and synonym inventory, and the behavior-locking specialty recognizer are deleted; runtime-metadata values are neutral direct contracts with no compatibility aliases, and generic `underlag` no longer invents a domain or minimum viable purpose (`3409a8409`) |
 | 2026-08-02 | **Precise Builder source-material dataflow**: explicit structured Underlag now compiles to exact field projections whose schema and lineage are shared by Builder compilation, publish validation, and runtime resolution; form fields remain at their declared consumers, post-transcription steps describe the text they actually receive, and blanket raw-plus-structured repair plus whole-object coverage heuristics are deleted. Compiler-to-runtime parity and large-transcript regressions protect the contract (`732c7cffb`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Explicit Builder source-reference failures**: typed source references now remain typed through the shared create/edit compilation boundary; every candidate is validated before deduplication, contract-invalid references fail with named target-correct Builder feedback instead of being flattened into a plausible free-text Underlag question, and the shared input-binding contract remains the validator (`b02529d5d`; Codex and Claude gates green 8/10, no blockers) |
@@ -209,19 +210,30 @@ external release gate (item 10); BM0.2 is external (item 10).
    constraints-discovery API. (e) **LANDED `7fa0c6a16`** — architecture-impact
    commitment admits only explicit, flow-default, requirements-summary, or cited
    high-confidence model evidence without changing the honest confirmation
-   buckets. A 2026-08-02 live run then exposed a separate action-policy defect:
-   neutral defaults and heuristics were deliberately non-commit-grade but every
-   such architecture slot was forced back into the ask set. Land the bounded
-   journey receipt in item 10, then delete that forced-ask path, freeze confirmed
-   visible slot decisions as typed requirements-summary evidence, make catalog
-   custom-answer support honest, and route first-question order through the
-   existing discovery-priority owner. No new assumption ledger, state taxonomy,
-   or phrase family. (f) persist every classifier attempt with a closed
-   resolved/no-content/parse-failed/skipped-no-resolvable-slots outcome; add no
-   retry policy. (g) move aggregate classifier transcript admission into the
+   buckets. The question-selection follow-up is **LANDED `b1e9b3ae8`** — the
+   bounded journey receipt exposed and the implementation deleted the separate
+   action-policy forced-ask and prompt reconstruction paths; discovery now owns
+   consequential question choice and
+   order, confirmed visible slot decisions become typed requirements evidence,
+   stale dependent decisions are pruned after input/output changes, and catalog
+   custom-answer support is honest. No new assumption ledger, state taxonomy,
+   or phrase family was introduced. (f) next, preserve the classifier's already
+   validated `explicit`/`inferred` evidence level in `ResolvedSlot`: an exact,
+   user-owned cited `explicit` fact may be commit-grade at medium confidence,
+   while inferred/medium, missing or invalid citations, low confidence, and
+   explicit unknowns remain unresolved. The same provenance owns confirmation
+   bucketing; add no second verifier or evidence ledger. (g) make the existing
+   confirmation payload honest without changing its wire shape: remove fixed
+   process guarantees from assumptions and require exhaustive bilingual labels
+   for every catalog slot. (h) after a product decision on purpose-first versus
+   input-first vague interviews, delete the remaining processing-goal phrase
+   family and move its critic consumer to typed planning/result evidence; do not
+   replace it with another matcher. (i) persist every classifier attempt with a
+   closed resolved/no-content/parse-failed/skipped-no-resolvable-slots outcome;
+   add no retry policy. (j) move aggregate classifier transcript admission into the
    existing model-aware/admin budget owner only after those attempt outcomes are
    measurable; keep named per-source parser-shape invariants fixed until item 10
-   benchmarks them. (h) keep ask/progress/plan/diagram as typed server events
+   benchmarks them. (k) keep ask/progress/plan/diagram as typed server events
    and frontend projections, delete the dead Builder MCP label-resolver path, and
    add no model-visible presentation tools; an end-result preview is a later
    plan-bound structural projection only if user-value evidence justifies it.
@@ -282,6 +294,80 @@ external release gate (item 10); BM0.2 is external (item 10).
     phrase matching, then rerun the identical 12-case cohort before the full
     120-case release evaluation. Do not claim numeric lift from the earlier
     truncated 120-case receipt.
+    The identical locked 12-case smoke reran on 2026-08-03 after the question-
+    selection slice with the same harness, corpus and per-case prompt hashes,
+    model id, and Luna route. Questions fell from 23 to 10, forbidden questions
+    from three to zero, and unclassified questions from 11 to one; plan creation
+    rose from three to seven and true first-pass plans from zero to five. Repair
+    attempts fell from five to four. The harness recorded 38 model calls and
+    154,335 authoring tokens versus 39 and 157,763 before the change, but the
+    unknown provider outcome in one post-fix run makes those cost totals lower
+    bounds rather than proof of an efficiency gain. The comparison is
+    directionally strong but not release-green: nine of 12 runs,
+    including four required cases, still failed at least one quality check. One
+    detailed audio-to-DOCX proposal duplicated transcription and moved the
+    requested transcript review onto the duplicate model step; multiple JSON
+    proposals lost required terminal leaf fields; a requested human review was
+    attached to the wrong producing step; and the many-document report remained
+    compiler-invalid. Two question-order mismatches require manual product
+    adjudication before changing policy, and one otherwise complete JSON case
+    ended with an explicitly recorded unknown provider outcome after timeout.
+    Treat these as owner-level topology, contract-fidelity, review-placement,
+    and provider-reliability evidence—not as permission to add prompt-specific
+    words or case-specific repair rules. Run the full 120-case diagnostic next
+    and use cohort evidence to rank the smallest complete owner-level slice.
+    The full single-repetition diagnostic completed on 2026-08-03 at
+    `6e0397938` with the same locked Luna model, harness hash, and corpus hash.
+    A host interruption split the receipt into 103 + 16 + one clean replacement
+    observation; identity verification found all 120 unique case ids with no
+    duplicate or missing result. Four attachment/template cases skipped because
+    their local file fixtures were not configured, leaving 116 live journeys.
+    Sixty-one journeys created plans: 48 true first-pass and 13 repaired; 37
+    stopped on an unanswered question and 18 ended in Builder
+    proposal/compiler errors. Ninety-seven of 116 live journeys failed at least
+    one configured quality check. The Builder emitted 116 questions (79
+    resolved, 37 unanswered, zero reopened): only 29 were the preferred
+    highest-impact unknown, 49 were allowed, 12 were forbidden, and 26 were
+    unclassified. Vague cases averaged 2.92 questions, but only two of 24 began
+    with the preferred processing-goal question and 12 asked forbidden low-value
+    runtime metadata; 16 of 17 complete everyday cases avoided questions, while
+    all 17 still failed a plan/contract quality check. The largest build failure
+    was exact JSON retention: 29 leaf-field checks failed, the only exact input-
+    schema case failed, and three of four exact output-schema cases failed.
+    Human-review producer targeting failed in both applied review cases, and at
+    least three of six produced audio plans repeated transcription semantics
+    after deterministic transcription. The 61 plans contained 165 steps, but
+    semantic duplication and contract loss—not the numeric average—are the
+    defect. Recorded authoring work was 335 model calls and 1,367,413 tokens;
+    no valid case executed its generated Flow, so runtime efficiency remains a
+    topology inference. Treat the receipt as broad diagnostic evidence, not a
+    variance baseline or license for post-hoc thresholds. Manually adjudicate
+    rubric mismatches, correct clarification stops, and representative journeys
+    before promoting a failure to product policy.
+    A 2026-08-03 source-verified Fable review ranks the product work without
+    creating another roadmap. First preserve the classifier's validated
+    explicit evidence level through `ResolvedSlot`, action admission, replay,
+    and confirmation; the current projection drops it and therefore re-asks
+    facts already stated by the user. Second retain bounded, cited,
+    prose-enumerated JSON leaf names as typed planning evidence, while reusing
+    the existing exact `SchemaEvidence` owner for declared/example schemas and
+    keeping report headings separate. Third split deterministic proposal
+    failures by owner: aggregate/compare plus JSON is decidable from committed
+    architecture before provider work and awaits a support/refusal product
+    decision, while document-report compose topology depends on proposed steps
+    and must become total deterministic compiler lowering for every supported
+    report disposition. Fourth, carry typed checkpoint intent onto the actual
+    producer: audio transcript review belongs on the fixed transcription step,
+    downstream review remains on its semantic producer, and the contradictory
+    prompt instruction to author another transcription step is deleted without
+    deleting legitimate downstream transcript-input guidance. Fifth, simplify
+    the existing confirmation contract rather than expanding it: remove two
+    fixed process guarantees from assumptions and make catalog labels
+    exhaustively bilingual. Last, after the human question-order decision,
+    delete processing-goal phrase inference and move action-follow-up critic
+    enforcement to typed planning/result evidence. These are owner-level
+    changes; no phrase detector, duplicate-step matcher, global step cap,
+    second schema ledger, or new confirmation API is accepted.
     Question review also records whether the question is answerable from the
     user's perspective, non-leading, offers sufficient option coverage or a
     usable custom-answer path, resolves after its answer, and avoids reopening
@@ -423,7 +509,12 @@ plan above controls all other ordering.
 - **B4** (two ordered slices): (a) the existing understanding pass records typed,
   cited checkpoint intents and confirmation exposes them; (b) compile/apply and
   the critic share one canonical requested-versus-compiled checkpoint predicate.
-  No parallel HITL classifier or duplicate matching rule. *(M)*
+  For audio, project transcript review through `CreateCompileContext` onto the
+  existing fixed transcription step, keep downstream analysis/report review on
+  its requested producer, and delete the proposal instruction that asks the
+  model to author a duplicate transcription step. Keep legitimate downstream
+  transcript-input guidance. No parallel HITL classifier, phrase detector, or
+  duplicate matching rule. *(M)*
 - **B5a** (= item 2d): **LANDED** `4b0796152`. *(S)*
 - **B5b** (= item 4b): **LANDED** `5509eef84..fb6934b5a`. Factual execution
   shape, shared mapped-execution ownership, heuristic-lint deletion, and
@@ -432,7 +523,7 @@ plan above controls all other ordering.
   its behavior tests: form variables (inmatningsfält), targeted underlag per
   step, enforced JSON input/output schemas, unusual-input resilience, and
   deterministic zero-call behavior. Measured economics stay in item 10.
-- **B7** (= item 8b/8c deepened, five ordered owner slices): (a) **LANDED
+- **B7** (= item 8b/8c deepened, ordered owner slices): (a) **LANDED
   `cbc1132e2`** — one gated semantic-owner series deleted the unused
   discovery-follow-up and readiness
   paths, adds one typed `question_response` marker containing only the pending
@@ -455,16 +546,26 @@ plan above controls all other ordering.
   deterministic document-category question, and pin the resulting question topology; generic
   source-material wording no longer invents a domain or purpose. (d) **LANDED
   `7fa0c6a16`** — architecture-impact dimensions do not commit from policy
-  defaults or heuristics and confirmation buckets remain honest. (e) current
-  corrective series: the v2 journey receipt lands first; then delete the
-  action-policy forced-ask path, project confirmed assumptions into typed
-  requirements-summary evidence, close custom-answer emission/validation, and
-  reuse discovery priority for the first question. (f) persist typed classifier
-  attempt outcomes. (g) only then join aggregate classifier transcript admission
+  defaults or heuristics and confirmation buckets remain honest. (e) **LANDED
+  `b1e9b3ae8`** — discovery priority owns the question order, the forced-ask and
+  prompt-reconstruction paths are deleted, confirmed visible slots project as
+  typed requirements evidence, dependent answers reconcile after architecture
+  changes, and fixed-choice custom-answer behavior is honest. (f) **LANDED
+  `ef4a45416`** — preserve the classifier's already validated evidence level in
+  `ResolvedSlot`, admit exact user-owned cited explicit facts at medium confidence,
+  keep weaker evidence unresolved, and use the same provenance for honest
+  confirmation bucketing.
+  (g) remove fixed process guarantees from assumptions and make every catalog
+  slot label exhaustive in Swedish and English without changing the public
+  payload shape. (h) after the purpose-first/input-first product decision,
+  replace the remaining processing-goal phrase consumers with admitted typed
+  planning/result evidence, including critic enforcement, then delete the
+  phrase family and its behavior-locking tests. (i) persist typed classifier
+  attempt outcomes. (j) only then join aggregate classifier transcript admission
   to the existing model-aware/admin budget owner while source-count and
   structured-value bounds remain named parser-shape invariants pending item 10.
   No classifier expansion for intentionally structured-only lanes. *(L)*
-- **B9** (directional JSON contracts, three ordered slices): (a) **LANDED
+- **B9** (directional JSON contracts, ordered owner slices): (a) **LANDED
   `0b7a450df`** — schema presence no longer changes terminal output before
   output direction is owned; a runtime-input schema plus requested generated
   DOCX remains DOCX through compilation, attachment-only classification cannot
@@ -483,8 +584,15 @@ plan above controls all other ordering.
   the terminal JSON contract; the real JSON golden asserts both contracts through
   canonical authoring, and unsupported composite bindings fail without entering
   model repair. One parser, one evidence type, and one bounded in-state resolution
-  aggregate—not a reusable schema registry or second ledger. *(M)*
-- **B10** (precise semantic dataflow, three ordered slices): (a) **LANDED
+  aggregate—not a reusable schema registry or second ledger. (d) retain bounded,
+  cited open-vocabulary JSON leaf names stated in prose as planning evidence and
+  compile them through the existing terminal schema owner; explicit full schemas
+  win conflicts, and ordinary lists, report headings, and form fields must not
+  become output leaves. Refuse ambiguous or over-limit enumerations instead of
+  truncating. (e) once product chooses whether aggregate/compare plus JSON is
+  supported, encode one shared architecture-compatibility predicate before
+  provider work and keep assembly's rejection as a fail-closed invariant. *(M)*
+- **B10** (precise semantic dataflow, ordered owner slices): (a) **LANDED
   `7ffaf5f6b`** — project exact confirmed form-field names/types from `PlanningState`
   into proposal context, keep existing `uses_form_fields` as the semantic
   consumer contract, delete the final-step auto-placement fallback, and fail
@@ -512,7 +620,12 @@ plan above controls all other ordering.
   a schema-valid refusal; later steps recovered only because they also reread
   the raw transcript, spending 52,640 completion-input and 10,301 output tokens.
   Fix the topology and actual-input instructions at the compiler boundary; do
-  not add language-specific refusal matching. No generic dataflow DSL. *(M)*
+  not add language-specific refusal matching. No generic dataflow DSL. (d) make
+  document-report lowering total for each supported committed report disposition
+  so per-source readers, overview/body composition, and deterministic rendering
+  cannot enter a futile model-repair loop; keep the low-level assembly invariant
+  for corrupt or impossible internal plans rather than duplicating the rule in
+  the turn controller. *(M)*
 - **B11** (exact-template workflow topology): after B4's checkpoint-intent owner
   is available, allow justified analysis/validation/review stages before the
   existing deterministic TEMPLATE_FILL terminal step. Preserve the exact selected
