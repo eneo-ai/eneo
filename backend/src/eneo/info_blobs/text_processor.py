@@ -3,7 +3,12 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.files.text import TextExtractor
-from eneo.info_blobs.info_blob import InfoBlobAdd
+from eneo.info_blobs.info_blob import (
+    CapturedKnowledgeOriginal,
+    InfoBlobAdd,
+    InfoBlobInDB,
+    PreparedKnowledgeOriginal,
+)
 from eneo.info_blobs.info_blob_service import InfoBlobService
 from eneo.users.user import UserInDB
 
@@ -35,6 +40,7 @@ class TextProcessor:
         content_hash: bytes | None = None,
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
+        original: PreparedKnowledgeOriginal | None = None,
     ):
         text = self.extractor.extract(filepath, mimetype)
 
@@ -45,6 +51,80 @@ class TextProcessor:
             group_id=group_id,
             website_id=website_id,
             content_hash=content_hash,  # Pass hash for files too
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            original=original,
+        )
+
+    def _info_blob_add(
+        self,
+        *,
+        text: str,
+        title: str,
+        group_id: UUID | None,
+        website_id: UUID | None,
+        url: str | None,
+        content_hash: bytes | None,
+    ) -> InfoBlobAdd:
+        return InfoBlobAdd(
+            title=title,
+            user_id=self.user.id,
+            text=text,
+            group_id=group_id,
+            url=url,
+            website_id=website_id,
+            tenant_id=self.user.tenant_id,
+            content_hash=content_hash,
+        )
+
+    async def try_refresh_healthy_reupload(
+        self,
+        *,
+        text: str,
+        title: str,
+        embedding_model: "EmbeddingModel",
+        group_id: UUID,
+        original: CapturedKnowledgeOriginal,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+    ) -> InfoBlobInDB | None:
+        return await self.info_blob_service.try_refresh_healthy_reupload(
+            self._info_blob_add(
+                text=text,
+                title=title,
+                group_id=group_id,
+                website_id=None,
+                url=None,
+                content_hash=None,
+            ),
+            embedding_model=embedding_model,
+            original=original,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+
+    async def precheck_knowledge_publication_capacity(
+        self,
+        *,
+        text: str,
+        title: str,
+        embedding_model: "EmbeddingModel",
+        group_id: UUID,
+        original: CapturedKnowledgeOriginal,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+    ) -> None:
+        await self.info_blob_service.precheck_knowledge_publication_capacity(
+            self._info_blob_add(
+                text=text,
+                title=title,
+                group_id=group_id,
+                website_id=None,
+                url=None,
+                content_hash=None,
+            ),
+            embedding_model=embedding_model,
+            original=original,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
@@ -61,16 +141,15 @@ class TextProcessor:
         content_hash: bytes | None = None,
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
+        original: PreparedKnowledgeOriginal | None = None,
     ):
-        info_blob_add = InfoBlobAdd(
-            title=title,
-            user_id=self.user.id,
+        info_blob_add = self._info_blob_add(
             text=text,
+            title=title,
             group_id=group_id,
-            url=url,
             website_id=website_id,
-            tenant_id=self.user.tenant_id,
-            content_hash=content_hash,  # Used by files for hash checking
+            url=url,
+            content_hash=content_hash,
         )
 
         return await self.info_blob_service.publish_info_blob_without_validation(
@@ -78,4 +157,5 @@ class TextProcessor:
             embedding_model=embedding_model,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            original=original,
         )

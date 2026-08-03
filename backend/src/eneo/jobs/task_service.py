@@ -4,15 +4,24 @@ import os
 from tempfile import SpooledTemporaryFile
 from uuid import UUID, uuid4
 
-from eneo.admin.quota_service import QuotaService
 from eneo.files.audio import AudioMimeTypes
+from eneo.files.file_protocol import sanitize_filename
 from eneo.files.file_size_service import FileSizeService
 from eneo.files.text import TextMimeTypes
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.jobs.job_service import JobService
 from eneo.jobs.job_staging import stage_job_file
-from eneo.jobs.task_models import Transcription, UploadInfoBlob
-from eneo.main.exceptions import FileNotSupportedException, FileTooLargeException
+from eneo.jobs.task_models import (
+    KnowledgeOriginalAdmission,
+    Transcription,
+    UploadInfoBlob,
+)
+from eneo.main.exceptions import (
+    FileNotSupportedException,
+    FileTooLargeException,
+    InvalidFilenameException,
+)
+from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.deployment_policy import (
     UploadAdmissionSnapshot,
     UploadLimitUseCase,
@@ -28,14 +37,14 @@ class TaskService:
         user: UserInDB,
         file_size_service: FileSizeService,
         job_service: JobService,
-        quota_service: QuotaService,
+        object_content: ObjectContentService,
         upload_admission: UploadAdmissionSnapshot | None = None,
     ) -> None:
         super().__init__()
         self.user = user
         self.file_size_service = file_size_service
         self.job_service = job_service
-        self.quota_service = quota_service
+        self.object_content = object_content
         self.upload_admission = upload_admission
 
     @staticmethod
@@ -78,12 +87,16 @@ class TaskService:
                 limit_name=limit_name,
             )
 
-    async def ensure_quota(self, file: SpooledTemporaryFile[bytes], task: Task) -> None:
-        if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):
-            return
-
-        file_size = await asyncio.to_thread(self.file_size_service.get_file_size, file)
-        await self.quota_service.ensure_capacity(file_size)
+    @staticmethod
+    def _sanitize_required_filename(filename: str) -> str:
+        if not os.path.basename(filename.replace("\x00", "")).strip():
+            raise InvalidFilenameException("A filename is required.")
+        sanitized = sanitize_filename(filename)
+        if len(sanitized) > 255:
+            raise InvalidFilenameException(
+                "The filename must contain at most 255 characters."
+            )
+        return sanitized
 
     async def queue_upload_file(
         self,
@@ -94,36 +107,48 @@ class TaskService:
         filename: str,
     ):
         task_type = self.get_task_type(mimetype)
+        sanitized_filename = self._sanitize_required_filename(filename)
 
         await self.validate_file_size(file, task_type)
-        await self.ensure_quota(file, task_type)
+        if self.upload_admission is None:
+            raise RuntimeError("Upload admission snapshot is required")
+        await self.object_content.ensure_target_ready(
+            self.upload_admission.new_write_storage_target
+        )
 
         job_id = uuid4()
+        maximum_bytes, _limit_name = self.get_max_size(task_type)
+        original_storage = KnowledgeOriginalAdmission(
+            policy_revision=self.upload_admission.policy_revision,
+            storage_target=self.upload_admission.new_write_storage_target,
+            maximum_bytes=maximum_bytes,
+        )
+        if task_type == Task.UPLOAD_FILE:
+            params: UploadInfoBlob | Transcription = UploadInfoBlob(
+                filename=sanitized_filename,
+                user_id=self.user.id,
+                group_id=group_id,
+                space_id=space_id,
+                mimetype=mimetype,
+                original_storage=original_storage,
+            )
+        else:
+            # task_type == Task.TRANSCRIPTION (get_task_type raises for any other value)
+            params = Transcription(
+                filename=sanitized_filename,
+                user_id=self.user.id,
+                group_id=group_id,
+                space_id=space_id,
+                mimetype=mimetype,
+                original_storage=original_storage,
+            )
+
         filepath = await stage_job_file(file, job_id)
-
         try:
-            if task_type == Task.UPLOAD_FILE:
-                params: UploadInfoBlob | Transcription = UploadInfoBlob(
-                    filename=filename,
-                    user_id=self.user.id,
-                    group_id=group_id,
-                    space_id=space_id,
-                    mimetype=mimetype,
-                )
-            else:
-                # task_type == Task.TRANSCRIPTION (get_task_type raises for any other value)
-                params = Transcription(
-                    filename=filename,
-                    user_id=self.user.id,
-                    group_id=group_id,
-                    space_id=space_id,
-                    mimetype=mimetype,
-                )
-
             # Set name of the job to the filename being processed
             job = await self.job_service.queue_durable_knowledge_job(
                 task_type,
-                name=filename,
+                name=sanitized_filename,
                 task_params=params,
                 job_id=job_id,
             )

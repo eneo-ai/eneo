@@ -41,7 +41,7 @@ class OperationLeaseCheckpoint:
         now = monotonic()
         if self._lease_deadline - now > self._request_budget_seconds:
             return
-        await self._renew_now()
+        await self.renew_now()
 
     async def run(self, operation: LeasedOperation[_ResultT]) -> _ResultT:
         """Renew during an in-flight mutation and confirm ownership afterward."""
@@ -53,7 +53,7 @@ class OperationLeaseCheckpoint:
             request.add_done_callback(_observe_future_result)
             raise
 
-        await self._renew_now()
+        await self.renew_now()
         return result
 
     async def _wait_with_heartbeat(
@@ -65,9 +65,9 @@ class OperationLeaseCheckpoint:
             done, _ = await asyncio.wait((request,), timeout=heartbeat_seconds)
             if done:
                 return await request
-            await self._renew_now()
+            await self.renew_now()
 
-    async def _renew_now(self) -> None:
+    async def renew_now(self) -> None:
         renewal_started_at = monotonic()
         await self._renew()
         # The pre-transaction timestamp is a conservative lower bound for the

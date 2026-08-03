@@ -8,7 +8,7 @@
 
   type Props = {
     capabilities: DeploymentPolicy["capabilities"];
-    storageTargetLabel: (target: StorageKind | null) => string;
+    storageTargetLabel: (target: StorageKind) => string;
     readinessLabel: (code: ObjectContentReadinessCode) => string;
   };
 

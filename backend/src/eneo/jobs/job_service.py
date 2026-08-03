@@ -4,7 +4,6 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import event
 
-from eneo.jobs.durable_dispatch import build_knowledge_dispatch_params
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Job, JobInDb, JobUpdate, Task
 from eneo.jobs.job_repo import JobRepository
@@ -72,10 +71,7 @@ class JobService:
 
         async def dispatch_after_commit() -> None:
             try:
-                dispatch_params = build_knowledge_dispatch_params(
-                    task_params, job_in_db.id
-                )
-                await job_manager.enqueue(task, job_in_db.id, dispatch_params)
+                await job_manager.enqueue(task, job_in_db.id, task_params)
             except Exception:
                 logger.exception(
                     "Immediate durable job dispatch failed",

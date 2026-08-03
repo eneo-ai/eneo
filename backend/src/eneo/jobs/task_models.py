@@ -1,9 +1,10 @@
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from eneo.jobs.job_models import Task
+from eneo.object_content.content import StorageKind
 
 
 class TaskParams(BaseModel):
@@ -24,11 +25,20 @@ class InfoBlobTask(TaskParams):
     space_id: UUID
 
 
+class KnowledgeOriginalAdmission(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    policy_revision: int = Field(ge=1)
+    storage_target: StorageKind
+    maximum_bytes: int = Field(ge=1)
+
+
 class UploadTask(InfoBlobTask):
     model_config = ConfigDict(extra="forbid")
 
-    filename: str
+    filename: str = Field(min_length=1, max_length=255)
     mimetype: str
+    original_storage: KnowledgeOriginalAdmission
 
 
 class UpdateUsageStatsTaskParams(TaskParams):
@@ -48,13 +58,13 @@ class Transcription(UploadTask):
 
 
 class UploadInfoBlobDispatchEnvelope(BaseModel):
-    version: Literal[1] = 1
+    version: Literal[2] = 2
     task: Literal[Task.UPLOAD_FILE] = Task.UPLOAD_FILE
     params: UploadInfoBlob
 
 
 class TranscriptionDispatchEnvelope(BaseModel):
-    version: Literal[1] = 1
+    version: Literal[2] = 2
     task: Literal[Task.TRANSCRIPTION] = Task.TRANSCRIPTION
     params: Transcription
 

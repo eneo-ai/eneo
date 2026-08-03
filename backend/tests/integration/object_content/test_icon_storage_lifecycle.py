@@ -120,8 +120,7 @@ def _admission(
 ) -> UploadAdmissionSnapshot:
     return UploadAdmissionSnapshot(
         policy_revision=revision,
-        session_storage_target=target,
-        session_operator_ceiling_bytes=maximum_bytes,
+        new_write_storage_target=target,
         session_file_maximum_bytes=maximum_bytes,
         session_image_maximum_bytes=maximum_bytes,
         session_audio_maximum_bytes=maximum_bytes,
