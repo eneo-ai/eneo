@@ -607,8 +607,9 @@ plan above controls all other ordering.
   the terminal JSON contract; the real JSON golden asserts both contracts through
   canonical authoring, and unsupported composite bindings fail without entering
   model repair. One parser, one evidence type, and one bounded in-state resolution
-  aggregate—not a reusable schema registry or second ledger. (d) retain bounded,
-  cited open-vocabulary JSON leaf names stated in prose as planning evidence and
+  aggregate—not a reusable schema registry or second ledger. (d) **LANDED
+  `e26328be6`** — retain bounded, cited open-vocabulary JSON leaf names stated in
+  prose as planning evidence and
   compile them through the existing terminal schema owner; explicit full schemas
   win conflicts, and ordinary lists, report headings, and form fields must not
   become output leaves. Refuse ambiguous or over-limit enumerations instead of
