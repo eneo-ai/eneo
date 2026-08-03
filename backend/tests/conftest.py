@@ -7,6 +7,17 @@ unit tests (with function-scoped tests).
 """
 
 import os
+import sys as _sys
+import tempfile as _tempfile
+from pathlib import Path as _Path
+
+# The repo is bind-mounted into the devcontainer, so host and container share
+# the in-tree __pycache__. Bytecode embeds the absolute source path at compile
+# time: a .pyc compiled on the host still validates (same mtime/size) inside
+# the container but carries /Users/... paths, which breaks inspect.getsource
+# and traceback rendering for the source-inspecting contract tests. Keep this
+# process's bytecode cache in a per-environment tmp dir instead of the mount.
+_sys.pycache_prefix = str(_Path(_tempfile.gettempdir()) / "eneo-pyc")
 
 # CRITICAL: Set crawler settings BEFORE importing pytest_plugins
 # pytest_plugins imports modules that trigger get_settings() at module load time

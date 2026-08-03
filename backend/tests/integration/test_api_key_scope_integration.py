@@ -865,12 +865,10 @@ async def test_space_scoped_user_key_cannot_delete_another_users_file(
 # 2A: Admin Route Guards
 #
 # Admin-endpoint access control ({tenant, space, assistant, app} scopes ×
-# {storage, integrations, user-groups}) is covered by:
-#   - tests/integration/test_api_key_access_matrix.py::test_collect_access_matrix
-#     (probes every admin endpoint with every key config + CSV output)
-#   - tests/unit/test_api_key_route_coverage.py::TestTenantAdminApiKeyGuards
-#     (structurally asserts every admin router carries both scope and admin
-#     permission deps)
+# {storage, integrations, user-groups}) is covered by
+# tests/unit/test_api_key_route_coverage.py::TestTenantAdminApiKeyGuards,
+# which structurally asserts every admin router carries both scope and admin
+# permission deps.
 # ---------------------------------------------------------------------------
 
 
