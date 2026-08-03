@@ -223,7 +223,7 @@ describe("ChatDebugPanel", () => {
       .toBeVisible();
     await expect.element(trigger).toHaveAttribute("aria-expanded", "true");
     await vi.waitFor(() =>
-      expect(document.querySelector('p[role="status"]')?.textContent).toContain(
+      expect(document.querySelector('[data-chat-debug-status="live-turn"]')?.textContent).toContain(
         m.chat_debug_live_turn_title()
       )
     );
@@ -236,6 +236,40 @@ describe("ChatDebugPanel", () => {
       .element(page.getByText(m.chat_debug_turn_option({ number: "1" }), { exact: false }).first())
       .toBeVisible();
     await expect.element(page.getByText("provider/model", { exact: true }).first()).toBeVisible();
+  });
+
+  test("announces selected-turn loading independently while a new turn is being saved", async () => {
+    const stream = controlledAsk("message-3");
+    const firstTurnDiagnostics = deferred<ChatTurnDiagnostics>();
+    const getTurnDiagnostics = vi.fn(({ messageId }: { messageId: string }) =>
+      messageId === "message-1"
+        ? firstTurnDiagnostics.promise
+        : Promise.resolve(diagnostics(messageId, evidence(1)))
+    );
+    const chat = createChat(
+      getTurnDiagnostics,
+      [message("message-1", "First question"), message("message-2", "Second question")],
+      { ask: stream.ask }
+    );
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    const request = chat.askQuestion("Third question");
+    await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-3"]));
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
+    await page.getByRole("button", { name: m.chat_debug_previous_turn() }).click();
+
+    const selectedTurnStatus = document.querySelector('[data-chat-debug-status="selected-turn"]');
+    const liveTurnStatus = document.querySelector('[data-chat-debug-status="live-turn"]');
+    await vi.waitFor(() => expect(selectedTurnStatus?.textContent).toBe(m.chat_debug_loading()));
+    expect(liveTurnStatus?.textContent).toBe(m.chat_debug_live_turn_title());
+    await expect.element(page.getByText(m.chat_debug_live_turn_title()).last()).toBeVisible();
+
+    firstTurnDiagnostics.resolve(diagnostics("message-1", evidence(1)));
+    await vi.waitFor(() => expect(selectedTurnStatus?.textContent).toBe(m.chat_debug_loaded()));
+    expect(liveTurnStatus?.textContent).toBe(m.chat_debug_live_turn_title());
+
+    stream.finishStream();
+    await request;
   });
 
   test("closes when starting or loading a different conversation", async () => {
@@ -415,7 +449,7 @@ describe("ChatDebugPanel", () => {
     await expect
       .element(page.getByRole("alert").getByText(m.chat_debug_confirmation_error_title()))
       .toBeVisible();
-    expect(document.querySelector('p[role="status"]')?.textContent).toBe("");
+    expect(document.querySelector('[data-chat-debug-status="live-turn"]')?.textContent).toBe("");
     await page.getByRole("button", { name: m.chat_debug_retry() }).click();
 
     await vi.waitFor(() => expect(message2Attempts).toBeGreaterThanOrEqual(2));

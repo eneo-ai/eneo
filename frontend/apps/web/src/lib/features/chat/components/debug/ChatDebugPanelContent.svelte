@@ -23,20 +23,19 @@
   }: { chat: ChatService; state: ChatDebugPanelState; idPrefix: string } = $props();
 
   const pendingDiagnosticsRefreshFailed = $derived(chat.pendingDiagnosticsRefreshFailed);
-  const liveStatus = $derived(
-    panel.liveTurnPending
-      ? pendingDiagnosticsRefreshFailed
-        ? ""
-        : m.chat_debug_live_turn_title()
-      : panel.loading
-        ? m.chat_debug_loading()
-        : panel.refreshing
-          ? m.chat_debug_refreshing()
-          : panel.loadError
-            ? m.chat_debug_load_error()
-            : panel.diagnostics
-              ? m.chat_debug_loaded()
-              : ""
+  const selectedTurnStatus = $derived(
+    panel.loading
+      ? m.chat_debug_loading()
+      : panel.refreshing
+        ? m.chat_debug_refreshing()
+        : panel.loadError
+          ? m.chat_debug_load_error()
+          : panel.diagnostics
+            ? m.chat_debug_loaded()
+            : ""
+  );
+  const liveTurnStatus = $derived(
+    panel.liveTurnPending && !pendingDiagnosticsRefreshFailed ? m.chat_debug_live_turn_title() : ""
   );
 
   const timeFormatter = $derived(
@@ -65,7 +64,12 @@
   }
 </script>
 
-<p class="sr-only" role="status" aria-live="polite">{liveStatus}</p>
+<p class="sr-only" role="status" aria-live="polite" data-chat-debug-status="selected-turn">
+  {selectedTurnStatus}
+</p>
+<p class="sr-only" role="status" aria-live="polite" data-chat-debug-status="live-turn">
+  {liveTurnStatus}
+</p>
 
 <div class="border-border flex flex-col gap-2 border-b px-5 py-4">
   <label for="{idPrefix}-turn-select" class="text-xs font-medium">
