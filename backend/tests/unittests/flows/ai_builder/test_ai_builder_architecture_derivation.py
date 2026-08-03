@@ -383,7 +383,6 @@ def test_document_pdf_ignores_structured_analysis_slot() -> None:
         }
     ]
     assert draft.chosen_patterns == ["document_to_pdf_report"]
-    assert draft.aggregation_intent == "aggregate"
 
 
 def test_json_terminal_schema_extraction_does_not_select_quality_chain() -> None:
@@ -408,7 +407,7 @@ def test_json_terminal_schema_extraction_does_not_select_quality_chain() -> None
     assert draft.aggregation_intent == "linear"
 
 
-def test_derives_aggregate_intent_for_multiple_document_scope() -> None:
+def test_derives_linear_intent_for_related_document_package() -> None:
     draft = derive_architecture_commit_draft(
         _state_with_slots(
             primary_runtime_input="documents",
@@ -416,24 +415,6 @@ def test_derives_aggregate_intent_for_multiple_document_scope() -> None:
             document_material_scope="multiple_documents_case",
         )
     )
-
-    assert draft is not None
-    assert draft.aggregation_intent == "aggregate"
-
-
-def test_non_commit_grade_document_scope_does_not_set_aggregation() -> None:
-    state = _state_with_slots(
-        primary_runtime_input="documents",
-        terminal_output="structured_text",
-    )
-    state.resolved_slots["document_material_scope"] = _slot(
-        "document_material_scope",
-        "multiple_documents_case",
-        source="heuristic",
-        confidence="high",
-    )
-
-    draft = derive_architecture_commit_draft(state)
 
     assert draft is not None
     assert draft.aggregation_intent == "linear"

@@ -441,6 +441,64 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
     assert validate_spec(compiled).valid
 
 
+def test_related_document_package_compiles_to_declared_json_contract() -> None:
+    output_schema: JsonObject = {
+        "type": "object",
+        "properties": {
+            "candidate_name": {"type": "string"},
+            "qualification_summary": {"type": "string"},
+        },
+        "required": ["candidate_name", "qualification_summary"],
+    }
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "document_material_scope": _slot(
+            "document_material_scope",
+            "multiple_documents_case",
+        ),
+        "terminal_output": _slot("terminal_output", "structured_json"),
+    }
+    _commit_architecture(state)
+    state.output_schema_evidence = build_schema_evidence(
+        json_schema=output_schema,
+        source="prose_field_names",
+        source_file_ids=(),
+        confidence="high",
+        evidence=[
+            "quote:user_message:application:field:candidate_name",
+            "quote:user_message:application:field:qualification_summary",
+        ],
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Application summary",
+            "plan_rationale": "Read the related application documents once.",
+            "steps": [
+                {
+                    "name": "Summarize application",
+                    "instructions": (
+                        "Read the application package and return the requested fields."
+                    ),
+                    "output_type": "json",
+                }
+            ],
+        }
+    )
+
+    context = create_compile_context_from_planning_state(state)
+    assert context is not None
+    assert context.aggregation_intent == "linear"
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    assert len(compiled.steps) == 1
+    assert compiled.steps[0].input_source is InputSource.FLOW_INPUT
+    assert compiled.steps[0].input_type is InputType.DOCUMENT
+    assert compiled.steps[0].output_contract == output_schema
+    assert validate_spec(compiled).valid
+
+
 def test_compile_context_rejects_input_schema_for_non_json_runtime_input() -> None:
     with pytest.raises(ValueError, match="requires JSON runtime input"):
         CreateCompileContext(
