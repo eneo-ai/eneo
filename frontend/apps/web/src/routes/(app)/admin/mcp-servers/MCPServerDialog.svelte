@@ -32,7 +32,6 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer">("none");
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
   let forward_identity = $state(false);
@@ -43,6 +42,20 @@
   // Authentication credentials
   let bearer_token = $state("");
 
+  // Top-level authentication mode is a single flat choice. ``auth_mode``
+  // collapses the backend's two-axis model (http_auth_type × auth_scope)
+  // into one selector so administrators don't have to reason about both:
+  //   public  → http_auth_type=none,   auth_scope=static_bearer
+  //   bearer  → http_auth_type=bearer, auth_scope=static_bearer
+  //   sso     → http_auth_type=bearer, auth_scope=per_user | per_tenant
+  let auth_mode = $state<"public" | "bearer" | "sso">("public");
+  // Sub-choice that only matters when ``auth_mode === "sso"``. Holds
+  // ``per_user`` or ``per_tenant``; rolls up into auth_scope at submit.
+  let sso_scope = $state<"per_user" | "per_tenant">("per_user");
+  let expected_idp_issuer = $state("");
+  let target_resource_or_scope = $state("");
+  let exchange_protocol = $state<"auto" | "id_jag" | "rfc8693">("auto");
+
   let submitting = $state(false);
   let errorMessage = $state("");
 
@@ -52,7 +65,21 @@
       name = mcpServer.name || "";
       description = mcpServer.description || "";
       http_url = mcpServer.http_url || "";
-      http_auth_type = (mcpServer.http_auth_type as "none" | "bearer") || "none";
+      const existingAuthType = (mcpServer.http_auth_type as "none" | "bearer") || "none";
+      const existingScope = mcpServer.auth_scope ?? "static_bearer";
+      if (existingScope === "per_user" || existingScope === "per_tenant") {
+        auth_mode = "sso";
+        sso_scope = existingScope;
+      } else if (existingAuthType === "bearer") {
+        auth_mode = "bearer";
+        sso_scope = "per_user";
+      } else {
+        auth_mode = "public";
+        sso_scope = "per_user";
+      }
+      expected_idp_issuer = mcpServer.expected_idp_issuer ?? "";
+      target_resource_or_scope = mcpServer.target_resource_or_scope ?? "";
+      exchange_protocol = mcpServer.exchange_protocol ?? "auto";
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
       forward_identity = mcpServer.forward_identity ?? false;
@@ -68,7 +95,11 @@
       name = "";
       description = "";
       http_url = "";
-      http_auth_type = "none";
+      auth_mode = "public";
+      sso_scope = "per_user";
+      expected_idp_issuer = "";
+      target_resource_or_scope = "";
+      exchange_protocol = "auto";
       documentation_url = "";
       security_classification = null;
       forward_identity = false;
@@ -84,6 +115,11 @@
   async function handleSubmit() {
     submitting = true;
     errorMessage = "";
+
+    // Roll the flat auth_mode UI back up to the backend's two-axis model.
+    const http_auth_type: "none" | "bearer" = auth_mode === "public" ? "none" : "bearer";
+    const auth_scope: "static_bearer" | "per_user" | "per_tenant" =
+      auth_mode === "sso" ? sso_scope : "static_bearer";
 
     try {
       const data: Record<string, unknown> = { name };
@@ -111,8 +147,23 @@
         : null;
 
       // Add auth config if provided
-      if (http_auth_type === "bearer" && bearer_token) {
+      if (auth_mode === "bearer" && bearer_token) {
         data.http_auth_config_schema = { token: bearer_token };
+      }
+
+      // OAuth scope and broker fields. Only send when they meaningfully
+      // differ from the current state (avoid touching unrelated rows).
+      if (!isEditMode || auth_scope !== (mcpServer?.auth_scope ?? "static_bearer")) {
+        data.auth_scope = auth_scope;
+      }
+      if (auth_mode === "sso") {
+        data.expected_idp_issuer = expected_idp_issuer || null;
+        data.target_resource_or_scope = target_resource_or_scope || null;
+        data.exchange_protocol = exchange_protocol;
+      } else if (isEditMode) {
+        // Switched away from SSO — clear the OAuth-only fields.
+        data.expected_idp_issuer = null;
+        data.target_resource_or_scope = null;
       }
 
       await onSubmit(data, mcpServer?.mcp_server_id);
@@ -122,7 +173,11 @@
         name = "";
         description = "";
         http_url = "";
-        http_auth_type = "none";
+        auth_mode = "public";
+        sso_scope = "per_user";
+        expected_idp_issuer = "";
+        target_resource_or_scope = "";
+        exchange_protocol = "auto";
         documentation_url = "";
         bearer_token = "";
         security_classification = null;
@@ -339,15 +394,16 @@
 
           <Select.Simple
             options={[
-              { value: "none", label: "Publik (ingen autentisering)" },
-              { value: "bearer", label: "Bearer Token" }
+              { value: "public", label: m.mcp_auth_mode_public() },
+              { value: "bearer", label: m.mcp_auth_mode_bearer() },
+              { value: "sso", label: m.mcp_auth_mode_sso() }
             ]}
-            bind:value={http_auth_type}
+            bind:value={auth_mode}
           >
             {m.authentication_type()}
           </Select.Simple>
 
-          {#if http_auth_type === "bearer"}
+          {#if auth_mode === "bearer"}
             <div>
               <label for="mcp-bearer_token" class="text-default mb-1.5 block text-sm font-medium"
                 >{m.bearer_token()}</label
@@ -367,6 +423,85 @@
                 {m.will_be_sent_as_bearer()}
               </p>
             </div>
+          {/if}
+
+          {#if auth_mode === "sso"}
+            <div>
+              <Select.Simple
+                options={[
+                  { value: "per_user", label: m.mcp_auth_sso_per_user() },
+                  { value: "per_tenant", label: m.mcp_auth_sso_per_tenant() }
+                ]}
+                bind:value={sso_scope}
+              >
+                {m.mcp_auth_sso_scope_label()}
+              </Select.Simple>
+              <p class="text-muted mt-1.5 text-xs">
+                {m.mcp_auth_sso_hint()}
+              </p>
+            </div>
+
+            <details class="border-default bg-secondary/30 rounded-lg border px-3 py-2">
+              <summary class="text-default cursor-pointer text-sm font-medium">
+                {m.mcp_auth_advanced()}
+              </summary>
+              <div class="mt-3 space-y-3">
+                <Select.Simple
+                  options={[
+                    { value: "auto", label: m.mcp_auth_exchange_protocol_auto() },
+                    { value: "id_jag", label: "ID-JAG (Enterprise-Managed Authorization)" },
+                    { value: "rfc8693", label: "RFC 8693 (samma IdP)" }
+                  ]}
+                  bind:value={exchange_protocol}
+                >
+                  {m.mcp_auth_exchange_protocol_label()}
+                </Select.Simple>
+                <p class="text-muted text-xs">
+                  {m.mcp_auth_exchange_protocol_hint()}
+                </p>
+
+                <div>
+                  <label for="mcp-target-aud" class="text-default mb-1.5 block text-sm font-medium">
+                    {m.mcp_auth_target_label()}
+                    <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span
+                    >
+                  </label>
+                  <input
+                    id="mcp-target-aud"
+                    type="text"
+                    bind:value={target_resource_or_scope}
+                    aria-describedby="mcp-target-aud-hint"
+                    placeholder={m.mcp_auth_target_placeholder()}
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                  />
+                  <p id="mcp-target-aud-hint" class="text-muted mt-1.5 text-xs">
+                    {m.mcp_auth_target_hint()}
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    for="mcp-expected-idp"
+                    class="text-default mb-1.5 block text-sm font-medium"
+                  >
+                    {m.mcp_auth_issuer_override_label()}
+                    <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span
+                    >
+                  </label>
+                  <input
+                    id="mcp-expected-idp"
+                    type="url"
+                    bind:value={expected_idp_issuer}
+                    aria-describedby="mcp-expected-idp-hint"
+                    placeholder={m.mcp_auth_issuer_placeholder()}
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                  />
+                  <p id="mcp-expected-idp-hint" class="text-muted mt-1.5 text-xs">
+                    {m.mcp_auth_issuer_override_hint()}
+                  </p>
+                </div>
+              </div>
+            </details>
           {/if}
         </fieldset>
 

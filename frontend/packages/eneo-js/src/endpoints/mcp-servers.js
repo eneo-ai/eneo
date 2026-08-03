@@ -52,6 +52,10 @@ export function initMCPServers(client) {
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
+     * @param {"static_bearer" | "per_user" | "per_tenant"} [params.auth_scope] OAuth scope discriminator
+     * @param {string | null} [params.expected_idp_issuer] Expected IdP issuer for the broker gate
+     * @param {string | null} [params.target_resource_or_scope] Audience/scope for token-exchange
+     * @param {"auto" | "id_jag" | "rfc8693"} [params.exchange_protocol] Token-exchange strategy selection
      * @param {{id: string} | null} [params.security_classification] Security classification
      * @throws {EneoError}
      * */
@@ -70,7 +74,11 @@ export function initMCPServers(client) {
       tags,
       icon_url,
       documentation_url,
-      security_classification
+      security_classification,
+      auth_scope,
+      expected_idp_issuer,
+      target_resource_or_scope,
+      exchange_protocol
     }) => {
       /** @type {any} */
       const body = {
@@ -88,7 +96,11 @@ export function initMCPServers(client) {
         tags,
         icon_url,
         documentation_url,
-        security_classification
+        security_classification,
+        auth_scope,
+        expected_idp_issuer,
+        target_resource_or_scope,
+        exchange_protocol
       };
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",
@@ -117,6 +129,10 @@ export function initMCPServers(client) {
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
+     * @param {"static_bearer" | "per_user" | "per_tenant"} [params.auth_scope] OAuth scope discriminator
+     * @param {string | null} [params.expected_idp_issuer] Expected IdP issuer for the broker gate
+     * @param {string | null} [params.target_resource_or_scope] Audience/scope for token-exchange
+     * @param {"auto" | "id_jag" | "rfc8693"} [params.exchange_protocol] Token-exchange strategy selection
      * @param {{id: string} | null} [params.security_classification] Security classification
      * @throws {EneoError}
      * */
@@ -136,7 +152,11 @@ export function initMCPServers(client) {
       tags,
       icon_url,
       documentation_url,
-      security_classification
+      security_classification,
+      auth_scope,
+      expected_idp_issuer,
+      target_resource_or_scope,
+      exchange_protocol
     }) => {
       /** @type {any} */
       const body = {
@@ -154,7 +174,11 @@ export function initMCPServers(client) {
         tags,
         icon_url,
         documentation_url,
-        security_classification
+        security_classification,
+        auth_scope,
+        expected_idp_issuer,
+        target_resource_or_scope,
+        exchange_protocol
       };
       const res = await client.fetch("/api/v1/mcp-servers/{id}/", {
         method: "post",

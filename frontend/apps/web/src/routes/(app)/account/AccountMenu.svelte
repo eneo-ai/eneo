@@ -2,6 +2,7 @@
   import { IconAssistant } from "@eneo/icons/assistant";
   import { IconKey } from "@eneo/icons/key";
   import { IconLink } from "@eneo/icons/link";
+  import { IconServices } from "@eneo/icons/services";
   import { page } from "$app/stores";
   import type { ComponentType } from "svelte";
   import { Navigation } from "$lib/components/layout";
@@ -29,6 +30,11 @@
       icon: IconKey,
       label: m.api_keys(),
       url: "/account/api-keys"
+    },
+    {
+      icon: IconServices,
+      label: m.mcp_connections_menu_label(),
+      url: "/account/mcp-connections"
     }
   ];
 </script>
