@@ -7,6 +7,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Info from "@lucide/svelte/icons/info";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { ChatService } from "../../ChatService.svelte";
@@ -23,15 +24,19 @@
 
   const pendingDiagnosticsRefreshFailed = $derived(chat.pendingDiagnosticsRefreshFailed);
   const liveStatus = $derived(
-    panel.loading
-      ? m.chat_debug_loading()
-      : panel.refreshing
-        ? m.chat_debug_refreshing()
-        : panel.loadError
-          ? m.chat_debug_load_error()
-          : panel.diagnostics
-            ? m.chat_debug_loaded()
-            : ""
+    panel.liveTurnPending
+      ? pendingDiagnosticsRefreshFailed
+        ? ""
+        : m.chat_debug_live_turn_title()
+      : panel.loading
+        ? m.chat_debug_loading()
+        : panel.refreshing
+          ? m.chat_debug_refreshing()
+          : panel.loadError
+            ? m.chat_debug_load_error()
+            : panel.diagnostics
+              ? m.chat_debug_loaded()
+              : ""
   );
 
   const timeFormatter = $derived(
@@ -131,16 +136,23 @@
 <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] @container">
   {#if panel.liveTurnPending}
     <div class="px-5 pt-5">
-      <Alert.Root variant={pendingDiagnosticsRefreshFailed ? "destructive" : undefined}>
-        <Info aria-hidden="true" />
+      <Alert.Root
+        variant={pendingDiagnosticsRefreshFailed ? "destructive" : undefined}
+        role={pendingDiagnosticsRefreshFailed ? "alert" : "group"}
+      >
+        {#if pendingDiagnosticsRefreshFailed}
+          <CircleAlert aria-hidden="true" />
+        {:else}
+          <Info aria-hidden="true" />
+        {/if}
         <Alert.Title>
           {pendingDiagnosticsRefreshFailed
-            ? m.chat_debug_unavailable_title()
+            ? m.chat_debug_confirmation_error_title()
             : m.chat_debug_live_turn_title()}
         </Alert.Title>
         <Alert.Description>
           {pendingDiagnosticsRefreshFailed
-            ? m.chat_debug_unavailable_description()
+            ? m.chat_debug_confirmation_error_description()
             : m.chat_debug_live_turn_description()}
         </Alert.Description>
         {#if pendingDiagnosticsRefreshFailed}

@@ -2,7 +2,13 @@ import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
-import type { ChatTurnDiagnostics, ConversationMessage, Eneo, components } from "@eneo/eneo-js";
+import type {
+  ChatTurnDiagnostics,
+  Conversation,
+  ConversationMessage,
+  Eneo,
+  components
+} from "@eneo/eneo-js";
 import { ChatService, type ChatPartner } from "../../ChatService.svelte";
 import ChatDebugPanelFixture from "./ChatDebugPanelFixture.svelte";
 
@@ -12,6 +18,46 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => (resolve = resolvePromise));
   return { promise, resolve };
+}
+
+function controlledAsk(messageId: string) {
+  let finishStream!: () => void;
+  const ask = vi.fn().mockImplementation(
+    ({ callbacks }) =>
+      new Promise<void>((resolve) => {
+        callbacks.onFirstChunk({
+          id: messageId,
+          session_id: "session-1",
+          answer: "",
+          references: []
+        });
+        finishStream = resolve;
+      })
+  );
+  return { ask, finishStream: () => finishStream() };
+}
+
+function delayedFirstChunk(messageId: string) {
+  let emitFirstChunk!: () => void;
+  let finishStream!: () => void;
+  const ask = vi.fn().mockImplementation(
+    ({ callbacks }) =>
+      new Promise<void>((resolve) => {
+        emitFirstChunk = () =>
+          callbacks.onFirstChunk({
+            id: messageId,
+            session_id: "session-1",
+            answer: "",
+            references: []
+          });
+        finishStream = resolve;
+      })
+  );
+  return {
+    ask,
+    emitFirstChunk: () => emitFirstChunk(),
+    finishStream: () => finishStream()
+  };
 }
 
 function message(id: string, question: string, extra: Partial<ConversationMessage> = {}) {
@@ -160,6 +206,100 @@ describe("ChatDebugPanel", () => {
       .not.toBeInTheDocument();
   });
 
+  test("stays open while the first turn receives its persisted conversation id", async () => {
+    const stream = controlledAsk("message-1");
+    const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-1", evidence(1)));
+    const chat = createChat(getTurnDiagnostics, [], { ask: stream.ask });
+    chat.newConversation();
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    const trigger = page.getByRole("button", { name: m.chat_debug_open(), exact: true });
+    await trigger.click();
+    const request = chat.askQuestion("First question");
+
+    await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-1"]));
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .toBeVisible();
+    await expect.element(trigger).toHaveAttribute("aria-expanded", "true");
+    await vi.waitFor(() =>
+      expect(document.querySelector('p[role="status"]')?.textContent).toContain(
+        m.chat_debug_live_turn_title()
+      )
+    );
+
+    stream.finishStream();
+    await request;
+
+    await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual([]));
+    await expect
+      .element(page.getByText(m.chat_debug_turn_option({ number: "1" }), { exact: false }).first())
+      .toBeVisible();
+    await expect.element(page.getByText("provider/model", { exact: true }).first()).toBeVisible();
+  });
+
+  test("closes when starting or loading a different conversation", async () => {
+    const stream = delayedFirstChunk("stale-message");
+    const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-1", evidence(1)));
+    const get = vi.fn().mockResolvedValue({
+      id: "session-2",
+      name: "Other conversation",
+      messages: [message("message-2", "Other question")]
+    });
+    const chat = createChat(getTurnDiagnostics, undefined, {
+      ask: stream.ask,
+      get
+    });
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    const trigger = page.getByRole("button", { name: m.chat_debug_open(), exact: true });
+    await trigger.click();
+    chat.newConversation();
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .not.toBeInTheDocument();
+    await expect.element(trigger).toHaveAttribute("aria-expanded", "false");
+
+    await trigger.click();
+    const request = chat.askQuestion("Pending question");
+    await vi.waitFor(() => expect(chat.askQuestion.isLoading).toBe(true));
+    await chat.loadConversation({ id: "session-2" });
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .not.toBeInTheDocument();
+    await expect.element(trigger).toHaveAttribute("aria-expanded", "false");
+    stream.emitFirstChunk();
+    expect(chat.currentConversation.id).toBe("session-2");
+    expect(chat.currentConversation.messages.map((item) => item.id)).toEqual(["message-2"]);
+
+    stream.finishStream();
+    await request;
+  });
+
+  test("closes before an asynchronous assistant context replacement settles", async () => {
+    const initialConversation = deferred<Conversation | null>();
+    const getTurnDiagnostics = vi.fn().mockResolvedValue(diagnostics("message-1", evidence(1)));
+    const chat = createChat(getTurnDiagnostics);
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    const trigger = page.getByRole("button", { name: m.chat_debug_open(), exact: true });
+    await trigger.click();
+    chat.init({
+      eneo: {} as Eneo,
+      chatPartner: { ...chat.partner, id: "assistant-2" } as ChatPartner,
+      initialConversation: initialConversation.promise,
+      initialHistory: { items: [], count: 0, total_count: 0, next_cursor: null }
+    });
+
+    await expect
+      .element(page.getByRole("complementary", { name: m.chat_debug_title() }))
+      .not.toBeInTheDocument();
+    await expect.element(trigger).toHaveAttribute("aria-expanded", "false");
+
+    initialConversation.resolve(null);
+    await vi.waitFor(() => expect(chat.currentConversation.id).toBe(""));
+  });
+
   test("selects the latest persisted turn and ignores a stale request after partner change", async () => {
     const firstRequest = deferred<ChatTurnDiagnostics>();
     const getTurnDiagnostics = vi.fn().mockReturnValue(firstRequest.promise);
@@ -273,8 +413,9 @@ describe("ChatDebugPanel", () => {
     await request;
 
     await expect
-      .element(page.getByRole("alert").getByText(m.chat_debug_unavailable_title()))
+      .element(page.getByRole("alert").getByText(m.chat_debug_confirmation_error_title()))
       .toBeVisible();
+    expect(document.querySelector('p[role="status"]')?.textContent).toBe("");
     await page.getByRole("button", { name: m.chat_debug_retry() }).click();
 
     await vi.waitFor(() => expect(message2Attempts).toBeGreaterThanOrEqual(2));
@@ -405,6 +546,69 @@ describe("ChatDebugPanel", () => {
     );
     await expect.element(previous).toBeDisabled();
     await expect.element(next).not.toBeDisabled();
+  });
+
+  test("preserves an explicit turn selection when a newer turn becomes available", async () => {
+    const stream = controlledAsk("message-3");
+    const getTurnDiagnostics = vi.fn(({ messageId }: { messageId: string }) =>
+      Promise.resolve(diagnostics(messageId, evidence(1)))
+    );
+    const chat = createChat(
+      getTurnDiagnostics,
+      [message("message-1", "First question"), message("message-2", "Second question")],
+      { ask: stream.ask }
+    );
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
+    await page.getByRole("button", { name: m.chat_debug_previous_turn() }).click();
+    const firstTurnLabel = page
+      .getByText(m.chat_debug_turn_option({ number: "1" }), { exact: false })
+      .first();
+    await expect.element(firstTurnLabel).toBeVisible();
+
+    const request = chat.askQuestion("Third question");
+    await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-3"]));
+    stream.finishStream();
+    await request;
+
+    await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual([]));
+    await expect.element(firstTurnLabel).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.chat_debug_next_turn() }))
+      .not.toBeDisabled();
+  });
+
+  test("resumes following new turns after returning to the latest turn", async () => {
+    const stream = controlledAsk("message-3");
+    const getTurnDiagnostics = vi.fn(({ messageId }: { messageId: string }) =>
+      Promise.resolve(diagnostics(messageId, evidence(1)))
+    );
+    const chat = createChat(
+      getTurnDiagnostics,
+      [message("message-1", "First question"), message("message-2", "Second question")],
+      { ask: stream.ask }
+    );
+    render(ChatDebugPanelFixture, { chat, available: true });
+
+    await page.getByRole("button", { name: m.chat_debug_open(), exact: true }).click();
+    await page.getByRole("button", { name: m.chat_debug_previous_turn() }).click();
+    await page.getByRole("button", { name: m.chat_debug_next_turn() }).click();
+
+    const request = chat.askQuestion("Third question");
+    await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual(["message-3"]));
+    stream.finishStream();
+    await request;
+
+    await vi.waitFor(() =>
+      expect(getTurnDiagnostics).toHaveBeenCalledWith({
+        sessionId: "session-1",
+        messageId: "message-3"
+      })
+    );
+    await expect
+      .element(page.getByText(m.chat_debug_turn_option({ number: "3" }), { exact: false }).first())
+      .toBeVisible();
   });
 
   test("distinguishes legacy evidence from zero candidates and reveals large lists in chunks", async () => {
