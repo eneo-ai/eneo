@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
@@ -17,10 +18,21 @@ from eneo.object_content.configuration import (
 )
 from eneo.object_content.content import CapturedContent
 from eneo.object_content.object_store_connection import (
+    ObjectStoreConnectionActor,
     ObjectStoreConnectionDatabaseUnavailable,
+    ObjectStoreConnectionInput,
+    ObjectStoreConnectionMutationOutcomeUnknown,
+    ObjectStoreConnectionRepository,
     ObjectStoreConnectionService,
+    ObjectStoreCredentialRotation,
+    ObjectStoreEndpointNotPermitted,
     ObjectStoreProbeCleanupFailed,
     ObjectStoreProbeConnectionFailed,
+    StoredObjectStoreConnection,
+)
+from eneo.object_content.reconciliation_repository import (
+    ObjectContentReconciliationRepository,
+    StoreBindingSnapshot,
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreUnavailableError,
@@ -88,6 +100,29 @@ class _UnavailableDatabase:
         yield cast(AsyncSession, None)
 
 
+class _SequencedCommitFailureSession:
+    def __init__(self, database: "_SequencedCommitFailureDatabase") -> None:
+        self._database = database
+
+    @asynccontextmanager
+    async def begin(self) -> AsyncGenerator[None]:
+        self._database.transactions += 1
+        transaction = self._database.transactions
+        yield
+        if transaction == self._database.fail_transaction:
+            raise SQLAlchemyError("commit outcome is unknown")
+
+
+class _SequencedCommitFailureDatabase:
+    def __init__(self, *, fail_transaction: int | None = None) -> None:
+        self.fail_transaction = fail_transaction
+        self.transactions = 0
+
+    @asynccontextmanager
+    async def session(self) -> AsyncGenerator[AsyncSession]:
+        yield cast(AsyncSession, _SequencedCommitFailureSession(self))
+
+
 def _settings() -> ObjectContentSettings:
     return ObjectContentSettings(
         _env_file=None,
@@ -100,13 +135,35 @@ def _settings() -> ObjectContentSettings:
     )
 
 
+def _stored_connection() -> StoredObjectStoreConnection:
+    now = datetime.now(UTC)
+    return StoredObjectStoreConnection(
+        revision=1,
+        endpoint_url="https://objects.example.test",
+        region="se-1",
+        bucket="eneo-content",
+        access_key_id_encrypted="encrypted-access",
+        secret_access_key_encrypted="encrypted-secret",
+        deployment_id=_settings().deployment_id,
+        addressing_style="path",
+        updated_by_actor=ObjectStoreConnectionActor.PLATFORM_ADMIN,
+        updated_by_user_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def _service(
-    store: object, database: object = object()
+    store: object,
+    database: object = object(),
+    *,
+    operator_settings: ObjectStoreOperatorSettings | None = None,
 ) -> ObjectStoreConnectionService:
     return ObjectStoreConnectionService(
         database=cast(DatabaseSessionManager, database),
         core_settings=ObjectContentCoreSettings(_env_file=None),
-        operator_settings=ObjectStoreOperatorSettings(_env_file=None),
+        operator_settings=operator_settings
+        or ObjectStoreOperatorSettings(_env_file=None),
         encryption=EncryptionService(Fernet.generate_key().decode()),
         store_factory=lambda _settings: cast(S3ObjectStore, store),
     )
@@ -169,3 +226,147 @@ async def test_probe_preserves_external_cancellation_after_cleanup(
 async def test_connection_database_failure_uses_typed_contract() -> None:
     with pytest.raises(ObjectStoreConnectionDatabaseUnavailable):
         await _service(_DelayedUploadStore(), _UnavailableDatabase()).get()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "rotate"])
+async def test_admin_mutations_reject_unapproved_endpoint_before_remote_io(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    stored = _stored_connection()
+    database = _SequencedCommitFailureDatabase()
+    service = _service(
+        _DelayedUploadStore(),
+        database,
+        operator_settings=ObjectStoreOperatorSettings(
+            _env_file=None,
+            admin_allowed_endpoint_origins=("https://approved.example.test",),
+        ),
+    )
+
+    async def get_connection(
+        _repository: ObjectStoreConnectionRepository,
+    ) -> StoredObjectStoreConnection | None:
+        return stored if operation == "rotate" else None
+
+    async def unbound_snapshot(
+        _repository: ObjectContentReconciliationRepository,
+    ) -> StoreBindingSnapshot:
+        return StoreBindingSnapshot(None, None, False)
+
+    async def remote_probe_must_not_run(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("the remote store must not be opened")
+
+    monkeypatch.setattr(ObjectStoreConnectionRepository, "get", get_connection)
+    monkeypatch.setattr(
+        ObjectContentReconciliationRepository,
+        "store_binding_snapshot",
+        unbound_snapshot,
+    )
+    monkeypatch.setattr(service, "_probe", remote_probe_must_not_run)
+
+    with pytest.raises(ObjectStoreEndpointNotPermitted):
+        if operation == "create":
+            await service.create(
+                ObjectStoreConnectionInput(
+                    endpoint_url=stored.endpoint_url,
+                    region=stored.region,
+                    bucket=stored.bucket,
+                    access_key_id="access",
+                    secret_access_key="secret",
+                ),
+                actor_user_id=stored.deployment_id,
+            )
+        else:
+            await service.rotate_credentials(
+                ObjectStoreCredentialRotation(
+                    expected_revision=stored.revision,
+                    access_key_id="access",
+                    secret_access_key="secret",
+                ),
+                actor_user_id=stored.deployment_id,
+            )
+
+    assert database.transactions == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "rotate"])
+async def test_admin_mutations_report_unknown_commit_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    stored = _stored_connection()
+    database = _SequencedCommitFailureDatabase(fail_transaction=2)
+    service = _service(
+        _DelayedUploadStore(),
+        database,
+        operator_settings=ObjectStoreOperatorSettings(
+            _env_file=None,
+            admin_allowed_endpoint_origins=("https://objects.example.test",),
+        ),
+    )
+
+    async def get_connection(
+        _repository: ObjectStoreConnectionRepository,
+    ) -> StoredObjectStoreConnection | None:
+        return stored if operation == "rotate" else None
+
+    async def unbound_snapshot(
+        _repository: ObjectContentReconciliationRepository,
+    ) -> StoreBindingSnapshot:
+        return StoreBindingSnapshot(None, None, False)
+
+    async def probe_succeeds(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    async def create_connection(
+        _repository: ObjectStoreConnectionRepository,
+        **_kwargs: object,
+    ) -> StoredObjectStoreConnection:
+        return stored
+
+    async def rotate_connection(
+        _repository: ObjectStoreConnectionRepository,
+        **_kwargs: object,
+    ) -> StoredObjectStoreConnection:
+        return stored
+
+    monkeypatch.setattr(ObjectStoreConnectionRepository, "get", get_connection)
+    monkeypatch.setattr(ObjectStoreConnectionRepository, "create", create_connection)
+    monkeypatch.setattr(
+        ObjectStoreConnectionRepository,
+        "rotate_credentials",
+        rotate_connection,
+    )
+    monkeypatch.setattr(
+        ObjectContentReconciliationRepository,
+        "store_binding_snapshot",
+        unbound_snapshot,
+    )
+    monkeypatch.setattr(service, "_probe", probe_succeeds)
+
+    with pytest.raises(ObjectStoreConnectionMutationOutcomeUnknown):
+        if operation == "create":
+            await service.create(
+                ObjectStoreConnectionInput(
+                    endpoint_url=stored.endpoint_url,
+                    region=stored.region,
+                    bucket=stored.bucket,
+                    access_key_id="access",
+                    secret_access_key="secret",
+                ),
+                actor_user_id=stored.deployment_id,
+            )
+        else:
+            await service.rotate_credentials(
+                ObjectStoreCredentialRotation(
+                    expected_revision=stored.revision,
+                    access_key_id="access",
+                    secret_access_key="secret",
+                ),
+                actor_user_id=stored.deployment_id,
+            )
+
+    assert database.transactions == 2

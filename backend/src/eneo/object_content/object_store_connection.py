@@ -121,6 +121,10 @@ class ObjectStorePlainHttpNotPermitted(ObjectStoreConnectionInvalid):
     code = "object_store_plain_http_not_permitted"
 
 
+class ObjectStoreEndpointNotPermitted(ObjectStoreConnectionInvalid):
+    code = "object_store_endpoint_not_permitted"
+
+
 class ObjectStoreCredentialEncryptionUnavailable(ObjectStoreConnectionError):
     code = "object_store_credential_encryption_unavailable"
 
@@ -131,6 +135,10 @@ class ObjectStoreCredentialDataInvalid(ObjectStoreConnectionError):
 
 class ObjectStoreConnectionDatabaseUnavailable(ObjectStoreConnectionError):
     code = "object_store_connection_database_unavailable"
+
+
+class ObjectStoreConnectionMutationOutcomeUnknown(ObjectStoreConnectionError):
+    code = "object_store_connection_mutation_outcome_unknown"
 
 
 class ObjectStoreProbeAuthenticationFailed(ObjectStoreConnectionError):
@@ -337,7 +345,7 @@ class ObjectStoreConnectionService:
         secret_access_key_encrypted = self._encryption.encrypt(
             candidate.secret_access_key.get_secret_value()
         )
-        async with self._transaction() as session:
+        async with self._transaction(mutation=True) as session:
             if await ObjectStoreConnectionRepository(session).get() is not None:
                 raise ObjectStoreConnectionAlreadyConfigured(
                     "Object storage was configured by another administrator"
@@ -391,7 +399,7 @@ class ObjectStoreConnectionService:
             binding=None if binding.unbound else binding,
         )
 
-        async with self._transaction() as session:
+        async with self._transaction(mutation=True) as session:
             return await ObjectStoreConnectionRepository(session).rotate_credentials(
                 expected_revision=replacement.expected_revision,
                 access_key_id_encrypted=self._encryption.encrypt(
@@ -438,13 +446,23 @@ class ObjectStoreConnectionService:
         return stored
 
     @asynccontextmanager
-    async def _transaction(self) -> AsyncGenerator[AsyncSession]:
+    async def _transaction(
+        self,
+        *,
+        mutation: bool = False,
+    ) -> AsyncGenerator[AsyncSession]:
+        body_completed = False
         try:
             async with self._database.session() as session, session.begin():
                 yield session
+                body_completed = True
         except ObjectStoreConnectionError:
             raise
         except (OSError, SQLAlchemyError) as error:
+            if mutation and body_completed:
+                raise ObjectStoreConnectionMutationOutcomeUnknown(
+                    "The database could not confirm whether the change was committed"
+                ) from error
             raise ObjectStoreConnectionDatabaseUnavailable(
                 "Object-store connection data is temporarily unavailable"
             ) from error
@@ -481,6 +499,9 @@ class ObjectStoreConnectionService:
                 addressing_style=stored.addressing_style,
             ),
             deployment_id=stored.deployment_id,
+            operator_supplied_endpoint=(
+                stored.updated_by_actor is ObjectStoreConnectionActor.MIGRATION
+            ),
         )
 
     async def _require_unbound_destination(self, session: AsyncSession) -> None:
@@ -497,7 +518,17 @@ class ObjectStoreConnectionService:
         candidate: ObjectStoreConnectionInput,
         *,
         deployment_id: UUID,
+        operator_supplied_endpoint: bool = False,
     ) -> ObjectContentSettings:
+        if (
+            not operator_supplied_endpoint
+            and not self._operator_settings.permits_admin_endpoint(
+                candidate.endpoint_url
+            )
+        ):
+            raise ObjectStoreEndpointNotPermitted(
+                "The object-store endpoint is not permitted by deployment policy"
+            )
         if (
             urlparse(candidate.endpoint_url).scheme == "http"
             and not self._operator_settings.allow_insecure_http

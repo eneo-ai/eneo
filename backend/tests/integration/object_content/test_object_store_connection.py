@@ -45,6 +45,7 @@ def _service(
             name: getattr(settings, name)
             for name in ObjectStoreOperatorSettings.model_fields
         }
+        | {"admin_allowed_endpoint_origins": (settings.endpoint_url,)}
     )
     return ObjectStoreConnectionService(
         database=database,

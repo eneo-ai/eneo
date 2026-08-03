@@ -421,6 +421,59 @@ describe("admin storage settings page", () => {
     });
   });
 
+  test("finishes connection and policy recovery when an uncertain save needs a retry", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection
+      .mockResolvedValueOnce(connection)
+      .mockRejectedValueOnce(new Error("connection reload failed"))
+      .mockResolvedValueOnce({ ...connection, revision: 4 });
+    rotateObjectStoreCredentials.mockRejectedValue(
+      new EneoError(
+        "The database could not confirm the save",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "PUT@/admin/object-store-connection/credentials" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await page.getByLabelText("storage_connection_access_key").fill("replacement-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("replacement-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    await expect
+      .element(page.getByText("storage_connection_mutation_outcome_unknown_title"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_rotate_title" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+
+    await page.getByRole("button", { name: "retry" }).click();
+
+    await expect
+      .element(page.getByText('storage_connection_revision {"revision":4}'))
+      .toBeVisible();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(3);
+    expect(getPolicy).toHaveBeenCalledTimes(2);
+  });
+
   test("refreshes move progress and inventory independently without reloading policy", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(policy());

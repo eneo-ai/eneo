@@ -58,6 +58,7 @@
   let submitting = $state(false);
   let submissionCode = $state<string | null>(null);
   let submissionUnknown = $state(false);
+  let mutationOutcomeUnknown = $state(false);
   let success = $state<DialogMode | null>(null);
   let alertRef = $state<HTMLElement | null>(null);
 
@@ -78,11 +79,13 @@
   });
   const canCreate = $derived(
     canEdit &&
+      loadStatus === "idle" &&
       connection?.source === "unconfigured" &&
       connection.credentials_can_be_managed === true
   );
   const canRotate = $derived(
     canEdit &&
+      loadStatus === "idle" &&
       connection?.source === "admin" &&
       connection.credentials_can_be_managed === true &&
       connection.revision !== null
@@ -102,15 +105,23 @@
     );
   }
 
-  async function loadConnection(): Promise<void> {
-    if (!canEdit || loadStatus === "loading") return;
+  async function loadConnection(): Promise<boolean> {
+    if (!canEdit || loadStatus === "loading") return false;
     loadStatus = "loading";
     try {
       connection = await eneo.objectStoreConnection.get();
       loadStatus = "idle";
+      return true;
     } catch (error: unknown) {
       if (hasStatus(error, 403)) onAuthorityRevoked?.();
       loadStatus = "error";
+      return false;
+    }
+  }
+
+  async function recoverConnection(): Promise<void> {
+    if ((await loadConnection()) && mutationOutcomeUnknown) {
+      await onConnectionChanged?.();
     }
   }
 
@@ -127,6 +138,7 @@
     addressingStyle = "path";
     resetSecrets();
     resetSubmissionState();
+    mutationOutcomeUnknown = false;
     advancedOpen = false;
     dialogOpen = true;
   }
@@ -140,6 +152,7 @@
     addressingStyle = connection.addressing_style ?? "path";
     resetSecrets();
     resetSubmissionState();
+    mutationOutcomeUnknown = false;
     advancedOpen = false;
     dialogOpen = true;
   }
@@ -184,6 +197,7 @@
       resetSecrets();
       dialogOpen = false;
       success = completedMode;
+      mutationOutcomeUnknown = false;
       await onConnectionChanged?.();
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
@@ -194,8 +208,16 @@
           error instanceof EneoError && typeof error.response?.code === "string"
             ? error.response.code
             : null;
-        submissionCode = reasonCode;
-        submissionUnknown = reasonCode === null;
+        if (reasonCode === "object_store_connection_mutation_outcome_unknown") {
+          resetSecrets();
+          dialogOpen = false;
+          success = null;
+          mutationOutcomeUnknown = true;
+          await recoverConnection();
+        } else {
+          submissionCode = reasonCode;
+          submissionUnknown = reasonCode === null;
+        }
       }
     } finally {
       submitting = false;
@@ -209,6 +231,8 @@
     if (code === "object_store_probe_tls_failed") return m.storage_connection_error_tls_title();
     if (code === "object_store_plain_http_not_permitted")
       return m.storage_connection_error_http_title();
+    if (code === "object_store_endpoint_not_permitted")
+      return m.storage_connection_error_endpoint_not_permitted_title();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_title();
     if (code === "object_store_probe_integrity_failed")
@@ -228,6 +252,8 @@
       return m.storage_connection_error_tls_description();
     if (code === "object_store_plain_http_not_permitted")
       return m.storage_connection_error_http_description();
+    if (code === "object_store_endpoint_not_permitted")
+      return m.storage_connection_error_endpoint_not_permitted_description();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_description();
     if (code === "object_store_probe_integrity_failed")
@@ -271,6 +297,16 @@
     </Alert.Root>
   {/if}
 
+  {#if mutationOutcomeUnknown}
+    <Alert.Root aria-live="polite">
+      <AlertCircle />
+      <Alert.Title>{m.storage_connection_mutation_outcome_unknown_title()}</Alert.Title>
+      <Alert.Description>
+        {m.storage_connection_mutation_outcome_unknown_description()}
+      </Alert.Description>
+    </Alert.Root>
+  {/if}
+
   {#if degraded}
     <Alert.Root variant="destructive">
       <AlertCircle />
@@ -309,7 +345,7 @@
       <Alert.Title>{m.storage_connection_load_error_title()}</Alert.Title>
       <Alert.Description>
         <p>{m.storage_connection_load_error_description()}</p>
-        <Button class="mt-3" variant="outline" onclick={loadConnection}>
+        <Button class="mt-3" variant="outline" onclick={recoverConnection}>
           {m.retry()}
         </Button>
       </Alert.Description>
