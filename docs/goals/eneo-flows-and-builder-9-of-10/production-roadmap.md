@@ -47,6 +47,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-03 | **Related document packages remain linear**: several related files in one run no longer imply cross-step Flow fan-in; only explicit commit-grade same-run comparison selects non-linear dataflow, so document-package journeys can compile their declared JSON terminal contract instead of failing after proposal. The separate compare-to-JSON product decision remains fail-closed and unchanged (`85516be94`; Codex gate green 8/10, 3,045 Builder tests passed) |
 | 2026-08-03 | **Explicit Builder evidence admission**: source-validated explicit requirements now retain their evidence level through replay into strict persisted planning state; cited medium-confidence facts can commit without a redundant question, inferred facts remain assumptions, incoherent model provenance fails validation, and confirmation uses the same provenance boundary. Parser-to-policy and JSONB round-trip proofs cover both admission and downgrade (`ef4a45416`; supporting type and test-contract corrections `f0a425b8c`, `74d014ad3`; Codex gate green 8/10, 2,988 Builder tests passed) |
 | 2026-08-03 | **Intent-led Builder questions and durable confirmation**: discovery now owns which unresolved consequential question is asked while action policy preserves its order instead of reconstructing heuristic or pattern questions; typed planning-state reconciliation removes stale document/comparison answers after input changes; visible legal assumptions survive confirmation through the existing requirements contract; fixed-choice questions no longer advertise unsupported custom answers, and the bounded mapped-file question appears only for a coherent document/file architecture with its actual organization ceiling. The duplicate forced-ask and prompt-reconstruction paths are deleted (`b1e9b3ae8`; Codex gate green 9/10, Claude Opus gate green 8/10, 493 changed-file behavior tests passed) |
 | 2026-08-02 | **Trustworthy Builder journey evaluation**: the 120-case v4 corpus now continues through bounded configured interviews, records ordered and reopened questions plus first-pass/repair outcomes, checks directional JSON contracts through applied flows, preserves one v2 case/failure identity across every receipt, and gates only the seven required cases; benchmark failures remain visible without blocking release (`22ece969a`; Codex and Claude gates green 8/10, no blockers) |
@@ -368,6 +369,30 @@ external release gate (item 10); BM0.2 is external (item 10).
     enforcement to typed planning/result evidence. These are owner-level
     changes; no phrase detector, duplicate-step matcher, global step cap,
     second schema ledger, or new confirmation API is accepted.
+    A complete, identity-verified 120-case diagnostic then ran at `0ee738f41`
+    with all fixtures present. It produced 49 first-pass plans, 15 repaired
+    plans, 15 correct clarification stops, 12 unanswered-question stalls, 23
+    Builder errors, four provider-unknown outcomes, one unconfirmed journey,
+    and one applied-case precondition failure. The 64 plans contained 165
+    steps; authoring recorded at least 343 model calls, 1,539,175 tokens, and 19
+    repairs. JSON remained the weakest cohort: 11 related-document-package
+    journeys failed only because file cardinality was misderived as Flow fan-in,
+    29 requested-leaf checks failed across extraction misses, evaluator aliases,
+    and journeys that never reached a plan, and four blocking critic failures
+    still depended on raw phrase markers. Audio evidence still showed duplicate
+    transcription semantics and misplaced review. A source-verified Fable High
+    review therefore re-ranks the next Builder work as: (1) correct document-
+    package admission; (2) persist typed classifier attempt outcomes; (3)
+    deepen noun-phrase leaf recall inside the existing `SchemaEvidence` owner;
+    (4) move remaining committed-slot contradictions before proposal and make
+    supported report lowering total; (5) add typed checkpoint intent plus the
+    transcript-text proposal boundary; (6) move blocking critic rules to typed
+    evidence; (7) after product decisions, delete goal phrase inference and gate
+    metadata timing; (8) close evaluator aliases and answer coverage before the
+    next full diagnostic. This order is authoritative. The first correction
+    landed at `85516be94`; it does not decide genuine compare/corpus-to-JSON
+    support. Use the locked smoke plus the affected cohort between slices; save
+    another full 120-case run for a multi-slice diagnostic checkpoint.
     The identical 12-case smoke ran once more on 2026-08-03 after explicit-
     evidence admission landed at `5e7956f8d`. The per-case prompt hashes and
     locked Luna route matched the preceding receipt. Plan creation rose from
@@ -613,9 +638,13 @@ plan above controls all other ordering.
   compile them through the existing terminal schema owner; explicit full schemas
   win conflicts, and ordinary lists, report headings, and form fields must not
   become output leaves. Refuse ambiguous or over-limit enumerations instead of
-  truncating. (e) once product chooses whether aggregate/compare plus JSON is
-  supported, encode one shared architecture-compatibility predicate before
-  provider work and keep assembly's rejection as a fail-closed invariant. *(M)*
+  truncating. (e1) **LANDED `85516be94`** — related document packages are
+  linear multi-file input, not cross-step aggregation; only explicit same-run
+  comparison selects non-linear dataflow, so package-to-JSON compilation no
+  longer reaches the aggregate-output rejection. (e2) once product chooses
+  whether genuine compare/corpus synthesis plus JSON is supported, encode one
+  shared architecture-compatibility predicate before provider work and keep
+  assembly's rejection as a fail-closed invariant. *(M)*
 - **B10** (precise semantic dataflow, ordered owner slices): (a) **LANDED
   `7ffaf5f6b`** — project exact confirmed form-field names/types from `PlanningState`
   into proposal context, keep existing `uses_form_fields` as the semantic
