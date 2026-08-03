@@ -100,6 +100,15 @@
       )
     : policy.min_chunk_size;
 
+  // A model switch can shrink the valid range to nothing while an explicit size is
+  // held. The template then hides the input and promises platform defaults, so the
+  // export has to keep that promise — clearing the size back to delegation instead
+  // of submitting a hidden value the backend refuses.
+  $: if (!sizeIsDefault && sizeMax < sizeMin) {
+    sizeIsDefault = true;
+    sizeValue = policy.default_chunk_size;
+  }
+
   // Tokens are what the API and the index actually use. Floor, and never above the
   // backend's own integer ceiling — rounding up would offer a pair the API refuses.
   //
