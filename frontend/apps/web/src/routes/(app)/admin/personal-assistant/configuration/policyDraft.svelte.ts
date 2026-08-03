@@ -262,18 +262,6 @@ export class PolicyDraft {
   defaultModelId = $derived(
     this.selectedModels.find((entry) => entry.is_default)?.completion_model_id ?? null
   );
-  canSelectOnDemand = $derived(
-    this.selectiveActivationEnabled &&
-      this.modelsEnabled &&
-      this.providerSelections.size === 0 &&
-      this.selectedModels.length > 0 &&
-      this.selectedModels.every(
-        (entry) =>
-          this.#allModels.find((model) => model.id === entry.completion_model_id)
-            ?.supports_tool_calling === true
-      )
-  );
-
   // ---- Dirty tracking (against the last-saved baseline) --------------------
   #initialModelIds = $derived(
     new SvelteSet(this.#policy.models_restriction.models.map((entry) => entry.completion_model_id))
@@ -353,7 +341,7 @@ export class PolicyDraft {
   mcpValid = $derived(!this.mcpEnabled || this.mcpSelections.size > 0);
   skillsValid = $derived(
     this.skillBindings.every((binding) => binding.activation_mode !== "on_demand") ||
-      this.canSelectOnDemand
+      this.selectiveActivationEnabled
   );
   canSave = $derived(
     this.dirty &&

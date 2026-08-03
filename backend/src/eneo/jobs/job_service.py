@@ -94,7 +94,7 @@ class JobService:
         outer_committed = False
         active = True
 
-        def after_commit(committed_session: object) -> None:
+        def after_commit(_session: object) -> None:
             nonlocal outer_committed
             if active and not session.in_nested_transaction():
                 outer_committed = True

@@ -399,7 +399,10 @@ class TestSkillRuntimePolicy:
         assert persisted == SKILL_RUNTIME_POLICY_DEFAULTS
         assert result.max_attached_skills == 100
         changes = audit_mock.log_async.call_args[1]["metadata"]["changes"]
-        assert changes == {"max_attached_skills": {"old": 37, "new": 100}}
+        assert changes == {
+            "selective_activation_enabled": {"old": False, "new": True},
+            "max_attached_skills": {"old": 37, "new": 100},
+        }
 
     @pytest.mark.asyncio
     async def test_activation_ceiling_cannot_be_raised_past_platform_bound(self):

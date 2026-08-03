@@ -133,7 +133,7 @@ describe("PolicyDraft", () => {
     });
   });
 
-  it("treats an activation-mode-only change as a saveable Skill change", async () => {
+  it("allows an on-demand Skill whenever the tenant runtime enables it", async () => {
     const update = vi.fn(async () => {});
     const binding = {
       skill_id: "skill-1",
@@ -185,16 +185,17 @@ describe("PolicyDraft", () => {
 
     expect(draft.dirty).toBe(true);
     draft.toggleProvider("provider-1", true);
-    expect(draft.canSelectOnDemand).toBe(false);
-    expect(draft.canSave).toBe(false);
-
-    draft.toggleProvider("provider-1", false);
-    expect(draft.canSelectOnDemand).toBe(true);
+    expect(draft.skillsValid).toBe(true);
     expect(draft.canSave).toBe(true);
     draft.save();
     await draft.pendingConfirm?.submit();
     await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
     expect(update).toHaveBeenCalledWith({
+      models_restriction: {
+        enabled: true,
+        models: [{ completion_model_id: "model-1", is_default: true }],
+        provider_ids: ["provider-1"]
+      },
       skills: {
         bindings: [
           {
@@ -254,7 +255,6 @@ describe("PolicyDraft", () => {
     draft.sync(pageData(false));
     draft.skillBindings = [{ ...draft.skillBindings[0], activation_mode: "on_demand" }];
 
-    expect(draft.canSelectOnDemand).toBe(false);
     expect(draft.dirty).toBe(true);
     expect(draft.skillsValid).toBe(false);
     expect(draft.canSave).toBe(false);
@@ -262,7 +262,6 @@ describe("PolicyDraft", () => {
     draft.sync(pageData(true));
     draft.skillBindings = [{ ...draft.skillBindings[0], activation_mode: "on_demand" }];
 
-    expect(draft.canSelectOnDemand).toBe(true);
     expect(draft.skillsValid).toBe(true);
     expect(draft.canSave).toBe(true);
   });
