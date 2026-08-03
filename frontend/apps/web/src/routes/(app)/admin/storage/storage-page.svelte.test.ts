@@ -380,6 +380,47 @@ describe("admin storage settings page", () => {
       .toBeChecked();
   });
 
+  test("replaces the complete key pair without presenting the destination as editable", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection.mockResolvedValue(connection);
+    rotateObjectStoreCredentials.mockResolvedValue({ ...connection, revision: 4 });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+
+    await expect.element(page.getByText("storage_connection_current_destination")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_connection_destination_locked_help"))
+      .toBeVisible();
+    await expect
+      .element(page.getByLabelText("storage_connection_endpoint"))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByLabelText("storage_connection_bucket")).not.toBeInTheDocument();
+
+    await page.getByLabelText("storage_connection_access_key").fill("replacement-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("replacement-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    expect(rotateObjectStoreCredentials).toHaveBeenCalledWith({
+      expected_revision: 3,
+      access_key_id: "replacement-access-key",
+      secret_access_key: "replacement-secret-key"
+    });
+  });
+
   test("refreshes move progress and inventory independently without reloading policy", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(policy());

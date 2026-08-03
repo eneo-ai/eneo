@@ -318,23 +318,23 @@
     <div class="flex flex-col gap-4">
       <dl class="grid gap-x-8 gap-y-4 sm:grid-cols-2">
         <div class="min-w-0">
-          <dt class="text-muted text-xs">{m.storage_connection_endpoint()}</dt>
+          <dt class="text-secondary text-sm">{m.storage_connection_endpoint()}</dt>
           <dd class="mt-1 truncate text-sm font-medium" title={connection.endpoint_url ?? ""}>
             {connection.endpoint_url}
           </dd>
         </div>
         <div class="min-w-0">
-          <dt class="text-muted text-xs">{m.storage_connection_bucket()}</dt>
+          <dt class="text-secondary text-sm">{m.storage_connection_bucket()}</dt>
           <dd class="mt-1 truncate text-sm font-medium" title={connection.bucket ?? ""}>
             {connection.bucket}
           </dd>
         </div>
         <div>
-          <dt class="text-muted text-xs">{m.storage_connection_region()}</dt>
+          <dt class="text-secondary text-sm">{m.storage_connection_region()}</dt>
           <dd class="mt-1 text-sm font-medium">{connection.region}</dd>
         </div>
         <div>
-          <dt class="text-muted text-xs">{m.storage_connection_addressing_style()}</dt>
+          <dt class="text-secondary text-sm">{m.storage_connection_addressing_style()}</dt>
           <dd class="mt-1 flex items-center gap-2 text-sm font-medium">
             {connection.addressing_style === "virtual"
               ? m.storage_connection_addressing_virtual()
@@ -349,10 +349,15 @@
       <div
         class="border-default flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between"
       >
-        <p class="text-secondary max-w-xl text-sm">
+        <p class="text-secondary max-w-[68ch] text-sm leading-5">
           {m.storage_connection_rotation_description()}
         </p>
-        <Button variant="outline" onclick={openRotationDialog} disabled={!canRotate}>
+        <Button
+          class="shrink-0"
+          variant="outline"
+          onclick={openRotationDialog}
+          disabled={!canRotate}
+        >
           <KeyRound data-icon="inline-start" aria-hidden="true" />
           {m.storage_connection_rotate_action()}
         </Button>
@@ -388,11 +393,13 @@
 
 <Dialog.Root open={dialogOpen} onOpenChange={handleDialogOpenChange}>
   <Dialog.Content
-    class="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-2xl"
+    class={dialogMode === "rotate"
+      ? "flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
+      : "flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"}
     showCloseButton={!submitting}
     closeLabel={m.close()}
   >
-    <Dialog.Header class="border-default border-b px-6 pt-6 pb-5">
+    <Dialog.Header class="px-6 pt-6 pb-2 pr-12">
       <Dialog.Title>
         {dialogMode === "create"
           ? m.storage_connection_dialog_create_title()
@@ -406,13 +413,13 @@
     </Dialog.Header>
 
     <form
-      class="contents"
+      class="flex min-h-0 flex-1 flex-col"
       onsubmit={(event) => {
         event.preventDefault();
         void submitConnection();
       }}
     >
-      <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+      <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
         <div class="flex flex-col gap-5">
           {#if submissionCode !== null || submissionUnknown}
             <Alert.Root
@@ -428,16 +435,29 @@
           {/if}
 
           {#if dialogMode === "rotate"}
-            <div class="bg-muted/40 grid gap-3 rounded-lg p-4 sm:grid-cols-2">
-              <div class="min-w-0">
-                <p class="text-muted text-xs">{m.storage_connection_endpoint()}</p>
-                <p class="truncate text-sm font-medium" title={endpointUrl}>{endpointUrl}</p>
-              </div>
-              <div class="min-w-0">
-                <p class="text-muted text-xs">{m.storage_connection_bucket()}</p>
-                <p class="truncate text-sm font-medium" title={bucket}>{bucket}</p>
-              </div>
-            </div>
+            <section
+              class="border-default border-b pb-5"
+              aria-labelledby="object-store-current-destination"
+            >
+              <h3 id="object-store-current-destination" class="text-sm font-medium">
+                {m.storage_connection_current_destination()}
+              </h3>
+              <dl class="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                <div class="min-w-0">
+                  <dt class="text-secondary text-sm">{m.storage_connection_endpoint()}</dt>
+                  <dd class="mt-0.5 truncate text-sm font-medium" title={endpointUrl}>
+                    {endpointUrl}
+                  </dd>
+                </div>
+                <div class="min-w-0">
+                  <dt class="text-secondary text-sm">{m.storage_connection_bucket()}</dt>
+                  <dd class="mt-0.5 truncate text-sm font-medium" title={bucket}>{bucket}</dd>
+                </div>
+              </dl>
+              <p class="text-secondary mt-3 max-w-[65ch] text-sm leading-5">
+                {m.storage_connection_destination_locked_help()}
+              </p>
+            </section>
           {:else}
             <Field.Group class="grid gap-5 sm:grid-cols-2">
               <Field.Field class="sm:col-span-2">
@@ -494,12 +514,13 @@
               </Field.Label>
               <Input
                 id="object-store-access-key"
-                type="password"
+                type="text"
                 bind:value={accessKeyId}
-                autocomplete="new-password"
+                autocomplete="off"
                 required
                 disabled={submitting}
               />
+              <Field.Description>{m.storage_connection_access_key_help()}</Field.Description>
             </Field.Field>
 
             <Field.Field>
@@ -514,6 +535,7 @@
                 required
                 disabled={submitting}
               />
+              <Field.Description>{m.storage_connection_secret_key_help()}</Field.Description>
             </Field.Field>
           </Field.Group>
 
@@ -558,15 +580,27 @@
             </Collapsible.Root>
           {/if}
 
-          <Alert.Root>
-            <CheckCircle2 />
-            <Alert.Title>{m.storage_connection_probe_title()}</Alert.Title>
-            <Alert.Description>{m.storage_connection_probe_description()}</Alert.Description>
-          </Alert.Root>
+          <div class="text-secondary flex items-start gap-3 text-sm">
+            <CheckCircle2 class="text-primary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <div class="min-w-0">
+              <p class="text-primary font-medium">
+                {dialogMode === "create"
+                  ? m.storage_connection_probe_create_title()
+                  : m.storage_connection_probe_rotate_title()}
+              </p>
+              <p class="mt-1 max-w-[65ch] leading-5">
+                {dialogMode === "create"
+                  ? m.storage_connection_probe_create_description()
+                  : m.storage_connection_probe_rotate_description()}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <Dialog.Footer class="border-default border-t px-6 py-4">
+      <div
+        class="border-default flex flex-col-reverse gap-2 border-t px-6 py-4 sm:flex-row sm:justify-end"
+      >
         <Button
           type="button"
           variant="outline"
@@ -585,7 +619,7 @@
             {m.storage_connection_test_and_rotate()}
           {/if}
         </Button>
-      </Dialog.Footer>
+      </div>
     </form>
   </Dialog.Content>
 </Dialog.Root>

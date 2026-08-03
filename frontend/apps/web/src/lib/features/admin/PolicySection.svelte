@@ -51,7 +51,7 @@
           {summary}
         </Badge>
       </div>
-      <p class="text-secondary mt-1 text-sm">
+      <p class="text-secondary mt-1 max-w-[72ch] text-sm leading-5">
         {description}
       </p>
     </div>

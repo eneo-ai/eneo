@@ -570,7 +570,7 @@
             <p class="text-secondary text-sm leading-6">
               {m.storage_settings_description()}
             </p>
-            <p class="text-muted text-xs">
+            <p class="text-muted text-sm leading-5">
               {m.storage_settings_last_changed({
                 date: storageDate(deploymentPolicy.policy.updated_at),
                 actor: policyActorLabel(deploymentPolicy.policy.updated_by_actor),
@@ -625,14 +625,16 @@
                 </Alert.Root>
               {/if}
 
-              <Alert.Root>
-                <Info />
-                <Alert.Title>{m.storage_settings_new_writes_only_title()}</Alert.Title>
-                <Alert.Description>
+              <div class="text-secondary flex items-start gap-3 text-sm">
+                <Info class="text-primary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <div class="max-w-[72ch] space-y-1 leading-5">
+                  <p class="text-primary font-medium">
+                    {m.storage_settings_new_writes_only_title()}
+                  </p>
                   <p>{m.storage_settings_no_move_notice()}</p>
                   <p>{m.storage_settings_no_fallback_notice()}</p>
-                </Alert.Description>
-              </Alert.Root>
+                </div>
+              </div>
 
               {#if stale}
                 <Alert.Root
@@ -901,7 +903,7 @@
                 </dl>
               {/if}
 
-              <div class="border-default overflow-x-auto rounded-lg border">
+              <div class="border-default border-y [&_td]:px-3 [&_th]:px-3">
                 <Table.Root class="min-w-[760px]">
                   <Table.Caption class="sr-only">
                     {m.storage_effective_limits_caption()}
@@ -995,7 +997,7 @@
 
               <div class="flex flex-wrap items-center justify-end gap-3">
                 {#if movesRefreshedAt !== null}
-                  <span class="text-muted text-xs">
+                  <span class="text-muted text-sm">
                     {m.storage_last_refreshed({ time: storageTime(movesRefreshedAt) })}
                   </span>
                 {/if}
@@ -1198,11 +1200,11 @@
               {/if}
 
               {#if contentMoves?.moves.length === 0}
-                <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
+                <p class="text-muted py-3 text-sm">
                   {m.storage_moves_empty()}
                 </p>
               {:else if contentMoves}
-                <div class="border-default overflow-x-auto rounded-lg border">
+                <div class="border-default border-y [&_td]:px-3 [&_th]:px-3">
                   <Table.Root class="min-w-[760px]">
                     <Table.Caption class="sr-only">{m.storage_moves_caption()}</Table.Caption>
                     <Table.Header>
