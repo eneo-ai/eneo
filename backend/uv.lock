@@ -604,6 +604,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "alembic" },
+    { name = "anyio" },
     { name = "arq" },
     { name = "asyncpg" },
     { name = "audioread" },
@@ -689,6 +690,7 @@ dev = [
 requires-dist = [
     { name = "aiofiles", specifier = ">=23.0,<24" },
     { name = "alembic", specifier = ">=1.10.2,<2" },
+    { name = "anyio", specifier = ">=4.5,<5" },
     { name = "arq", specifier = ">=0.26,<1" },
     { name = "asyncpg", specifier = ">=0.27.0,<0.28" },
     { name = "audioread", specifier = ">=3.0.1,<4" },
