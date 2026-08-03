@@ -88,12 +88,18 @@ class TokenExchangeStrategy(ABC):
         client_id: str,
         client_secret: Optional[str],
         idp_issuer: Optional[str] = None,
+        subject_id_token: Optional[str] = None,
+        as_issuer: Optional[str] = None,
+        as_token_endpoint: Optional[str] = None,
+        scope: Optional[str] = None,
     ) -> ExchangedToken:
-        """Perform the strategy-specific grant against the IdP's token endpoint.
+        """Perform the strategy-specific grant.
 
         ``subject_access_token`` is the user's IdP access token (or a tenant
-        service-account access token for ``per_tenant`` flows; the wire
-        differs only in subject acquisition, not the exchange grant).
+        service-account access token for ``per_tenant`` flows). The ID-JAG
+        strategy instead consumes ``subject_id_token`` plus the MCP server's
+        authorization-server coordinates (``as_issuer`` /
+        ``as_token_endpoint``); the same-IdP strategy ignores those.
         """
         ...
 
@@ -148,6 +154,9 @@ def classify_error(status_code: int, payload: dict[str, Any]) -> Exception:
     )
 
 
+from eneo.mcp_servers.application.token_exchange.id_jag import (  # noqa: E402
+    IdJagStrategy,
+)
 from eneo.mcp_servers.application.token_exchange.rfc8693 import (  # noqa: E402
     Rfc8693Strategy,
 )
@@ -156,6 +165,7 @@ __all__ = [
     "ConcreteExchangeProtocol",
     "ExchangeProtocol",
     "ExchangedToken",
+    "IdJagStrategy",
     "Rfc8693Strategy",
     "TokenExchangeError",
     "TokenExchangeStrategy",
@@ -176,4 +186,6 @@ def resolve_strategy(protocol: ConcreteExchangeProtocol) -> TokenExchangeStrateg
     """
     if protocol == "rfc8693":
         return Rfc8693Strategy()
+    if protocol == "id_jag":
+        return IdJagStrategy()
     raise ValueError(f"Unsupported exchange_protocol: {protocol}")

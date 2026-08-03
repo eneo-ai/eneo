@@ -31,6 +31,7 @@ from eneo.authentication.auth_models import is_service_api_key
 from eneo.authentication.oidc_token_store import (
     IdpRefreshFailedError,
     OidcTokenStoreError,
+    StoredIdpTokens,
 )
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.mcp_exchanged_tokens_table import MCPExchangedTokens
@@ -121,6 +122,44 @@ class MCPBrokerConfigurationError(Exception):
 CACHE_SAFETY_MARGIN_SECONDS = 60
 
 
+@dataclass(frozen=True)
+class _ExchangePlan:
+    """Resolved inputs for one exchange, independent of the subject.
+
+    ``idp_issuer`` is the enterprise IdP the subject tokens come from and
+    the cache-key issuer. For ``id_jag`` the MCP server's authorization
+    server (``as_issuer`` / ``as_token_endpoint``) is a separate party;
+    for ``rfc8693`` it is the IdP itself.
+    """
+
+    protocol: ConcreteExchangeProtocol
+    idp_issuer: str
+    idp_token_endpoint: str
+    client_id: str
+    client_secret: Optional[str]
+    as_issuer: Optional[str] = None
+    as_token_endpoint: Optional[str] = None
+    scope: Optional[str] = None
+
+    @property
+    def refresh_endpoint(self) -> str:
+        """Where refresh_token grants for the exchanged token go.
+
+        ID-JAG refresh tokens are minted by (and redeemed at) the MCP
+        server's AS; same-IdP refresh tokens go back to the IdP.
+        """
+        if self.protocol == "id_jag" and self.as_token_endpoint:
+            return self.as_token_endpoint
+        return self.idp_token_endpoint
+
+    @property
+    def validation_issuer(self) -> str:
+        """Expected ``iss`` of the exchanged access token."""
+        if self.protocol == "id_jag" and self.as_issuer:
+            return self.as_issuer
+        return self.idp_issuer
+
+
 class MCPTokenBroker:
     """Lazy two-tier cache + token-exchange strategy dispatcher."""
 
@@ -189,12 +228,6 @@ class MCPTokenBroker:
             raise MCPBrokerConfigurationError(
                 f"PRM discovery failed for {mcp_server.http_url}: {exc}"
             ) from exc
-        idp_issuer = self._enforce_issuer_gate(
-            mcp_server=mcp_server,
-            prm=prm,
-            tenant_federation_config=tenant_federation_config,
-        )
-
         # Resolve the audience/scope override with the tenant-wide default
         # as a fallback: per-server override > tenant default > the MCP
         # server's canonical RFC 8707 resource from PRM.
@@ -209,13 +242,12 @@ class MCPTokenBroker:
             resource_or_scope=target_override,
         )
         effective_audience = target.resource_or_scope or target.audience
-        exchange_protocol = await self._resolve_concrete_protocol(
-            mcp_server=mcp_server, idp_issuer=idp_issuer
-        )
-        token_endpoint, client_id, client_secret = await self._resolve_strategy_inputs(
-            idp_issuer=idp_issuer,
+        plan = await self._resolve_exchange_plan(
+            mcp_server=mcp_server,
+            prm=prm,
             tenant_federation_config=tenant_federation_config,
         )
+        idp_issuer = plan.idp_issuer
 
         async with self._tx():
             cached_token = await self._cache_lookup(
@@ -241,11 +273,11 @@ class MCPTokenBroker:
             try:
                 exchanged = await self._refresh_exchanged_token(
                     refresh_token=cached_refresh,
-                    token_endpoint=token_endpoint,
-                    client_id=client_id,
-                    client_secret=client_secret,
+                    token_endpoint=plan.refresh_endpoint,
+                    client_id=plan.client_id,
+                    client_secret=plan.client_secret,
                     target=target,
-                    idp_issuer=idp_issuer,
+                    idp_issuer=plan.validation_issuer,
                 )
                 logger.info(
                     "Refreshed cached exchanged token for MCP server %s",
@@ -281,18 +313,14 @@ class MCPTokenBroker:
                 async with self._tx():
                     exchanged = await self._exchange_as_user(
                         user=principal.user,
-                        idp_issuer=idp_issuer,
-                        exchange_protocol=exchange_protocol,
+                        plan=plan,
                         target=target,
-                        token_endpoint=token_endpoint,
-                        client_id=client_id,
-                        client_secret=client_secret,
                     )
             else:
                 exchanged = await self._exchange_as_tenant(
                     tenant_federation_config=tenant_federation_config,
                     target=target,
-                    token_endpoint=token_endpoint,
+                    token_endpoint=plan.idp_token_endpoint,
                 )
         except (
             TokenExchangeError,
@@ -315,11 +343,11 @@ class MCPTokenBroker:
             try:
                 exchanged = await self._refresh_exchanged_token(
                     refresh_token=exchanged.refresh_token,
-                    token_endpoint=token_endpoint,
-                    client_id=client_id,
-                    client_secret=client_secret,
+                    token_endpoint=plan.refresh_endpoint,
+                    client_id=plan.client_id,
+                    client_secret=plan.client_secret,
                     target=target,
-                    idp_issuer=idp_issuer,
+                    idp_issuer=plan.validation_issuer,
                 )
                 logger.info(
                     "Immediately refreshed expired exchanged token for MCP server %s",
@@ -428,35 +456,30 @@ class MCPTokenBroker:
         )
 
     # ------------------------------------------------------------------
-    # Issuer gate (PRM + expected_idp_issuer)
+    # Exchange plan resolution
     # ------------------------------------------------------------------
 
-    def _enforce_issuer_gate(
+    async def _resolve_exchange_plan(
         self,
         *,
         mcp_server: "MCPServer",
         prm: ProtectedResourceMetadata,
         tenant_federation_config: dict[str, Any],
-    ) -> str:
-        """Return the issuer the broker will hit; raise on mismatch.
+    ) -> _ExchangePlan:
+        """Pick the concrete protocol and resolve every endpoint it needs.
 
-        Resolution order for the expected issuer:
+        ``rfc8693`` (same-IdP): the PRM's ``authorization_servers`` must
+        include the expected IdP issuer; the exchange happens entirely at
+        the IdP token endpoint.
 
-        1. ``mcp_server.expected_idp_issuer``: per-server override for the
-           rare cross-IdP case (operator explicitly federates one MCP
-           server to a different IdP than the tenant default).
-        2. ``tenant.federation_config.issuer``: the canonical tenant IdP
-           that the user already authenticated against at login. This is
-           the common path; admins configure SSO once at the tenant level
-           and every MCP server inherits it.
+        ``id_jag`` (Enterprise-Managed Authorization): the MCP server's
+        authorization server is taken from the PRM and may be a third
+        party. Its metadata provides the leg-2 token endpoint; the IdP
+        remains the leg-1 policy decision point.
 
-        Then both of these must hold:
-
-        - The resolved issuer is listed in the PRM's ``authorization_servers``
-          (server agrees on its own IdP).
-        - For UserPrincipal flows, the user logged in via the same IdP
-          (we have an ``idp_user_tokens`` row for that issuer). The
-          subject-token lookup in :meth:`_exchange_as_user` enforces this.
+        ``auto``: id_jag iff the server's AS advertises the
+        ``urn:ietf:params:oauth:grant-profile:id-jag`` grant profile,
+        else the same-IdP fallback.
         """
         expected = mcp_server.expected_idp_issuer or tenant_federation_config.get(
             "issuer"
@@ -468,8 +491,80 @@ class MCPTokenBroker:
                 "unknown authorization server"
             )
 
-        # PRM authorization_servers may carry the issuer URL with or
-        # without a trailing slash; normalize both sides for compare.
+        configured = mcp_server.exchange_protocol
+        if configured not in ("auto", "id_jag", "rfc8693"):
+            raise MCPBrokerConfigurationError(
+                f"Unknown exchange_protocol: {configured!r}"
+            )
+
+        as_issuer: Optional[str] = None
+        as_token_endpoint: Optional[str] = None
+        protocol: ConcreteExchangeProtocol
+
+        if configured == "rfc8693":
+            protocol = "rfc8693"
+            self._require_issuer_in_prm(expected=expected, prm=prm)
+        else:
+            candidate_as = self._pick_authorization_server(
+                prm=prm, expected_idp_issuer=expected
+            )
+            as_metadata = None
+            try:
+                as_metadata = await self._discovery.get_authorization_server_metadata(
+                    issuer=candidate_as
+                )
+            except DiscoveryError as exc:
+                if configured == "id_jag":
+                    raise MCPBrokerConfigurationError(
+                        f"exchange_protocol=id_jag but authorization server "
+                        f"metadata for {candidate_as} is unavailable: {exc}"
+                    ) from exc
+                logger.info(
+                    "AS metadata unavailable for %s; auto falls back to "
+                    "the same-IdP rfc8693 exchange: %s",
+                    candidate_as,
+                    str(exc),
+                )
+
+            if configured == "id_jag" or (
+                as_metadata is not None and as_metadata.supports_id_jag
+            ):
+                if as_metadata is None or not as_metadata.token_endpoint:
+                    raise MCPBrokerConfigurationError(
+                        f"ID-JAG flow requires a token_endpoint in the "
+                        f"authorization server metadata of {candidate_as}"
+                    )
+                protocol = "id_jag"
+                as_issuer = as_metadata.issuer
+                as_token_endpoint = as_metadata.token_endpoint
+            else:
+                protocol = "rfc8693"
+                self._require_issuer_in_prm(expected=expected, prm=prm)
+
+        idp_token_endpoint, client_id, client_secret = await self._resolve_idp_inputs(
+            idp_issuer=expected,
+            tenant_federation_config=tenant_federation_config,
+        )
+        return _ExchangePlan(
+            protocol=protocol,
+            idp_issuer=expected,
+            idp_token_endpoint=idp_token_endpoint,
+            client_id=client_id,
+            client_secret=client_secret,
+            as_issuer=as_issuer,
+            as_token_endpoint=as_token_endpoint,
+            scope=" ".join(prm.scopes_supported) if prm.scopes_supported else None,
+        )
+
+    @staticmethod
+    def _require_issuer_in_prm(
+        *, expected: str, prm: ProtectedResourceMetadata
+    ) -> None:
+        """Same-IdP gate: the PRM must name the expected IdP as its AS.
+
+        PRM authorization_servers may carry the issuer URL with or without
+        a trailing slash; normalize both sides for compare.
+        """
         normalized_expected = expected.rstrip("/")
         normalized_servers = {s.rstrip("/") for s in prm.authorization_servers}
         if normalized_expected not in normalized_servers:
@@ -478,34 +573,23 @@ class MCPTokenBroker:
                 f"{prm.authorization_servers!r} "
                 f"but server is configured for issuer {expected!r}"
             )
-        return expected
 
-    # ------------------------------------------------------------------
-    # Strategy input resolution
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _pick_authorization_server(
+        *, prm: ProtectedResourceMetadata, expected_idp_issuer: str
+    ) -> str:
+        """Choose the AS the ID-JAG will be redeemed at.
 
-    async def _resolve_concrete_protocol(
-        self,
-        *,
-        mcp_server: "MCPServer",
-        idp_issuer: str,
-    ) -> ConcreteExchangeProtocol:
-        """Map the configured ``exchange_protocol`` to a concrete strategy.
-
-        ``auto`` currently resolves to ``rfc8693``; ID-JAG grant-profile
-        detection against the authorization server's metadata plugs in
-        here when the ``id_jag`` strategy lands.
+        Prefer the PRM entry matching the expected IdP issuer when present
+        (the AS-is-the-IdP deployment), else the first advertised AS.
         """
-        configured = mcp_server.exchange_protocol
-        if configured == "rfc8693":
-            return "rfc8693"
-        if configured == "auto":
-            return "rfc8693"
-        raise MCPBrokerConfigurationError(
-            f"exchange_protocol {configured!r} is not available yet"
-        )
+        normalized_expected = expected_idp_issuer.rstrip("/")
+        for server in prm.authorization_servers:
+            if server.rstrip("/") == normalized_expected:
+                return server
+        return prm.authorization_servers[0]
 
-    async def _resolve_strategy_inputs(
+    async def _resolve_idp_inputs(
         self,
         *,
         idp_issuer: str,
@@ -562,21 +646,22 @@ class MCPTokenBroker:
         self,
         *,
         user: "UserInDB",
-        idp_issuer: str,
-        exchange_protocol: ConcreteExchangeProtocol,
+        plan: _ExchangePlan,
         target: TokenExchangeTarget,
-        token_endpoint: str,
-        client_id: str,
-        client_secret: Optional[str],
     ) -> ExchangedToken:
         stored = await self._oidc_token_store.get_decrypted(
-            user_id=user.id, idp_issuer=idp_issuer
+            user_id=user.id, idp_issuer=plan.idp_issuer
         )
         if stored is None:
             raise MCPNotAuthenticatedError(
                 "No active IdP refresh token stored for this user; the "
                 "user must log in via SSO before per_user MCP servers can "
                 "be reached"
+            )
+
+        if plan.protocol == "id_jag":
+            return await self._exchange_as_user_id_jag(
+                user=user, plan=plan, target=target, stored=stored
             )
 
         # If the cached access token is missing or about to expire, refresh
@@ -589,38 +674,96 @@ class MCPTokenBroker:
             < datetime.now(timezone.utc)
             + timedelta(seconds=CACHE_SAFETY_MARGIN_SECONDS)
         ):
-            try:
-                refreshed = await self._oidc_token_store.refresh_idp_token(
-                    user=user,
-                    idp_issuer=idp_issuer,
-                    token_endpoint=token_endpoint,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                )
-            except IdpRefreshFailedError as exc:
-                raise MCPNotAuthenticatedError(
-                    "Stored IdP refresh token can no longer refresh the main "
-                    "login token; user must re-authenticate"
-                ) from exc
-            except OidcTokenStoreError as exc:
-                raise TokenExchangeError(
-                    "Unable to refresh the main login token before MCP token exchange"
-                ) from exc
+            refreshed = await self._refresh_idp_subject(user=user, plan=plan)
             subject_token = refreshed.access_token
             if not subject_token:
                 raise MCPNotAuthenticatedError(
                     "IdP refresh returned no access_token; user must re-authenticate"
                 )
 
-        strategy = resolve_strategy(exchange_protocol)
+        strategy = resolve_strategy(plan.protocol)
         return await strategy.exchange(
             subject_access_token=subject_token,
             target=target,
-            token_endpoint=token_endpoint,
-            client_id=client_id,
-            client_secret=client_secret,
-            idp_issuer=idp_issuer,
+            token_endpoint=plan.idp_token_endpoint,
+            client_id=plan.client_id,
+            client_secret=plan.client_secret,
+            idp_issuer=plan.idp_issuer,
         )
+
+    async def _exchange_as_user_id_jag(
+        self,
+        *,
+        user: "UserInDB",
+        plan: _ExchangePlan,
+        target: TokenExchangeTarget,
+        stored: "StoredIdpTokens",
+    ) -> ExchangedToken:
+        """Run the two-leg ID-JAG flow with a one-shot refresh retry.
+
+        The identity assertion is the stored ID token. When the IdP
+        rejects it (expired assertion, revoked session), one refresh
+        against the IdP may rotate the ID token; retry once with the new
+        assertion, then surface the failure.
+        """
+        if not stored.id_token:
+            raise MCPNotAuthenticatedError(
+                "No ID token stored for this user; reconnect via SSO so the "
+                "identity assertion can be captured"
+            )
+
+        strategy = resolve_strategy(plan.protocol)
+        try:
+            return await strategy.exchange(
+                subject_access_token=stored.access_token or "",
+                target=target,
+                token_endpoint=plan.idp_token_endpoint,
+                client_id=plan.client_id,
+                client_secret=plan.client_secret,
+                idp_issuer=plan.idp_issuer,
+                subject_id_token=stored.id_token,
+                as_issuer=plan.as_issuer,
+                as_token_endpoint=plan.as_token_endpoint,
+                scope=plan.scope,
+            )
+        except TokenExchangeUserActionRequired:
+            refreshed = await self._refresh_idp_subject(user=user, plan=plan)
+            if not refreshed.id_token or refreshed.id_token == stored.id_token:
+                raise
+            return await strategy.exchange(
+                subject_access_token=refreshed.access_token or "",
+                target=target,
+                token_endpoint=plan.idp_token_endpoint,
+                client_id=plan.client_id,
+                client_secret=plan.client_secret,
+                idp_issuer=plan.idp_issuer,
+                subject_id_token=refreshed.id_token,
+                as_issuer=plan.as_issuer,
+                as_token_endpoint=plan.as_token_endpoint,
+                scope=plan.scope,
+            )
+
+    async def _refresh_idp_subject(
+        self, *, user: "UserInDB", plan: _ExchangePlan
+    ) -> "StoredIdpTokens":
+        """Refresh the user's IdP tokens, mapping failures to broker errors."""
+        try:
+            return await self._oidc_token_store.refresh_idp_token(
+                user=user,
+                idp_issuer=plan.idp_issuer,
+                token_endpoint=plan.idp_token_endpoint,
+                client_id=plan.client_id,
+                client_secret=plan.client_secret,
+            )
+        except IdpRefreshFailedError as exc:
+            raise MCPNotAuthenticatedError(
+                "Stored IdP refresh token can no longer refresh the main "
+                "login token; user must re-authenticate"
+            ) from exc
+        except OidcTokenStoreError as exc:
+            raise TokenExchangeError(
+                "Unable to refresh the main login token before MCP token exchange"
+            ) from exc
 
     async def _exchange_as_tenant(
         self,

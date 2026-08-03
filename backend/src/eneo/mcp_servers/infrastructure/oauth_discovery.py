@@ -84,17 +84,20 @@ def parse_resource_metadata_challenge(www_authenticate: str) -> Optional[str]:
 
 async def _get_json(url: str) -> dict[str, Any]:
     timeout = aiohttp.ClientTimeout(total=DISCOVERY_TIMEOUT_SECONDS)
-    async with aiohttp.ClientSession(timeout=timeout) as http:
-        async with http.get(url, allow_redirects=False) as resp:
-            if resp.status != 200:
-                raise DiscoveryError(f"GET {url} returned HTTP {resp.status}")
-            try:
-                payload = await resp.json(content_type=None)
-            except Exception as exc:
-                raise DiscoveryError(f"GET {url} returned non-JSON body") from exc
-            if not isinstance(payload, dict):
-                raise DiscoveryError(f"GET {url} returned a non-object document")
-            return cast("dict[str, Any]", payload)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            async with http.get(url, allow_redirects=False) as resp:
+                if resp.status != 200:
+                    raise DiscoveryError(f"GET {url} returned HTTP {resp.status}")
+                try:
+                    payload = await resp.json(content_type=None)
+                except Exception as exc:
+                    raise DiscoveryError(f"GET {url} returned non-JSON body") from exc
+                if not isinstance(payload, dict):
+                    raise DiscoveryError(f"GET {url} returned a non-object document")
+                return cast("dict[str, Any]", payload)
+    except (aiohttp.ClientError, OSError, TimeoutError) as exc:
+        raise DiscoveryError(f"GET {url} failed: {exc}") from exc
 
 
 def _cache_get(key: str) -> Any | None:
