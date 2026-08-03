@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import UUID
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.database.database import AsyncSession
     from eneo.main.container.container import Container
+    from eneo.mcp_servers.application.mcp_token_broker import MCPTokenBroker
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
@@ -78,6 +79,7 @@ class CompletionService:
         session: Optional["AsyncSession"] = None,
         redis_client: Optional[aioredis.Redis] = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
+        mcp_token_broker: "MCPTokenBroker | None" = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
@@ -92,10 +94,47 @@ class CompletionService:
         self.session = session
         self.redis_client = redis_client
         self.mcp_server_tool_repo = mcp_server_tool_repo
+        self.mcp_token_broker = mcp_token_broker
         self._mcp_proxy_factory = MCPProxySessionFactory(
             encryption_service=self.encryption_service
         )
         super().__init__()
+
+    def _build_token_provider_map(
+        self, mcp_servers: list["MCPServer"]
+    ) -> dict[UUID, Callable[[], Awaitable[str]]]:
+        """Return a per-server async token resolver for non-static_bearer servers.
+
+        Returns an empty dict when the broker / user / tenant context is not
+        available (e.g. anonymous batch jobs). The proxy treats an empty map
+        as "use the legacy static-bearer path for every server".
+        """
+        if self.mcp_token_broker is None or self.user is None or self.tenant is None:
+            return {}
+
+        from eneo.mcp_servers.application.mcp_token_broker import UserPrincipal
+
+        broker = self.mcp_token_broker
+        user = self.user
+        federation_config = dict(getattr(self.tenant, "federation_config", {}) or {})
+        principal = UserPrincipal(user=user)
+
+        def _make_provider(server: "MCPServer") -> Callable[[], Awaitable[str]]:
+            async def _provider() -> str:
+                return await broker.get_token(
+                    mcp_server=server,
+                    tenant_federation_config=federation_config,
+                    principal=principal,
+                )
+
+            return _provider
+
+        provider_map: dict[UUID, Callable[[], Awaitable[str]]] = {}
+        for server in mcp_servers:
+            if server.auth_scope == "static_bearer":
+                continue
+            provider_map[server.id] = _make_provider(server)
+        return provider_map
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """
@@ -199,6 +238,7 @@ class CompletionService:
                 enabled_servers,
                 identity_headers=build_identity_headers(self.user, self.tenant),
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
+                token_provider_map=self._build_token_provider_map(enabled_servers),
             )
 
         try:
@@ -427,6 +467,7 @@ class CompletionService:
                 db_session=self.session,
                 identity_headers=identity_headers,
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
+                token_provider_map=self._build_token_provider_map(mcp_servers),
             )
             if model.supports_tool_calling:
                 await mcp_proxy.prepare_tools_for_context()

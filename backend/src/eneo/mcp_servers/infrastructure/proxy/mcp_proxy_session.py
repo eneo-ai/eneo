@@ -12,6 +12,7 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -66,6 +67,7 @@ class MCPProxySession:
         db_session: "AsyncSession | None" = None,
         identity_headers: dict[str, str] | None = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
+        token_provider_map: "dict[UUID, Callable[[], Awaitable[str]]] | None" = None,
     ):
         """
         Initialize proxy session.
@@ -84,10 +86,14 @@ class MCPProxySession:
             db_session: Active SQLAlchemy session backing the
                 ``chat_session_mcp_state`` lookups/upserts. Only consulted when
                 ``chat_session_id`` is non-None.
+            token_provider_map: Map of server_id -> async bearer resolver for
+                broker-backed servers. Servers absent from the map use the
+                static credentials in ``auth_credentials_map``.
         """
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
+        self.token_provider_map = token_provider_map or {}
         self.identity_headers = identity_headers or {}
         self.chat_session_id = chat_session_id
         self._durable_session_requested = chat_session_id is not None
@@ -363,6 +369,7 @@ class MCPProxySession:
                 auth_credentials,
                 resume_mcp_session_id=next_resume_id,
                 identity_headers=self.identity_headers,
+                dynamic_token_provider=self.token_provider_map.get(server.id),
             )
             session_is_durable = False
             candidate_terminated = False
@@ -797,6 +804,7 @@ class MCPProxySession:
                         sid
                     ),
                     identity_headers=self.identity_headers,
+                    dynamic_token_provider=self.token_provider_map.get(server_id),
                 )
 
                 logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")

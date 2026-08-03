@@ -263,10 +263,12 @@ from eneo.mcp_servers.application.mcp_server_settings_service import (
 from eneo.mcp_servers.application.mcp_session_lifecycle_service import (
     McpSessionLifecycleService,
 )
+from eneo.mcp_servers.application.mcp_token_broker import MCPTokenBroker
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerMapper,
     MCPServerToolMapper,
 )
+from eneo.mcp_servers.infrastructure.oauth_discovery import OAuthDiscoveryService
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
 )
@@ -858,17 +860,8 @@ class Container(containers.DeclarativeContainer):
 
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
-    completion_service = providers.Factory(
-        CompletionService,
-        context_builder=context_builder,
-        tenant=tenant,
-        user=user,
-        config=config,
-        encryption_service=encryption_service,
-        session=session,
-        redis_client=redis_client,
-        mcp_server_tool_repo=mcp_server_tool_repo,
-    )
+    # completion_service is defined after the audit/token-broker providers
+    # below; nothing references it until the session-service block.
 
     # Datastore
     create_embeddings_service = providers.Factory(
@@ -967,6 +960,27 @@ class Container(containers.DeclarativeContainer):
         session=session,
         encryption_service=encryption_service,
         audit_service=audit_service,
+    )
+    oauth_discovery_service = providers.Factory(OAuthDiscoveryService)
+    mcp_token_broker = providers.Factory(
+        MCPTokenBroker,
+        session=session,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+        oidc_token_store=oidc_token_store,
+        discovery=oauth_discovery_service,
+    )
+    completion_service = providers.Factory(
+        CompletionService,
+        context_builder=context_builder,
+        tenant=tenant,
+        user=user,
+        config=config,
+        encryption_service=encryption_service,
+        session=session,
+        redis_client=redis_client,
+        mcp_server_tool_repo=mcp_server_tool_repo,
+        mcp_token_broker=mcp_token_broker,
     )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,

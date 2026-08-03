@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any, AsyncContextManager, Callable, Optional, Protocol, cast
@@ -602,6 +602,7 @@ class MCPClient:
         resume_mcp_session_id: str | None = None,
         on_tools_list_changed: Callable[[], None] | None = None,
         identity_headers: dict[str, str] | None = None,
+        dynamic_token_provider: Callable[[], Awaitable[str]] | None = None,
     ):
         """
         Initialize MCP client.
@@ -621,10 +622,14 @@ class MCPClient:
                 servers emit this after a tool like ``load_tools`` activates new
                 tools; the proxy reacts by re-listing so the freshly activated
                 tools become callable on the next model turn.
+            dynamic_token_provider: Async resolver returning a broker-minted
+                bearer token for this server (auth_scope != static_bearer).
+                When set it takes precedence over the static bearer credential.
         """
         super().__init__()
         self.mcp_server = mcp_server
         self.auth_credentials = auth_credentials or {}
+        self._dynamic_token_provider = dynamic_token_provider
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
         self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
@@ -693,7 +698,11 @@ class MCPClient:
         headers: dict[str, str] = {}
 
         token: Optional[str] = None
-        if self.mcp_server.http_auth_type == "bearer":
+        if self._dynamic_token_provider is not None:
+            # Broker-backed server: mint/reuse an audience-bound token. The
+            # broker raises typed errors; the connect path surfaces them.
+            token = await self._dynamic_token_provider()
+        elif self.mcp_server.http_auth_type == "bearer":
             token = self.auth_credentials.get("token")
 
         if token:

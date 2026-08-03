@@ -2007,3 +2007,4 @@ async def revoke_oidc_tokens(
     """Revoke every IdP token row for the authenticated user."""
     user = container.user()
     await container.oidc_token_store().revoke(user=user)
+    await container.mcp_token_broker().purge_cache_for_user(user.id)
