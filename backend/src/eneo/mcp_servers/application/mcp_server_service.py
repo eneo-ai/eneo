@@ -11,6 +11,8 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+    MCPAuthScope,
+    MCPExchangeProtocol,
     MCPServer,
     MCPServerTool,
 )
@@ -22,6 +24,7 @@ from eneo.mcp_servers.infrastructure.identity_headers import build_identity_head
 from eneo.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
+    from eneo.mcp_servers.application.mcp_token_broker import MCPTokenBroker
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -102,6 +105,7 @@ class MCPServerService:
         user: "UserInDB",
         mcp_state_repo: "ChatSessionMcpStateRepo",
         encryption_service: "EncryptionService | None" = None,
+        mcp_token_broker: "MCPTokenBroker | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
@@ -109,6 +113,7 @@ class MCPServerService:
         self.user = user
         self.mcp_state_repo = mcp_state_repo
         self.encryption_service = encryption_service
+        self.mcp_token_broker = mcp_token_broker
 
     # Keys in http_auth_config_schema that contain secrets
     _SECRET_KEYS = ("token",)
@@ -184,6 +189,10 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | None" = None,
+        auth_scope: MCPAuthScope = "static_bearer",
+        expected_idp_issuer: str | None = None,
+        target_resource_or_scope: str | None = None,
+        exchange_protocol: MCPExchangeProtocol = "auto",
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
@@ -211,6 +220,10 @@ class MCPServerService:
             icon_url=icon_url,
             documentation_url=documentation_url,
             security_classification=security_classification,
+            auth_scope=auth_scope,
+            expected_idp_issuer=expected_idp_issuer,
+            target_resource_or_scope=target_resource_or_scope,
+            exchange_protocol=exchange_protocol,
         )
 
         # Test connection FIRST with plaintext credentials before saving to database
@@ -274,6 +287,10 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | NotProvided | None" = NOT_PROVIDED,
+        auth_scope: MCPAuthScope | None = None,
+        expected_idp_issuer: "str | NotProvided | None" = NOT_PROVIDED,
+        target_resource_or_scope: "str | NotProvided | None" = NOT_PROVIDED,
+        exchange_protocol: MCPExchangeProtocol | None = None,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
@@ -291,6 +308,24 @@ class MCPServerService:
         identity_mode_changed = (
             forward_identity is not None
             and forward_identity != mcp_server.forward_identity
+        )
+        # Cached exchanged tokens are keyed on audience + issuer; any change
+        # to these fields invalidates them.
+        cache_affecting_changed = (
+            url_changed
+            or (auth_scope is not None and auth_scope != mcp_server.auth_scope)
+            or (
+                not isinstance(expected_idp_issuer, NotProvided)
+                and expected_idp_issuer != mcp_server.expected_idp_issuer
+            )
+            or (
+                not isinstance(target_resource_or_scope, NotProvided)
+                and target_resource_or_scope != mcp_server.target_resource_or_scope
+            )
+            or (
+                exchange_protocol is not None
+                and exchange_protocol != mcp_server.exchange_protocol
+            )
         )
 
         # Apply changes to domain object
@@ -321,9 +356,30 @@ class MCPServerService:
             mcp_server.documentation_url = str(documentation_url)
         if not isinstance(security_classification, NotProvided):
             mcp_server.security_classification = security_classification
+        if auth_scope is not None:
+            previous_scope = mcp_server.auth_scope
+            mcp_server.auth_scope = auth_scope
+            # SSO scopes (per_user / per_tenant) authenticate via token-exchange
+            # at call time; any previously stored static bearer is dead weight
+            # and a stale-secret risk. Clear it on transition into SSO.
+            if (
+                auth_scope in ("per_user", "per_tenant")
+                and previous_scope == "static_bearer"
+            ):
+                mcp_server.http_auth_config_schema = None
+        if not isinstance(expected_idp_issuer, NotProvided):
+            mcp_server.expected_idp_issuer = expected_idp_issuer
+        if not isinstance(target_resource_or_scope, NotProvided):
+            mcp_server.target_resource_or_scope = target_resource_or_scope
+        if exchange_protocol is not None:
+            mcp_server.exchange_protocol = exchange_protocol
 
-        # Validate connection before saving when connection config changes
-        if (
+        # Validate connection before saving when connection config changes.
+        # SSO scopes are excluded: the broker exchanges a fresh token per user
+        # at call time, so there are no admin-time credentials to test with.
+        if mcp_server.auth_scope in ("per_user", "per_tenant"):
+            pass
+        elif (
             url_changed
             or auth_type_changed
             or credentials_changed
@@ -386,6 +442,8 @@ class MCPServerService:
             raise NameCollisionException(
                 "An MCP server with this name already exists."
             ) from e
+        if cache_affecting_changed and self.mcp_token_broker is not None:
+            await self.mcp_token_broker.purge_cache_for_server(mcp_server.id)
         return MCPServerUpdateResult(server=mcp_server)
 
     @validate_permissions(Permission.ADMIN)

@@ -1991,7 +1991,7 @@ async def auth_callback(
 
 @router.post(
     "/oidc/logout",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=204,
     summary="Revoke the caller's persisted IdP tokens",
     description=(
         "Called by the frontend logout flow before the local session "

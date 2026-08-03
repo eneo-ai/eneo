@@ -70,6 +70,9 @@ from eneo.jobs.job_router import router as jobs_router
 from eneo.limits.limit_router import router as limit_router
 from eneo.logging.logging_router import router as logging_router
 from eneo.main.config import get_settings
+from eneo.mcp_servers.presentation.mcp_connections_router import (
+    router as mcp_connections_router,
+)
 from eneo.mcp_servers.presentation.mcp_server_router import (
     router as mcp_server_router,
 )
@@ -497,6 +500,11 @@ router.include_router(
     prefix="/mcp-servers",
     tags=["mcp-servers"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    mcp_connections_router,
+    prefix="/me",
+    tags=["mcp-connections"],
 )
 router.include_router(
     prompt_library_router,

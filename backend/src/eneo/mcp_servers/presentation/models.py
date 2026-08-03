@@ -27,6 +27,10 @@ class BaseListModel(BaseModel, Generic[T]):
         return len(self.items)
 
 
+MCPAuthScopeLiteral = Literal["per_user", "per_tenant", "static_bearer"]
+MCPExchangeProtocolLiteral = Literal["auto", "id_jag", "rfc8693"]
+
+
 class MCPServerPublic(BaseModel):
     """Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport)."""
 
@@ -37,6 +41,10 @@ class MCPServerPublic(BaseModel):
     http_auth_type: str  # "none", "bearer"
     has_credentials: bool
     credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
+    auth_scope: MCPAuthScopeLiteral = "static_bearer"
+    expected_idp_issuer: Optional[str] = None
+    target_resource_or_scope: Optional[str] = None
+    exchange_protocol: MCPExchangeProtocolLiteral = "auto"
     forward_identity: bool = False
     tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
     tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
@@ -59,6 +67,10 @@ class MCPServerCreate(BaseModel):
     http_auth_type: Literal["none", "bearer"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    auth_scope: MCPAuthScopeLiteral = "static_bearer"
+    expected_idp_issuer: Optional[str] = None
+    target_resource_or_scope: Optional[str] = None
+    exchange_protocol: MCPExchangeProtocolLiteral = "auto"
     forward_identity: bool = False
     tool_catalog_max_count: int = Field(
         default=MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
@@ -91,6 +103,10 @@ class MCPServerUpdate(BaseModel):
     http_auth_type: Optional[Literal["none", "bearer"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    auth_scope: Optional[MCPAuthScopeLiteral] = None
+    expected_idp_issuer: Union[str, None, NotProvided] = NOT_PROVIDED
+    target_resource_or_scope: Union[str, None, NotProvided] = NOT_PROVIDED
+    exchange_protocol: Optional[MCPExchangeProtocolLiteral] = None
     forward_identity: Optional[bool] = None
     tool_catalog_max_count: Optional[int] = Field(
         default=None,
@@ -246,3 +262,34 @@ class ToolReviewResponse(BaseModel):
     approved_tools: list[MCPServerToolPublic] = []
     rejected_tools: list[MCPServerToolPublic] = []
     deleted_count: int = 0
+
+
+class MCPServiceAccountPublic(BaseModel):
+    """DTO for the tenant MCP service-account read-out (masked).
+
+    Also surfaces the tenant-wide default audience/scope so the panel
+    can render both knobs from a single GET; they are written via
+    separate PUT endpoints because the concerns are independent.
+    """
+
+    configured: bool
+    client_id: Optional[str] = None
+    client_secret_preview: Optional[str] = None  # e.g. "********4f3c"
+    default_target: Optional[str] = None
+
+
+class MCPServiceAccountUpdate(BaseModel):
+    """DTO for setting / rotating the tenant MCP service-account credentials."""
+
+    client_id: str
+    client_secret: str
+
+
+class MCPSsoDefaultTargetUpdate(BaseModel):
+    """DTO for setting the tenant-wide default audience/scope.
+
+    Used as the fallback ``target.resource_or_scope`` in the broker for
+    every SSO MCP server that does not carry its own override.
+    """
+
+    default_target: str

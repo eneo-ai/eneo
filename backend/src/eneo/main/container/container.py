@@ -256,6 +256,7 @@ from eneo.limits.limit_service import LimitService
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.application.mcp_connection_service import MCPConnectionService
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
@@ -274,6 +275,9 @@ from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
 )
 from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
     ChatSessionMcpStateRepo,
+)
+from eneo.mcp_servers.infrastructure.repo_impl.mcp_connection_repo_impl import (
+    MCPConnectionRepositoryImpl,
 )
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
@@ -1253,6 +1257,16 @@ class Container(containers.DeclarativeContainer):
         user=user,
         encryption_service=encryption_service,
     )
+    mcp_connection_repo = providers.Factory(
+        MCPConnectionRepositoryImpl,
+        session=session,
+    )
+    mcp_connection_service = providers.Factory(
+        MCPConnectionService,
+        connection_repo=mcp_connection_repo,
+        mcp_server_settings_service=mcp_server_settings_service,
+        user=user,
+    )
     governance_policy_service = providers.Factory(
         GovernancePolicyService,
         user=user,
@@ -1411,6 +1425,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         mcp_state_repo=chat_session_mcp_state_repo,
         encryption_service=encryption_service,
+        mcp_token_broker=mcp_token_broker,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

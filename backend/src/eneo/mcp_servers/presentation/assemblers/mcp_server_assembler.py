@@ -103,6 +103,10 @@ class MCPServerAssembler:
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service
             ),
+            auth_scope=mcp_server.auth_scope,
+            expected_idp_issuer=mcp_server.expected_idp_issuer,
+            target_resource_or_scope=mcp_server.target_resource_or_scope,
+            exchange_protocol=mcp_server.exchange_protocol,
             forward_identity=mcp_server.forward_identity,
             tool_catalog_max_count=mcp_server.tool_catalog_max_count,
             tool_catalog_max_bytes=mcp_server.tool_catalog_max_bytes,
@@ -163,6 +167,10 @@ class MCPServerSettingsAssembler:
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service
             ),
+            auth_scope=mcp_server.auth_scope,
+            expected_idp_issuer=mcp_server.expected_idp_issuer,
+            target_resource_or_scope=mcp_server.target_resource_or_scope,
+            exchange_protocol=mcp_server.exchange_protocol,
             forward_identity=mcp_server.forward_identity,
             tool_catalog_max_count=mcp_server.tool_catalog_max_count,
             tool_catalog_max_bytes=mcp_server.tool_catalog_max_bytes,

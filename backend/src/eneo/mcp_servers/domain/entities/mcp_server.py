@@ -1,8 +1,11 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
+
+MCPAuthScope = Literal["per_user", "per_tenant", "static_bearer"]
+MCPExchangeProtocol = Literal["auto", "id_jag", "rfc8693"]
 
 if TYPE_CHECKING:
     from eneo.security_classifications.domain.entities.security_classification import (
@@ -104,11 +107,11 @@ class MCPServer(Entity):
         description: Optional[str] = None,
         http_auth_type: str = "none",
         http_auth_config_schema: Optional[dict[str, Any]] = None,
-        auth_scope: str = "static_bearer",
+        auth_scope: MCPAuthScope = "static_bearer",
         expected_idp_issuer: Optional[str] = None,
         tool_discovery_principal: str = "anonymous",
         target_resource_or_scope: Optional[str] = None,
-        exchange_protocol: str = "auto",
+        exchange_protocol: MCPExchangeProtocol = "auto",
         is_enabled: bool = True,
         forward_identity: bool = False,
         identity_policy_generation: int = 0,
@@ -132,11 +135,11 @@ class MCPServer(Entity):
         self.http_url = http_url
         self.http_auth_type = http_auth_type
         self.http_auth_config_schema = http_auth_config_schema
-        self.auth_scope = auth_scope
+        self.auth_scope: MCPAuthScope = auth_scope
         self.expected_idp_issuer = expected_idp_issuer
         self.tool_discovery_principal = tool_discovery_principal
         self.target_resource_or_scope = target_resource_or_scope
-        self.exchange_protocol = exchange_protocol
+        self.exchange_protocol: MCPExchangeProtocol = exchange_protocol
         self.is_enabled = is_enabled
         self.forward_identity = forward_identity
         self.identity_policy_generation = identity_policy_generation
