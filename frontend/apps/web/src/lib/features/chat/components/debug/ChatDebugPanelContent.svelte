@@ -7,6 +7,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Info from "@lucide/svelte/icons/info";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { ChatService } from "../../ChatService.svelte";
@@ -22,7 +23,7 @@
   }: { chat: ChatService; state: ChatDebugPanelState; idPrefix: string } = $props();
 
   const pendingDiagnosticsRefreshFailed = $derived(chat.pendingDiagnosticsRefreshFailed);
-  const liveStatus = $derived(
+  const selectedTurnStatus = $derived(
     panel.loading
       ? m.chat_debug_loading()
       : panel.refreshing
@@ -32,6 +33,9 @@
           : panel.diagnostics
             ? m.chat_debug_loaded()
             : ""
+  );
+  const liveTurnStatus = $derived(
+    panel.liveTurnPending && !pendingDiagnosticsRefreshFailed ? m.chat_debug_live_turn_title() : ""
   );
 
   const timeFormatter = $derived(
@@ -60,7 +64,12 @@
   }
 </script>
 
-<p class="sr-only" role="status" aria-live="polite">{liveStatus}</p>
+<p class="sr-only" role="status" aria-live="polite" data-chat-debug-status="selected-turn">
+  {selectedTurnStatus}
+</p>
+<p class="sr-only" role="status" aria-live="polite" data-chat-debug-status="live-turn">
+  {liveTurnStatus}
+</p>
 
 <div class="border-border flex flex-col gap-2 border-b px-5 py-4">
   <label for="{idPrefix}-turn-select" class="text-xs font-medium">
@@ -131,16 +140,23 @@
 <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] @container">
   {#if panel.liveTurnPending}
     <div class="px-5 pt-5">
-      <Alert.Root variant={pendingDiagnosticsRefreshFailed ? "destructive" : undefined}>
-        <Info aria-hidden="true" />
+      <Alert.Root
+        variant={pendingDiagnosticsRefreshFailed ? "destructive" : undefined}
+        role={pendingDiagnosticsRefreshFailed ? "alert" : "group"}
+      >
+        {#if pendingDiagnosticsRefreshFailed}
+          <CircleAlert aria-hidden="true" />
+        {:else}
+          <Info aria-hidden="true" />
+        {/if}
         <Alert.Title>
           {pendingDiagnosticsRefreshFailed
-            ? m.chat_debug_unavailable_title()
+            ? m.chat_debug_confirmation_error_title()
             : m.chat_debug_live_turn_title()}
         </Alert.Title>
         <Alert.Description>
           {pendingDiagnosticsRefreshFailed
-            ? m.chat_debug_unavailable_description()
+            ? m.chat_debug_confirmation_error_description()
             : m.chat_debug_live_turn_description()}
         </Alert.Description>
         {#if pendingDiagnosticsRefreshFailed}
