@@ -142,7 +142,7 @@ def _test_request_snapshot(message: str) -> FlowPersistedJsonObject:
 
 def _route(
     *,
-    model: str = "openai/gpt-4",
+    model: str = "openai/gpt-4o",
     kwargs: dict[str, object] | None = None,
     supported: SupportedModelKwargs | None = None,
 ) -> ResolvedCompletionModelRoute:
@@ -608,7 +608,7 @@ def _make_model() -> MagicMock:
 
 def _make_adapter() -> MagicMock:
     adapter = MagicMock()
-    adapter.litellm_model = "openai/gpt-4"
+    adapter.litellm_model = "openai/gpt-4o"
     adapter.credential_resolver.get_api_key.return_value = "sk-test"
     adapter.credential_resolver.get_credential_field.return_value = None
     return adapter

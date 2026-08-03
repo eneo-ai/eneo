@@ -54,7 +54,7 @@ from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 12
+BUILDER_SCHEMA_VERSION: int = 13
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -111,6 +111,7 @@ AttachmentCoverage = Literal[
 ]
 SchemaEvidenceSource = Literal[
     "declared_schema",
+    "prose_field_names",
     "template_placeholders",
     "inferred_example",
 ]
@@ -373,13 +374,17 @@ class SchemaEvidence(_PlanningModel):
         if self.fingerprint != expected_fingerprint:
             raise ValueError("schema fingerprint must match json_schema")
         expected_strength: SchemaEvidenceStrength = (
-            "explicit" if self.source == "declared_schema" else "inferred"
+            "explicit"
+            if self.source in {"declared_schema", "prose_field_names"}
+            else "inferred"
         )
         if self.strength != expected_strength:
             raise ValueError("schema strength must match its source")
         if self.source_file_ids != sorted(set(self.source_file_ids), key=str):
             raise ValueError("schema source_file_ids must be unique and sorted")
-        if self.source != "declared_schema" and not self.source_file_ids:
+        if self.source in {"template_placeholders", "inferred_example"} and not (
+            self.source_file_ids
+        ):
             raise ValueError("inferred output schema requires source_file_ids")
         if self.source != "template_placeholders":
             if self.total_count is not None or self.truncated:

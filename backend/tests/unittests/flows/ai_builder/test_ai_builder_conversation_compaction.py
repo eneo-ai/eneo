@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     conversation_serialized_size_bytes,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationSourceMetadata,
     metadata_with_slot_classification,
     question_response_from_metadata,
     slot_classification_from_metadata,
@@ -37,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
+    ClassifiedOutputSchemaFields,
     ClassifiedSlot,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -117,6 +119,7 @@ def _classifier_result_msg(
     result: SlotClassificationResult,
     *,
     uploaded_file_id: UUID | None = None,
+    retained_source_inventory: tuple[SlotClassificationSourceMetadata, ...] = (),
 ) -> ConversationMessage:
     source_id = (
         f"uploaded_file:{uploaded_file_id}"
@@ -133,6 +136,11 @@ def _classifier_result_msg(
                 for evidence in file_role.evidence
             ],
             *([] if result.form_intake is None else result.form_intake.evidence),
+            *(
+                []
+                if result.output_schema_fields is None
+                else result.output_schema_fields.evidence
+            ),
             *(
                 []
                 if result.example_output_constraints is None
@@ -160,6 +168,7 @@ def _classifier_result_msg(
         ),
         model="openai/gpt-test",
         provider="openai",
+        retained_source_inventory=retained_source_inventory,
     )
     assert classification is not None
     metadata = metadata_with_slot_classification(None, classification)
@@ -473,6 +482,116 @@ def test_byte_compaction_rebuild_matches_after_later_slot_correction() -> None:
         if (parsed := slot_classification_from_metadata(message.metadata)) is not None
     )
     assert classification.contradictions == ["conversation_compaction:bytes"]
+
+
+def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
+    first_source = "user_message:json-fields-old"
+    latest_source = "user_message:json-fields-new"
+    first_quote = "Create a machine-readable report containing case_id."
+    first_message = _classifier_result_msg(
+        "json-fields-old",
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_json",
+                    confidence="high",
+                    reason="typed test classification",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id=first_source,
+                            quote=first_quote,
+                        ),
+                    ),
+                ),
+                ClassifiedSlot(
+                    slot_name="post_processing_goal",
+                    value="structure_key_information",
+                    confidence="high",
+                    reason="typed test classification",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id=first_source,
+                            quote=first_quote,
+                        ),
+                    ),
+                ),
+            ),
+            output_schema_fields=ClassifiedOutputSchemaFields(
+                operation="replace",
+                field_names=("case_id",),
+                confidence="high",
+                reason="Initial complete field snapshot.",
+                evidence=(
+                    ClassifiedEvidence(
+                        source_id=first_source,
+                        quote=first_quote,
+                    ),
+                ),
+            ),
+        ),
+    )
+    first_message = ConversationMessage(
+        message_id=first_message.message_id,
+        role="user",
+        content=first_quote,
+        metadata=first_message.metadata,
+    )
+    first_classification = slot_classification_from_metadata(first_message.metadata)
+    assert first_classification is not None
+    conversation = [
+        first_message,
+        ConversationMessage(
+            message_id="json-fields-new",
+            role="user",
+            content="Keep case_id and add status.",
+            metadata=_classifier_result_msg(
+                "json-fields-new",
+                SlotClassificationResult(
+                    output_schema_fields=ClassifiedOutputSchemaFields(
+                        operation="replace",
+                        field_names=("case_id", "status"),
+                        confidence="high",
+                        reason="Current complete field snapshot.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id=first_source,
+                                quote=first_quote,
+                            ),
+                            ClassifiedEvidence(
+                                source_id=latest_source,
+                                quote="Keep case_id and add status.",
+                            ),
+                        ),
+                    ),
+                ),
+                retained_source_inventory=tuple(first_classification.source_inventory),
+            ).metadata,
+        ),
+        _classifier_msg(
+            "json-terminal-reconfirmed",
+            slot_name="terminal_output",
+            value="structured_json",
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+    expected = build_planning_state_from_conversation(conversation)
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=5,
+        tail_messages=3,
+    )
+
+    evidence = expected.output_schema_evidence
+    assert evidence is not None
+    assert evidence.json_schema["properties"] == {"case_id": {}, "status": {}}
+    assert evidence.evidence == [
+        f"quote:user_message:json-fields-old:{first_quote}",
+        "quote:user_message:json-fields-new:Keep case_id and add status.",
+    ]
+    assert build_planning_state_from_conversation(compacted) == expected
 
 
 def test_compaction_retains_explicit_unknown_that_clears_older_model_slot() -> None:

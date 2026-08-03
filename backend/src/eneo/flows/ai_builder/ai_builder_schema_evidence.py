@@ -120,6 +120,7 @@ class SchemaFieldProjection:
     fields: tuple[str, ...]
     total_count: int
     truncated: bool
+    lossy: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,7 +275,11 @@ def build_schema_evidence(
         json_schema=json_schema,
         fingerprint=schema_fingerprint(json_schema),
         source=source,
-        strength="explicit" if source == "declared_schema" else "inferred",
+        strength=(
+            "explicit"
+            if source in {"declared_schema", "prose_field_names"}
+            else "inferred"
+        ),
         source_file_ids=list(sorted(set(source_file_ids), key=str)),
         confidence=confidence,
         evidence=list(evidence),
@@ -845,26 +850,31 @@ def project_schema_fields(schema: JsonObject) -> SchemaFieldProjection:
 
     properties = schema.get("properties")
     if not isinstance(properties, dict):
-        return SchemaFieldProjection(fields=(), total_count=0, truncated=False)
+        return SchemaFieldProjection(
+            fields=(), total_count=0, truncated=False, lossy=False
+        )
     fields: list[str] = []
     total_count = 0
+    lossy = False
     for raw_name in properties:
         name = " ".join(raw_name.split())
         if not name:
             continue
+        lossy = lossy or name != raw_name
         total_count += 1
         if len(fields) >= SCHEMA_FIELD_PROJECTION_MAX_ITEMS:
             continue
-        fields.append(
-            _truncate_json_display(
-                name,
-                max_serialized_bytes=SCHEMA_FIELD_NAME_MAX_JSON_BYTES,
-            )
+        display_name = _truncate_json_display(
+            name,
+            max_serialized_bytes=SCHEMA_FIELD_NAME_MAX_JSON_BYTES,
         )
+        lossy = lossy or display_name != name
+        fields.append(display_name)
     return SchemaFieldProjection(
         fields=tuple(fields),
         total_count=total_count,
         truncated=total_count > len(fields),
+        lossy=lossy or total_count > len(fields),
     )
 
 

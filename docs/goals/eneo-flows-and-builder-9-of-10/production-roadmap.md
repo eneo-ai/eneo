@@ -644,6 +644,16 @@ plan above controls all other ordering.
   the raw transcript, spending 52,640 completion-input and 10,301 output tokens.
   Fix the topology and actual-input instructions at the compiler boundary; do
   not add language-specific refusal matching. No generic dataflow DSL. (d) make
+  every typed source-capture requirement survive compilation: delete the fixed
+  eight-field, 96-character description, and 900-character block limits plus
+  substring-based suppression rather than replacing them with another Builder
+  heuristic. Render the complete admitted `SourceCaptureField` set and let the
+  selected Flow-step model's existing save-time prompt admission and runtime
+  context-window refusal own the budget. Do not couple this to the Builder model,
+  add an admin knob for a correctness invariant, or silently truncate. Prove more
+  than eight fields, a long description, and a short name already occurring as a
+  substring in authored instructions; reuse the existing model-fit and typed
+  runtime-overflow tests instead of duplicating them. (e) make
   document-report lowering total for each supported committed report disposition
   so per-source readers, overview/body composition, and deterministic rendering
   cannot enter a futile model-repair loop; keep the low-level assembly invariant

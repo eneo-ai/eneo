@@ -31,6 +31,7 @@ from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
+    AIBuilderErrorCode,
     AIBuilderKnownProviderRejectionException,
     AIBuilderProviderOutcomeUnknownException,
 )
@@ -66,7 +67,7 @@ def _classification_input(
                 text=text,
                 message_id="user-1",
             ),
-        )
+        ),
     )
 
 
@@ -82,6 +83,362 @@ def _make_response(content: str) -> MagicMock:
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+def test_parser_accepts_exact_user_cited_output_schema_fields() -> None:
+    quote = "JSON output fields must be case_id, status, and assigned_team."
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": ["case_id", "status", "assigned_team"],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The user explicitly enumerated JSON fields.",
+                    "evidence": [_evidence(quote)],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.output_schema_fields is not None
+    assert result.output_schema_fields.operation == "update"
+    assert result.output_schema_fields.field_names == (
+        "case_id",
+        "status",
+        "assigned_team",
+    )
+
+
+@pytest.mark.parametrize(
+    "evidence_quote",
+    ['JSON output field: "id".', '"id"'],
+)
+def test_parser_accepts_field_declaration_using_source_relative_citation_boundaries(
+    evidence_quote: str,
+) -> None:
+    source_text = 'JSON output field: "id".'
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": ["id"],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The user explicitly named the JSON property.",
+                    "evidence": [_evidence(evidence_quote)],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(source_text),
+    )
+
+    assert result is not None
+    assert result.output_schema_fields is not None
+    assert result.output_schema_fields.field_names == ("id",)
+
+
+@pytest.mark.parametrize(
+    ("quote", "classified_name", "expected_name"),
+    [
+        (
+            "Return JSON with attachment_inventory[].",
+            "attachment_inventory[]",
+            "attachment_inventory",
+        ),
+        (
+            'Return JSON with the literal field "attachment_inventory[]".',
+            "attachment_inventory[]",
+            "attachment_inventory[]",
+        ),
+        (
+            "Return JSON with the literal field ”attachment_inventory[]”.",
+            "attachment_inventory[]",
+            "attachment_inventory[]",
+        ),
+    ],
+)
+def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation(
+    quote: str,
+    classified_name: str,
+    expected_name: str,
+) -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": [classified_name],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The user explicitly named the JSON property.",
+                    "evidence": [_evidence(quote)],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.output_schema_fields is not None
+    assert result.output_schema_fields.field_names == (expected_name,)
+
+
+@pytest.mark.parametrize(
+    "field_names, quote",
+    [
+        (["case_id", "invented_field"], "JSON output field: case_id."),
+        (["id"], "The JSON output provides identifiers."),
+        (["id"], "Fältet idé ska ingå i JSON-resultatet."),
+        (["id"], "Return $id in the JSON output."),
+        (["id"], "Return user.id in the JSON output."),
+        (["id"], 'Return user["id"] in the JSON output.'),
+        (["id"], 'Return user[ "id" ] in the JSON output.'),
+        (["id"], "Return user[ “id” ] in the JSON output."),
+        (["id"], "Return user[id] in the JSON output."),
+        (["id"], 'Return [ "id", "status" ] in the JSON output.'),
+        (["id"], 'Return "id" . child in the JSON output.'),
+        (["id"], "Return id[0] in the JSON output."),
+        (["id"], "Return user:id in the JSON output."),
+        (["id"], "Return id\N{COMBINING ACUTE ACCENT} in the JSON output."),
+        ([" id "], 'Return the literal field " id ".'),
+    ],
+)
+def test_parser_refuses_unverified_output_schema_fields(
+    field_names: list[str],
+    quote: str,
+) -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": field_names,
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "Claimed field declaration.",
+                    "evidence": [_evidence(quote)],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.output_schema_fields is None
+
+
+@pytest.mark.parametrize(
+    ("source_text", "evidence_quote"),
+    [
+        ('Return user[ "id" ] in the JSON output.', '"id"'),
+        ("Return user.id in the JSON output.", "id"),
+        ('Return [ "id", "status" ] in the JSON output.', '"id"'),
+    ],
+)
+def test_parser_refuses_short_citations_of_nested_or_list_field_names(
+    source_text: str,
+    evidence_quote: str,
+) -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": ["id"],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "Claimed field declaration.",
+                    "evidence": [_evidence(evidence_quote)],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(source_text),
+    )
+
+    assert result is not None
+    assert result.output_schema_fields is None
+
+
+@pytest.mark.parametrize(
+    ("added", "removed", "quote", "accepted"),
+    [
+        (("priority",), (), "Also add priority.", True),
+        (("priority",), ("status",), "Also add priority.", False),
+        (("priority",), ("status",), "Remove status and add priority.", True),
+    ],
+)
+def test_parser_accepts_only_cited_output_field_deltas(
+    added: tuple[str, ...],
+    removed: tuple[str, ...],
+    quote: str,
+    accepted: bool,
+) -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": list(added),
+                    "removed_field_names": list(removed),
+                    "confidence": "high",
+                    "reason": "Apply the user's current field change.",
+                    "evidence": [_evidence(quote)],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    if accepted:
+        assert result.output_schema_fields is not None
+        assert result.output_schema_fields.field_names == added
+        assert result.output_schema_fields.removed_field_names == removed
+    else:
+        assert result.output_schema_fields is None
+
+
+def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
+    quote = "Remove every previously named JSON field constraint."
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "clear",
+                    "field_names": [],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The user removed the named field constraints.",
+                    "evidence": [_evidence(quote)],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.output_schema_fields is not None
+    assert result.output_schema_fields.operation == "clear"
+    assert result.output_schema_fields.field_names == ()
+
+
+def test_parser_accepts_many_cited_field_additions_across_user_sources() -> None:
+    field_names = tuple(f"field_{index}" for index in range(4))
+    sources = tuple(
+        SlotClassificationSource(
+            source_id=f"user_message:user-{index}",
+            kind="user_message",
+            text=f"Include {field_name} in the JSON output.",
+            message_id=f"user-{index}",
+        )
+        for index, field_name in enumerate(field_names)
+    )
+
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": list(field_names),
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "Current complete JSON field set.",
+                    "evidence": [
+                        {
+                            "source_id": source.source_id,
+                            "quote": source.text,
+                        }
+                        for source in sources
+                    ],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=SlotClassificationInput(sources=sources),
+    )
+
+    assert result is not None
+    assert result.output_schema_fields is not None
+    assert result.output_schema_fields.field_names == field_names
 
 
 def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries() -> (
@@ -1155,6 +1512,40 @@ def test_prompt_hash_changes_when_allowed_slot_values_change() -> None:
     assert changed_hash != base_hash
 
 
+def test_prompt_hash_changes_with_model_input_budget() -> None:
+    base_hash = slot_classification_prompt_hash(
+        classification_input=_classification_input("Also add priority."),
+        ui_language="en",
+        allowed_slot_values={},
+        litellm_model="openai/gpt-test",
+        provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
+        max_input_tokens=4096,
+    )
+    changed_hash = slot_classification_prompt_hash(
+        classification_input=_classification_input("Also add priority."),
+        ui_language="en",
+        allowed_slot_values={},
+        litellm_model="openai/gpt-test",
+        provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
+        max_input_tokens=8192,
+    )
+    safety_hash = slot_classification_prompt_hash(
+        classification_input=_classification_input("Also add priority."),
+        ui_language="en",
+        allowed_slot_values={},
+        litellm_model="openai/gpt-test",
+        provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
+        max_input_tokens=4096,
+        safety_buffer_tokens=128,
+    )
+
+    assert changed_hash != base_hash
+    assert safety_hash != base_hash
+
+
 def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
     allowed = {"terminal_output": {"docx_document", "structured_text"}}
     classification_input = _classification_input("en fil jag kan ladda ner")
@@ -1220,10 +1611,20 @@ def test_prompt_hash_changes_with_source_model_and_provider_identity() -> None:
         provider="azure",
         supported_model_kwargs=_route().supported_model_kwargs,
     )
+    output_budget_hash = slot_classification_prompt_hash(
+        classification_input=_classification_input("filename: mall.docx"),
+        ui_language="sv",
+        allowed_slot_values=allowed,
+        litellm_model="openai/gpt-test",
+        provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
+        max_output_tokens=4096,
+    )
 
     assert source_hash != base_hash
     assert model_hash != base_hash
     assert provider_hash != base_hash
+    assert output_budget_hash != base_hash
 
 
 def test_provider_execution_identity_partitions_behavior_and_excludes_secrets() -> None:
@@ -1603,7 +2004,14 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
 
     prompt = "\n".join(message["content"] for message in messages)
 
-    assert f"1-{classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes" in prompt
+    assert (
+        f"1-{classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes for each "
+        "slot, file_role, and form_intake classification" in prompt
+    )
+    assert (
+        f"up to {classifier.OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
+        "quotes" in prompt
+    )
     assert f"at most {classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH}" in prompt
     assert "exact_quote_str" in prompt
     assert "form_intake" in prompt
@@ -1709,6 +2117,67 @@ async def test_classify_slots_refuses_duplicate_source_ids() -> None:
 
 
 @pytest.mark.asyncio
+async def test_classify_slots_refuses_request_that_exceeds_selected_model_window() -> (
+    None
+):
+    litellm_client = AsyncMock()
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(),
+            classification_input=_classification_input("Return JSON with case_id."),
+            allowed_slot_values={"terminal_output": {"structured_json"}},
+            tenant_id=uuid4(),
+            max_input_tokens=1,
+            max_output_tokens=1024,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
+    assert exc_info.value.context == {
+        "phase": "slot_classification",
+        "request_tokens": exc_info.value.context["request_tokens"],
+        "output_reserve_tokens": 1024,
+        "safety_buffer_tokens": 0,
+        "required_context_tokens": exc_info.value.context["required_context_tokens"],
+        "max_input_tokens": 1,
+    }
+    litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_classify_slots_reserves_output_and_safety_within_model_window() -> None:
+    litellm_client = AsyncMock()
+
+    with (
+        patch.object(classifier, "count_message_tokens", return_value=100),
+        patch.object(classifier, "count_tokens", return_value=20),
+        pytest.raises(AIBuilderBadRequestException) as exc_info,
+    ):
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(),
+            classification_input=_classification_input("Return JSON with case_id."),
+            allowed_slot_values={"terminal_output": {"structured_json"}},
+            tenant_id=uuid4(),
+            max_input_tokens=1_000,
+            max_output_tokens=800,
+            safety_buffer_tokens=100,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
+    assert exc_info.value.context == {
+        "phase": "slot_classification",
+        "request_tokens": 120,
+        "output_reserve_tokens": 800,
+        "safety_buffer_tokens": 100,
+        "required_context_tokens": 1_020,
+        "max_input_tokens": 1_000,
+    }
+    litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_classify_slots_requests_bounded_json_schema_response_format() -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
@@ -1731,12 +2200,17 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
         tenant_id=uuid4(),
         ui_language="sv",
+        max_output_tokens=4096,
     )
 
-    response_format = litellm_client.acompletion.await_args.kwargs["response_format"]
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["max_tokens"] == 4096
+    response_format = call_kwargs["response_format"]
     assert response_format["type"] == "json_schema"
     json_schema = response_format["json_schema"]
-    assert json_schema["name"] == "ai_builder_slot_classification_v15"
+    assert json_schema["name"] == (
+        f"ai_builder_slot_classification_v{classifier.SLOT_CLASSIFICATION_SCHEMA_VERSION}"
+    )
     assert json_schema["strict"] is False
 
     schema = json_schema["schema"]
@@ -1744,6 +2218,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "slots",
         "file_roles",
         "form_intake",
+        "output_schema_fields",
         "example_output_constraints",
         "schema_direction",
         "secondary_obligations",
@@ -1751,6 +2226,24 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "contradictions",
     ]
     assert schema["additionalProperties"] is False
+    output_fields_schema = schema["properties"]["output_schema_fields"]["anyOf"][0]
+    assert output_fields_schema["required"] == [
+        "operation",
+        "field_names",
+        "removed_field_names",
+        "confidence",
+        "reason",
+        "evidence",
+    ]
+    assert output_fields_schema["properties"]["operation"]["enum"] == [
+        "update",
+        "clear",
+    ]
+    assert "maxItems" not in output_fields_schema["properties"]["field_names"]
+    assert "maxItems" not in output_fields_schema["properties"]["removed_field_names"]
+    assert output_fields_schema["properties"]["field_names"]["items"]["maxLength"] == (
+        classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH
+    )
     slot_schema = schema["properties"]["slots"]
     assert slot_schema["maxItems"] == 1
     slot_variant = slot_schema["items"]["anyOf"][0]

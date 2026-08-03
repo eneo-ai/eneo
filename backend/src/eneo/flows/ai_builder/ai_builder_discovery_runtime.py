@@ -38,6 +38,9 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
     slot_names_blocked_by_explicit_uncertainty,
 )
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    top_level_schema_property_names,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_question_state import (
     assistant_question_id,
@@ -54,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     resolve_structured_schema_direction,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedOutputSchemaFields,
     ClassifiedSchemaDirection,
     SlotClassificationBias,
     SlotClassificationInput,
@@ -512,6 +516,9 @@ async def build_runtime_discovery_context(
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    safety_buffer_tokens: int = 0,
 ) -> RuntimeDiscoveryContext:
     schema_candidates = (
         prepared_schema_candidates
@@ -578,7 +585,14 @@ async def build_runtime_discovery_context(
             for slot_name, values in allowed_values.items()
             if slot_name not in model_blocked_slots
         }
-    if not allowed_values and not schema_direction_pending:
+    output_schema_fields_relevant = _output_schema_field_classification_is_relevant(
+        state
+    )
+    if (
+        not allowed_values
+        and not schema_direction_pending
+        and not output_schema_fields_relevant
+    ):
         return _complete_runtime_discovery_context(
             state,
             attachment_context=attachment_context,
@@ -589,6 +603,10 @@ async def build_runtime_discovery_context(
         conversation,
         allowed_values,
         classification_input,
+    )
+    prior_output_schema_classification = _latest_matching_output_schema_classification(
+        conversation,
+        state=state,
     )
     result = await classify_slots(
         litellm_client=litellm_client,
@@ -601,6 +619,9 @@ async def build_runtime_discovery_context(
         bias=bias,
         usage_tracker=usage_tracker,
         before_provider_call=before_provider_call,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
     )
     if result is None:
         return _complete_runtime_discovery_context(
@@ -609,7 +630,6 @@ async def build_runtime_discovery_context(
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
         )
-
     provider = slot_classification_provider_identity(
         provider_type=completion_model_route.provider_type,
         litellm_kwargs=completion_model_route.litellm_kwargs,
@@ -623,6 +643,9 @@ async def build_runtime_discovery_context(
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
         bias=bias,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
     )
     merge_llm_resolved_slots(
         state,
@@ -643,6 +666,20 @@ async def build_runtime_discovery_context(
             direction=classified_direction,
         )
         schema_direction_pending = False
+    if (
+        not _output_schema_field_classification_is_relevant(state)
+        and result.output_schema_fields is not None
+    ):
+        result = replace(result, output_schema_fields=None)
+    else:
+        result = replace(
+            result,
+            output_schema_fields=_materialized_output_schema_field_classification(
+                state,
+                classified_fields=result.output_schema_fields,
+                prior_classification=prior_output_schema_classification,
+            ),
+        )
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
     return _complete_runtime_discovery_context(
         state,
@@ -656,7 +693,94 @@ async def build_runtime_discovery_context(
             classification_input=classification_input,
             model=completion_model_route.litellm_model,
             provider=provider,
+            retained_source_inventory=(
+                prior_output_schema_classification.source_inventory
+                if prior_output_schema_classification is not None
+                and result.output_schema_fields is not None
+                and result.output_schema_fields.operation == "replace"
+                else ()
+            ),
         ),
+    )
+
+
+def _output_schema_field_classification_is_relevant(state: PlanningState) -> bool:
+    terminal_output = state.resolved_slots.get("terminal_output")
+    if terminal_output is None or terminal_output.value != "structured_json":
+        return False
+    evidence = state.output_schema_evidence
+    return evidence is None or evidence.source != "declared_schema"
+
+
+def _current_prose_output_schema_field_names(
+    state: PlanningState,
+) -> tuple[str, ...]:
+    if not _output_schema_field_classification_is_relevant(state):
+        return ()
+    evidence = state.output_schema_evidence
+    if evidence is None or evidence.source != "prose_field_names":
+        return ()
+    return tuple(top_level_schema_property_names(evidence.json_schema))
+
+
+def _latest_matching_output_schema_classification(
+    conversation: list[ConversationMessage],
+    *,
+    state: PlanningState,
+) -> SlotClassificationMetadata | None:
+    current_field_names = _current_prose_output_schema_field_names(state)
+    if not current_field_names:
+        return None
+    for message in reversed(conversation):
+        classification = slot_classification_from_metadata(message.metadata)
+        fields = (
+            classification.output_schema_fields if classification is not None else None
+        )
+        if (
+            fields is not None
+            and fields.operation == "replace"
+            and fields.confidence != "low"
+            and tuple(fields.field_names) == current_field_names
+        ):
+            return classification
+    return None
+
+
+def _materialized_output_schema_field_classification(
+    state: PlanningState,
+    *,
+    classified_fields: ClassifiedOutputSchemaFields | None,
+    prior_classification: SlotClassificationMetadata | None,
+) -> ClassifiedOutputSchemaFields | None:
+    if classified_fields is None or classified_fields.confidence == "low":
+        return None
+    if classified_fields.operation == "clear":
+        return classified_fields
+    prior_evidence = (
+        tuple(
+            item.to_classified_evidence()
+            for item in prior_classification.output_schema_fields.evidence
+        )
+        if prior_classification is not None
+        and prior_classification.output_schema_fields is not None
+        else ()
+    )
+    evidence = tuple(dict.fromkeys((*prior_evidence, *classified_fields.evidence)))
+    field_names = _current_prose_output_schema_field_names(state)
+    if not field_names:
+        return ClassifiedOutputSchemaFields(
+            operation="clear",
+            field_names=(),
+            confidence=classified_fields.confidence,
+            reason=classified_fields.reason,
+            evidence=classified_fields.evidence,
+        )
+    return ClassifiedOutputSchemaFields(
+        operation="replace",
+        field_names=field_names,
+        confidence=classified_fields.confidence,
+        reason=classified_fields.reason,
+        evidence=evidence,
     )
 
 
@@ -676,6 +800,9 @@ async def build_discovery_runtime_result(
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
     persisted_planning_state: PlanningState | None = None,
     attached_file_ids: Collection[UUID] = frozenset(),
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    safety_buffer_tokens: int = 0,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -690,6 +817,9 @@ async def build_discovery_runtime_result(
         before_provider_call=before_provider_call,
         mapped_execution_policy=mapped_execution_policy,
         prepared_schema_candidates=prepared_schema_candidates,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
     )
     carry_forward_persisted_planner_state(
         context.planning_state,

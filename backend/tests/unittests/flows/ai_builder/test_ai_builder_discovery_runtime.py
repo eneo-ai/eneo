@@ -60,7 +60,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
     ClassifiedFileRole,
+    ClassifiedOutputSchemaFields,
     ClassifiedSchemaDirection,
+    ClassifiedSlot,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -1266,6 +1268,362 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
     )
 
     litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _resolved_state()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_json",
+    )
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": ["case_id", "status"],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The user explicitly named the JSON fields.",
+                    "evidence": [
+                        {
+                            "source_id": "user_message:user-1",
+                            "quote": "case_id och status",
+                        }
+                    ],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        )
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        MagicMock(return_value=state),
+    )
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="JSON-resultatet ska innehålla case_id och status.",
+            )
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+    )
+
+    litellm_client.acompletion.assert_awaited_once()
+    evidence = context.planning_state.output_schema_evidence
+    assert evidence is not None
+    assert evidence.source == "prose_field_names"
+    assert evidence.json_schema["properties"] == {"case_id": {}, "status": {}}
+
+
+@pytest.mark.asyncio
+async def test_runtime_atomically_resolves_json_terminal_and_named_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _resolved_state()
+    state.resolved_slots.pop("terminal_output", None)
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "structured_json",
+                        "confidence": "high",
+                        "reason": "The user requests a machine-readable result.",
+                        "evidence": [
+                            {
+                                "source_id": "user_message:user-1",
+                                "quote": "JSON with case_id and status",
+                            }
+                        ],
+                        "evidence_level": "explicit",
+                    }
+                ],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": ["case_id", "status"],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The user explicitly named the JSON fields.",
+                    "evidence": [
+                        {
+                            "source_id": "user_message:user-1",
+                            "quote": "JSON with case_id and status",
+                        }
+                    ],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        )
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        MagicMock(return_value=state),
+    )
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="Return JSON with case_id and status.",
+            )
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+    )
+
+    assert context.planning_state.resolved_slots["terminal_output"].value == (
+        "structured_json"
+    )
+    evidence = context.planning_state.output_schema_evidence
+    assert evidence is not None
+    assert evidence.json_schema["properties"] == {"case_id": {}, "status": {}}
+    assert context.slot_classification_metadata is not None
+    assert context.slot_classification_metadata.output_schema_fields is not None
+
+
+@pytest.mark.asyncio
+async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> None:
+    prior_source = SlotClassificationSource(
+        source_id="user_message:user-1",
+        kind="user_message",
+        text="Return JSON with case_id and status.",
+        message_id="user-1",
+    )
+    prior_classification = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_json",
+                    confidence="high",
+                    reason="The user requested JSON.",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id=prior_source.source_id,
+                            quote=prior_source.text,
+                        ),
+                    ),
+                    evidence_level="explicit",
+                ),
+            ),
+            output_schema_fields=ClassifiedOutputSchemaFields(
+                operation="replace",
+                field_names=("case_id", "status"),
+                confidence="high",
+                reason="Initial materialized field snapshot.",
+                evidence=(
+                    ClassifiedEvidence(
+                        source_id=prior_source.source_id,
+                        quote=prior_source.text,
+                    ),
+                ),
+            ),
+        ),
+        prompt_hash="a" * 64,
+        classification_input=SlotClassificationInput(sources=(prior_source,)),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    assert prior_classification is not None
+    prior_metadata = metadata_with_slot_classification(None, prior_classification)
+    assert prior_metadata is not None
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": ["priority"],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The user added one field.",
+                    "evidence": [
+                        {
+                            "source_id": "user_message:user-2",
+                            "quote": "Also add priority",
+                        }
+                    ],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        )
+    )
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content=prior_source.text,
+                metadata=prior_metadata,
+            ),
+            ConversationMessage(
+                message_id="user-2",
+                role="user",
+                content="Also add priority.",
+            ),
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        ui_language="en",
+    )
+
+    evidence = context.planning_state.output_schema_evidence
+    assert evidence is not None
+    assert evidence.json_schema["properties"] == {
+        "case_id": {},
+        "status": {},
+        "priority": {},
+    }
+    call = litellm_client.acompletion.await_args
+    assert call is not None
+    system_prompt = call.kwargs["messages"][0]["content"]
+    user_prompt = call.kwargs["messages"][1]["content"]
+    assert "Report only additions or removals explicitly requested" in system_prompt
+    assert '["case_id", "status"]' not in user_prompt
+    assert context.slot_classification_metadata is not None
+    materialized = context.slot_classification_metadata.output_schema_fields
+    assert materialized is not None
+    assert materialized.field_names == ["case_id", "status", "priority"]
+    assert {item.source_id for item in materialized.evidence} == {
+        "user_message:user-1",
+        "user_message:user-2",
+    }
+
+
+def test_runtime_does_not_materialize_low_confidence_output_field_snapshot() -> None:
+    state = _resolved_state()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_json",
+    )
+    classified = ClassifiedOutputSchemaFields(
+        operation="update",
+        field_names=("case_id",),
+        confidence="low",
+        reason="The field name was uncertain.",
+        evidence=(
+            ClassifiedEvidence(
+                source_id="user_message:user-1",
+                quote="Maybe case_id.",
+            ),
+        ),
+    )
+
+    assert (
+        runtime._materialized_output_schema_field_classification(
+            state,
+            classified_fields=classified,
+            prior_classification=None,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_discards_named_json_fields_for_non_json_terminal_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _resolved_state()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+        name="runtime_metadata_fields",
+        value="no_extra_metadata",
+        source="policy_default",
+        evidence=["policy_default:runtime_metadata_fields=no_extra_metadata"],
+        confidence="medium",
+    )
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "output_schema_fields": {
+                    "operation": "update",
+                    "field_names": ["case_id", "status"],
+                    "removed_field_names": [],
+                    "confidence": "high",
+                    "reason": "The user named fields for an intermediate JSON matrix.",
+                    "evidence": [
+                        {
+                            "source_id": "user_message:user-1",
+                            "quote": "case_id och status",
+                        }
+                    ],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        )
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        MagicMock(return_value=state),
+    )
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="PDF-rapporten bygger på en JSON-matris med case_id och status.",
+            )
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+    )
+
+    assert context.planning_state.output_schema_evidence is None
+    assert context.slot_classification_result is not None
+    assert context.slot_classification_result.output_schema_fields is None
+    assert context.slot_classification_metadata is not None
+    assert context.slot_classification_metadata.output_schema_fields is None
 
 
 @pytest.mark.asyncio

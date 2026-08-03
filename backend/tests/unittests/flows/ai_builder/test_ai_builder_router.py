@@ -1044,6 +1044,7 @@ class TestGetSessionEndpoint:
                     "file_roles": [],
                     "secondary_obligations": [],
                     "form_intake": None,
+                    "output_schema_fields": None,
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "assumptions": [],

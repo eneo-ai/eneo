@@ -346,6 +346,29 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 "fields or validation constraints.",
             ]
         )
+    if evidence.source == "prose_field_names":
+        field_label = (
+            "explicitly named top-level field preview"
+            if projection.lossy
+            else "explicitly named top-level fields"
+        )
+        preservation_instruction = (
+            "- The canonical schema retains the exact user-named fields; this "
+            "display is only a normalized or truncated preview. Keep output_fields "
+            "consistent with the canonical schema and do not infer missing names, "
+            "types, nesting, requiredness, or validation constraints."
+            if projection.lossy
+            else "- Preserve these exact user-named fields. Their types, nesting, "
+            "requiredness, and validation constraints remain unspecified; do not "
+            "invent them unless supported elsewhere in the conversation."
+        )
+        return "\n".join(
+            [
+                f"- source: {evidence.source}, {evidence.confidence} confidence",
+                f"- {field_label}: {field_text}",
+                preservation_instruction,
+            ]
+        )
     return "\n".join(
         [
             f"- source: {evidence.source}, {evidence.confidence} confidence",
