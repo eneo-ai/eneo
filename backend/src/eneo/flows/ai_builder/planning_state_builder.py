@@ -272,12 +272,14 @@ def _replay_slot_classification_metadata(
     replayed = False
     for message in conversation:
         classification = slot_classification_from_metadata(message.metadata)
-        if classification is None:
+        if classification is None or classification.outcome != "resolved":
             continue
+        prompt_hash = classification.prompt_hash
+        assert prompt_hash is not None
         merge_llm_resolved_slots(
             state,
             classification.to_result(),
-            prompt_hash=classification.prompt_hash,
+            prompt_hash=prompt_hash,
             freeform_text=freeform_text,
             model_blocked_slots=model_blocked_slots,
             defer_output_schema_relevance=True,

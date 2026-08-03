@@ -24,7 +24,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -51,6 +51,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedFormIntake,
     ClassifiedOutputSchemaFields,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationConfidence,
     SlotClassificationEvidenceLevel,
     SlotClassificationInput,
@@ -360,8 +361,9 @@ def _slot_classification_metadata(
     evidence_quotes = [item.quote for slot in slots for item in slot.evidence]
     if form_intake is not None:
         evidence_quotes.extend(item.quote for item in form_intake.evidence)
-    metadata = slot_classification_metadata_from_result(
-        SlotClassificationResult(slots=slots, form_intake=form_intake),
+    result = SlotClassificationResult(slots=slots, form_intake=form_intake)
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash=prompt_hash,
         classification_input=SlotClassificationInput(
             sources=(
@@ -401,23 +403,24 @@ def test_conversation_replay_overlays_live_attachment_role_evidence() -> None:
             ),
         )
     )
-    metadata = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            file_roles=(
-                ClassifiedFileRole(
-                    file_id=file_id,
-                    role="example_output",
-                    confidence="high",
-                    reason="The user identified the example output.",
-                    evidence=(
-                        ClassifiedEvidence(
-                            source_id="user_message:file-role",
-                            quote="This attachment is the example output.",
-                        ),
+    result = SlotClassificationResult(
+        file_roles=(
+            ClassifiedFileRole(
+                file_id=file_id,
+                role="example_output",
+                confidence="high",
+                reason="The user identified the example output.",
+                evidence=(
+                    ClassifiedEvidence(
+                        source_id="user_message:file-role",
+                        quote="This attachment is the example output.",
                     ),
                 ),
-            )
-        ),
+            ),
+        )
+    )
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=classification_input,
         model="openai/gpt-test",
@@ -2475,6 +2478,12 @@ class TestModelSlotMerge:
                             "evidence_level": "explicit",
                         },
                     ],
+                    "file_roles": [],
+                    "form_intake": None,
+                    "output_schema_fields": None,
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
                     "assumptions": [],
                     "contradictions": [],
                 }
@@ -2532,6 +2541,12 @@ class TestModelSlotMerge:
                             "evidence_level": "explicit",
                         }
                     ],
+                    "file_roles": [],
+                    "form_intake": None,
+                    "output_schema_fields": None,
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
                     "assumptions": [],
                     "contradictions": [],
                 }

@@ -17,7 +17,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     question_response_from_metadata,
     slot_classification_from_metadata,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
@@ -40,6 +40,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedFormIntake,
     ClassifiedOutputSchemaFields,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -149,8 +150,8 @@ def _classifier_result_msg(
         )
     ]
     source_text = "\n".join(evidence_quotes) or "classifier source"
-    classification = slot_classification_metadata_from_result(
-        result,
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash=hashlib.sha256(message_id.encode()).hexdigest(),
         classification_input=SlotClassificationInput(
             sources=(

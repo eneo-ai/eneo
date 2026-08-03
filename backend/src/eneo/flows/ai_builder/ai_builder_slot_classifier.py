@@ -57,6 +57,12 @@ if TYPE_CHECKING:
 
 SlotClassificationConfidence = Literal["high", "medium", "low"]
 SlotClassificationEvidenceLevel = SlotEvidenceLevel
+SlotClassificationAttemptOutcome = Literal[
+    "resolved",
+    "no_content",
+    "parse_failed",
+    "skipped_no_resolvable_slots",
+]
 SlotClassificationSourceKind = Literal[
     "user_message",
     "structured_answer",
@@ -73,7 +79,7 @@ _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 17
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 18
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
@@ -187,6 +193,19 @@ class SlotClassificationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SlotClassificationAttempt:
+    outcome: SlotClassificationAttemptOutcome
+    result: SlotClassificationResult | None = None
+
+    def __post_init__(self) -> None:
+        if (self.outcome == "resolved") != (self.result is not None):
+            raise ValueError(
+                "Resolved slot classification attempts require a result; "
+                "other outcomes must not carry one"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class SlotClassificationBias:
     """Sharpens classification toward the slot the user was just asked about.
 
@@ -226,7 +245,7 @@ async def classify_slots(
     max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
     safety_buffer_tokens: int = 0,
-) -> SlotClassificationResult | None:
+) -> SlotClassificationAttempt:
     if max_input_tokens is not None and max_input_tokens < 1:
         raise ValueError("Slot classification max input tokens must be positive")
     if max_output_tokens is not None and max_output_tokens < 1:
@@ -235,7 +254,7 @@ async def classify_slots(
         raise ValueError("Slot classification safety buffer cannot be negative")
     slot_values = _normalize_allowed_slot_values(allowed_slot_values)
     if not _classification_input_is_valid(classification_input):
-        return None
+        raise ValueError("Slot classification input must contain unique, valid sources")
     schema_candidate_fingerprints = tuple(
         sorted(candidate.fingerprint for candidate in schema_candidates)
     )
@@ -280,7 +299,10 @@ async def classify_slots(
                 cached=True,
             ),
         )
-        return replace(cached, cached=True)
+        return SlotClassificationAttempt(
+            outcome="resolved",
+            result=replace(cached, cached=True),
+        )
 
     started_at = time.perf_counter()
     completion_kwargs = completion_model_route.prepare_provider_kwargs(
@@ -322,6 +344,7 @@ async def classify_slots(
             usage_tracker.fail_call(call=call, failure=failure)
         raise failure.as_exception() from error
 
+    content = response.choices[0].message.content if response.choices else None
     if call is not None and usage_tracker is not None:
         usage_tracker.complete_call(
             call=call,
@@ -329,15 +352,14 @@ async def classify_slots(
                 response,
                 model_name=litellm_model,
                 messages=messages,
-                completion_text=(
-                    response.choices[0].message.content if response.choices else None
-                ),
+                completion_text=content if isinstance(content, str) else None,
             ),
         )
 
-    content = response.choices[0].message.content if response.choices else None
-    if not isinstance(content, str) or not content.strip():
-        return None
+    if content is None or (isinstance(content, str) and not content.strip()):
+        return SlotClassificationAttempt(outcome="no_content")
+    if not isinstance(content, str):
+        return SlotClassificationAttempt(outcome="parse_failed")
 
     result = parse_slot_classification_response(
         content,
@@ -346,7 +368,7 @@ async def classify_slots(
         schema_candidate_fingerprints=schema_candidate_fingerprints,
     )
     if result is None:
-        return None
+        return SlotClassificationAttempt(outcome="parse_failed")
 
     _remember_cache(cache_key, result)
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
@@ -365,7 +387,7 @@ async def classify_slots(
             "elapsed_ms": elapsed_ms,
         },
     )
-    return result
+    return SlotClassificationAttempt(outcome="resolved", result=result)
 
 
 def _classification_input_is_valid(
@@ -449,9 +471,13 @@ def parse_slot_classification_response(
     if not isinstance(raw, dict):
         return None
     raw_dict = cast(dict[str, Any], raw)
-    raw_slots = raw_dict.get("slots", [])
-    if not isinstance(raw_slots, list):
+    if not _slot_classification_top_level_contract_is_valid(
+        raw_dict,
+        allowed_slot_values=allowed_slot_values,
+        schema_candidate_fingerprints=schema_candidate_fingerprints,
+    ):
         return None
+    raw_slots = cast(list[object], raw_dict["slots"])
 
     slot_values = _normalize_allowed_slot_values(allowed_slot_values)
     source_kinds_by_id: dict[str, SlotClassificationSourceKind] = {
@@ -459,7 +485,7 @@ def parse_slot_classification_response(
     }
     slots: list[ClassifiedSlot] = []
     seen_slot_names: set[str] = set()
-    for item in cast(list[object], raw_slots):
+    for item in raw_slots:
         if not isinstance(item, dict):
             continue
         item_dict = cast(dict[str, Any], item)
@@ -562,6 +588,29 @@ def parse_slot_classification_response(
         assumptions=assumptions,
         contradictions=contradictions,
     )
+
+
+def _slot_classification_top_level_contract_is_valid(
+    payload: Mapping[str, object],
+    *,
+    allowed_slot_values: Mapping[str, Collection[str]],
+    schema_candidate_fingerprints: Collection[str],
+) -> bool:
+    properties = _slot_classification_top_level_properties(
+        allowed_slot_values,
+        schema_candidate_fingerprints=schema_candidate_fingerprints,
+    )
+    if frozenset(payload) != frozenset(properties):
+        return False
+    for field, schema in properties.items():
+        value = payload[field]
+        if schema.get("type") == "array":
+            if not isinstance(value, list):
+                return False
+            continue
+        if value is not None and not isinstance(value, dict):
+            return False
+    return True
 
 
 def _parse_output_schema_fields(
@@ -1301,68 +1350,70 @@ def _slot_classification_json_schema(
     *,
     schema_candidate_fingerprints: Collection[str] = (),
 ) -> dict[str, object]:
-    normalized_values = _normalize_allowed_slot_values(allowed_slot_values)
-    normalized_fingerprints = tuple(sorted(set(schema_candidate_fingerprints)))
+    properties = _slot_classification_top_level_properties(
+        allowed_slot_values,
+        schema_candidate_fingerprints=schema_candidate_fingerprints,
+    )
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": [
-            "slots",
-            "file_roles",
-            "form_intake",
-            "output_schema_fields",
-            "example_output_constraints",
-            "schema_direction",
-            "secondary_obligations",
-            "assumptions",
-            "contradictions",
-        ],
-        "properties": {
-            "slots": {
-                "type": "array",
-                "maxItems": len(normalized_values),
-                "items": _slot_classification_slot_schema(normalized_values),
-            },
-            "file_roles": {
-                "type": "array",
-                "items": _classified_file_role_schema(),
-            },
-            "form_intake": {
-                "anyOf": [
-                    _classified_form_intake_schema(),
-                    {"type": "null"},
-                ],
-            },
-            "output_schema_fields": {
-                "anyOf": [
-                    _classified_output_schema_fields_schema(),
-                    {"type": "null"},
-                ],
-            },
-            "example_output_constraints": {
-                "anyOf": [
-                    _classified_example_output_constraints_schema(),
-                    {"type": "null"},
-                ],
-            },
-            "schema_direction": {
-                "anyOf": [
-                    *(
-                        [_classified_schema_direction_schema(normalized_fingerprints)]
-                        if normalized_fingerprints
-                        else []
-                    ),
-                    {"type": "null"},
-                ],
-            },
-            "secondary_obligations": {
-                "type": "array",
-                "maxItems": len(RESULT_OBLIGATION_VALUES),
-                "items": {"type": "string", "enum": list(RESULT_OBLIGATION_VALUES)},
-            },
-            "assumptions": _classification_note_array_schema(),
-            "contradictions": _classification_note_array_schema(),
+        "required": list(properties),
+        "properties": properties,
+    }
+
+
+def _slot_classification_top_level_properties(
+    allowed_slot_values: Mapping[str, Collection[str]],
+    *,
+    schema_candidate_fingerprints: Collection[str] = (),
+) -> dict[str, dict[str, object]]:
+    normalized_values = _normalize_allowed_slot_values(allowed_slot_values)
+    normalized_fingerprints = tuple(sorted(set(schema_candidate_fingerprints)))
+    return {
+        "slots": {
+            "type": "array",
+            "maxItems": len(normalized_values),
+            "items": _slot_classification_slot_schema(normalized_values),
         },
+        "file_roles": {
+            "type": "array",
+            "items": _classified_file_role_schema(),
+        },
+        "form_intake": {
+            "anyOf": [
+                _classified_form_intake_schema(),
+                {"type": "null"},
+            ],
+        },
+        "output_schema_fields": {
+            "anyOf": [
+                _classified_output_schema_fields_schema(),
+                {"type": "null"},
+            ],
+        },
+        "example_output_constraints": {
+            "anyOf": [
+                _classified_example_output_constraints_schema(),
+                {"type": "null"},
+            ],
+        },
+        "schema_direction": {
+            "anyOf": [
+                *(
+                    [_classified_schema_direction_schema(normalized_fingerprints)]
+                    if normalized_fingerprints
+                    else []
+                ),
+                {"type": "null"},
+            ],
+        },
+        "secondary_obligations": {
+            "type": "array",
+            "maxItems": len(RESULT_OBLIGATION_VALUES),
+            "items": {"type": "string", "enum": list(RESULT_OBLIGATION_VALUES)},
+        },
+        "assumptions": _classification_note_array_schema(),
+        "contradictions": _classification_note_array_schema(),
     }
 
 

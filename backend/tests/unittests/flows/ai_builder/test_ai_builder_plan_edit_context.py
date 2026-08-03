@@ -8,7 +8,7 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -70,23 +71,24 @@ def _catalog():
 
 
 def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, object]:
-    metadata = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value=value,
-                    confidence="medium",
-                    reason="classified terminal output",
-                    evidence=(
-                        ClassifiedEvidence(
-                            source_id="user_message:user-1",
-                            quote="ändra output filen till pdf",
-                        ),
+    result = SlotClassificationResult(
+        slots=(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value=value,
+                confidence="medium",
+                reason="classified terminal output",
+                evidence=(
+                    ClassifiedEvidence(
+                        source_id="user_message:user-1",
+                        quote="ändra output filen till pdf",
                     ),
                 ),
-            )
-        ),
+            ),
+        )
+    )
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=SlotClassificationInput(
             sources=(

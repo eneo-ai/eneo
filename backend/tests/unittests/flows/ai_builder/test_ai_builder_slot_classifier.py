@@ -75,7 +75,28 @@ def _evidence(quote: str, *, source_id: str = "user_message:user-1") -> dict[str
     return {"source_id": source_id, "quote": quote}
 
 
-def _make_response(content: str) -> MagicMock:
+_VALID_CLASSIFICATION_RESPONSE: dict[str, object] = {
+    "slots": [],
+    "file_roles": [],
+    "form_intake": None,
+    "output_schema_fields": None,
+    "example_output_constraints": None,
+    "schema_direction": None,
+    "secondary_obligations": [],
+    "assumptions": [],
+    "contradictions": [],
+}
+
+
+def _make_response(content: object) -> MagicMock:
+    if isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if isinstance(payload, dict):
+                content = json.dumps({**_VALID_CLASSIFICATION_RESPONSE, **payload})
     message = MagicMock()
     message.content = content
     choice = MagicMock()
@@ -83,6 +104,30 @@ def _make_response(content: str) -> MagicMock:
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+@pytest.mark.asyncio
+async def test_non_string_response_records_parse_failure_with_usage_telemetry() -> None:
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(return_value=_make_response(["unexpected"]))
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-slot-non-string",
+        model="gpt-test",
+        target_kind=TargetKind.CREATE,
+    )
+
+    attempt = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(model="gpt-test"),
+        classification_input=_classification_input("Build a text flow."),
+        allowed_slot_values={"primary_runtime_input": {"text"}},
+        tenant_id=uuid4(),
+        usage_tracker=usage_tracker,
+    )
+
+    assert attempt.outcome == "parse_failed"
+    assert usage_tracker.llm_calls_made == 1
+    assert usage_tracker.token_usages[0].source == "litellm_estimate"
 
 
 def test_parser_accepts_exact_user_cited_output_schema_fields() -> None:
@@ -451,6 +496,7 @@ def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [],
                 "form_intake": None,
@@ -490,6 +536,7 @@ def test_parser_rejects_schema_direction_outside_complete_candidate_set() -> Non
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [],
                 "form_intake": None,
@@ -698,8 +745,7 @@ def test_parse_slot_classification_response_uses_canonical_slots_shape_only() ->
         classification_input=_classification_input("PDF report"),
     )
 
-    assert result is not None
-    assert result.slots == ()
+    assert result is None
 
 
 def test_parse_slot_classification_response_filters_invalid_entries() -> None:
@@ -709,6 +755,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "terminal_output",
@@ -779,6 +826,7 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "primary_runtime_input",
@@ -824,6 +872,7 @@ def test_inventory_only_attachment_evidence_cannot_promote_semantic_file_role() 
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "file_roles": [
                     {
                         "file_id": str(file_id),
@@ -834,7 +883,7 @@ def test_inventory_only_attachment_evidence_cannot_promote_semantic_file_role() 
                             _evidence("filename: example.pdf", source_id=source_id)
                         ],
                     }
-                ]
+                ],
             }
         ),
         allowed_slot_values={},
@@ -860,6 +909,7 @@ def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "primary_runtime_input",
@@ -869,7 +919,7 @@ def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
                         "evidence": [_evidence("User requested documents")],
                         "evidence_level": "explicit",
                     }
-                ]
+                ],
             }
         ),
         allowed_slot_values={"primary_runtime_input": {"documents"}},
@@ -888,6 +938,7 @@ def test_attachment_only_evidence_cannot_classify_terminal_output() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "terminal_output",
@@ -899,7 +950,7 @@ def test_attachment_only_evidence_cannot_classify_terminal_output() -> None:
                         ],
                         "evidence_level": "explicit",
                     }
-                ]
+                ],
             }
         ),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
@@ -926,6 +977,7 @@ def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> Non
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "report_disposition",
@@ -957,7 +1009,7 @@ def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> Non
                         ],
                         "evidence_level": "explicit",
                     },
-                ]
+                ],
             }
         ),
         allowed_slot_values={
@@ -999,6 +1051,7 @@ def test_file_role_rejects_evidence_from_a_different_file() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1041,6 +1094,7 @@ def test_parse_slot_classification_response_filters_secondary_obligations() -> N
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "secondary_obligations": [
                     "risks",
@@ -1063,6 +1117,7 @@ def test_parse_slot_classification_response_filters_file_roles() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1136,6 +1191,7 @@ def test_example_output_constraints_keep_typed_citations_and_downgrade_attachmen
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1220,6 +1276,7 @@ def test_example_output_constraints_keep_high_confidence_with_independent_user_e
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1287,6 +1344,7 @@ def test_example_output_constraints_reject_inventory_only_content_claims() -> No
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1331,6 +1389,7 @@ def test_example_output_constraints_reject_fabricated_citations() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1375,6 +1434,7 @@ def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> No
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "terminal_output",
@@ -1409,6 +1469,7 @@ def test_parse_slot_classification_response_accepts_form_intake_evidence() -> No
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "form_intake": {
                     "needs_form_fields": True,
@@ -1444,6 +1505,7 @@ def test_parse_slot_classification_response_downgrades_unsupported_form_intake()
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "form_intake": {
                     "needs_form_fields": True,
@@ -1731,10 +1793,10 @@ async def test_classification_cache_separates_provider_execution_targets(
         tenant_id=uuid4(),
     )
 
-    assert first is not None
-    assert second is not None
-    assert first.cached is False
-    assert second.cached is False
+    assert first.result is not None
+    assert second.result is not None
+    assert first.result.cached is False
+    assert second.result.cached is False
     assert litellm_client.acompletion.await_count == 2
 
 
@@ -1797,8 +1859,10 @@ async def test_classification_cache_ignores_credential_only_differences() -> Non
 
     assert first is not None
     assert second is not None
-    assert first.cached is False
-    assert second.cached is True
+    assert first.result is not None
+    assert second.result is not None
+    assert first.result.cached is False
+    assert second.result.cached is True
     assert litellm_client.acompletion.await_count == 1
 
 
@@ -1849,8 +1913,10 @@ async def test_classification_cache_separates_effective_optional_kwargs() -> Non
 
     assert first is not None
     assert second is not None
-    assert first.cached is False
-    assert second.cached is False
+    assert first.result is not None
+    assert second.result is not None
+    assert first.result.cached is False
+    assert second.result.cached is False
     assert litellm_client.acompletion.await_count == 2
     assert "temperature" not in litellm_client.acompletion.await_args_list[0].kwargs
     assert litellm_client.acompletion.await_args_list[1].kwargs["temperature"] == 0.0
@@ -2082,13 +2148,15 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
 
     assert first is not None
     assert second is not None
-    assert first.cached is False
-    assert second.cached is True
-    assert first.slots[0].confidence == "high"
-    assert first.slots[0].evidence == (
+    assert first.result is not None
+    assert second.result is not None
+    assert first.result.cached is False
+    assert second.result.cached is True
+    assert first.result.slots[0].confidence == "high"
+    assert first.result.slots[0].evidence == (
         ClassifiedEvidence(source_id="user_message:user-1", quote=text),
     )
-    assert second.slots == first.slots
+    assert second.result.slots == first.result.slots
     assert litellm_client.acompletion.await_count == 1
 
 
@@ -2102,17 +2170,20 @@ async def test_classify_slots_refuses_duplicate_source_ids() -> None:
         message_id="duplicate",
     )
 
-    result = await classify_slots(
-        litellm_client=litellm_client,
-        completion_model_route=_route(model="openai/gpt-test"),
-        classification_input=SlotClassificationInput(
-            sources=(duplicate_source, duplicate_source)
-        ),
-        allowed_slot_values={"terminal_output": {"structured_text"}},
-        tenant_id=uuid4(),
-    )
+    with pytest.raises(
+        ValueError,
+        match="Slot classification input must contain unique, valid sources",
+    ):
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(model="openai/gpt-test"),
+            classification_input=SlotClassificationInput(
+                sources=(duplicate_source, duplicate_source)
+            ),
+            allowed_slot_values={"terminal_output": {"structured_text"}},
+            tenant_id=uuid4(),
+        )
 
-    assert result is None
     litellm_client.acompletion.assert_not_awaited()
 
 

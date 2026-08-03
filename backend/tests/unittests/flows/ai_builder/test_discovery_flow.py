@@ -66,6 +66,7 @@ from eneo.flows.ai_builder.ai_builder_signal_confidence import ScoredSignal
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
@@ -1771,6 +1772,7 @@ class TestExtendedClarificationHints:
     ) -> None:
         conversation = [
             ConversationMessage(
+                message_id="test-source",
                 role="user",
                 content=(
                     "Jag vill bygga ett flöde som hjälper mig med dokument jag "
@@ -1781,8 +1783,8 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
-            return SlotClassificationResult(
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
+            result = SlotClassificationResult(
                 slots=(
                     ClassifiedSlot(
                         slot_name="post_processing_goal",
@@ -1793,6 +1795,7 @@ class TestExtendedClarificationHints:
                     ),
                 )
             )
+            return SlotClassificationAttempt(outcome="resolved", result=result)
 
         with patch(
             "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
@@ -1832,14 +1835,15 @@ class TestExtendedClarificationHints:
     ) -> None:
         conversation = [
             ConversationMessage(
+                message_id="test-source",
                 role="user",
                 content="Jag vill ha ett transkriberingsflöde.",
                 metadata={"ui_language": "sv"},
             )
         ]
 
-        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
-            return SlotClassificationResult(
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
+            result = SlotClassificationResult(
                 slots=(
                     ClassifiedSlot(
                         slot_name="post_processing_goal",
@@ -1850,6 +1854,7 @@ class TestExtendedClarificationHints:
                     ),
                 )
             )
+            return SlotClassificationAttempt(outcome="resolved", result=result)
 
         with patch(
             "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
@@ -2144,6 +2149,7 @@ class TestExtendedClarificationHints:
     ) -> None:
         conversation = [
             ConversationMessage(
+                message_id="test-source",
                 role="user",
                 content=(
                     "Create a flow that transcribes meeting audio, extracts ten "
@@ -2154,9 +2160,9 @@ class TestExtendedClarificationHints:
         ]
         captured_allowed_values: dict[str, object] = {}
 
-        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
             captured_allowed_values.update(kwargs["allowed_slot_values"])
-            return SlotClassificationResult(
+            result = SlotClassificationResult(
                 slots=(
                     ClassifiedSlot(
                         slot_name="runtime_metadata_fields",
@@ -2167,6 +2173,7 @@ class TestExtendedClarificationHints:
                     ),
                 )
             )
+            return SlotClassificationAttempt(outcome="resolved", result=result)
 
         with patch(
             "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
@@ -2194,14 +2201,15 @@ class TestExtendedClarificationHints:
     ) -> None:
         conversation = [
             ConversationMessage(
+                message_id="test-source",
                 role="user",
                 content="Jag vill ha ett OCR-flöde.",
                 metadata={"ui_language": "sv"},
             )
         ]
 
-        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
-            return SlotClassificationResult(
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
+            result = SlotClassificationResult(
                 slots=(
                     ClassifiedSlot(
                         slot_name="post_processing_goal",
@@ -2219,6 +2227,7 @@ class TestExtendedClarificationHints:
                     ),
                 )
             )
+            return SlotClassificationAttempt(outcome="resolved", result=result)
 
         with patch(
             "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
@@ -2253,6 +2262,7 @@ class TestExtendedClarificationHints:
     ) -> None:
         conversation = [
             ConversationMessage(
+                message_id="test-source",
                 role="user",
                 content="Jag vill ha ett transkriberingsflöde.",
                 metadata={"ui_language": "sv"},
@@ -2270,8 +2280,8 @@ class TestExtendedClarificationHints:
             ),
         ]
 
-        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
-            return SlotClassificationResult(
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
+            result = SlotClassificationResult(
                 slots=(
                     ClassifiedSlot(
                         slot_name="post_processing_goal",
@@ -2289,6 +2299,7 @@ class TestExtendedClarificationHints:
                     ),
                 )
             )
+            return SlotClassificationAttempt(outcome="resolved", result=result)
 
         with patch(
             "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",

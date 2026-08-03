@@ -29,7 +29,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     create_compile_context_from_planning_state,
@@ -63,6 +63,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedOutputSchemaFields,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -83,7 +84,28 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 
 
-def _make_response(content: str) -> MagicMock:
+def _make_response(content: object, *, complete_contract: bool = True) -> MagicMock:
+    if complete_contract and isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if isinstance(payload, dict):
+                content = json.dumps(
+                    {
+                        "slots": [],
+                        "file_roles": [],
+                        "form_intake": None,
+                        "output_schema_fields": None,
+                        "example_output_constraints": None,
+                        "schema_direction": None,
+                        "secondary_obligations": [],
+                        "assumptions": [],
+                        "contradictions": [],
+                        **payload,
+                    }
+                )
     message = MagicMock()
     message.content = content
     choice = MagicMock()
@@ -703,23 +725,24 @@ async def test_degraded_turn_replays_semantic_role_over_fresh_attachment_facts()
             ),
         )
     )
-    classification = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            file_roles=(
-                ClassifiedFileRole(
-                    file_id=file_id,
-                    role="example_output",
-                    confidence="high",
-                    reason="The user identified the example output.",
-                    evidence=(
-                        ClassifiedEvidence(
-                            source_id=user_source_id,
-                            quote="This attachment is the example output.",
-                        ),
+    result = SlotClassificationResult(
+        file_roles=(
+            ClassifiedFileRole(
+                file_id=file_id,
+                role="example_output",
+                confidence="high",
+                reason="The user identified the example output.",
+                evidence=(
+                    ClassifiedEvidence(
+                        source_id=user_source_id,
+                        quote="This attachment is the example output.",
                     ),
                 ),
-            )
-        ),
+            ),
+        )
+    )
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=classification_input,
         model="openai/gpt-test",
@@ -1146,7 +1169,9 @@ async def test_runtime_infers_schema_only_after_example_output_classification() 
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        classify = AsyncMock(return_value=classification_result)
+        classify = AsyncMock(
+            return_value=SlotClassificationAttempt("resolved", classification_result)
+        )
         monkeypatch.setattr(runtime, "classify_slots", classify)
         state = (
             await build_runtime_discovery_context(
@@ -1235,7 +1260,11 @@ async def test_runtime_records_incomplete_example_json_without_guessing_schema()
         monkeypatch.setattr(
             runtime,
             "classify_slots",
-            AsyncMock(return_value=classification_result),
+            AsyncMock(
+                return_value=SlotClassificationAttempt(
+                    "resolved", classification_result
+                )
+            ),
         )
         state = (
             await build_runtime_discovery_context(
@@ -1268,6 +1297,156 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
     )
 
     litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("provider_content", "expected_outcome", "expected_mutation"),
+    [
+        ({}, "resolved", False),
+        (
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "text",
+                        "confidence": "high",
+                        "reason": "The user supplied plain text.",
+                        "evidence": [_cited("plain text")],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            },
+            "resolved",
+            True,
+        ),
+        ("   ", "no_content", False),
+        ("{not-json", "parse_failed", False),
+        ([{"unexpected": "content"}], "parse_failed", False),
+        (json.dumps({"slots": []}), "parse_failed", False),
+        (None, "skipped_no_resolvable_slots", False),
+    ],
+    ids=[
+        "valid-empty",
+        "resolved-fact",
+        "blank",
+        "malformed",
+        "non-string",
+        "invalid-top-level-contract",
+        "already-resolved",
+    ],
+)
+@pytest.mark.asyncio
+async def test_runtime_persists_classifier_attempt_outcomes_before_state_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_content: dict[str, object] | str | list[object] | None,
+    expected_outcome: str,
+    expected_mutation: bool,
+) -> None:
+    already_resolved = provider_content is None
+    if already_resolved:
+        monkeypatch.setattr(
+            runtime,
+            "build_planning_state_from_conversation",
+            lambda *_args, **_kwargs: _resolved_state(),
+        )
+    litellm_client = AsyncMock()
+    if isinstance(provider_content, dict):
+        litellm_client.acompletion.return_value = _make_response(
+            json.dumps(provider_content)
+        )
+    elif provider_content is not None:
+        litellm_client.acompletion.return_value = _make_response(
+            provider_content, complete_contract=False
+        )
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content=f"plain text {expected_outcome} {expected_mutation}",
+            )
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+    )
+
+    assert context.slot_classification_metadata is not None
+    assert context.slot_classification_metadata.outcome == expected_outcome
+    assert (context.slot_classification_result is not None) == (
+        expected_outcome == "resolved"
+    )
+    expected_primary_input = expected_mutation or already_resolved
+    assert (
+        context.planning_state.resolved_slots.get("primary_runtime_input") is not None
+    ) == expected_primary_input
+    if expected_mutation:
+        assert (
+            context.planning_state.resolved_slots["primary_runtime_input"].source
+            == "model"
+        )
+    if already_resolved:
+        litellm_client.acompletion.assert_not_awaited()
+    else:
+        litellm_client.acompletion.assert_awaited_once()
+    assert (
+        context.slot_classification_metadata.prompt_hash is None
+    ) == already_resolved
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_mutate_planning_state_when_metadata_admission_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = PlanningState(
+        fcm_version=FCM_VERSION,
+        planner_contract_version=PLANNER_CONTRACT_VERSION,
+        builder_schema_version=BUILDER_SCHEMA_VERSION,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        MagicMock(return_value=state),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "slot_classification_metadata_from_attempt",
+        MagicMock(side_effect=ValueError("metadata admission failed")),
+    )
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "text",
+                        "confidence": "high",
+                        "reason": "The user supplied plain text.",
+                        "evidence": [_cited("plain text")],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="metadata admission failed"):
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    message_id="user-1",
+                    role="user",
+                    content="plain text",
+                )
+            ],
+            litellm_client=litellm_client,
+            completion_model_route=_route(),
+            tenant_id=uuid4(),
+        )
+
+    assert state.resolved_slots == {}
 
 
 @pytest.mark.asyncio
@@ -1418,36 +1597,37 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
         text="Return JSON with case_id and status.",
         message_id="user-1",
     )
-    prior_classification = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value="structured_json",
-                    confidence="high",
-                    reason="The user requested JSON.",
-                    evidence=(
-                        ClassifiedEvidence(
-                            source_id=prior_source.source_id,
-                            quote=prior_source.text,
-                        ),
-                    ),
-                    evidence_level="explicit",
-                ),
-            ),
-            output_schema_fields=ClassifiedOutputSchemaFields(
-                operation="replace",
-                field_names=("case_id", "status"),
+    result = SlotClassificationResult(
+        slots=(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value="structured_json",
                 confidence="high",
-                reason="Initial materialized field snapshot.",
+                reason="The user requested JSON.",
                 evidence=(
                     ClassifiedEvidence(
                         source_id=prior_source.source_id,
                         quote=prior_source.text,
                     ),
                 ),
+                evidence_level="explicit",
             ),
         ),
+        output_schema_fields=ClassifiedOutputSchemaFields(
+            operation="replace",
+            field_names=("case_id", "status"),
+            confidence="high",
+            reason="Initial materialized field snapshot.",
+            evidence=(
+                ClassifiedEvidence(
+                    source_id=prior_source.source_id,
+                    quote=prior_source.text,
+                ),
+            ),
+        ),
+    )
+    prior_classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=SlotClassificationInput(sources=(prior_source,)),
         model="openai/gpt-test",

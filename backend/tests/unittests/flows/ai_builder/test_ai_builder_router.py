@@ -588,6 +588,7 @@ def test_classifier_diagnostic_projection_exposes_compaction_degradation() -> No
                 metadata={
                     "slot_classification": {
                         "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
+                        "outcome": "resolved",
                         "prompt_hash": "a" * 64,
                         "model": "openai/gpt-test",
                         "provider": "openai",
@@ -965,6 +966,7 @@ class TestGetSessionEndpoint:
                 metadata={
                     "slot_classification": {
                         "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
+                        "outcome": "resolved",
                         "prompt_hash": "a" * 64,
                         "model": "openai/gpt-test",
                         "provider": "openai",
@@ -1010,6 +1012,7 @@ class TestGetSessionEndpoint:
                 {
                     "message_id": "assistant-1",
                     "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
+                    "outcome": "resolved",
                     "prompt_hash": "a" * 64,
                     "model": "openai/gpt-test",
                     "provider": "openai",

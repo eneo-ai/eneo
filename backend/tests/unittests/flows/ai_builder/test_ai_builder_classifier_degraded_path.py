@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
 )
@@ -168,19 +169,19 @@ def _slot(name: str, value: str) -> ResolvedSlot:
     ("text", "expected_slots", "forbidden_questions"),
     KEYWORD_OUTAGE_FALLBACK_CASES,
 )
-async def test_classifier_outage_keeps_deterministic_slot_fallbacks(
+async def test_empty_classifier_response_keeps_deterministic_slot_fallbacks(
     monkeypatch: pytest.MonkeyPatch,
     text: str,
     expected_slots: dict[str, str],
     forbidden_questions: set[str],
 ) -> None:
-    async def classifier_outage(**_: object) -> None:
-        return None
+    async def empty_classifier_response(**_: object) -> SlotClassificationAttempt:
+        return SlotClassificationAttempt(outcome="no_content")
 
     monkeypatch.setattr(
         ai_builder_discovery_runtime,
         "classify_slots",
-        classifier_outage,
+        empty_classifier_response,
     )
     conversation = [
         ConversationMessage(
@@ -215,16 +216,16 @@ async def test_classifier_outage_keeps_deterministic_slot_fallbacks(
 
 
 @pytest.mark.asyncio
-async def test_classifier_outage_reopens_heuristic_architecture_slots(
+async def test_empty_classifier_response_reopens_heuristic_architecture_slots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def classifier_outage(**_: object) -> None:
-        return None
+    async def empty_classifier_response(**_: object) -> SlotClassificationAttempt:
+        return SlotClassificationAttempt(outcome="no_content")
 
     monkeypatch.setattr(
         ai_builder_discovery_runtime,
         "classify_slots",
-        classifier_outage,
+        empty_classifier_response,
     )
     conversation = [
         ConversationMessage(
@@ -280,17 +281,18 @@ async def test_classifier_primary_path_merges_result_into_planning_state(
     expected_slots: dict[str, str],
     forbidden_questions: set[str],
 ) -> None:
-    async def classifier_result(**kwargs: object) -> SlotClassificationResult:
+    async def classifier_result(**kwargs: object) -> SlotClassificationAttempt:
         allowed_slot_values = kwargs["allowed_slot_values"]
         classification_input = kwargs["classification_input"]
         assert isinstance(allowed_slot_values, dict)
         assert isinstance(classification_input, SlotClassificationInput)
         assert expected_slots.keys() <= allowed_slot_values.keys()
-        return _classifier_result_for(
+        result = _classifier_result_for(
             text,
             expected_slots,
             source_id=classification_input.sources[0].source_id,
         )
+        return SlotClassificationAttempt(outcome="resolved", result=result)
 
     monkeypatch.setattr(
         ai_builder_discovery_runtime,

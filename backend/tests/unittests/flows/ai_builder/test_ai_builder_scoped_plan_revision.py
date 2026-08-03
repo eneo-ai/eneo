@@ -10,7 +10,7 @@ import pytest
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     metadata_with_slot_classification,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -42,6 +42,7 @@ from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -105,23 +106,24 @@ def _make_request(**overrides: object) -> ScopedPlanRevisionRequest:
 
 
 def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, object]:
-    metadata = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value=value,
-                    confidence="medium",
-                    reason="classified terminal output",
-                    evidence=(
-                        ClassifiedEvidence(
-                            source_id="user_message:user-1",
-                            quote="ändra output filen till pdf",
-                        ),
+    result = SlotClassificationResult(
+        slots=(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value=value,
+                confidence="medium",
+                reason="classified terminal output",
+                evidence=(
+                    ClassifiedEvidence(
+                        source_id="user_message:user-1",
+                        quote="ändra output filen till pdf",
                     ),
                 ),
-            )
-        ),
+            ),
+        )
+    )
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=SlotClassificationInput(
             sources=(

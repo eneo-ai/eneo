@@ -225,7 +225,9 @@ def _mock_response(slots: list[dict[str, object]]) -> MagicMock:
             "slots": slots,
             "file_roles": [],
             "form_intake": None,
+            "output_schema_fields": None,
             "example_output_constraints": None,
+            "schema_direction": None,
             "secondary_obligations": [],
             "assumptions": [],
             "contradictions": [],
@@ -448,8 +450,9 @@ async def test_representative_exact_labels_cross_prompt_parse_and_citation_bound
     )
 
     assert classification is not None
-    assert len(classification.slots) == 1
-    resolved = classification.slots[0]
+    assert classification.result is not None
+    assert len(classification.result.slots) == 1
+    resolved = classification.result.slots[0]
     assert resolved.slot_name == case.slot_name
     assert resolved.value == case.option_value
     assert resolved.confidence == "high"
@@ -457,7 +460,7 @@ async def test_representative_exact_labels_cross_prompt_parse_and_citation_bound
     assert resolved.evidence == (
         ClassifiedEvidence(source_id=source.source_id, quote=case.label),
     )
-    assert all(slot.slot_name == case.slot_name for slot in classification.slots)
+    assert all(slot.slot_name == case.slot_name for slot in classification.result.slots)
     litellm_client.acompletion.assert_awaited_once()
     provider_messages = cast(
         list[dict[str, str]],

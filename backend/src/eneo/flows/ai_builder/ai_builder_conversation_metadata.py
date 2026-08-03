@@ -57,6 +57,8 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedOutputSchemaFields,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
+    SlotClassificationAttempt,
+    SlotClassificationAttemptOutcome,
     SlotClassificationConfidence,
     SlotClassificationEvidenceLevel,
     SlotClassificationInput,
@@ -137,7 +139,7 @@ _MAX_REQUIREMENTS_VERSION_LENGTH = 128
 class SlotClassificationEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_id: str = Field(min_length=1, max_length=256)
+    source_id: str = Field(min_length=1)
     quote: str = Field(min_length=1, max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH)
 
     def to_classified_evidence(self) -> ClassifiedEvidence:
@@ -147,12 +149,12 @@ class SlotClassificationEvidence(BaseModel):
 class SlotClassificationSourceMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_id: str = Field(min_length=1, max_length=256)
+    source_id: str = Field(min_length=1)
     kind: SlotClassificationSourceKind
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    message_id: str | None = Field(default=None, min_length=1, max_length=128)
-    question_id: str | None = Field(default=None, min_length=1, max_length=128)
-    selected_value: str | None = Field(default=None, max_length=500)
+    message_id: str | None = Field(default=None, min_length=1)
+    question_id: str | None = Field(default=None, min_length=1)
+    selected_value: str | None = None
     file_id: UUID | None = None
     coverage: AttachmentCoverage | None = None
     truncated: bool = False
@@ -413,9 +415,10 @@ class SlotClassificationMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: int
-    prompt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    model: str = Field(min_length=1, max_length=256)
-    provider: str = Field(min_length=1, max_length=128)
+    outcome: SlotClassificationAttemptOutcome
+    prompt_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    model: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
     source_inventory: list[SlotClassificationSourceMetadata] = Field(
         default_factory=_empty_slot_classification_sources,
         max_length=500,
@@ -489,6 +492,31 @@ class SlotClassificationMetadata(BaseModel):
 
     @model_validator(mode="after")
     def validate_evidence_sources(self) -> "SlotClassificationMetadata":
+        if self.outcome == "skipped_no_resolvable_slots":
+            if self.prompt_hash is not None:
+                raise ValueError(
+                    "skipped slot classification metadata must not carry prompt_hash"
+                )
+        elif self.prompt_hash is None:
+            raise ValueError(
+                "provider-call slot classification metadata requires prompt_hash"
+            )
+        if self.outcome != "resolved" and any(
+            (
+                self.slots,
+                self.file_roles,
+                self.secondary_obligations,
+                self.form_intake is not None,
+                self.output_schema_fields is not None,
+                self.example_output_constraints is not None,
+                self.schema_direction is not None,
+                self.assumptions,
+                self.contradictions,
+            )
+        ):
+            raise ValueError(
+                "non-resolved slot classification metadata cannot carry semantic facts"
+            )
         sources_by_id = {source.source_id: source for source in self.source_inventory}
         source_ids = set(sources_by_id)
         evidence_items = [evidence for slot in self.slots for evidence in slot.evidence]
@@ -586,6 +614,10 @@ class SlotClassificationMetadata(BaseModel):
         return self
 
     def to_result(self) -> SlotClassificationResult:
+        if self.outcome != "resolved":
+            raise ValueError(
+                "Only resolved slot classification metadata carries a result"
+            )
         return SlotClassificationResult(
             slots=tuple(slot.to_classified_slot() for slot in self.slots),
             file_roles=tuple(
@@ -612,6 +644,8 @@ class SlotClassificationMetadata(BaseModel):
 
     def effective_retention_identities(self) -> frozenset[ClassifierRetentionIdentity]:
         """Return classifier facts that can affect deterministic rebuild replay."""
+        if self.outcome != "resolved":
+            return frozenset()
         identities: set[ClassifierRetentionIdentity] = set()
         for slot in self.slots:
             if slot.value == UNKNOWN_SLOT_VALUE or (
@@ -1123,15 +1157,16 @@ def requirements_confirmation_from_metadata(
         return None
 
 
-def slot_classification_metadata_from_result(
-    result: SlotClassificationResult,
+def slot_classification_metadata_from_attempt(
+    attempt: SlotClassificationAttempt,
     *,
-    prompt_hash: str,
+    prompt_hash: str | None,
     classification_input: SlotClassificationInput,
     model: str,
     provider: str,
     retained_source_inventory: Sequence[SlotClassificationSourceMetadata] = (),
-) -> SlotClassificationMetadata | None:
+) -> SlotClassificationMetadata:
+    result = attempt.result or SlotClassificationResult()
     slot_payloads: list[dict[str, object]] = []
     seen_slot_names: set[str] = set()
     for slot in result.slots:
@@ -1175,41 +1210,39 @@ def slot_classification_metadata_from_result(
             for source in classification_input.sources
         }
     )
-    try:
-        return SlotClassificationMetadata.model_validate(
-            {
-                "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
-                "prompt_hash": prompt_hash,
-                "model": model,
-                "provider": provider,
-                "source_inventory": list(source_inventory_by_id.values()),
-                "slots": slot_payloads,
-                "file_roles": file_role_payloads,
-                "secondary_obligations": secondary_obligations,
-                "form_intake": form_intake_payload,
-                "output_schema_fields": output_schema_fields_payload,
-                "example_output_constraints": (
-                    result.example_output_constraints.model_dump(mode="python")
-                    if result.example_output_constraints is not None
-                    else None
-                ),
-                "schema_direction": _slot_classification_schema_direction_payload(
-                    result.schema_direction
-                ),
-                "assumptions": [
-                    _bounded_metadata_text(value, fallback="assumption")
-                    for value in result.assumptions
-                    if value.strip()
-                ][:CLASSIFICATION_NOTES_MAX_ITEMS],
-                "contradictions": [
-                    _bounded_metadata_text(value, fallback="contradiction")
-                    for value in result.contradictions
-                    if value.strip()
-                ][:CLASSIFICATION_NOTES_MAX_ITEMS],
-            }
-        )
-    except ValidationError:
-        return None
+    return SlotClassificationMetadata.model_validate(
+        {
+            "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
+            "outcome": attempt.outcome,
+            "prompt_hash": prompt_hash,
+            "model": model,
+            "provider": provider,
+            "source_inventory": list(source_inventory_by_id.values()),
+            "slots": slot_payloads,
+            "file_roles": file_role_payloads,
+            "secondary_obligations": secondary_obligations,
+            "form_intake": form_intake_payload,
+            "output_schema_fields": output_schema_fields_payload,
+            "example_output_constraints": (
+                result.example_output_constraints.model_dump(mode="python")
+                if result.example_output_constraints is not None
+                else None
+            ),
+            "schema_direction": _slot_classification_schema_direction_payload(
+                result.schema_direction
+            ),
+            "assumptions": [
+                _bounded_metadata_text(value, fallback="assumption")
+                for value in result.assumptions
+                if value.strip()
+            ][:CLASSIFICATION_NOTES_MAX_ITEMS],
+            "contradictions": [
+                _bounded_metadata_text(value, fallback="contradiction")
+                for value in result.contradictions
+                if value.strip()
+            ][:CLASSIFICATION_NOTES_MAX_ITEMS],
+        }
+    )
 
 
 def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object] | None:
