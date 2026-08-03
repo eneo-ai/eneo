@@ -20,12 +20,21 @@
     step,
     onValueChange({ next }) {
       value = next[0];
-      onInput?.(value);
+      // Only report genuine interaction. melt-ui's store calls onChange even when the
+      // value is unchanged, so pushing the prop in below would otherwise notify the
+      // consumer on mount and on every external update — indistinguishable from a
+      // user dragging the thumb.
+      if (!syncingFromProp) onInput?.(value);
       return next;
     }
   });
 
-  $: $selectedValue = [value];
+  let syncingFromProp = false;
+  $: {
+    syncingFromProp = true;
+    $selectedValue = [value];
+    syncingFromProp = false;
+  }
 </script>
 
 <div {...$root} use:root class="relative flex flex-grow items-center {cls}">

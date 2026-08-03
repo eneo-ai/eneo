@@ -99,6 +99,7 @@ def test_splitter_is_built_from_the_resolved_values(platform_defaults: ChunkSett
         (600, 1000, 600),  # exactly at the ceiling, untouched
         (5000, None, 5000),  # unknown limit, untouched
         (5000, 0, 5000),  # a zero limit is treated as unknown, not as a ceiling
+        (100000, 1, 0),  # a known limit always yields its ceiling, even a zero one
     ],
 )
 def test_clamp_chunk_size(chunk_size: int, max_input: int | None, expected: int):
@@ -295,6 +296,18 @@ class TestSourceChunkConfig:
             resolve_source_chunk_config(
                 chunk_size=None, chunk_overlap=60, max_input=None
             )
+
+    def test_a_model_with_a_one_token_limit_refuses_every_explicit_size(self):
+        # int(1 * 0.6) is 0. Treating that ceiling as "unknown" let this model accept a
+        # 100000-token chunk and build a splitter that large during ingestion.
+        with pytest.raises(BadRequestException, match="below the"):
+            resolve_source_chunk_config(
+                chunk_size=MAX_CHUNK_SIZE, chunk_overlap=0, max_input=1
+            )
+
+        assert resolve_source_chunk_config(
+            chunk_size=None, chunk_overlap=None, max_input=1
+        ) == (None, None)
 
     def test_a_model_that_forces_the_size_below_the_floor_is_refused(self):
         # max_input=64 clamps every explicit size to 38, under the public minimum of

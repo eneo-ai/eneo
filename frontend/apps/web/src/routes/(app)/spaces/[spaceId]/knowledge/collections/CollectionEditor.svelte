@@ -21,7 +21,7 @@
         name: string;
         chunk_size?: number | null;
         chunk_overlap?: number | null;
-        embedding_model?: { id: string } | null;
+        embedding_model?: { id: string; max_input?: number | null } | null;
       }
     | undefined;
   let collectionName = collection?.name ?? "";
@@ -31,10 +31,13 @@
 
   // The backend clamps chunk size against the source's embedding model, so the
   // inputs need that model's limit to stop at the same value.
-  $: chunkMaxInput = $currentSpace.embedding_models.find(
-    (model) =>
-      model.id === (mode === "create" ? embeddingModel?.id : collection?.embedding_model?.id)
-  )?.max_input;
+  // The source keeps its own embedding model, and a deprecated model is filtered out
+  // of the space list — so update mode has to read the limit off the source itself or
+  // it loses the ceiling the backend still applies, silently clamping what it shows.
+  $: chunkMaxInput =
+    mode === "create"
+      ? $currentSpace.embedding_models.find((model) => model.id === embeddingModel?.id)?.max_input
+      : collection?.embedding_model?.max_input;
 
   let isProcessing = false;
   async function editCollection() {

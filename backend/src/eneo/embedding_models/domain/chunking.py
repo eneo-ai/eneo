@@ -149,10 +149,12 @@ def clamp_chunk_size(chunk_size: int, max_input: int | None) -> int:
 
     ``max_input`` of None/0 (unknown limit) leaves the value untouched.
     """
-    if not max_input:
+    if max_input is None or max_input == 0:
         return chunk_size
-    ceiling = int(max_input * MAX_CHUNK_FRACTION)
-    return min(chunk_size, ceiling) if ceiling > 0 else chunk_size
+    # A known limit always produces a ceiling, even a zero one. Treating that as
+    # unknown let a model declaring a one-token input accept a 100000-token chunk;
+    # returning it instead lets the caller's floor check refuse the configuration.
+    return min(chunk_size, int(max_input * MAX_CHUNK_FRACTION))
 
 
 def resolve_chunk_config(

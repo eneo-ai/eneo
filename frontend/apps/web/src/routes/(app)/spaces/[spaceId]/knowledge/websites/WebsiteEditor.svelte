@@ -30,7 +30,7 @@
 
   export let mode: "update" | "create" = "create";
   export let website: Omit<Website, "embedding_model"> & {
-    embedding_model?: { id: string } | null;
+    embedding_model?: { id: string; max_input?: number | null } | null;
   } = emptyWebsite();
   export let showDialog: Dialog.OpenState | undefined = undefined;
 
@@ -39,10 +39,15 @@
   let isProcessing = false;
   let validUrl = false;
 
+  // Bumped after a successful create so ChunkSettings remounts with fresh state.
+  let chunkSettingsKey = 0;
+
   // The backend clamps chunk size against the source's embedding model.
-  $: chunkMaxInput = $currentSpace.embedding_models.find(
-    (model) => model.id === editableWebsite.embedding_model?.id
-  )?.max_input;
+  // Same as the collection editor: a deprecated model is absent from the space list,
+  // so fall back to the limit carried by the website's own model.
+  $: chunkMaxInput =
+    $currentSpace.embedding_models.find((model) => model.id === editableWebsite.embedding_model?.id)
+      ?.max_input ?? website.embedding_model?.max_input;
 
   // Chunk configuration (null = use platform defaults).
   let chunkSize: number | null = website.chunk_size ?? null;
@@ -261,6 +266,12 @@
       httpAuthEnabled = false;
       httpAuthUsername = "";
       httpAuthPassword = "";
+      // The dialog is reused for the next website, so the chunk state has to reset
+      // with the rest of the form. The key below remounts ChunkSettings, clearing its
+      // own defaultness flags and numeric state along with these bindings.
+      chunkSize = null;
+      chunkOverlap = null;
+      chunkSettingsKey += 1;
       refreshCurrentSpace();
       $showDialog = false;
     } catch (e) {
@@ -470,7 +481,9 @@
         ></SelectEmbeddingModel>
       {/if}
 
-      <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
+      {#key chunkSettingsKey}
+        <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
+      {/key}
     </Dialog.Section>
 
     <Dialog.Controls let:close>
