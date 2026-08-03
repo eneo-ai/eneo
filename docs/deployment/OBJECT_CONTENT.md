@@ -83,8 +83,11 @@ must pass the same tested subset:
 - bucket-scoped paginated object and multipart listing;
 - single-part `PUT`, `HEAD`, streaming `GET`, and one byte range;
 - multipart create, ordered part upload, complete, abort, and list;
-- object deletion with observable not-found convergence;
-- SHA-256 part/composite semantics for multipart where requested.
+- object deletion with observable not-found convergence.
+
+Eneo does not require AWS additional-checksum extensions from an external
+endpoint. Some compatible services implement them fully, some omit them, and
+some accept only the core multipart fields.
 
 Native range support is an endpoint conformance gate. Eneo fetches and verifies
 only the persisted upload chunks covering the requested interval before sending
@@ -92,10 +95,11 @@ response headers. Content migrated as one whole-object chunk retains its
 full-verification cost for range reads.
 
 Eneo computes the canonical full-byte SHA-256 incrementally over its own upload
-stream. S3 ETags, multipart composite checksums, CRCs, and user metadata never
-replace that digest. A bypassing upload, migration, restore, or ambiguous
-reconciliation must be fully streamed back and rehashed before it becomes
-available.
+stream and stores it in PostgreSQL. Every new remote write is streamed back and
+rehashed before it becomes available. S3 ETags, multipart composite checksums,
+CRCs, and user metadata never replace that digest. The same read-back contract
+also applies to a bypassing upload, migration, restore, or ambiguous
+reconciliation.
 
 For an external endpoint, set `OBJECT_CONTENT_ENDPOINT_URL`, TLS, addressing,
 signing region, bucket, credentials, and the stable deployment ID in `.env`,
@@ -442,10 +446,12 @@ bounded (1-32) and should be raised only after measuring PostgreSQL and endpoint
 capacity. Size the backend/worker temporary volume for concurrent in-flight
 upload and verified-read spools: memory use stops at the configured threshold,
 while the remainder uses temporary disk until each upload or verified response
-finishes. Full reads verify and spool the full object. Range reads fetch and
-verify only the persisted upload chunks covering the requested interval before
-response headers are sent. Their transfer and temporary-disk cost is the
-requested interval plus at most two chunk edges; existing rows migrated as one
+finishes. Account for one full remote read after each new remote write; this is
+the provider-neutral integrity check before publication. Full user reads verify
+and spool the full object. Range reads fetch and verify only the persisted upload
+chunks covering the requested interval before response headers are sent. Their
+transfer and temporary-disk cost is the requested interval plus at most two
+chunk edges; existing rows migrated as one
 whole-object chunk retain their previous full-verification cost. The chunk size
 is captured per object, so later multipart tuning cannot invalidate existing
 content. A range proves the chunks it covers; a full read still checks the
