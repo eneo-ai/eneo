@@ -70,21 +70,6 @@ def _resolve_category(name: str) -> type[Warning]:
 _install_warning_ignores_eagerly()
 
 
-# Import shared fixture modules
-# These fixtures are automatically discovered by pytest
-# Organized to mirror the backend source structure (src/eneo/*)
-pytest_plugins = [
-    "tests.integration.fixtures.completion_models",  # Completion model fixtures
-    "tests.integration.fixtures.transcription_models",  # Transcription model fixtures
-    "tests.integration.fixtures.assistants",  # Assistant fixtures
-    "tests.integration.fixtures.apps",  # App fixtures
-    "tests.integration.fixtures.services",  # Service fixtures
-    "tests.integration.fixtures.spaces",  # Space fixtures
-    "tests.integration.fixtures.organization_knowledge",  # Organization knowledge fixtures
-    "tests.integration.fixtures.integrations",  # Integration fixtures (SharePoint, etc.)
-]
-
-
 def pytest_configure(config: pytest.Config) -> None:
     """Register structured warning ignores so they ride alongside pytest.ini.
 
