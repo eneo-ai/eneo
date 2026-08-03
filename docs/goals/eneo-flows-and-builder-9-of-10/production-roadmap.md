@@ -368,6 +368,27 @@ external release gate (item 10); BM0.2 is external (item 10).
     enforcement to typed planning/result evidence. These are owner-level
     changes; no phrase detector, duplicate-step matcher, global step cap,
     second schema ledger, or new confirmation API is accepted.
+    The identical 12-case smoke ran once more on 2026-08-03 after explicit-
+    evidence admission landed at `5e7956f8d`. The per-case prompt hashes and
+    locked Luna route matched the preceding receipt. Plan creation rose from
+    seven to nine and first-pass plans from five to six, while total questions
+    stayed at ten and unclassified questions fell from one to zero. The same
+    run also added one forbidden metadata question, one repair attempt, six
+    model calls, and 18,021 authoring tokens (44 calls and 172,356 tokens in
+    total). Offline reanalysis of both receipts with the same final harness
+    rules found nine of 12 product-quality failures in each. Four JSON journeys
+    still lost required terminal leaf names, the complex audio plan still
+    duplicated transcription and misplaced transcript review, one ambiguous
+    report skipped its required disposition question and assumed a combined
+    overview, and two journeys ended in deterministic Builder errors. Treat the
+    extra plans as directional evidence that explicit facts now reach proposal,
+    not as an aggregate quality or efficiency win. The harness and corpus were
+    edited concurrently by another workstream during the live run, so its
+    source-identity check correctly failed; the in-memory journeys remain useful
+    evidence, but this receipt is not a release gate and must not be used for
+    p50/p95 or variance claims. The tracked smoke cohort may replace manual case
+    lists only after its attachment and six-file runtime fixtures are configured
+    and its harness/corpus revision is frozen before execution.
     Question review also records whether the question is answerable from the
     user's perspective, non-leading, offers sufficient option coverage or a
     usable custom-answer path, resolves after its answer, and avoids reopening
@@ -555,9 +576,11 @@ plan above controls all other ordering.
   `ResolvedSlot`, admit exact user-owned cited explicit facts at medium confidence,
   keep weaker evidence unresolved, and use the same provenance for honest
   confirmation bucketing.
-  (g) remove fixed process guarantees from assumptions and make every catalog
-  slot label exhaustive in Swedish and English without changing the public
-  payload shape. (h) after the purpose-first/input-first product decision,
+  (g) **LANDED `ff9bacdee`** — fixed process guarantees no longer appear as
+  assumptions; concise summary labels are owned by the canonical bilingual
+  Question Catalog, cover every slot in Swedish and English, and fail closed
+  instead of exposing internal identifiers; the public payload is unchanged.
+  (h) after the purpose-first/input-first product decision,
   replace the remaining processing-goal phrase consumers with admitted typed
   planning/result evidence, including critic enforcement, then delete the
   phrase family and its behavior-locking tests. (i) persist typed classifier
