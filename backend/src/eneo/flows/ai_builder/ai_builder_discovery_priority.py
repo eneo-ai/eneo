@@ -36,11 +36,17 @@ DISCOVERY_ISSUE_PRIORITY: Mapping[str, int] = MappingProxyType(
 )
 
 
+def discovery_issue_priority(issue_id: str) -> int:
+    """Return the canonical ordering priority for one discovery issue."""
+
+    return DISCOVERY_ISSUE_PRIORITY.get(issue_id, 999)
+
+
 def sort_discovery_issues(issues: list[DiscoveryIssue]) -> list[DiscoveryIssue]:
     return sorted(
         issues,
         key=lambda issue: (
             0 if issue.severity == "blocking" else 1,
-            DISCOVERY_ISSUE_PRIORITY.get(issue.issue_id, 999),
+            discovery_issue_priority(issue.issue_id),
         ),
     )

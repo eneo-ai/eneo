@@ -114,6 +114,7 @@ class QuestionTemplate:
     priority_base: int
     impact: DiscoveryImpact
     exposure: QuestionExposure = "user_requirement"
+    allow_custom: bool = False
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
@@ -830,6 +831,7 @@ _MAPPED_FILE_LIMIT = QuestionTemplate(
     family="input_shape",
     priority_base=25,
     impact="architecture",
+    allow_custom=True,
 )
 
 
@@ -904,6 +906,7 @@ class RenderedQuestion:
     help: str
     options: tuple[RenderedOption, ...]
     worked_examples: tuple[str, ...]
+    allow_custom: bool
 
 
 def _project_option(option: QuestionOption, locale: Locale) -> RenderedOption:
@@ -952,4 +955,5 @@ def render_question(template_id: str, locale: Locale) -> RenderedQuestion:
         help=help_text,
         options=tuple(_project_option(option, locale) for option in template.options),
         worked_examples=worked_examples,
+        allow_custom=template.allow_custom,
     )

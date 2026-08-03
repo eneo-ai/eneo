@@ -4,6 +4,15 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Final
 
+from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
+    comparison_scope_is_relevant,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
+from eneo.flows.ai_builder.ai_builder_commit_invariance import (
+    architecture_commit_draft_matches_pinned,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     apply_discovery_decision_engine,
 )
@@ -119,6 +128,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.domain.flow import Flow
+from eneo.flows.enums import FlowAuthoringInputType
 
 DiscoveryIssueBuilder = Callable[
     [list[ConversationMessage], DiscoveryProfile], DiscoveryIssue | None
@@ -141,7 +151,7 @@ def analyze_discovery(
     raw_issues = _build_raw_discovery_issues(conversation, profile)
     if (
         planning_state is not None
-        and planning_state.architecture_commit is not None
+        and _mapped_file_limit_is_relevant(planning_state)
         and planning_state.mapped_file_limit.proposed_value is not None
         and planning_state.mapped_file_limit.accepted_value is None
     ):
@@ -173,8 +183,7 @@ def analyze_discovery(
                     severity="blocking",
                     message=localized_text(
                         profile.language,
-                        "Bekräfta filgränsen för mappad körning innan arkitekturen låses.",
-                        "Confirm the mapped execution file limit before locking the architecture.",
+                        *_mapped_file_limit_message(planning_state),
                     ),
                     suggestion=suggestion,
                     question_level="blocking",
@@ -229,6 +238,43 @@ def analyze_discovery(
         mvs_met=mvs_met,
         selected_question_ids=tuple(selected_question_ids),
         assumptions=tuple(assumptions),
+    )
+
+
+def _mapped_file_limit_is_relevant(planning_state: PlanningState) -> bool:
+    current_draft = derive_architecture_commit_draft(planning_state)
+    if current_draft is None or not architecture_commit_draft_matches_pinned(
+        before=planning_state.architecture_commit,
+        after=current_draft,
+    ):
+        return False
+    return current_draft.tuples_chain[0].input_type in {
+        FlowAuthoringInputType.DOCUMENT,
+        FlowAuthoringInputType.FILE,
+    }
+
+
+def _mapped_file_limit_message(planning_state: PlanningState) -> tuple[str, str]:
+    limit = planning_state.mapped_file_limit.proposed_value
+    diagnostic = planning_state.mapped_file_limit.diagnostic
+    if diagnostic == "exceeds_policy":
+        return (
+            f"Ange ett positivt heltal som är högst organisationens gräns ({limit}).",
+            f"Enter a positive whole number no higher than the organization limit ({limit}).",
+        )
+    if diagnostic == "not_positive":
+        return (
+            "Ange ett positivt heltal som är minst 1.",
+            "Enter a positive whole number of at least 1.",
+        )
+    if diagnostic == "not_an_integer":
+        return (
+            "Ange filgränsen som ett positivt heltal.",
+            "Enter the file limit as a positive whole number.",
+        )
+    return (
+        "Bekräfta hur många filer varje mappat steg högst ska behandla.",
+        "Confirm the maximum number of files each mapped step may process.",
     )
 
 
@@ -388,6 +434,14 @@ def _build_comparison_scope_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
 ) -> DiscoveryIssue | None:
+    primary_runtime_input = profile.input_intent.primary_runtime_input
+    if primary_runtime_input == "unknown":
+        primary_runtime_input = None
+    if not comparison_scope_is_relevant(
+        primary_runtime_input=primary_runtime_input,
+        unresolved_values_are_relevant=True,
+    ):
+        return None
     if not profile.comparison_requested or profile.reference_source.status not in {
         "missing",
         "unclear",
@@ -665,9 +719,14 @@ def build_registry_question_followup(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
+    planning_state: PlanningState | None = None,
 ) -> BackendQuestion | None:
     canonical_id = canonical_question_id(question_id)
-    profile = _build_discovery_profile(conversation, flow=flow)
+    profile = _build_discovery_profile(
+        conversation,
+        flow=flow,
+        planning_state=planning_state,
+    )
     suggestion = question_suggestion_for_id(canonical_id, language=profile.language)
     if suggestion is None or suggestion.exposure != "user_requirement":
         return None
@@ -675,7 +734,11 @@ def build_registry_question_followup(
     issue = next(
         (
             issue
-            for issue in analyze_discovery(conversation, flow=flow).issues
+            for issue in analyze_discovery(
+                conversation,
+                flow=flow,
+                planning_state=planning_state,
+            ).issues
             if issue.suggestion is not None
             and issue.suggestion.question_id == canonical_id
         ),
@@ -692,8 +755,13 @@ def build_registry_question_followup(
         ),
         profile.language,
     )
+    rendered_suggestion = (
+        issue.suggestion
+        if issue is not None and issue.suggestion is not None
+        else suggestion
+    )
     return BackendQuestion(
-        question_data=_structured_question_payload_from_suggestion(suggestion),
+        question_data=_structured_question_payload_from_suggestion(rendered_suggestion),
         assistant_text=assistant_text,
         issue=issue,
     )
@@ -743,6 +811,8 @@ def build_discovery_followup_text(
             "Jag behöver reda ut en motsättning innan jag kan sammanfatta upplägget. Dina val pekar åt olika håll, så jag behöver ett förtydligande först.",
             "I need to resolve a contradiction before I can summarize the design. Your choices point in different directions, so I need one more clarification first.",
         )
+    if issue.issue_id == "mapped_file_limit_confirmation_required":
+        return issue.message
     if issue.category == "comparison":
         return localized_text(
             language,

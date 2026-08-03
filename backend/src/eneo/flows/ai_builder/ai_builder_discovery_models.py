@@ -60,7 +60,7 @@ class DiscoveryQuestionSuggestion:
     question: str
     options: tuple[DiscoveryQuestionOption, ...]
     selection_mode: Literal["single", "multi"] = "single"
-    allow_custom: bool = True
+    allow_custom: bool = False
     exposure: QuestionExposure = "user_requirement"
 
 

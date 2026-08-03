@@ -165,6 +165,7 @@ def build_planning_state_from_conversation(
     )
     _replay_slot_classification_metadata(state, conversation, flow=flow)
     _reconcile_report_disposition_after_classifier_replay(state, conversation)
+    _reconcile_dependent_slot_relevance(state)
     return state
 
 
@@ -890,6 +891,7 @@ def apply_policy_defaults_from_resolved_slots(
                 evidence=["policy_default:pdf_generation_mode=generated_pdf"],
                 confidence="medium",
             )
+    _reconcile_dependent_slot_relevance(state)
 
 
 def llm_resolvable_slot_values_for_state(
@@ -914,33 +916,69 @@ def _model_slot_is_persistable(slot_name: str) -> bool:
 
 
 def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
-    if slot_name == "comparison_scope":
-        primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
-        return comparison_scope_is_relevant(
-            primary_runtime_input=(
-                primary_runtime_input.value
-                if primary_runtime_input is not None
-                and primary_runtime_input.is_commit_grade
-                else None
-            ),
+    return _dependent_slot_is_relevant(
+        slot_name=slot_name,
+        state=state,
+        unresolved_values_are_relevant=True,
+        require_commit_grade_primary_input=True,
+    )
+
+
+def _reconcile_dependent_slot_relevance(state: PlanningState) -> None:
+    for slot_name in tuple(state.resolved_slots):
+        if not _dependent_slot_is_relevant(
+            slot_name=slot_name,
+            state=state,
             unresolved_values_are_relevant=True,
-        )
-    if slot_name == "report_disposition":
-        return _report_disposition_slot_is_relevant(state)
-    if slot_name != "structured_io_contract":
-        return True
+            require_commit_grade_primary_input=False,
+        ):
+            state.resolved_slots.pop(slot_name, None)
+
+
+def _dependent_slot_is_relevant(
+    *,
+    slot_name: str,
+    state: PlanningState,
+    unresolved_values_are_relevant: bool,
+    require_commit_grade_primary_input: bool,
+) -> bool:
     primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
     terminal_output = state.resolved_slots.get("terminal_output")
-    input_incompatible = (
-        primary_runtime_input is not None and primary_runtime_input.value != "json"
-    )
+    primary_value = None
+    if primary_runtime_input is not None and (
+        not require_commit_grade_primary_input or primary_runtime_input.is_commit_grade
+    ):
+        primary_value = primary_runtime_input.value
+    terminal_value = terminal_output.value if terminal_output is not None else None
+
+    if slot_name in {"comparison_scope", "document_material_scope"}:
+        return comparison_scope_is_relevant(
+            primary_runtime_input=primary_value,
+            unresolved_values_are_relevant=unresolved_values_are_relevant,
+        )
+    if slot_name == "report_disposition":
+        return _report_disposition_slot_is_relevant(
+            state,
+            unresolved_values_are_relevant=unresolved_values_are_relevant,
+        )
+    if slot_name == "docx_output_mode":
+        return terminal_value is None or terminal_value == "docx_document"
+    if slot_name == "pdf_generation_mode":
+        return terminal_value is None or terminal_value == "pdf_document"
+    if slot_name != "structured_io_contract":
+        return True
+    input_incompatible = primary_value is not None and primary_value != "json"
     output_incompatible = (
-        terminal_output is not None and terminal_output.value != "structured_json"
+        terminal_value is not None and terminal_value != "structured_json"
     )
     return not input_incompatible and not output_incompatible
 
 
-def _report_disposition_slot_is_relevant(state: PlanningState) -> bool:
+def _report_disposition_slot_is_relevant(
+    state: PlanningState,
+    *,
+    unresolved_values_are_relevant: bool = True,
+) -> bool:
     primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
     terminal_output = state.resolved_slots.get("terminal_output")
     document_material_scope = state.resolved_slots.get("document_material_scope")
@@ -960,7 +998,7 @@ def _report_disposition_slot_is_relevant(state: PlanningState) -> bool:
         docx_output_mode=(
             docx_output_mode.value if docx_output_mode is not None else None
         ),
-        unresolved_values_are_relevant=True,
+        unresolved_values_are_relevant=unresolved_values_are_relevant,
     )
 
 

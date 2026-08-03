@@ -125,10 +125,17 @@ def _has_unsupported_slot_value(
 ) -> bool:
     canonical_id = canonical_question_id(question_id)
     if canonical_id not in QUESTION_CATALOG:
-        return False
+        return answer.custom_value is not None
+
+    template = QUESTION_CATALOG[canonical_id]
+    answer_values = question_answer_values(answer)
+    if answer.custom_value is not None:
+        if not template.allow_custom:
+            return True
+        answer_values.discard(answer.custom_value.strip().casefold())
 
     allowed_values = {value.casefold() for value in legal_slot_values(canonical_id)}
-    return not question_answer_values(answer) <= allowed_values
+    return not answer_values <= allowed_values
 
 
 def _raise_invalid_question_payload(reason: str) -> NoReturn:

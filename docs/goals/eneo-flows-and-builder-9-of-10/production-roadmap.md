@@ -34,6 +34,11 @@ plan against current source, not carried over blind).
   one read-only Claude Opus/high gate before push, with one final resume only
   for a verified material finding. Never review routine landing mechanics or
   duplicate a gate that already covers the exact commit range.
+- Testing stays proportional to observable risk: reuse the narrowest existing
+  behavior or contract surface, replace stale internal assertions instead of
+  adding parallel tests, and add a regression only for a distinct user-visible
+  failure mode. Do not build broad matrices, mock-heavy wiring tests, or new test
+  abstractions when an existing owner-level check proves the behavior.
 - Evidence vocabulary: retrieved ≠ included-in-prompt ≠ material influence.
   Exports are complete-or-refuse; views narrow honestly and say what they
   left out.
@@ -42,6 +47,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-03 | **Intent-led Builder questions and durable confirmation**: discovery now owns which unresolved consequential question is asked while action policy preserves its order instead of reconstructing heuristic or pattern questions; typed planning-state reconciliation removes stale document/comparison answers after input changes; visible legal assumptions survive confirmation through the existing requirements contract; fixed-choice questions no longer advertise unsupported custom answers, and the bounded mapped-file question appears only for a coherent document/file architecture with its actual organization ceiling. The duplicate forced-ask and prompt-reconstruction paths are deleted (`b1e9b3ae8`; Codex gate green 9/10, Claude Opus gate green 8/10, 493 changed-file behavior tests passed) |
 | 2026-08-02 | **Trustworthy Builder journey evaluation**: the 120-case v4 corpus now continues through bounded configured interviews, records ordered and reopened questions plus first-pass/repair outcomes, checks directional JSON contracts through applied flows, preserves one v2 case/failure identity across every receipt, and gates only the seven required cases; benchmark failures remain visible without blocking release (`22ece969a`; Codex and Claude gates green 8/10, no blockers) |
 | 2026-08-02 | **Evidence-backed Builder architecture admission**: architecture-changing slots now commit only from explicit answers, existing-flow defaults, a typed confirmed-requirements projection, deterministic attachment structure, or citation-backed high-confidence model evidence; policy defaults and heuristics remain visible assumptions but cannot silently shape topology. The create compiler consumes only the persisted architecture commit, and the language-specific requirements-summary parser and draft/raw-slot compiler fallbacks are deleted (`this change`) |
 | 2026-08-02 | **Language-neutral Builder discovery ownership**: `PlanningState` and typed input/output intent remain the semantic truth while the parallel phrase-derived `case_like_flow` flag, the unused document-category question and synonym inventory, and the behavior-locking specialty recognizer are deleted; runtime-metadata values are neutral direct contracts with no compatibility aliases, and generic `underlag` no longer invents a domain or minimum viable purpose (`3409a8409`) |

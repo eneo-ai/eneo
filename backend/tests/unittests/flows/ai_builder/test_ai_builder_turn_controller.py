@@ -45,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
     ConfirmRequirements,
+    GenerateProposal,
     ReviseArchitecture,
     _slot_is_key_decision,
     resolve_turn_control,
@@ -103,12 +104,13 @@ def _decision(
     ui_language: str | None,
     requirements_confirmed: bool = False,
     discovery_assumptions: tuple[str, ...] = (),
+    selected_discovery_question_ids: tuple[str, ...] = (),
 ) -> object:
     confirmed_attachment_evidence_fingerprint: str | None = None
     if requirements_confirmed:
         unconfirmed = resolve_turn_control(
             session_state=state,
-            selected_discovery_question_ids=(),
+            selected_discovery_question_ids=selected_discovery_question_ids,
             confirmed_attachment_evidence_fingerprint=None,
             ui_language=ui_language,
             discovery_assumptions=discovery_assumptions,
@@ -119,7 +121,7 @@ def _decision(
             )
     return resolve_turn_control(
         session_state=state,
-        selected_discovery_question_ids=(),
+        selected_discovery_question_ids=selected_discovery_question_ids,
         confirmed_attachment_evidence_fingerprint=(
             confirmed_attachment_evidence_fingerprint
         ),
@@ -130,11 +132,27 @@ def _decision(
 
 def test_server_builds_ask_question_for_allowed_target() -> None:
     state = _state(primary_runtime_input="documents", terminal_output="text")
-    decision = _decision(state=state, ui_language="en")
+    decision = _decision(
+        state=state,
+        ui_language="en",
+        selected_discovery_question_ids=("document_material_scope",),
+    )
 
     assert isinstance(decision, AskCanonicalQuestion)
     assert decision.slot_name == "document_material_scope"
-    assert "uploaded source material" in decision.prompt
+
+
+def test_server_routes_renderable_non_slot_discovery_question() -> None:
+    state = _state(primary_runtime_input="documents", terminal_output="text")
+
+    decision = _decision(
+        state=state,
+        ui_language="en",
+        selected_discovery_question_ids=("flow_input_architecture",),
+    )
+
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "flow_input_architecture"
 
 
 @pytest.mark.parametrize("ui_language", ["en", "sv"])
@@ -284,17 +302,29 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         terminal_output="docx_document",
         document_material_scope="flexible_document_case",
         docx_output_mode="generated_docx",
-        report_disposition="combined_report",
+        report_disposition="both",
         runtime_metadata_fields="no_extra_metadata",
+    )
+    state.resolved_slots["runtime_metadata_fields"] = _slot(
+        "runtime_metadata_fields",
+        "no_extra_metadata",
+        source="policy_default",
+        confidence="medium",
+    )
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "structure_key_information",
+        source="heuristic",
+        confidence="medium",
     )
     state.architecture_commit = _finalized_commit_for_state(state)
     decision = _decision(state=state, ui_language="sv")
 
     assert isinstance(decision, ConfirmRequirements)
     payload = decision.payload
-    assert (
-        payload.summary
-        == "Flödet ska ta emot Dokument vid körning och leverera DOCX-dokument."
+    assert payload.summary == (
+        "Flödet ska ta emot Dokument vid körning och leverera DOCX-dokument. "
+        "Resultatet ska hjälpa till med: Strukturera materialet."
     )
     assert payload.input_description == "Primär indata vid körning: Dokument."
     assert payload.output_description == "Huvudsakligt slutresultat: DOCX-dokument."
@@ -307,9 +337,12 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert {decision.decision for decision in payload.key_decisions} >= {
         "Genererad DOCX utan mall",
         "Ibland ett, ibland flera dokument",
-        "Inga extra fält",
         "Skapa DOCX",
     }
+    assert {
+        "Metadata vid körning: Inga extra fält",
+        "Syfte med bearbetningen: Strukturera materialet",
+    } <= set(payload.assumptions)
     assert "Docx Output Mode" not in {
         decision.topic for decision in payload.key_decisions
     }
@@ -320,7 +353,8 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         "document_material_scope": "flexible_document_case",
         "docx_output_mode": "generated_docx",
         "primary_runtime_input": "documents",
-        "report_disposition": "combined_report",
+        "post_processing_goal": "structure_key_information",
+        "report_disposition": "both",
         "runtime_metadata_fields": "no_extra_metadata",
         "terminal_output": "docx_document",
     }
@@ -883,7 +917,7 @@ def test_server_revises_architecture_for_commit_grade_terminal_output_change() -
     assert decision.architecture_commit.chosen_patterns == ["text_to_artifact_report"]
 
 
-def test_server_reasks_when_pinned_commit_conflicts_with_weak_output_slot() -> None:
+def test_server_keeps_pinned_commit_when_only_weak_output_slot_conflicts() -> None:
     state = _state(primary_runtime_input="text")
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
@@ -911,8 +945,7 @@ def test_server_reasks_when_pinned_commit_conflicts_with_weak_output_slot() -> N
         requirements_confirmed=True,
     )
 
-    assert isinstance(decision, AskCanonicalQuestion)
-    assert decision.slot_name == "terminal_output"
+    assert isinstance(decision, GenerateProposal)
 
 
 def test_server_confirmation_separates_decisions_from_assumptions() -> None:

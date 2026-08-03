@@ -96,9 +96,6 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
-from eneo.flows.ai_builder.planning_state_builder import (
-    carry_forward_persisted_planner_state,
-)
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.main.logging import get_logger
@@ -226,6 +223,8 @@ async def prepare_planner_request(
         before_provider_call=request.before_provider_call,
         mapped_execution_policy=request.mapped_execution_policy,
         prepared_schema_candidates=schema_candidates,
+        persisted_planning_state=request.persisted_planning_state,
+        attached_file_ids={file.id for file in request.attachment_files},
     )
     discovery_analysis = discovery_runtime.discovery_analysis
     rebuilt_planning_state = discovery_runtime.planning_state
@@ -244,11 +243,6 @@ async def prepare_planner_request(
         available_models=request.available_models,
         available_kbs=request.available_kbs,
         prior_bindings=prior_resource_bindings,
-    )
-    carry_forward_persisted_planner_state(
-        rebuilt_planning_state,
-        request.persisted_planning_state,
-        attached_file_ids={file.id for file in request.attachment_files},
     )
     if discovery_runtime.schema_direction_pending:
         rebuilt_planning_state.replace_schema_resolution(

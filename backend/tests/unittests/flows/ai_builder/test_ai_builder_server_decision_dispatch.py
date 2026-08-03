@@ -158,7 +158,6 @@ async def test_unrenderable_server_question_returns_typed_error_without_commit()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     decision = AskCanonicalQuestion(
         slot_name="structured_analysis_need",
-        prompt="Should the flow use structured analysis?",
     )
 
     result = await dispatch_server_decision(
@@ -195,7 +194,6 @@ async def test_server_question_preserves_prepared_file_roles_on_commit() -> None
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     decision = AskCanonicalQuestion(
         slot_name="primary_runtime_input",
-        prompt="What should the runtime input be?",
     )
 
     await dispatch_server_decision(
@@ -218,7 +216,6 @@ async def test_server_question_uses_canonical_slot_name_question_id() -> None:
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     decision = AskCanonicalQuestion(
         slot_name="primary_runtime_input",
-        prompt="What should the runtime input be?",
     )
 
     result = await dispatch_server_decision(

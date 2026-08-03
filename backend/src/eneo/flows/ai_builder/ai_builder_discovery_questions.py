@@ -57,6 +57,7 @@ def _catalog_question(
             for option in rendered.options
         ),
         exposure=template.exposure,
+        allow_custom=rendered.allow_custom,
     )
 
 
@@ -183,6 +184,8 @@ def comparison_scope_conflict_question(
             "You chose one file per run but also want document comparison. Which comparison architecture do you want?",
         ),
         options=base.options,
+        selection_mode=base.selection_mode,
+        allow_custom=base.allow_custom,
         exposure=base.exposure,
     )
 
