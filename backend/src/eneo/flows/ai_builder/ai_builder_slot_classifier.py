@@ -37,11 +37,13 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
 )
 from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
+    CheckpointProducerKind,
     ExampleOutputConstraintEvidence,
     ExampleOutputStyleCategory,
     FileRole,
     SlotEvidenceLevel,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.main.logging import get_logger
 from eneo.tokens.token_utils import count_message_tokens, count_tokens
 
@@ -57,6 +59,7 @@ if TYPE_CHECKING:
 
 SlotClassificationConfidence = Literal["high", "medium", "low"]
 SlotClassificationEvidenceLevel = SlotEvidenceLevel
+CheckpointUpdateOperation = Literal["update", "clear"]
 SlotClassificationAttemptOutcome = Literal[
     "resolved",
     "no_content",
@@ -79,7 +82,7 @@ _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 18
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 19
 CLASSIFICATION_EVIDENCE_MAX_ITEMS = 3
 CLASSIFICATION_EVIDENCE_MAX_LENGTH = 240
 CLASSIFICATION_REASON_MAX_LENGTH = 500
@@ -170,6 +173,16 @@ class ClassifiedFormIntake:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassifiedCheckpointUpdate:
+    operation: CheckpointUpdateOperation
+    producer_kind: CheckpointProducerKind
+    mode: FlowStepReviewMode | None
+    confidence: SlotClassificationConfidence
+    reason: str
+    evidence: tuple[ClassifiedEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ClassifiedOutputSchemaFieldDelta:
     operation: Literal["update", "clear"]
     field_names: tuple[str, ...]
@@ -183,6 +196,7 @@ class ClassifiedOutputSchemaFieldDelta:
 class SlotClassificationResult:
     slots: tuple[ClassifiedSlot, ...] = ()
     file_roles: tuple[ClassifiedFileRole, ...] = ()
+    checkpoint_updates: tuple[ClassifiedCheckpointUpdate, ...] = ()
     form_intake: ClassifiedFormIntake | None = None
     output_schema_fields: ClassifiedOutputSchemaFieldDelta | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
@@ -560,6 +574,12 @@ def parse_slot_classification_response(
         raw_dict.get("file_roles", []),
         classification_input=classification_input,
     )
+    checkpoint_updates = _parse_checkpoint_updates(
+        raw_dict["checkpoint_updates"],
+        classification_input=classification_input,
+    )
+    if checkpoint_updates is None:
+        return None
     form_intake = _parse_form_intake(
         raw_dict.get("form_intake"),
         classification_input=classification_input,
@@ -584,6 +604,7 @@ def parse_slot_classification_response(
     return SlotClassificationResult(
         slots=tuple(slots),
         file_roles=file_roles,
+        checkpoint_updates=checkpoint_updates,
         form_intake=form_intake,
         output_schema_fields=output_schema_fields,
         example_output_constraints=example_output_constraints,
@@ -709,6 +730,77 @@ def _parse_output_schema_fields(
         removed_field_names=removed_field_names,
         evidence=user_owned_evidence,
     )
+
+
+def _parse_checkpoint_updates(
+    raw_value: object,
+    *,
+    classification_input: SlotClassificationInput,
+) -> tuple[ClassifiedCheckpointUpdate, ...] | None:
+    if not isinstance(raw_value, list):
+        return None
+    producer_kinds = set(get_args(CheckpointProducerKind))
+    review_modes = {mode.value: mode for mode in FlowStepReviewMode}
+    source_kinds = {
+        source.source_id: source.kind for source in classification_input.sources
+    }
+    source_message_ids = {
+        source.source_id: source.message_id for source in classification_input.sources
+    }
+    current_user_message_id = classification_input.current_user_message_id
+    updates: list[ClassifiedCheckpointUpdate] = []
+    seen_producers: set[str] = set()
+    for item in cast(list[object], raw_value):
+        if not isinstance(item, dict):
+            return None
+        payload = cast(dict[str, object], item)
+        operation = payload.get("operation")
+        if operation not in {"update", "clear"}:
+            return None
+        producer_kind = payload.get("producer_kind")
+        if not isinstance(producer_kind, str) or producer_kind not in producer_kinds:
+            return None
+        if producer_kind in seen_producers:
+            return None
+        seen_producers.add(producer_kind)
+        confidence = payload.get("confidence")
+        if confidence not in {"high", "medium"}:
+            return None
+        raw_mode = payload.get("mode")
+        if operation == "update":
+            if raw_mode not in review_modes:
+                return None
+            mode = review_modes[cast(str, raw_mode)]
+        else:
+            if raw_mode is not None:
+                return None
+            mode = None
+        evidence = _parse_classification_evidence(
+            payload.get("evidence", []),
+            classification_input=classification_input,
+        )
+        if not evidence or current_user_message_id is None:
+            return None
+        if not any(
+            source_kinds[cited.source_id] in _USER_OWNED_CLASSIFICATION_SOURCE_KINDS
+            and source_message_ids[cited.source_id] == current_user_message_id
+            for cited in evidence
+        ):
+            return None
+        reason = payload.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            return None
+        updates.append(
+            ClassifiedCheckpointUpdate(
+                operation=cast(CheckpointUpdateOperation, operation),
+                producer_kind=cast(CheckpointProducerKind, producer_kind),
+                mode=mode,
+                confidence=cast(SlotClassificationConfidence, confidence),
+                reason=reason.strip(),
+                evidence=evidence,
+            )
+        )
+    return tuple(updates)
 
 
 def _parse_cited_output_schema_field_names(
@@ -1404,6 +1496,11 @@ def _slot_classification_top_level_properties(
             "type": "array",
             "items": _classified_file_role_schema(),
         },
+        "checkpoint_updates": {
+            "type": "array",
+            "maxItems": len(get_args(CheckpointProducerKind)),
+            "items": _classified_checkpoint_update_schema(),
+        },
         "form_intake": {
             "anyOf": [
                 _classified_form_intake_schema(),
@@ -1566,6 +1663,62 @@ def _classified_file_role_schema() -> dict[str, object]:
             "evidence": _classification_evidence_array_schema(),
             "evidence_level": _classification_evidence_level_schema(),
         },
+    }
+
+
+def _classified_checkpoint_update_schema() -> dict[str, object]:
+    producer_kind = {
+        "type": "string",
+        "enum": list(get_args(CheckpointProducerKind)),
+    }
+    common_properties: dict[str, object] = {
+        "producer_kind": producer_kind,
+        "confidence": {
+            "type": "string",
+            "enum": ["high", "medium"],
+        },
+        "reason": _classification_reason_schema(),
+        "evidence": _classification_evidence_array_schema(),
+    }
+    return {
+        "anyOf": [
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "operation",
+                    "producer_kind",
+                    "mode",
+                    "confidence",
+                    "reason",
+                    "evidence",
+                ],
+                "properties": {
+                    "operation": {"type": "string", "enum": ["update"]},
+                    **common_properties,
+                    "mode": {
+                        "type": "string",
+                        "enum": [mode.value for mode in FlowStepReviewMode],
+                    },
+                },
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "operation",
+                    "producer_kind",
+                    "confidence",
+                    "reason",
+                    "evidence",
+                ],
+                "properties": {
+                    "operation": {"type": "string", "enum": ["clear"]},
+                    **common_properties,
+                    "mode": {"type": "null"},
+                },
+            },
+        ]
     }
 
 
@@ -1829,11 +1982,13 @@ def _build_slot_classification_prompt(
         "You classify unresolved flow-builder intent into constrained slot values. "
         "Return JSON only. Never explain outside the schema. "
         "Use a slot only when the conversation provides real evidence. "
-        "Every slot, file_role, and form_intake classification must include "
+        "Every slot, file_role, form_intake, and checkpoint_update classification "
+        "must include "
         "evidence objects with a listed source_id and an exact, case-sensitive "
         "quote from that source's content. "
         f"Use 1-{CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes for each "
-        "slot, file_role, and form_intake classification, each at most "
+        "slot, file_role, form_intake, and checkpoint_update classification, each at "
+        "most "
         f"{CLASSIFICATION_EVIDENCE_MAX_LENGTH} "
         "characters. Shorten by selecting a shorter exact span, never by "
         "paraphrasing. "
@@ -1909,6 +2064,20 @@ def _build_slot_classification_prompt(
         "Readable summaries, memos, and reports are structured_text terminal output; "
         "machine-readable records or downstream integration payloads are "
         "structured_json terminal output. "
+        "Return checkpoint_updates as changes requested by the current user message, "
+        "not as a snapshot of prior checkpoint requirements. Return an empty array "
+        "when the current message makes no checkpoint change. Use operation update "
+        "to add or change one checkpoint and include mode. Use operation clear only "
+        "when the current message explicitly removes that producer's checkpoint; "
+        "omit mode or set it to null for clear. Every update and clear requires high "
+        "or medium confidence and exact cited evidence from the current user-owned "
+        "message. Attachment-only evidence is insufficient. Use transcript for the "
+        "audio transcription result, structured_result for machine-readable JSON, "
+        "and report_text for readable report or document text. Use mode view when "
+        "approval is required without changing the result, and edit when the reviewer "
+        "must be able to replace the result before downstream work continues. Do not "
+        "invent step names or classify an unsupported producer. Emit at most one "
+        "checkpoint update for each producer_kind. "
         "For post_processing_goal, classify what the user wants done with the "
         "source material after the primary read/transcription/conversion. "
         "Use stop_after_primary_operation only for explicit transcript-only, "
@@ -1978,6 +2147,7 @@ def _build_slot_classification_prompt(
         "{"
         '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
+        '"checkpoint_updates": [{"operation": "update"|"clear", "producer_kind": "transcript"|"structured_result"|"report_text", "mode": "view"|"edit"|null, "confidence": "high"|"medium", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
         '"output_schema_fields": {"operation": "update"|"clear", "field_names": [str], "removed_field_names": [str], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '

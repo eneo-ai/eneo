@@ -47,6 +47,8 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     derive_freeform_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    CheckpointUpdateOperation,
+    ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
@@ -66,6 +68,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
     AttachmentCoverage,
+    CheckpointProducerKind,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
@@ -90,6 +93,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     merge_llm_resolved_slots,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _state(
@@ -358,11 +362,19 @@ def _slot_classification_metadata(
     *slots: ClassifiedSlot,
     prompt_hash: str = "a" * 64,
     form_intake: ClassifiedFormIntake | None = None,
+    checkpoint_updates: tuple[ClassifiedCheckpointUpdate, ...] = (),
 ) -> dict[str, object]:
     evidence_quotes = [item.quote for slot in slots for item in slot.evidence]
     if form_intake is not None:
         evidence_quotes.extend(item.quote for item in form_intake.evidence)
-    result = SlotClassificationResult(slots=slots, form_intake=form_intake)
+    evidence_quotes.extend(
+        item.quote for update in checkpoint_updates for item in update.evidence
+    )
+    result = SlotClassificationResult(
+        slots=slots,
+        form_intake=form_intake,
+        checkpoint_updates=checkpoint_updates,
+    )
     metadata = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash=prompt_hash,
@@ -1868,6 +1880,93 @@ class TestRuntimeMetadataClassificationBoundaries:
 
 
 class TestSlotClassificationMetadataReplay:
+    def test_replay_applies_checkpoint_updates_per_producer(
+        self,
+    ) -> None:
+        def checkpoint_update(
+            operation: CheckpointUpdateOperation,
+            producer_kind: CheckpointProducerKind,
+            mode: FlowStepReviewMode | None,
+            quote: str,
+        ) -> ClassifiedCheckpointUpdate:
+            return ClassifiedCheckpointUpdate(
+                operation=operation,
+                producer_kind=producer_kind,
+                mode=mode,
+                confidence="high",
+                reason="Typed checkpoint requirement.",
+                evidence=_model_evidence(quote),
+            )
+
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="assistant",
+                    content="Classifier evidence.",
+                    metadata=_slot_classification_metadata(
+                        checkpoint_updates=(
+                            checkpoint_update(
+                                "update",
+                                "transcript",
+                                FlowStepReviewMode.VIEW,
+                                "Approve the transcript before analysis.",
+                            ),
+                            checkpoint_update(
+                                "update",
+                                "structured_result",
+                                FlowStepReviewMode.VIEW,
+                                "Approve the structured result before delivery.",
+                            ),
+                        ),
+                    ),
+                ),
+                ConversationMessage(
+                    role="assistant",
+                    content="Unrelated classifier evidence.",
+                    metadata=_slot_classification_metadata(checkpoint_updates=()),
+                ),
+                ConversationMessage(
+                    role="assistant",
+                    content="Updated classifier evidence.",
+                    metadata=_slot_classification_metadata(
+                        checkpoint_updates=(
+                            checkpoint_update(
+                                "update",
+                                "transcript",
+                                FlowStepReviewMode.EDIT,
+                                "Edit the transcript before analysis.",
+                            ),
+                        )
+                    ),
+                ),
+                ConversationMessage(
+                    role="assistant",
+                    content="Checkpoint removal evidence.",
+                    metadata=_slot_classification_metadata(
+                        checkpoint_updates=(
+                            checkpoint_update(
+                                "clear",
+                                "structured_result",
+                                None,
+                                "Do not pause for structured result approval.",
+                            ),
+                        )
+                    ),
+                ),
+            ]
+        )
+
+        assert [
+            (intent.producer_kind, intent.mode.value, intent.evidence)
+            for intent in state.checkpoint_intents
+        ] == [
+            (
+                "transcript",
+                "edit",
+                ["quote:user_message:test-source:Edit the transcript before analysis."],
+            ),
+        ]
+
     def test_replays_terminal_output_and_runtime_fields_from_conversation_metadata(
         self,
     ) -> None:
@@ -2150,6 +2249,31 @@ class TestSlotClassificationMetadataReplay:
 
 
 class TestModelSlotMerge:
+    def test_duplicate_checkpoint_producer_is_rejected_at_merge_boundary(
+        self,
+    ) -> None:
+        checkpoint = ClassifiedCheckpointUpdate(
+            operation="update",
+            producer_kind="report_text",
+            mode=FlowStepReviewMode.VIEW,
+            confidence="high",
+            reason="Report approval requested.",
+            evidence=_model_evidence("Approve the report before delivery."),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="checkpoint_updates must contain unique producer_kind values",
+        ):
+            merge_llm_resolved_slots(
+                _state(),
+                SlotClassificationResult(
+                    checkpoint_updates=(checkpoint, checkpoint),
+                ),
+                prompt_hash="a" * 64,
+                freeform_text="Approve the report before delivery.",
+            )
+
     def test_mixed_attachment_evidence_cannot_enter_output_schema_provenance(
         self,
     ) -> None:
@@ -2170,6 +2294,7 @@ class TestModelSlotMerge:
                 {
                     "slots": [],
                     "file_roles": [],
+                    "checkpoint_updates": [],
                     "form_intake": None,
                     "output_schema_fields": {
                         "operation": "update",
@@ -2562,6 +2687,7 @@ class TestModelSlotMerge:
                         },
                     ],
                     "file_roles": [],
+                    "checkpoint_updates": [],
                     "form_intake": None,
                     "output_schema_fields": None,
                     "example_output_constraints": None,
@@ -2625,6 +2751,7 @@ class TestModelSlotMerge:
                         }
                     ],
                     "file_roles": [],
+                    "checkpoint_updates": [],
                     "form_intake": None,
                     "output_schema_fields": None,
                     "example_output_constraints": None,

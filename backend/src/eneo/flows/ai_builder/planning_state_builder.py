@@ -93,6 +93,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
+    CheckpointIntent,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
     FileRole,
@@ -140,6 +141,7 @@ CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozense
     {
         "slot",
         "file_role",
+        "checkpoint_update",
         "form_intake",
         "output_schema_fields",
         "example_output_constraint",
@@ -557,6 +559,10 @@ def merge_llm_resolved_slots(
         raise ValueError("prompt_hash must be non-empty")
 
     apply_model_blocked_slots(state, model_blocked_slots=model_blocked_slots)
+    _merge_model_checkpoint_updates(
+        state,
+        classification_result=classification_result,
+    )
     _merge_model_result_obligations(
         state,
         classification_result=classification_result,
@@ -638,6 +644,41 @@ def merge_llm_resolved_slots(
     )
     if not defer_output_schema_relevance:
         _clear_prose_output_schema_for_non_json_terminal(state)
+
+
+def _merge_model_checkpoint_updates(
+    state: PlanningState,
+    *,
+    classification_result: SlotClassificationResult,
+) -> None:
+    producer_kinds = [
+        update.producer_kind for update in classification_result.checkpoint_updates
+    ]
+    if len(producer_kinds) != len(set(producer_kinds)):
+        raise ValueError("checkpoint_updates must contain unique producer_kind values")
+    intents_by_producer = {
+        intent.producer_kind: intent for intent in state.checkpoint_intents
+    }
+    for update in classification_result.checkpoint_updates:
+        if update.confidence == "low" or not update.evidence:
+            raise ValueError("checkpoint update requires supported cited evidence")
+        if update.operation == "clear":
+            if update.mode is not None:
+                raise ValueError("checkpoint clear must not carry a review mode")
+            intents_by_producer.pop(update.producer_kind, None)
+            continue
+        if update.mode is None:
+            raise ValueError("checkpoint update requires a review mode")
+        intents_by_producer[update.producer_kind] = CheckpointIntent(
+            producer_kind=update.producer_kind,
+            mode=update.mode,
+            confidence=update.confidence,
+            evidence=[item.planning_reference() for item in update.evidence],
+        )
+    state.checkpoint_intents = sorted(
+        intents_by_producer.values(),
+        key=lambda intent: intent.producer_kind,
+    )
 
 
 def _clear_prose_output_schema_for_non_json_terminal(state: PlanningState) -> None:

@@ -601,6 +601,11 @@ async def build_runtime_discovery_context(
     output_schema_fields_relevant = _output_schema_field_classification_is_relevant(
         state
     )
+    checkpoint_updates_relevant = any(
+        source.kind in {"user_message", "structured_answer"}
+        and source.message_id == classification_input.current_user_message_id
+        for source in classification_input.sources
+    )
     provider = slot_classification_provider_identity(
         provider_type=completion_model_route.provider_type,
         litellm_kwargs=completion_model_route.litellm_kwargs,
@@ -609,6 +614,7 @@ async def build_runtime_discovery_context(
         not allowed_values
         and not schema_direction_pending
         and not output_schema_fields_relevant
+        and not checkpoint_updates_relevant
     ):
         skipped_attempt = SlotClassificationAttempt(
             outcome="skipped_no_resolvable_slots"

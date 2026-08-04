@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
+    ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
@@ -56,6 +57,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     CLASSIFIER_REBUILD_INPUT_CLASSES,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
@@ -77,7 +79,8 @@ def _classification_input(*quotes: str) -> SlotClassificationInput:
                 text="\n".join(quotes),
                 message_id="user-1",
             ),
-        )
+        ),
+        current_user_message_id="user-1",
     )
 
 
@@ -498,6 +501,136 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert parsed.model == "openai/gpt-test"
     assert parsed.provider == "openai"
     assert parsed.source_inventory[0].source_id == _CLASSIFICATION_SOURCE_ID
+
+
+def test_slot_classification_round_trips_checkpoint_update_with_cited_source() -> None:
+    quote = "Let a reviewer approve the structured result before delivery."
+    result = SlotClassificationResult(
+        checkpoint_updates=(
+            ClassifiedCheckpointUpdate(
+                operation="update",
+                producer_kind="structured_result",
+                mode=FlowStepReviewMode.VIEW,
+                confidence="high",
+                reason="The user requests approval of the structured result.",
+                evidence=(_classified_evidence(quote),),
+            ),
+        )
+    )
+
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
+        prompt_hash="a" * 64,
+        classification_input=_classification_input(quote),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    parsed = slot_classification_from_metadata(
+        metadata_with_slot_classification(None, classification)
+    )
+
+    assert parsed is not None
+    assert parsed.to_result().checkpoint_updates == result.checkpoint_updates
+    assert parsed.effective_retention_identities() == frozenset(
+        {("checkpoint_update", "structured_result")}
+    )
+
+
+def test_slot_classification_rejects_duplicate_checkpoint_producer() -> None:
+    quote = "Let a reviewer approve the report before delivery."
+    checkpoint = ClassifiedCheckpointUpdate(
+        operation="update",
+        producer_kind="report_text",
+        mode=FlowStepReviewMode.VIEW,
+        confidence="high",
+        reason="The user requests report approval.",
+        evidence=(_classified_evidence(quote),),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="must not duplicate checkpoint producers",
+    ):
+        slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(
+                outcome="resolved",
+                result=SlotClassificationResult(
+                    checkpoint_updates=(checkpoint, checkpoint)
+                ),
+            ),
+            prompt_hash="a" * 64,
+            classification_input=_classification_input(quote),
+            model="openai/gpt-test",
+            provider="openai",
+        )
+
+
+def test_checkpoint_update_metadata_requires_user_owned_evidence() -> None:
+    file_id = uuid4()
+    file_source_id = f"uploaded_file:{file_id}"
+    user_quote = "Let a reviewer approve the report before delivery."
+    attachment_quote = "Example report with an approval heading."
+
+    def persist(evidence: tuple[ClassifiedEvidence, ...]):
+        return slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(
+                outcome="resolved",
+                result=SlotClassificationResult(
+                    checkpoint_updates=(
+                        ClassifiedCheckpointUpdate(
+                            operation="update",
+                            producer_kind="report_text",
+                            mode=FlowStepReviewMode.VIEW,
+                            confidence="high",
+                            reason="The user requests report approval.",
+                            evidence=evidence,
+                        ),
+                    )
+                ),
+            ),
+            prompt_hash="a" * 64,
+            classification_input=SlotClassificationInput(
+                sources=(
+                    SlotClassificationSource(
+                        source_id=_CLASSIFICATION_SOURCE_ID,
+                        kind="user_message",
+                        text=user_quote,
+                        message_id="user-1",
+                    ),
+                    SlotClassificationSource(
+                        source_id=file_source_id,
+                        kind="uploaded_file",
+                        text=attachment_quote,
+                        file_id=file_id,
+                        coverage="fully_seen",
+                    ),
+                ),
+                current_user_message_id="user-1",
+            ),
+            model="openai/gpt-test",
+            provider="openai",
+        )
+
+    with pytest.raises(
+        ValidationError,
+        match="checkpoint updates require user-owned evidence",
+    ):
+        persist(
+            (
+                ClassifiedEvidence(
+                    source_id=file_source_id,
+                    quote=attachment_quote,
+                ),
+            )
+        )
+
+    mixed = persist(
+        (
+            _classified_evidence(user_quote),
+            ClassifiedEvidence(source_id=file_source_id, quote=attachment_quote),
+        )
+    )
+    assert len(mixed.checkpoint_updates) == 1
 
 
 def test_classifier_metadata_preserves_supplier_owned_identifiers() -> None:

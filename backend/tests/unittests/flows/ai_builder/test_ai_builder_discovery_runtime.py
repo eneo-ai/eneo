@@ -85,6 +85,7 @@ from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    CheckpointIntent,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
@@ -97,6 +98,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _make_response(content: object, *, complete_contract: bool = True) -> MagicMock:
@@ -111,6 +113,7 @@ def _make_response(content: object, *, complete_contract: bool = True) -> MagicM
                     {
                         "slots": [],
                         "file_roles": [],
+                        "checkpoint_updates": [],
                         "form_intake": None,
                         "output_schema_fields": None,
                         "example_output_constraints": None,
@@ -449,6 +452,7 @@ def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -634,10 +638,11 @@ def test_discovery_analysis_carries_classifier_assumptions() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_planning_state_skips_model_when_resolvable_slots_are_strong(
+async def test_runtime_planning_state_classifies_current_turn_when_slots_are_strong(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(json.dumps({}))
     monkeypatch.setattr(
         runtime,
         "build_planning_state_from_conversation",
@@ -653,8 +658,9 @@ async def test_runtime_planning_state_skips_model_when_resolvable_slots_are_stro
         )
     ).planning_state
 
-    assert state.resolved_slots.keys() == _resolved_state().resolved_slots.keys()
-    litellm_client.acompletion.assert_not_awaited()
+    assert state.resolved_slots["primary_runtime_input"].value == "text"
+    assert state.checkpoint_intents == []
+    litellm_client.acompletion.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1391,7 +1397,6 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
         ("{not-json", "parse_failed", False),
         ([{"unexpected": "content"}], "parse_failed", False),
         (json.dumps({"slots": []}), "parse_failed", False),
-        (None, "skipped_no_resolvable_slots", False),
     ],
     ids=[
         "valid-empty",
@@ -1400,7 +1405,6 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
         "malformed",
         "non-string",
         "invalid-top-level-contract",
-        "already-resolved",
     ],
 )
 @pytest.mark.asyncio
@@ -1410,13 +1414,6 @@ async def test_runtime_persists_classifier_attempt_outcomes_before_state_mutatio
     expected_outcome: str,
     expected_mutation: bool,
 ) -> None:
-    already_resolved = provider_content is None
-    if already_resolved:
-        monkeypatch.setattr(
-            runtime,
-            "build_planning_state_from_conversation",
-            lambda *_args, **_kwargs: _resolved_state(),
-        )
     litellm_client = AsyncMock()
     if isinstance(provider_content, dict):
         litellm_client.acompletion.return_value = _make_response(
@@ -1445,7 +1442,7 @@ async def test_runtime_persists_classifier_attempt_outcomes_before_state_mutatio
     assert (context.slot_classification_result is not None) == (
         expected_outcome == "resolved"
     )
-    expected_primary_input = expected_mutation or already_resolved
+    expected_primary_input = expected_mutation
     assert (
         context.planning_state.resolved_slots.get("primary_runtime_input") is not None
     ) == expected_primary_input
@@ -1454,13 +1451,81 @@ async def test_runtime_persists_classifier_attempt_outcomes_before_state_mutatio
             context.planning_state.resolved_slots["primary_runtime_input"].source
             == "model"
         )
-    if already_resolved:
-        litellm_client.acompletion.assert_not_awaited()
+    litellm_client.acompletion.assert_awaited_once()
+    assert context.slot_classification_metadata.prompt_hash is not None
+
+
+@pytest.mark.parametrize(
+    ("operation", "prompt", "expected_mode"),
+    [
+        (
+            "update",
+            "Let me edit the report before delivery.",
+            FlowStepReviewMode.EDIT,
+        ),
+        (
+            "clear",
+            "Do not pause for report approval anymore.",
+            None,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_resolved_session_classifies_current_checkpoint_change(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    prompt: str,
+    expected_mode: FlowStepReviewMode | None,
+) -> None:
+    state = _resolved_state()
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="report_text",
+            mode=FlowStepReviewMode.VIEW,
+            confidence="high",
+            evidence=["quote:user_message:prior:Approve the report."],
+        )
+    ]
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        MagicMock(return_value=state),
+    )
+    update: dict[str, object] = {
+        "operation": operation,
+        "producer_kind": "report_text",
+        "confidence": "high",
+        "reason": "The current user changed report review requirements.",
+        "evidence": [_cited(prompt)],
+    }
+    if expected_mode is not None:
+        update["mode"] = expected_mode.value
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps({"checkpoint_updates": [update]})
+    )
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content=prompt,
+            )
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+    )
+
+    litellm_client.acompletion.assert_awaited_once()
+    if expected_mode is None:
+        assert context.planning_state.checkpoint_intents == []
     else:
-        litellm_client.acompletion.assert_awaited_once()
-    assert (
-        context.slot_classification_metadata.prompt_hash is None
-    ) == already_resolved
+        assert [
+            (intent.producer_kind, intent.mode)
+            for intent in context.planning_state.checkpoint_intents
+        ] == [("report_text", expected_mode)]
 
 
 @pytest.mark.asyncio
@@ -1532,6 +1597,7 @@ async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -1663,6 +1729,7 @@ async def test_runtime_atomically_resolves_json_terminal_and_named_fields(
                     }
                 ],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -1770,6 +1837,7 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -1886,6 +1954,7 @@ async def test_runtime_discards_named_json_fields_for_non_json_terminal_output(
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",

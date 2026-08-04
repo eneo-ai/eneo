@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     schema_direction_option_values,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
@@ -55,6 +56,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _msg(
@@ -138,6 +140,11 @@ def _classifier_result_msg(
                 for file_role in result.file_roles
                 for evidence in file_role.evidence
             ],
+            *[
+                evidence
+                for checkpoint_update in result.checkpoint_updates
+                for evidence in checkpoint_update.evidence
+            ],
             *([] if result.form_intake is None else result.form_intake.evidence),
             *(
                 []
@@ -170,7 +177,10 @@ def _classifier_result_msg(
                     file_id=uploaded_file_id,
                     coverage="fully_seen" if uploaded_file_id is not None else None,
                 ),
-            )
+            ),
+            current_user_message_id=(
+                None if uploaded_file_id is not None else message_id
+            ),
         ),
         model="openai/gpt-test",
         provider="openai",
@@ -489,6 +499,126 @@ def test_byte_compaction_rebuild_matches_after_later_slot_correction() -> None:
         if (parsed := slot_classification_from_metadata(message.metadata)) is not None
     )
     assert classification.contradictions == ["conversation_compaction:bytes"]
+
+
+def test_compaction_retains_latest_checkpoint_update_for_rebuild() -> None:
+    first_quote = "Approve the report before delivery."
+    latest_quote = "Edit the report before delivery."
+    conversation = [
+        _classifier_result_msg(
+            "checkpoint-view",
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="update",
+                        producer_kind="report_text",
+                        mode=FlowStepReviewMode.VIEW,
+                        confidence="high",
+                        reason="Report approval requested.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:checkpoint-view",
+                                quote=first_quote,
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        _classifier_result_msg(
+            "checkpoint-edit",
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="update",
+                        producer_kind="report_text",
+                        mode=FlowStepReviewMode.EDIT,
+                        confidence="high",
+                        reason="Report editing requested.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:checkpoint-edit",
+                                quote=latest_quote,
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+    expected = build_planning_state_from_conversation(conversation)
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=5,
+        tail_messages=3,
+    )
+
+    assert build_planning_state_from_conversation(compacted) == expected
+    assert [
+        (intent.producer_kind, intent.mode.value)
+        for intent in expected.checkpoint_intents
+    ] == [("report_text", "edit")]
+
+
+def test_compaction_retains_checkpoint_revocation_for_rebuild() -> None:
+    quote = "Approve the report before delivery."
+    clear_quote = "Do not pause for report approval anymore."
+    conversation = [
+        _classifier_result_msg(
+            "checkpoint-required",
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="update",
+                        producer_kind="report_text",
+                        mode=FlowStepReviewMode.VIEW,
+                        confidence="high",
+                        reason="Report approval requested.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:checkpoint-required",
+                                quote=quote,
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        _classifier_result_msg(
+            "checkpoint-revoked",
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="clear",
+                        producer_kind="report_text",
+                        mode=None,
+                        confidence="high",
+                        reason="Report approval removed.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:checkpoint-revoked",
+                                quote=clear_quote,
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=5,
+        tail_messages=3,
+    )
+
+    assert build_planning_state_from_conversation(conversation).checkpoint_intents == []
+    assert build_planning_state_from_conversation(compacted).checkpoint_intents == []
 
 
 def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:

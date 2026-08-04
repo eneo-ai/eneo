@@ -79,6 +79,7 @@ def _evidence(quote: str, *, source_id: str = "user_message:user-1") -> dict[str
 _VALID_CLASSIFICATION_RESPONSE: dict[str, object] = {
     "slots": [],
     "file_roles": [],
+    "checkpoint_updates": [],
     "form_intake": None,
     "output_schema_fields": None,
     "example_output_constraints": None,
@@ -105,6 +106,101 @@ def _make_response(content: object) -> MagicMock:
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+def test_checkpoint_updates_require_current_user_owned_evidence() -> None:
+    user_quote = "Let the case worker edit the transcript before the analysis."
+    attachment_quote = "A sample transcript that mentions case workers."
+    attachment_source_id = f"uploaded_file:{uuid4()}"
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id="user_message:user-1",
+                kind="user_message",
+                text=user_quote,
+                message_id="user-1",
+            ),
+            SlotClassificationSource(
+                source_id=attachment_source_id,
+                kind="uploaded_file",
+                text=attachment_quote,
+                file_id=uuid4(),
+            ),
+        ),
+        current_user_message_id="user-1",
+    )
+
+    def parse(evidence: list[dict[str, str]], *, confidence: str = "high"):
+        return parse_slot_classification_response(
+            json.dumps(
+                {
+                    **_VALID_CLASSIFICATION_RESPONSE,
+                    "checkpoint_updates": [
+                        {
+                            "operation": "update",
+                            "producer_kind": "transcript",
+                            "mode": "edit",
+                            "confidence": confidence,
+                            "reason": "The user requests transcript editing.",
+                            "evidence": evidence,
+                        }
+                    ],
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=classification_input,
+        )
+
+    mixed = parse(
+        [
+            _evidence(user_quote),
+            _evidence(attachment_quote, source_id=attachment_source_id),
+        ]
+    )
+
+    assert mixed is not None
+    assert len(mixed.checkpoint_updates) == 1
+    assert mixed.checkpoint_updates[0].mode is not None
+    assert mixed.checkpoint_updates[0].mode.value == "edit"
+    assert parse([_evidence(attachment_quote, source_id=attachment_source_id)]) is None
+    assert parse([_evidence(user_quote)], confidence="low") is None
+
+
+def test_parser_accepts_cited_clear_and_rejects_duplicate_checkpoint_producer() -> None:
+    quote = "Do not pause for report approval anymore."
+    clear = {
+        "operation": "clear",
+        "producer_kind": "report_text",
+        "confidence": "high",
+        "reason": "The user removed report approval.",
+        "evidence": [_evidence(quote)],
+    }
+
+    accepted = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "checkpoint_updates": [clear],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+    duplicate = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "checkpoint_updates": [clear, clear],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert accepted is not None
+    assert accepted.checkpoint_updates[0].operation == "clear"
+    assert accepted.checkpoint_updates[0].mode is None
+    assert duplicate is None
 
 
 @pytest.mark.asyncio
@@ -205,6 +301,7 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -260,6 +357,7 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -313,6 +411,7 @@ def test_parser_refuses_unverified_output_schema_fields(
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -354,6 +453,7 @@ def test_parser_refuses_short_citations_of_nested_or_list_field_names(
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -397,6 +497,7 @@ def test_parser_accepts_only_cited_output_field_deltas(
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -434,6 +535,7 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "clear",
@@ -477,6 +579,7 @@ def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> N
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -520,6 +623,7 @@ def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries
                 **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "example_output_constraints": None,
                 "schema_direction": {
@@ -560,6 +664,7 @@ def test_parser_rejects_schema_direction_outside_complete_candidate_set() -> Non
                 **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "example_output_constraints": None,
                 "schema_direction": {
@@ -2093,7 +2198,7 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
 
     assert (
         f"1-{classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes for each "
-        "slot, file_role, and form_intake classification" in prompt
+        "slot, file_role, form_intake, and checkpoint_update classification" in prompt
     )
     assert (
         f"up to {classifier.OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
@@ -2277,6 +2382,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
                 "assumptions": [],
@@ -2309,6 +2415,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert schema["required"] == [
         "slots",
         "file_roles",
+        "checkpoint_updates",
         "form_intake",
         "output_schema_fields",
         "example_output_constraints",
@@ -2405,6 +2512,7 @@ async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
                 "assumptions": [],
@@ -2490,6 +2598,7 @@ async def test_classification_uses_real_resolved_route_without_discovery_call() 
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
                 "assumptions": [],

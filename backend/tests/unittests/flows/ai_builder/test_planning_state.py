@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
     AttachmentCoverage,
+    CheckpointIntent,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
@@ -45,8 +46,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_thirteen(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 13
+    def test_builder_schema_version_is_fourteen(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 14
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
@@ -529,6 +530,40 @@ class TestFileRoleEvidenceValidation:
                 planner_contract_version=PLANNER_CONTRACT_VERSION,
                 builder_schema_version=BUILDER_SCHEMA_VERSION,
                 file_roles=[file_role, file_role],
+            )
+
+    def test_checkpoint_intent_round_trips_with_closed_producer_and_mode(self) -> None:
+        intent = CheckpointIntent(
+            producer_kind="transcript",
+            mode="edit",
+            confidence="high",
+            evidence=["quote:user_message:user-1:edit the transcript before analysis"],
+        )
+        state = PlanningState.empty()
+        state.checkpoint_intents = [intent]
+
+        restored = PlanningState.model_validate_json(state.model_dump_json())
+
+        assert restored.checkpoint_intents == [intent]
+        assert restored.checkpoint_intents[0].mode.value == "edit"
+
+    def test_planning_state_rejects_duplicate_checkpoint_producer(self) -> None:
+        intent = CheckpointIntent(
+            producer_kind="report_text",
+            mode="view",
+            confidence="medium",
+            evidence=["quote:user_message:user-1:approve the report"],
+        )
+
+        with pytest.raises(
+            ValidationError,
+            match="checkpoint_intents must contain unique producer_kind values",
+        ):
+            PlanningState(
+                fcm_version=FCM_VERSION,
+                planner_contract_version=PLANNER_CONTRACT_VERSION,
+                builder_schema_version=BUILDER_SCHEMA_VERSION,
+                checkpoint_intents=[intent, intent],
             )
 
 
