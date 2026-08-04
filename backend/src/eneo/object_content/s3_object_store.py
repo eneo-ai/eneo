@@ -49,9 +49,6 @@ _SHA256_BYTES: Final = 32
 _BINDING_MEDIA_TYPE: Final = "application/vnd.eneo.object-content-binding"
 _BINDING_PREAMBLE: Final = b"eneo-object-content-binding-v1\n"
 _BINDING_PROBE_ID: Final = UUID(int=0)
-# The bucket is deployment-dedicated. A single reusable key bounds remote state
-# when an administrator fixes missing delete permission and retries the probe.
-_BINDING_PROBE_KEY: Final = "v1/.eneo-bindings/.probe-v1"
 
 
 class ObjectStoreError(RuntimeError):
@@ -347,19 +344,19 @@ class S3ObjectStore:
         await self._create_binding_at(self._binding_key, creation)
 
     async def probe_binding_creation(self) -> None:
-        """Exercise conditional marker creation using a probe-owned key."""
+        """Exercise conditional marker creation at this deployment's key."""
         creation = StoreBindingCreation(
             binding_id=_BINDING_PROBE_ID,
             body=_BINDING_PREAMBLE + _BINDING_PROBE_ID.bytes,
         )
         primary_error: BaseException | None = None
         try:
-            await self._create_binding_at(_BINDING_PROBE_KEY, creation)
+            await self._create_binding_at(self._binding_key, creation)
         except BaseException as error:
             primary_error = error
 
         try:
-            await self._delete_binding_probe(_BINDING_PROBE_KEY, creation)
+            await self._delete_binding_probe(self._binding_key, creation)
         except ObjectStoreProbeCleanupError as cleanup_error:
             if primary_error is not None:
                 raise cleanup_error from primary_error
