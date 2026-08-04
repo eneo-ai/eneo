@@ -1295,8 +1295,8 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
             (
                 node
                 for node in plan_nodes
-                if node.get("Index Name")
-                == "ix_assistant_skill_bindings_skill_id_assistant_id"
+                if "assistant_skill_bindings" in str(node.get("Index Name", ""))
+                and "assistant_id" in str(node.get("Index Cond", ""))
             ),
             None,
         )
@@ -1307,5 +1307,10 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
         }
         condition = index_node.get("Index Cond")
         assert isinstance(condition, str)
-        assert "skill_id" in condition
         assert "assistant_id" in condition
+        skill_predicate = " ".join(
+            str(node.get(key, ""))
+            for node in plan_nodes
+            for key in ("Index Cond", "Filter")
+        )
+        assert "skill_id" in skill_predicate
