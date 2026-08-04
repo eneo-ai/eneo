@@ -418,6 +418,23 @@ external release gate (item 10); BM0.2 is external (item 10).
     report-citations support-or-refuse choice stays a separate product
     decision; the typed refusal stands and detection may move earlier.
     Single repetition: directional, no variance claims.
+    Corpus investment (product-owner directive, 2026-08-04; full text in
+    local `fablereview/2026-08-04-corpus-strategy/`): keep the generic
+    primitives as release gates and add ~7–8 vertical journeys — the
+    four-case Sundsvall tjänsteskrivelse flagship family
+    (`interview_open_tjansteskrivelse`,
+    `advanced_sundsvall_tjansteskrivelse_runtime_sources_docx` with an
+    authentic anonymized DOCX template + six-document runtime fixture,
+    `edit_tjansteskrivelse_single_section` retention,
+    `failure_tjansteskrivelse_template_contract` typed degradation), then a
+    real `.oeflow` Open ePlatform food-registration migration, own-sewage
+    completeness with downstream-only rerun, and an elevresor governed
+    decision packet where deterministic capabilities own eligibility. All
+    checks deterministic; the flagship journey is measured EXECUTED
+    (per-step tokens, source duplication, local rerun). Synthetic fixtures
+    for the four skipped cases are configured first; the user supplies the
+    internal fixture packet (anonymized template, matter documents,
+    `.oeflow` export, three submissions).
     A 2026-08-03 source-verified Fable review ranks the product work without
     creating another roadmap. First preserve the classifier's validated
     explicit evidence level through `ResolvedSlot`, action admission, replay,
