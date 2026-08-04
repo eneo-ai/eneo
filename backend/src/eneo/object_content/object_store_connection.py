@@ -23,7 +23,11 @@ from eneo.object_content.configuration import (
     ObjectContentSettings,
     ObjectStoreOperatorSettings,
 )
-from eneo.object_content.content import capture_content
+from eneo.object_content.content import (
+    ObjectContentConfigurationError,
+    ObjectContentUnavailableError,
+    capture_content,
+)
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
     StoreBindingSnapshot,
@@ -38,6 +42,7 @@ from eneo.object_content.s3_object_store import (
     classify_object_store_failure,
     new_object_key,
 )
+from eneo.object_content.store_binding import ensure_store_binding_ready
 from eneo.settings.encryption_service import EncryptionService
 
 _PROBE_BODY = b"eneo-object-store-connection-probe-v1\n"
@@ -395,10 +400,24 @@ class ObjectStoreConnectionService:
             addressing_style=stored.addressing_style,
         )
         settings = self._settings(candidate, deployment_id=stored.deployment_id)
-        await self._probe(
-            settings,
-            binding=None if binding.unbound else binding,
-        )
+        if not binding.confirmed:
+            probe_settings = self._probe_settings(settings)
+            store = self._store_factory(probe_settings)
+            try:
+                await ensure_store_binding_ready(
+                    self._database,
+                    probe_settings,
+                    store,
+                )
+            except BaseException as error:
+                self._raise_probe_error(error)
+            finally:
+                await store.close()
+            async with self._transaction() as session:
+                binding = await ObjectContentReconciliationRepository(
+                    session
+                ).store_binding_snapshot()
+        await self._probe(settings, binding=binding)
 
         async with self._transaction(mutation=True) as session:
             return await ObjectStoreConnectionRepository(session).rotate_credentials(
@@ -556,36 +575,7 @@ class ObjectStoreConnectionService:
         *,
         binding: StoreBindingSnapshot | None,
     ) -> None:
-        delete_visibility_timeout_seconds = min(
-            settings.delete_visibility_timeout_seconds,
-            _PROBE_DELETE_TIMEOUT_SECONDS,
-        )
-        probe_settings = ObjectContentSettings.model_validate(
-            {
-                **settings.model_dump(),
-                "connect_timeout_seconds": min(
-                    settings.connect_timeout_seconds,
-                    _PROBE_REQUEST_TIMEOUT_SECONDS,
-                ),
-                "read_timeout_seconds": min(
-                    settings.read_timeout_seconds,
-                    _PROBE_REQUEST_TIMEOUT_SECONDS,
-                ),
-                "sdk_max_attempts": 1,
-                "readiness_timeout_seconds": min(
-                    settings.readiness_timeout_seconds,
-                    _PROBE_REQUEST_TIMEOUT_SECONDS,
-                ),
-                "readiness_max_attempts": 1,
-                "delete_visibility_timeout_seconds": (
-                    delete_visibility_timeout_seconds
-                ),
-                "delete_poll_interval_seconds": min(
-                    settings.delete_poll_interval_seconds,
-                    delete_visibility_timeout_seconds,
-                ),
-            }
-        )
+        probe_settings = self._probe_settings(settings)
         store = self._store_factory(probe_settings)
         key = new_object_key(probe_settings)
         upload_attempted = False
@@ -662,11 +652,56 @@ class ObjectStoreConnectionService:
             self._raise_probe_error(primary_error)
 
     @staticmethod
+    def _probe_settings(
+        settings: ObjectContentSettings,
+    ) -> ObjectContentSettings:
+        delete_visibility_timeout_seconds = min(
+            settings.delete_visibility_timeout_seconds,
+            _PROBE_DELETE_TIMEOUT_SECONDS,
+        )
+        return ObjectContentSettings.model_validate(
+            {
+                **settings.model_dump(),
+                "connect_timeout_seconds": min(
+                    settings.connect_timeout_seconds,
+                    _PROBE_REQUEST_TIMEOUT_SECONDS,
+                ),
+                "read_timeout_seconds": min(
+                    settings.read_timeout_seconds,
+                    _PROBE_REQUEST_TIMEOUT_SECONDS,
+                ),
+                "sdk_max_attempts": 1,
+                "readiness_timeout_seconds": min(
+                    settings.readiness_timeout_seconds,
+                    _PROBE_REQUEST_TIMEOUT_SECONDS,
+                ),
+                "readiness_max_attempts": 1,
+                "delete_visibility_timeout_seconds": (
+                    delete_visibility_timeout_seconds
+                ),
+                "delete_poll_interval_seconds": min(
+                    settings.delete_poll_interval_seconds,
+                    delete_visibility_timeout_seconds,
+                ),
+            }
+        )
+
+    @staticmethod
     def _raise_probe_error(error: BaseException) -> None:
         if isinstance(error, asyncio.CancelledError):
             raise error
         if isinstance(error, ObjectStoreConnectionError):
             raise error
+        if isinstance(error, ObjectContentConfigurationError):
+            raise ObjectStoreProbeBindingMismatch(
+                "Object storage does not match PostgreSQL"
+            ) from error
+        if isinstance(error, ObjectContentUnavailableError):
+            if isinstance(error.__cause__, ObjectStoreUnavailableError):
+                ObjectStoreConnectionService._raise_probe_error(error.__cause__)
+            raise ObjectStoreProbeUnavailable(
+                "Object storage could not establish its durable binding"
+            ) from error
         if isinstance(error, ObjectStoreBindingError):
             raise ObjectStoreProbeBindingMismatch(
                 "Object storage is bound to another Eneo installation"

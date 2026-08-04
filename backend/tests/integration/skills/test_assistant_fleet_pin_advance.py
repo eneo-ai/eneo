@@ -1297,6 +1297,7 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
                 for node in plan_nodes
                 if "assistant_skill_bindings" in str(node.get("Index Name", ""))
                 and "assistant_id" in str(node.get("Index Cond", ""))
+                and "skill_id" in str(node.get("Index Cond", ""))
             ),
             None,
         )
@@ -1308,9 +1309,25 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
         condition = index_node.get("Index Cond")
         assert isinstance(condition, str)
         assert "assistant_id" in condition
-        skill_predicate = " ".join(
-            str(node.get(key, ""))
-            for node in plan_nodes
-            for key in ("Index Cond", "Filter")
-        )
-        assert "skill_id" in skill_predicate
+        assert "skill_id" in condition
+        index_name = index_node.get("Index Name")
+        assert isinstance(index_name, str)
+        ordered_columns = (
+            await session.scalars(
+                sa.text(
+                    """
+                    SELECT attribute.attname
+                    FROM pg_index AS selected
+                    JOIN LATERAL unnest(selected.indkey)
+                        WITH ORDINALITY AS key(attnum, position) ON TRUE
+                    JOIN pg_attribute AS attribute
+                      ON attribute.attrelid = selected.indrelid
+                     AND attribute.attnum = key.attnum
+                    WHERE selected.indexrelid = to_regclass(:index_name)
+                    ORDER BY key.position
+                    """
+                ),
+                {"index_name": index_name},
+            )
+        ).all()
+        assert tuple(ordered_columns[:2]) == ("skill_id", "assistant_id")

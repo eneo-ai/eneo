@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -21,9 +22,11 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionService,
     ObjectStoreCredentialRotation,
     ObjectStoreDestinationAlreadyBound,
+    ObjectStoreProbeUnavailable,
 )
 from eneo.object_content.runtime import ObjectContentRuntime
-from eneo.object_content.s3_object_store import S3ObjectStore
+from eneo.object_content.s3_object_store import S3ObjectStore, StoreBindingCreation
+from eneo.object_content.store_binding import ensure_store_binding_ready
 from eneo.settings.encryption_service import EncryptionService
 from tests.integration.object_content.conftest import RealObjectStore
 
@@ -109,6 +112,86 @@ async def test_first_admin_connection_is_verified_encrypted_and_leaves_no_probe_
     finally:
         await store.close()
     assert page.objects == ()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotation_racing_initial_binding_cannot_remove_the_durable_marker(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _service(object_content_database, real_object_store.settings)
+    async with object_content_database.session() as session, session.begin():
+        actor_user_id = (await session.scalars(select(Users.id))).one()
+
+    stored = await service.create(
+        _candidate(real_object_store.settings),
+        actor_user_id=actor_user_id,
+    )
+    connected_settings = service.settings_for(stored)
+    readiness_store = S3ObjectStore(connected_settings)
+
+    rotation_has_unbound_snapshot = asyncio.Event()
+    release_rotation = asyncio.Event()
+    binding_creation_started = asyncio.Event()
+    release_binding_creation = asyncio.Event()
+    original_create_binding = readiness_store.create_binding
+
+    async def wait_before_rotation_binding(
+        database: DatabaseSessionManager,
+        settings: ObjectContentSettings,
+        store: S3ObjectStore,
+    ) -> None:
+        rotation_has_unbound_snapshot.set()
+        await release_rotation.wait()
+        await ensure_store_binding_ready(database, settings, store)
+
+    async def pause_binding_creation(creation: StoreBindingCreation) -> None:
+        binding_creation_started.set()
+        await release_binding_creation.wait()
+        await original_create_binding(creation)
+
+    monkeypatch.setattr(
+        "eneo.object_content.object_store_connection.ensure_store_binding_ready",
+        wait_before_rotation_binding,
+    )
+    monkeypatch.setattr(readiness_store, "create_binding", pause_binding_creation)
+
+    rotation = asyncio.create_task(
+        service.rotate_credentials(
+            ObjectStoreCredentialRotation(
+                expected_revision=stored.revision,
+                access_key_id=real_object_store.settings.access_key_id,
+                secret_access_key=real_object_store.settings.secret_access_key,
+            ),
+            actor_user_id=actor_user_id,
+        )
+    )
+    await rotation_has_unbound_snapshot.wait()
+
+    readiness = asyncio.create_task(
+        ensure_store_binding_ready(
+            object_content_database,
+            connected_settings,
+            readiness_store,
+        )
+    )
+    await binding_creation_started.wait()
+    release_rotation.set()
+    with pytest.raises(ObjectStoreProbeUnavailable):
+        await rotation
+
+    release_binding_creation.set()
+    await readiness
+
+    async with object_content_database.session() as session, session.begin():
+        state = await session.get(ObjectContentReconciliationState, 1)
+        assert state is not None
+        assert state.store_binding_id is not None
+        assert state.store_binding_confirmed_at is not None
+        assert await readiness_store.verify_binding(state.store_binding_id)
+    await readiness_store.close()
 
 
 @pytest.mark.integration

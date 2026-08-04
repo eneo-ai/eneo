@@ -6,6 +6,7 @@ from typing import cast
 from uuid import UUID
 
 import pytest
+from botocore.exceptions import ClientError
 from cryptography.fernet import Fernet
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionService,
     ObjectStoreCredentialRotation,
     ObjectStoreEndpointNotPermitted,
+    ObjectStoreProbeAuthenticationFailed,
     ObjectStoreProbeCleanupFailed,
     ObjectStoreProbeConnectionFailed,
     ObjectStoreProbeUnavailable,
@@ -73,6 +75,20 @@ class _ListDeniedStore(_DelayedUploadStore):
     async def check_ready(self) -> None:
         self.readiness_checks += 1
         raise ObjectStoreUnavailableError("list permission denied")
+
+
+class _AuthenticationDeniedStore(_DelayedUploadStore):
+    async def check_ready(self) -> None:
+        try:
+            raise ClientError(
+                {
+                    "Error": {"Code": "AccessDenied"},
+                    "ResponseMetadata": {"HTTPStatusCode": 403},
+                },
+                "ListObjectsV2",
+            )
+        except ClientError as error:
+            raise ObjectStoreUnavailableError("authentication denied") from error
 
 
 class _CleanupFailureStore(_DelayedUploadStore):
@@ -418,6 +434,65 @@ async def test_probe_caps_preserve_valid_operator_timeout_relationships() -> Non
 
 
 @pytest.mark.asyncio
+async def test_unbound_rotation_keeps_probe_bounds_and_authentication_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored = _stored_connection()
+    observed_settings: ObjectContentSettings | None = None
+    store = _AuthenticationDeniedStore()
+
+    def store_factory(settings: ObjectContentSettings) -> S3ObjectStore:
+        nonlocal observed_settings
+        observed_settings = settings
+        return cast(S3ObjectStore, store)
+
+    service = ObjectStoreConnectionService(
+        database=cast(DatabaseSessionManager, _SequencedCommitFailureDatabase()),
+        core_settings=ObjectContentCoreSettings(_env_file=None),
+        operator_settings=ObjectStoreOperatorSettings(
+            _env_file=None,
+            admin_allowed_endpoint_origins=("https://objects.example.test",),
+        ),
+        encryption=EncryptionService(Fernet.generate_key().decode()),
+        store_factory=store_factory,
+    )
+
+    async def get_connection(
+        _repository: ObjectStoreConnectionRepository,
+    ) -> StoredObjectStoreConnection:
+        return stored
+
+    async def unbound_snapshot(
+        _repository: ObjectContentReconciliationRepository,
+    ) -> StoreBindingSnapshot:
+        return StoreBindingSnapshot(None, None, False)
+
+    monkeypatch.setattr(ObjectStoreConnectionRepository, "get", get_connection)
+    monkeypatch.setattr(
+        ObjectContentReconciliationRepository,
+        "store_binding_snapshot",
+        unbound_snapshot,
+    )
+
+    with pytest.raises(ObjectStoreProbeAuthenticationFailed):
+        await service.rotate_credentials(
+            ObjectStoreCredentialRotation(
+                expected_revision=stored.revision,
+                access_key_id="replacement-access",
+                secret_access_key="replacement-secret",
+            ),
+            actor_user_id=stored.deployment_id,
+        )
+
+    assert observed_settings is not None
+    assert observed_settings.connect_timeout_seconds == 5
+    assert observed_settings.read_timeout_seconds == 15
+    assert observed_settings.sdk_max_attempts == 1
+    assert observed_settings.readiness_timeout_seconds == 2
+    assert observed_settings.readiness_max_attempts == 1
+
+
+@pytest.mark.asyncio
 async def test_connection_database_failure_uses_typed_contract() -> None:
     with pytest.raises(ObjectStoreConnectionDatabaseUnavailable):
         await _service(_DelayedUploadStore(), _UnavailableDatabase()).get()
@@ -511,6 +586,12 @@ async def test_admin_mutations_report_unknown_commit_outcome(
     async def unbound_snapshot(
         _repository: ObjectContentReconciliationRepository,
     ) -> StoreBindingSnapshot:
+        if operation == "rotate":
+            return StoreBindingSnapshot(
+                stored.deployment_id,
+                stored.deployment_id,
+                True,
+            )
         return StoreBindingSnapshot(None, None, False)
 
     async def probe_succeeds(*_args: object, **_kwargs: object) -> None:
