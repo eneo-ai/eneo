@@ -48,6 +48,10 @@ if TYPE_CHECKING:
 _SHA256_BYTES: Final = 32
 _BINDING_MEDIA_TYPE: Final = "application/vnd.eneo.object-content-binding"
 _BINDING_PREAMBLE: Final = b"eneo-object-content-binding-v1\n"
+_BINDING_PROBE_ID: Final = UUID(int=0)
+# The bucket is deployment-dedicated. A single reusable key bounds remote state
+# when an administrator fixes missing delete permission and retries the probe.
+_BINDING_PROBE_KEY: Final = "v1/.eneo-bindings/.probe-v1"
 
 
 class ObjectStoreError(RuntimeError):
@@ -67,6 +71,10 @@ class ObjectStoreIntegrityError(ObjectStoreError):
 
 
 class ObjectStoreBindingError(ObjectStoreError):
+    pass
+
+
+class ObjectStoreProbeCleanupError(ObjectStoreError):
     pass
 
 
@@ -306,8 +314,11 @@ class S3ObjectStore:
 
     async def verify_binding(self, binding_id: UUID) -> bool:
         """Return whether this store has this database's immutable marker."""
+        return await self._verify_binding_at(self._binding_key, binding_id)
+
+    async def _verify_binding_at(self, key: str, binding_id: UUID) -> bool:
         expected = _BINDING_PREAMBLE + binding_id.bytes
-        observed = await self._read_binding()
+        observed = await self._read_binding(key)
         if observed is None:
             return False
         if observed != expected:
@@ -333,11 +344,39 @@ class S3ObjectStore:
 
     async def create_binding(self, creation: StoreBindingCreation) -> None:
         """Create a preflighted marker without replacing an existing marker."""
+        await self._create_binding_at(self._binding_key, creation)
+
+    async def probe_binding_creation(self) -> None:
+        """Exercise conditional marker creation using a probe-owned key."""
+        creation = StoreBindingCreation(
+            binding_id=_BINDING_PROBE_ID,
+            body=_BINDING_PREAMBLE + _BINDING_PROBE_ID.bytes,
+        )
+        primary_error: BaseException | None = None
+        try:
+            await self._create_binding_at(_BINDING_PROBE_KEY, creation)
+        except BaseException as error:
+            primary_error = error
+
+        try:
+            await self._delete_binding_probe(_BINDING_PROBE_KEY, creation)
+        except ObjectStoreProbeCleanupError as cleanup_error:
+            if primary_error is not None:
+                raise cleanup_error from primary_error
+            raise
+        if primary_error is not None:
+            raise primary_error
+
+    async def _create_binding_at(
+        self,
+        key: str,
+        creation: StoreBindingCreation,
+    ) -> None:
         try:
             await asyncio.to_thread(
                 self._readiness_client.put_object,
                 Bucket=self._settings.bucket,
-                Key=self._binding_key,
+                Key=key,
                 Body=creation.body,
                 ContentLength=len(creation.body),
                 ContentType=_BINDING_MEDIA_TYPE,
@@ -353,10 +392,38 @@ class S3ObjectStore:
                 "Object content storage binding failed"
             ) from error
 
-        if not await self.verify_binding(creation.binding_id):
+        if not await self._verify_binding_at(key, creation.binding_id):
             raise ObjectStoreBindingError(
                 "Object content storage binding marker was not persisted"
             )
+
+    async def _delete_binding_probe(
+        self,
+        key: str,
+        creation: StoreBindingCreation,
+    ) -> None:
+        try:
+            if not await self._verify_binding_at(key, creation.binding_id):
+                return
+            await asyncio.to_thread(
+                self._readiness_client.delete_object,
+                Bucket=self._settings.bucket,
+                Key=key,
+            )
+
+            deadline = monotonic() + self._settings.delete_visibility_timeout_seconds
+            while await self._verify_binding_at(key, creation.binding_id):
+                if monotonic() >= deadline:
+                    raise ObjectStoreProbeCleanupError(
+                        "Object content storage binding probe deletion was not visible"
+                    )
+                await asyncio.sleep(self._settings.delete_poll_interval_seconds)
+        except ObjectStoreProbeCleanupError:
+            raise
+        except (ObjectStoreError, BotoCoreError, ClientError) as error:
+            raise ObjectStoreProbeCleanupError(
+                "Object content storage binding probe cleanup failed"
+            ) from error
 
     async def upload(
         self,
@@ -929,12 +996,12 @@ class S3ObjectStore:
     def _binding_key(self) -> str:
         return f"v1/.eneo-bindings/{self._settings.deployment_id.hex}"
 
-    async def _read_binding(self) -> bytes | None:
+    async def _read_binding(self, key: str) -> bytes | None:
         try:
             result = await asyncio.to_thread(
                 self._readiness_client.get_object,
                 Bucket=self._settings.bucket,
-                Key=self._binding_key,
+                Key=key,
             )
         except ClientError as error:
             if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:

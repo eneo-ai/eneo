@@ -16,7 +16,7 @@ from eneo.object_content.configuration import (
     ObjectContentSettings,
     ObjectStoreOperatorSettings,
 )
-from eneo.object_content.content import CapturedContent
+from eneo.object_content.content import CapturedContent, ContentRead
 from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionActor,
     ObjectStoreConnectionDatabaseUnavailable,
@@ -36,9 +36,9 @@ from eneo.object_content.reconciliation_repository import (
     StoreBindingSnapshot,
 )
 from eneo.object_content.s3_object_store import (
+    ObjectStoreProbeCleanupError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
-    StoreBindingCreation,
 )
 from eneo.settings.encryption_service import EncryptionService
 
@@ -48,10 +48,7 @@ class _DelayedUploadStore:
         self.object_exists = False
         self.closed = False
 
-    async def prepare_binding_creation(
-        self,
-        _binding_id: UUID,
-    ) -> StoreBindingCreation | None:
+    async def probe_binding_creation(self) -> None:
         return None
 
     async def check_ready(self) -> None:
@@ -105,6 +102,56 @@ class _ExternallyCancelledStore(_DelayedUploadStore):
     async def delete_and_confirm(self, _key: str) -> None:
         self.object_exists = False
         self.cleanup_complete = True
+
+
+class _CancelledBindingCleanupStore(_DelayedUploadStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.probe_started = asyncio.Event()
+        self.release_probe = asyncio.Event()
+
+    async def probe_binding_creation(self) -> None:
+        self.probe_started.set()
+        await self.release_probe.wait()
+        raise ObjectStoreProbeCleanupError("binding probe cleanup failed")
+
+
+class _ConditionalBindingRejectedStore(_DelayedUploadStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.payload = b""
+        self.binding_write_attempted = False
+
+    async def probe_binding_creation(self) -> None:
+        self.binding_write_attempted = True
+        raise ObjectStoreUnavailableError("conditional writes are not supported")
+
+    async def upload(self, _key: str, content: CapturedContent) -> None:
+        self.payload = content.file.read()
+        self.object_exists = True
+
+    @asynccontextmanager
+    async def open_verified_read(
+        self,
+        _key: str,
+        *,
+        expected_size_bytes: int,
+        expected_media_type: str,
+        **_kwargs: object,
+    ) -> AsyncGenerator[ContentRead]:
+        async def chunks() -> AsyncGenerator[bytes]:
+            yield self.payload
+
+        stream = chunks()
+        try:
+            yield ContentRead(
+                chunks=stream,
+                content_length=expected_size_bytes,
+                media_type=expected_media_type,
+                content_range=None,
+            )
+        finally:
+            await stream.aclose()
 
 
 class _UnavailableDatabase:
@@ -234,6 +281,140 @@ async def test_probe_preserves_external_cancellation_after_cleanup(
     assert store.object_exists is False
     assert store.cleanup_complete is True
     assert store.closed is True
+
+
+@pytest.mark.asyncio
+async def test_binding_probe_cleanup_does_not_replace_external_cancellation() -> None:
+    store = _CancelledBindingCleanupStore()
+    probe = asyncio.create_task(_service(store)._probe(_settings(), binding=None))
+    await store.probe_started.wait()
+
+    probe.cancel()
+    store.release_probe.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await probe
+
+    assert store.closed is True
+
+
+@pytest.mark.asyncio
+async def test_binding_probe_cleanup_failure_wins_after_internal_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _CancelledBindingCleanupStore()
+    monkeypatch.setattr(
+        "eneo.object_content.object_store_connection._PROBE_END_TO_END_TIMEOUT_SECONDS",
+        0.01,
+    )
+    probe = asyncio.create_task(_service(store)._probe(_settings(), binding=None))
+    await store.probe_started.wait()
+    await asyncio.sleep(0.02)
+    store.release_probe.set()
+
+    with pytest.raises(ObjectStoreProbeCleanupFailed):
+        await probe
+
+    assert store.closed is True
+
+
+@pytest.mark.asyncio
+async def test_connection_is_not_saved_when_conditional_binding_write_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored = _stored_connection()
+    store = _ConditionalBindingRejectedStore()
+    database = _SequencedCommitFailureDatabase()
+    service = _service(
+        store,
+        database,
+        operator_settings=ObjectStoreOperatorSettings(
+            _env_file=None,
+            admin_allowed_endpoint_origins=("https://objects.example.test",),
+        ),
+    )
+    persistence_attempted = False
+
+    async def no_connection(
+        _repository: ObjectStoreConnectionRepository,
+    ) -> StoredObjectStoreConnection | None:
+        return None
+
+    async def unbound_snapshot(
+        _repository: ObjectContentReconciliationRepository,
+    ) -> StoreBindingSnapshot:
+        return StoreBindingSnapshot(None, None, False)
+
+    async def persist_connection(
+        _repository: ObjectStoreConnectionRepository,
+        **_kwargs: object,
+    ) -> StoredObjectStoreConnection:
+        nonlocal persistence_attempted
+        persistence_attempted = True
+        return stored
+
+    monkeypatch.setattr(ObjectStoreConnectionRepository, "get", no_connection)
+    monkeypatch.setattr(
+        ObjectContentReconciliationRepository,
+        "store_binding_snapshot",
+        unbound_snapshot,
+    )
+    monkeypatch.setattr(ObjectStoreConnectionRepository, "create", persist_connection)
+
+    with pytest.raises(ObjectStoreProbeUnavailable):
+        await service.create(
+            ObjectStoreConnectionInput(
+                endpoint_url=stored.endpoint_url,
+                region=stored.region,
+                bucket=stored.bucket,
+                access_key_id="access",
+                secret_access_key="secret",
+            ),
+            actor_user_id=stored.deployment_id,
+        )
+
+    assert store.binding_write_attempted is True
+    assert persistence_attempted is False
+    assert database.transactions == 1
+
+
+@pytest.mark.asyncio
+async def test_probe_caps_preserve_valid_operator_timeout_relationships() -> None:
+    store = _ConditionalBindingRejectedStore()
+    observed_settings: ObjectContentSettings | None = None
+
+    def store_factory(settings: ObjectContentSettings) -> S3ObjectStore:
+        nonlocal observed_settings
+        observed_settings = settings
+        return cast(S3ObjectStore, store)
+
+    service = ObjectStoreConnectionService(
+        database=cast(DatabaseSessionManager, object()),
+        core_settings=ObjectContentCoreSettings(_env_file=None),
+        operator_settings=ObjectStoreOperatorSettings(_env_file=None),
+        encryption=EncryptionService(Fernet.generate_key().decode()),
+        store_factory=store_factory,
+    )
+    settings = ObjectContentSettings.model_validate(
+        {
+            **_settings().model_dump(),
+            "connect_timeout_seconds": 1.0,
+            "read_timeout_seconds": 1.0,
+            "sdk_max_attempts": 1,
+            "reconciliation_lease_seconds": 7,
+            "delete_visibility_timeout_seconds": 30,
+            "delete_poll_interval_seconds": 20.0,
+        }
+    )
+
+    with pytest.raises(ObjectStoreProbeUnavailable):
+        await service._probe(settings, binding=None)
+
+    assert observed_settings is not None
+    assert observed_settings.connect_timeout_seconds == 1.0
+    assert observed_settings.read_timeout_seconds == 1.0
+    assert observed_settings.delete_visibility_timeout_seconds == 10
+    assert observed_settings.delete_poll_interval_seconds == 10
 
 
 @pytest.mark.asyncio

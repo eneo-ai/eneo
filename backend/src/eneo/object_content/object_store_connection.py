@@ -32,6 +32,7 @@ from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
     ObjectStoreFailureKind,
     ObjectStoreIntegrityError,
+    ObjectStoreProbeCleanupError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
     classify_object_store_failure,
@@ -555,29 +556,54 @@ class ObjectStoreConnectionService:
         *,
         binding: StoreBindingSnapshot | None,
     ) -> None:
+        delete_visibility_timeout_seconds = min(
+            settings.delete_visibility_timeout_seconds,
+            _PROBE_DELETE_TIMEOUT_SECONDS,
+        )
         probe_settings = ObjectContentSettings.model_validate(
             {
                 **settings.model_dump(),
-                "connect_timeout_seconds": _PROBE_REQUEST_TIMEOUT_SECONDS,
-                "read_timeout_seconds": _PROBE_REQUEST_TIMEOUT_SECONDS,
-                "sdk_max_attempts": 1,
-                "readiness_timeout_seconds": _PROBE_REQUEST_TIMEOUT_SECONDS,
-                "readiness_max_attempts": 1,
-                "binding_claim_seconds": max(
-                    settings.binding_claim_seconds,
-                    int(_PROBE_END_TO_END_TIMEOUT_SECONDS),
+                "connect_timeout_seconds": min(
+                    settings.connect_timeout_seconds,
+                    _PROBE_REQUEST_TIMEOUT_SECONDS,
                 ),
-                "delete_visibility_timeout_seconds": _PROBE_DELETE_TIMEOUT_SECONDS,
+                "read_timeout_seconds": min(
+                    settings.read_timeout_seconds,
+                    _PROBE_REQUEST_TIMEOUT_SECONDS,
+                ),
+                "sdk_max_attempts": 1,
+                "readiness_timeout_seconds": min(
+                    settings.readiness_timeout_seconds,
+                    _PROBE_REQUEST_TIMEOUT_SECONDS,
+                ),
+                "readiness_max_attempts": 1,
+                "delete_visibility_timeout_seconds": (
+                    delete_visibility_timeout_seconds
+                ),
+                "delete_poll_interval_seconds": min(
+                    settings.delete_poll_interval_seconds,
+                    delete_visibility_timeout_seconds,
+                ),
             }
         )
         store = self._store_factory(probe_settings)
         key = new_object_key(probe_settings)
         upload_attempted = False
         primary_error: BaseException | None = None
+        binding_cleanup_error: ObjectStoreProbeCleanupError | None = None
+
+        async def probe_binding_creation() -> None:
+            nonlocal binding_cleanup_error
+            try:
+                await store.probe_binding_creation()
+            except ObjectStoreProbeCleanupError as error:
+                binding_cleanup_error = error
+                raise
+
         try:
             async with asyncio.timeout(_PROBE_END_TO_END_TIMEOUT_SECONDS):
                 if binding is None:
-                    await store.prepare_binding_creation(uuid4())
+                    await _await_quiescent(probe_binding_creation())
                 else:
                     await store.check_ready()
                     if (
@@ -612,7 +638,11 @@ class ObjectStoreConnectionService:
                             "Object-store probe read returned different bytes"
                         )
         except BaseException as error:
-            primary_error = error
+            primary_error = (
+                binding_cleanup_error
+                if isinstance(error, TimeoutError) and binding_cleanup_error is not None
+                else error
+            )
         finally:
             try:
                 if upload_attempted:
@@ -625,14 +655,6 @@ class ObjectStoreConnectionService:
                         primary_error = ObjectStoreProbeCleanupFailed(
                             "Object-store probe cleanup could not be confirmed"
                         )
-                if binding is None and primary_error is None:
-                    try:
-                        await store.prepare_binding_creation(uuid4())
-                    except (
-                        ObjectStoreUnavailableError,
-                        ObjectStoreIntegrityError,
-                    ) as error:
-                        primary_error = error
             finally:
                 await store.close()
 
@@ -652,6 +674,10 @@ class ObjectStoreConnectionService:
         if isinstance(error, ObjectStoreIntegrityError):
             raise ObjectStoreProbeIntegrityFailed(
                 "Object storage did not preserve the probe bytes"
+            ) from error
+        if isinstance(error, ObjectStoreProbeCleanupError):
+            raise ObjectStoreProbeCleanupFailed(
+                "Object-store binding probe cleanup could not be confirmed"
             ) from error
         if isinstance(error, TimeoutError):
             raise ObjectStoreProbeConnectionFailed(
