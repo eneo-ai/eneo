@@ -277,6 +277,7 @@ def test_settings(
         # Security
         url_signing_key="test_url_signing_key",
         eneo_super_api_key="test-super-admin-key-for-integration-tests",
+        eneo_super_duper_api_key="test-super-duper-key-for-integration-tests",
         # LLM API Keys - CRITICAL: Set to None to prevent reading from environment
         # Integration tests should NEVER use real API keys
         openai_api_key=None,
