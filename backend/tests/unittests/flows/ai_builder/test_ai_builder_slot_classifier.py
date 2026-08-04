@@ -27,6 +27,9 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.flows.ai_builder import (
     ai_builder_error_contract as error_contract_module,
 )
+from eneo.flows.ai_builder import (
+    ai_builder_slot_classification_contract as classification_contract,
+)
 from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -39,13 +42,15 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTele
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedSchemaDirection,
     SlotClassificationInput,
     SlotClassificationSource,
-    classify_slots,
     parse_slot_classification_response,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    classify_slots,
     slot_classification_prompt_hash,
 )
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -1753,7 +1758,7 @@ def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
         litellm_model="openai/gpt-test",
         provider="openai",
         supported_model_kwargs=_route().supported_model_kwargs,
-        bias=classifier.SlotClassificationBias(
+        bias=classification_contract.SlotClassificationBias(
             target_slot_name="terminal_output",
             asked_question_id="final_output_mode",
             answer_source_id="user_message:user-1",
@@ -2085,7 +2090,7 @@ def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
         classification_input=_classification_input("en fil jag kan ladda ner"),
         allowed_slot_values={"terminal_output": frozenset({"docx_document"})},
         ui_language="sv",
-        bias=classifier.SlotClassificationBias(
+        bias=classification_contract.SlotClassificationBias(
             target_slot_name="terminal_output",
             asked_question_id="final_output_mode",
             answer_source_id="user_message:user-1",
@@ -2197,14 +2202,17 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
     prompt = "\n".join(message["content"] for message in messages)
 
     assert (
-        f"1-{classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes for each "
+        f"1-{classification_contract.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes for each "
         "slot, file_role, form_intake, and checkpoint_update classification" in prompt
     )
     assert (
-        f"up to {classifier.OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
+        f"up to {classification_contract.OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
         "quotes" in prompt
     )
-    assert f"at most {classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH}" in prompt
+    assert (
+        f"at most {classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH}"
+        in prompt
+    )
     assert "exact_quote_str" in prompt
     assert "form_intake" in prompt
     assert (
@@ -2407,7 +2415,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert response_format["type"] == "json_schema"
     json_schema = response_format["json_schema"]
     assert json_schema["name"] == (
-        f"ai_builder_slot_classification_v{classifier.SLOT_CLASSIFICATION_SCHEMA_VERSION}"
+        f"ai_builder_slot_classification_v{classification_contract.SLOT_CLASSIFICATION_SCHEMA_VERSION}"
     )
     assert json_schema["strict"] is False
 
@@ -2441,7 +2449,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert "maxItems" not in output_fields_schema["properties"]["field_names"]
     assert "maxItems" not in output_fields_schema["properties"]["removed_field_names"]
     assert output_fields_schema["properties"]["field_names"]["items"]["maxLength"] == (
-        classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH
+        classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH
     )
     slot_schema = schema["properties"]["slots"]
     assert slot_schema["maxItems"] == 1
@@ -2462,25 +2470,25 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     ]
     assert (
         slot_variant["properties"]["reason"]["maxLength"]
-        == classifier.CLASSIFICATION_REASON_MAX_LENGTH
+        == classification_contract.CLASSIFICATION_REASON_MAX_LENGTH
     )
     assert (
         slot_variant["properties"]["evidence"]["maxItems"]
-        == classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS
+        == classification_contract.CLASSIFICATION_EVIDENCE_MAX_ITEMS
     )
     assert (
         slot_variant["properties"]["evidence"]["items"]["properties"]["quote"][
             "maxLength"
         ]
-        == classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH
+        == classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH
     )
     assert (
         schema["properties"]["assumptions"]["maxItems"]
-        == classifier.CLASSIFICATION_NOTES_MAX_ITEMS
+        == classification_contract.CLASSIFICATION_NOTES_MAX_ITEMS
     )
     assert (
         schema["properties"]["assumptions"]["items"]["maxLength"]
-        == classifier.CLASSIFICATION_NOTE_MAX_LENGTH
+        == classification_contract.CLASSIFICATION_NOTE_MAX_LENGTH
     )
     example_schema = schema["properties"]["example_output_constraints"]["anyOf"][0]
     assert example_schema["required"] == [
@@ -2493,14 +2501,14 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert example_schema["properties"]["source_file_ids"]["maxItems"] == 100
     assert (
         example_schema["properties"]["headings"]["maxItems"]
-        == classifier.EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS
+        == classification_contract.EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS
     )
     assert example_schema["properties"]["style_constraints"]["items"]["properties"][
         "category"
     ]["enum"] == ["tone", "detail_level", "organization", "formatting", "audience"]
     assert (
         example_schema["properties"]["evidence"]["maxItems"]
-        == classifier.EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS
+        == classification_contract.EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS
     )
 
 

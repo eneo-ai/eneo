@@ -115,7 +115,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendTurn,
     SessionTurnAcceptance,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedSlot,
     SlotClassificationInput,

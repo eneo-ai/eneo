@@ -106,7 +106,9 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreflight,
     SessionTurnPreparationBaseline,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import SlotClassificationAttempt
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationAttempt,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     ConfirmRequirements,

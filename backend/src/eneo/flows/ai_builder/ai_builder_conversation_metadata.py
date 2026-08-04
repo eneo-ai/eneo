@@ -42,7 +42,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultObligation,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import canonical_schema_bytes
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     CLASSIFICATION_NOTE_MAX_LENGTH,

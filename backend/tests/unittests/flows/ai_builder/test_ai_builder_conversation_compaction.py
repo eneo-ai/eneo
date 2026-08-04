@@ -35,7 +35,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     resolve_structured_schema_direction,
     schema_direction_option_values,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,

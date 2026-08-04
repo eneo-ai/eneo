@@ -76,7 +76,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SchemaLimitExceeded,
     build_schema_evidence,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedFileRole,
     ClassifiedFormIntake,

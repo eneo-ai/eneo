@@ -35,7 +35,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     tool_calls_from_message,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     ClassifiedCheckpointUpdate,
     ClassifiedEvidence,

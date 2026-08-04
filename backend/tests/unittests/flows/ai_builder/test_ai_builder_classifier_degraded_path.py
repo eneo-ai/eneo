@@ -17,7 +17,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_runtime_discovery_context,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedSlot,
     SlotClassificationAttempt,

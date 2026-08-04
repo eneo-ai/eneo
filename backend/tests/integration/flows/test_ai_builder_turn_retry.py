@@ -1174,7 +1174,7 @@ async def _run_child(command: _ChildCommand) -> NoReturn:
         )
     elif command.mode is _CrashMode.AFTER_PROVIDER_RETURN:
         failure_patch = patch(
-            "eneo.flows.ai_builder.ai_builder_slot_classifier.parse_slot_classification_response",
+            "eneo.flows.ai_builder.ai_builder_slot_classification_contract.parse_slot_classification_response",
             new=exit_after_provider_return,
         )
     else:

@@ -63,7 +63,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
     build_schema_evidence,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
     ClassifiedFileRole,
@@ -75,6 +75,8 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
     SlotClassificationSource,
     parse_slot_classification_response,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     slot_classification_provider_identity,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (

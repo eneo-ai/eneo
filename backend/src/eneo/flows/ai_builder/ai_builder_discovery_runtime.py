@@ -57,7 +57,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     resolve_example_output_schema_inference,
     resolve_structured_schema_direction,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedOutputSchemaFieldDelta,
     ClassifiedSchemaDirection,
     SlotClassificationAttempt,
@@ -65,6 +65,8 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     classify_slots,
     slot_classification_prompt_hash,
     slot_classification_provider_identity,

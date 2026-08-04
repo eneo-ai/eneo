@@ -63,7 +63,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreparationBaseline,
 )
 from eneo.flows.ai_builder.ai_builder_signal_confidence import ScoredSignal
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedSlot,
     SlotClassificationAttempt,

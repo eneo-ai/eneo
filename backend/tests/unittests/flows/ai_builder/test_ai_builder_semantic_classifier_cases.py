@@ -35,12 +35,12 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     SlotClassificationBias,
     SlotClassificationSource,
-    classify_slots,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classifier import classify_slots
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )

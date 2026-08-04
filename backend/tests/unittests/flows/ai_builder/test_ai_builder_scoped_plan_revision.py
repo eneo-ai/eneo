@@ -39,7 +39,7 @@ from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
     process_scoped_step_revision_if_requested,
     run_scoped_plan_revision_attempt,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedSlot,
     SlotClassificationAttempt,

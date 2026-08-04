@@ -46,7 +46,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     canonical_schema_bytes,
     derive_freeform_schema_candidates,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CheckpointUpdateOperation,
     ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
