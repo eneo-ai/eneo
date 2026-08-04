@@ -57,6 +57,10 @@ PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
 _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
     {
         "assembly_unsupported_architecture_hints",
+        "assembly_document_report_compose_topology_missing",
+        "assembly_document_report_citations_unsupported",
+        "assembly_document_report_model_ref_conflict",
+        "assembly_document_report_review_mode_conflict",
         "flow_input_schema_composite_bindings_unsupported",
         "flow_input_schema_target_missing",
         "section_writer_structured_source_ambiguous",

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -31,7 +32,7 @@ DEFAULT_CASES_FILE = Path(__file__).with_name("ai_builder_api_battle_cases.json"
 DEFAULT_CONFIRM_MESSAGE = "Ja, det stämmer. Bygg planen."
 MAX_INTERACTIONS_PER_CASE = 6
 SUPPORTED_CASES_FILE_VERSION = 4
-SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v2"
+SUPPORTED_RECEIPT_ARTIFACT_VERSION = "ai-builder-live-release.v3"
 
 
 def _local_app_version() -> str:
@@ -86,7 +87,9 @@ class BattleCase:
     expected: JsonObject | None = None
     file_ids: tuple[str, ...] = ()
     file_id_envs: tuple[str, ...] = ()
+    attachment_evidence_sha256_envs: tuple[str, ...] = ()
     runtime_file_path_envs: tuple[str, ...] = ()
+    runtime_file_sha256_envs: tuple[str, ...] = ()
     synthetic_user_profile: str | None = None
     cohorts: tuple[str, ...] = ()
     configured_question_answers: JsonObject | None = None
@@ -100,6 +103,87 @@ def _case_identity(case: BattleCase) -> JsonObject:
         "complexity": case.complexity,
         "domain": case.domain,
         "cohorts": list(case.cohorts),
+    }
+
+
+def _case_contract_payload(case: BattleCase) -> JsonObject:
+    """Return the portable behavior contract for one selected benchmark case."""
+    return {
+        "id": case.case_id,
+        "prompt": case.prompt,
+        "complexity": case.complexity,
+        "domain": case.domain,
+        "required": case.required,
+        "apply_plan": case.apply_plan,
+        "execute_flow": case.execute_flow,
+        "release_dimensions": list(case.release_dimensions),
+        "expected": case.expected or {},
+        "attachment_fixture": {
+            "direct_file_slot_count": len(case.file_ids),
+            "file_id_envs": list(case.file_id_envs),
+            "attachment_evidence_sha256_envs": list(
+                case.attachment_evidence_sha256_envs
+            ),
+            "runtime_file_path_envs": list(case.runtime_file_path_envs),
+            "runtime_file_sha256_envs": list(case.runtime_file_sha256_envs),
+        },
+        "synthetic_user_profile": case.synthetic_user_profile,
+        "cohorts": list(case.cohorts),
+        "configured_question_answers": case.configured_question_answers or {},
+        "question_answer_sources": case.question_answer_sources or {},
+    }
+
+
+def _case_contract_sha256(case: BattleCase) -> str:
+    return _canonical_sha256(_case_contract_payload(case))
+
+
+def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
+    """Project persisted observation fields onto the authored case contract."""
+
+    def string_list_or_none(value: object) -> list[str] | None:
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            return None
+        return list(value)
+
+    expected = case.get("expected")
+    configured_answers = case.get("configured_question_answers")
+    answer_sources = case.get("question_answer_sources")
+    return {
+        "id": case.get("id"),
+        "prompt": case.get("prompt"),
+        "complexity": case.get("complexity"),
+        "domain": case.get("domain"),
+        "required": case.get("required"),
+        "apply_plan": case.get("apply_plan"),
+        "execute_flow": case.get("execute_flow"),
+        "release_dimensions": string_list_or_none(case.get("release_dimensions")),
+        "expected": dict(expected) if isinstance(expected, Mapping) else None,
+        "attachment_fixture": {
+            "direct_file_slot_count": case.get("direct_file_slot_count"),
+            "file_id_envs": string_list_or_none(case.get("file_id_envs")),
+            "attachment_evidence_sha256_envs": string_list_or_none(
+                case.get("attachment_evidence_sha256_envs")
+            ),
+            "runtime_file_path_envs": string_list_or_none(
+                case.get("runtime_file_path_envs")
+            ),
+            "runtime_file_sha256_envs": string_list_or_none(
+                case.get("runtime_file_sha256_envs")
+            ),
+        },
+        "synthetic_user_profile": case.get("synthetic_user_profile"),
+        "cohorts": string_list_or_none(case.get("cohorts")),
+        "configured_question_answers": (
+            dict(configured_answers)
+            if isinstance(configured_answers, Mapping)
+            else None
+        ),
+        "question_answer_sources": (
+            dict(answer_sources) if isinstance(answer_sources, Mapping) else None
+        ),
     }
 
 
@@ -133,6 +217,9 @@ def main() -> int:
             bundle_paths=[Path(path) for path in args.reanalyze_bundle],
             output_dir=Path(args.output_dir),
             expected_overrides_by_case_id=_expected_overrides_from_args(args),
+            suite_summary_path=(
+                Path(args.suite_summary) if args.suite_summary is not None else None
+            ),
         )
 
     api_key = args.api_key or os.getenv("ENEO_API_KEY")
@@ -255,6 +342,15 @@ def _parse_args() -> argparse.Namespace:
         help="Run only this case id from --cases-file. Repeat for multiple cases.",
     )
     parser.add_argument(
+        "--cohort",
+        action="append",
+        default=None,
+        help=(
+            "Run cases carrying this cohort from --cases-file. Repeat to require "
+            "all named cohorts."
+        ),
+    )
+    parser.add_argument(
         "--run-suite",
         action="store_true",
         help="Run all selected cases from --cases-file.",
@@ -266,6 +362,15 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Recompute summaries/checks for a previously saved bundle without "
             "calling the API. Repeat for multiple bundles."
+        ),
+    )
+    parser.add_argument(
+        "--suite-summary",
+        default=None,
+        help=(
+            "Optional suite-summary.json that proves reanalyzed bundles belong "
+            "to a completed suite receipt. Without it, reanalysis is explicitly "
+            "marked as unverified standalone analysis."
         ),
     )
     parser.add_argument(
@@ -340,9 +445,30 @@ def _read_prompt(args: argparse.Namespace) -> str:
 
 
 def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
+    if getattr(args, "run_suite", False) and (
+        getattr(args, "case_id", None)
+        or getattr(args, "cohort", None)
+        or getattr(args, "max_cases", None) is not None
+        or getattr(args, "file_ids", None)
+    ):
+        raise ValueError(
+            "--run-suite is the full benchmark run, including its sentinel gate, "
+            "and cannot be filtered. "
+            "Omit --run-suite to use --cohort, --case-id, --max-cases, or "
+            "--file-id in an exploratory suite."
+        )
     cases_file = _cases_path_from_args(args)
     if cases_file is not None:
         cases = _read_cases_file(cases_file)
+        selected_cohorts = set(getattr(args, "cohort", None) or ())
+        if selected_cohorts:
+            known_cohorts = {cohort for case in cases for cohort in case.cohorts}
+            missing_cohorts = selected_cohorts - known_cohorts
+            if missing_cohorts:
+                raise ValueError(
+                    "Unknown battle cohort(s): " + ", ".join(sorted(missing_cohorts))
+                )
+            cases = [case for case in cases if selected_cohorts.issubset(case.cohorts)]
         selected = set(args.case_id or ())
         if selected:
             cases = [case for case in cases if case.case_id in selected]
@@ -372,6 +498,7 @@ def _cases_path_from_args(args: argparse.Namespace) -> Path | None:
         getattr(args, "run_suite", False)
         or cases_file
         or getattr(args, "case_id", None)
+        or getattr(args, "cohort", None)
     ):
         return Path(cases_file) if cases_file else DEFAULT_CASES_FILE
     return None
@@ -456,7 +583,9 @@ _CASE_KEYS = frozenset(
         "expected",
         "file_ids",
         "file_id_envs",
+        "attachment_evidence_sha256_envs",
         "runtime_file_path_envs",
+        "runtime_file_sha256_envs",
         "synthetic_user_profile",
         "question_answer_overrides",
         "cohorts",
@@ -590,6 +719,23 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             raise ValueError(
                 f"{path} case {case_id}.file_id_envs must be a string list."
             )
+        attachment_evidence_sha256_envs = raw_case.get(
+            "attachment_evidence_sha256_envs"
+        )
+        if attachment_evidence_sha256_envs is None:
+            attachment_evidence_sha256_envs = []
+        if not isinstance(attachment_evidence_sha256_envs, list) or not all(
+            isinstance(env_name, str) for env_name in attachment_evidence_sha256_envs
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.attachment_evidence_sha256_envs must be "
+                "a string list."
+            )
+        if len(attachment_evidence_sha256_envs) != len(file_id_envs):
+            raise ValueError(
+                f"{path} case {case_id}.attachment_evidence_sha256_envs must have "
+                "one entry per file_id_envs entry."
+            )
         runtime_file_path_envs = raw_case.get("runtime_file_path_envs")
         if runtime_file_path_envs is None:
             runtime_file_path_envs = []
@@ -598,6 +744,20 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
         ):
             raise ValueError(
                 f"{path} case {case_id}.runtime_file_path_envs must be a string list."
+            )
+        runtime_file_sha256_envs = raw_case.get("runtime_file_sha256_envs")
+        if runtime_file_sha256_envs is None:
+            runtime_file_sha256_envs = []
+        if not isinstance(runtime_file_sha256_envs, list) or not all(
+            isinstance(env_name, str) for env_name in runtime_file_sha256_envs
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.runtime_file_sha256_envs must be a string list."
+            )
+        if len(runtime_file_sha256_envs) != len(runtime_file_path_envs):
+            raise ValueError(
+                f"{path} case {case_id}.runtime_file_sha256_envs must have one "
+                "entry per runtime_file_path_envs entry."
             )
         release_dimensions = raw_case.get("release_dimensions")
         if release_dimensions is None:
@@ -683,7 +843,9 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             expected=dict(expected) if isinstance(expected, Mapping) else None,
             file_ids=tuple(file_ids),
             file_id_envs=tuple(file_id_envs),
+            attachment_evidence_sha256_envs=tuple(attachment_evidence_sha256_envs),
             runtime_file_path_envs=tuple(runtime_file_path_envs),
+            runtime_file_sha256_envs=tuple(runtime_file_sha256_envs),
             synthetic_user_profile=(
                 profile_name if isinstance(profile_name, str) else None
             ),
@@ -1182,6 +1344,64 @@ def _expected_overrides_from_args(args: argparse.Namespace) -> dict[str, JsonObj
     return overrides
 
 
+def _expected_observations(
+    cases: list[BattleCase], repetitions: int
+) -> list[JsonObject]:
+    return [
+        {
+            "case_id": case.case_id,
+            "repetition": repetition,
+            "case_contract_sha256": _case_contract_sha256(case),
+        }
+        for repetition in range(1, repetitions + 1)
+        for case in cases
+    ]
+
+
+def _suite_run_context(args: argparse.Namespace) -> JsonObject:
+    confirm_message = getattr(args, "confirm_message", DEFAULT_CONFIRM_MESSAGE)
+    return {
+        "ui_language": getattr(args, "ui_language", "sv"),
+        "auto_confirm_requirements": getattr(
+            args,
+            "auto_confirm_requirements",
+            True,
+        ),
+        "confirm_message_sha256": hashlib.sha256(
+            str(confirm_message).encode("utf-8")
+        ).hexdigest(),
+        "repetitions": args.repetitions,
+    }
+
+
+def _suite_evaluator_identity(
+    *,
+    release_identity: Mapping[str, object],
+    run_context: Mapping[str, object],
+    expected_observations: list[JsonObject],
+) -> JsonObject:
+    build = release_identity.get("build")
+    build = build if isinstance(build, Mapping) else {}
+    model = release_identity.get("model")
+    model = model if isinstance(model, Mapping) else {}
+    target = release_identity.get("target")
+    target = target if isinstance(target, Mapping) else {}
+    selected_case_contracts = {
+        str(observation["case_id"]): observation["case_contract_sha256"]
+        for observation in expected_observations
+    }
+    payload = {
+        "source_revision": build.get("source_revision"),
+        "harness_sha256": build.get("harness_sha256"),
+        "cases_sha256": build.get("cases_sha256"),
+        "requested_model_id": model.get("requested_id"),
+        "target_sha256": target.get("sha256"),
+        "run_context": dict(run_context),
+        "case_contract_sha256_by_id": selected_case_contracts,
+    }
+    return {**payload, "sha256": _canonical_sha256(payload)}
+
+
 def _run_suite(
     *,
     cases: list[BattleCase],
@@ -1192,6 +1412,7 @@ def _run_suite(
 ) -> int:
     if args.repetitions < 1:
         raise ValueError("--repetitions must be >= 1.")
+    release_gate_supplied = release_gate is not None
     release_gate = release_gate or ReleaseGate(
         required_case_ids=tuple(case.case_id for case in cases if case.required),
         thresholds=ReleaseThresholds(
@@ -1200,6 +1421,7 @@ def _run_suite(
             max_required_skips=0,
         ),
     )
+    is_release_run = release_gate_supplied and bool(release_gate.required_case_ids)
     selected_case_ids = {case.case_id for case in cases}
     missing_required_cases = set(release_gate.required_case_ids) - selected_case_ids
     if missing_required_cases:
@@ -1209,11 +1431,23 @@ def _run_suite(
         )
     cases_path = _cases_path_from_args(args) or DEFAULT_CASES_FILE
     requested_model_id = getattr(args, "model_id", None)
+    if is_release_run and (
+        not isinstance(requested_model_id, str) or not requested_model_id.strip()
+    ):
+        raise ValueError("Release suite requires --model-id before execution.")
     release_identity = _release_run_identity(
         cases=cases,
         cases_path=cases_path,
         requested_model_id=requested_model_id,
         require_clean_source=release_gate.require_clean_source,
+        config=config if is_release_run else None,
+    )
+    expected_observations = _expected_observations(cases, args.repetitions)
+    run_context = _suite_run_context(args)
+    evaluator_identity = _suite_evaluator_identity(
+        release_identity=release_identity,
+        run_context=run_context,
+        expected_observations=expected_observations,
     )
     started_at = time.strftime("%Y%m%dT%H%M%S")
     suite_dir = output_dir / f"ai-builder-api-battle-suite-{started_at}"
@@ -1226,6 +1460,9 @@ def _run_suite(
             "artifact_mode": "live_execution_manifest",
             "created_at": started_at,
             "release_identity": release_identity,
+            "evaluator_identity": evaluator_identity,
+            "run_context": run_context,
+            "expected_observations": expected_observations,
             "required_case_ids": list(release_gate.required_case_ids),
             "thresholds": {
                 "max_required_case_errors": (
@@ -1240,6 +1477,7 @@ def _run_suite(
                 {
                     "case_identity": _case_identity(case),
                     "release_dimensions": list(case.release_dimensions),
+                    "case_contract_sha256": _case_contract_sha256(case),
                     "prompt_sha256": hashlib.sha256(
                         case.prompt.encode("utf-8")
                     ).hexdigest(),
@@ -1251,8 +1489,10 @@ def _run_suite(
     results: list[JsonObject] = []
     case_error_count = 0
     quality_failure_run_count = 0
+    evidence_failure_run_count = 0
     required_case_error_count = 0
     required_quality_failure_run_count = 0
+    required_evidence_failure_run_count = 0
     skipped_run_count = 0
     required_skipped_run_count = 0
     total_runs = len(cases) * args.repetitions
@@ -1282,6 +1522,8 @@ def _run_suite(
                 skipped["artifact_schema_version"] = (
                     release_gate.artifact_schema_version
                 )
+                skipped["case_contract"] = _case_contract_payload(case)
+                skipped["case_contract_sha256"] = _case_contract_sha256(case)
                 if case.required:
                     skipped["release_identity"] = release_identity
                 skipped_path = _write_bundle(
@@ -1302,6 +1544,8 @@ def _run_suite(
                     cases_path=cases_path,
                 )
                 bundle["case_identity"] = _case_identity(case)
+                bundle["case_contract"] = _case_contract_payload(case)
+                bundle["case_contract_sha256"] = _case_contract_sha256(case)
                 bundle["artifact_schema_version"] = release_gate.artifact_schema_version
                 bundle["repetition"] = repetition
                 if case.required:
@@ -1316,14 +1560,19 @@ def _run_suite(
                         checks, list
                     ):
                         raise ValueError(
-                            f"required case {case.case_id} has no identity evidence."
+                            f"required case {case.case_id} has no evaluable evidence."
                         )
-                    checks.extend(
-                        _required_case_identity_checks(
-                            case=case,
-                            release_identity=release_identity,
-                            provenance=provenance,
-                        )
+                    bundle["release_identity_checks"] = _required_case_identity_checks(
+                        case=case,
+                        release_identity=release_identity,
+                        provenance=provenance,
+                        observation_input_identity=(
+                            bundle.get("observation_input_identity")
+                            if isinstance(
+                                bundle.get("observation_input_identity"), Mapping
+                            )
+                            else None
+                        ),
                     )
                     bundle["release_identity"] = release_identity
                 bundle_path = _write_bundle(
@@ -1334,7 +1583,19 @@ def _run_suite(
                 _print_summary(bundle["plan_summary"], bundle_path)
                 result = _suite_result(bundle, bundle_path)
                 results.append(result)
-                if (_int_value(result.get("failed_check_count")) or 0) > 0:
+                if result.get("evidence_valid") is False:
+                    evidence_failure_run_count += 1
+                    if case.required:
+                        required_evidence_failure_run_count += 1
+                    evidence_names = _failed_check_names(
+                        {"failed_checks": result.get("evidence_failed_checks")}
+                    )
+                    print(
+                        "case evidence checks failed: "
+                        + ", ".join(evidence_names or ["<unknown>"]),
+                        file=sys.stderr,
+                    )
+                if (_int_value(result.get("failed_expectation_check_count")) or 0) > 0:
                     quality_failure_run_count += 1
                     if case.required:
                         required_quality_failure_run_count += 1
@@ -1342,6 +1603,15 @@ def _run_suite(
                     print(
                         "case quality checks failed: "
                         + ", ".join(failed_names or ["<unknown>"]),
+                        file=sys.stderr,
+                    )
+                if (_int_value(result.get("identity_failed_check_count")) or 0) > 0:
+                    identity_names = _failed_check_names(
+                        {"failed_checks": result.get("identity_failed_checks")}
+                    )
+                    print(
+                        "case identity checks failed: "
+                        + ", ".join(identity_names or ["<unknown>"]),
                         file=sys.stderr,
                     )
             except (HTTPError, URLError, TimeoutError, ValueError) as error:
@@ -1354,6 +1624,8 @@ def _run_suite(
                     "created_at": time.strftime("%Y%m%dT%H%M%S"),
                     "app_version": LOCAL_APP_VERSION,
                     "case_identity": _case_identity(case),
+                    "case_contract": _case_contract_payload(case),
+                    "case_contract_sha256": _case_contract_sha256(case),
                     "repetition": repetition,
                     **_failure_error_fields(error),
                     "release_identity": release_identity,
@@ -1373,12 +1645,21 @@ def _run_suite(
             cases_path=cases_path,
             requested_model_id=requested_model_id,
             require_clean_source=release_gate.require_clean_source,
+            config=config if is_release_run else None,
         )
         release_identity_recheck_checks = _release_identity_recheck_checks(
             expected=release_identity,
             actual=release_identity_recheck,
+            require_verified_target=is_release_run,
         )
-    except (subprocess.CalledProcessError, ValueError) as error:
+    except (
+        HTTPError,
+        URLError,
+        TimeoutError,
+        OSError,
+        subprocess.CalledProcessError,
+        ValueError,
+    ) as error:
         release_identity_recheck = {"error": str(error)}
         release_identity_recheck_checks = [
             {
@@ -1387,12 +1668,18 @@ def _run_suite(
                 "actual": str(error),
                 "expected": release_identity.get(component),
             }
-            for component in ("source", "build", "model", "prompts")
+            for component in ("source", "build", "model", "prompts", "target")
         ]
     suite_identity_failure_count = sum(
         1
         for check in release_identity_recheck_checks
         if check.get("passed") is not True
+    )
+    observation_identity_failure_count = sum(
+        _int_value(result.get("identity_failed_check_count")) or 0 for result in results
+    )
+    identity_failure_count = (
+        suite_identity_failure_count + observation_identity_failure_count
     )
     threshold_checks = _evaluate_release_thresholds(
         release_gate.thresholds,
@@ -1400,9 +1687,40 @@ def _run_suite(
         required_quality_failure_run_count=required_quality_failure_run_count,
         required_skipped_run_count=required_skipped_run_count,
     )
+    receipt_integrity = _suite_receipt_integrity(
+        expected_observations=expected_observations,
+        results=results,
+        suite_dir=suite_dir,
+    )
+    receipt_complete = receipt_integrity["status"] == "complete"
+    sentinel_checks_pass = (
+        identity_failure_count == 0
+        and required_evidence_failure_run_count == 0
+        and all(check["passed"] is True for check in threshold_checks)
+    )
+    sentinel_verdict = (
+        ("pass" if sentinel_checks_pass else "fail")
+        if receipt_complete and is_release_run
+        else None
+    )
+    sentinel_gate_scope = {
+        "case_count": len(release_gate.required_case_ids),
+        "selected_case_count": len(cases),
+        "observation_count": len(release_gate.required_case_ids) * args.repetitions,
+        "selected_observation_count": total_runs,
+        "case_ids": list(release_gate.required_case_ids),
+    }
     suite_summary: JsonObject = {
         "artifact_schema_version": release_gate.artifact_schema_version,
-        "artifact_mode": "live_execution_summary",
+        "artifact_mode": (
+            "live_execution_partial_summary"
+            if not receipt_complete
+            else (
+                "live_execution_summary"
+                if is_release_run
+                else "live_execution_exploratory_summary"
+            )
+        ),
         "created_at": started_at,
         "app_version": LOCAL_APP_VERSION,
         "base_url": config.base_url,
@@ -1410,35 +1728,39 @@ def _run_suite(
         "case_count": len(cases),
         "repetitions": args.repetitions,
         "run_count": total_runs,
-        "failure_count": (
-            case_error_count
-            + quality_failure_run_count
-            + required_skipped_run_count
-            + suite_identity_failure_count
+        "sentinel_verdict": sentinel_verdict,
+        "sentinel_gate_scope": sentinel_gate_scope,
+        "receipt_integrity": receipt_integrity,
+        "execution_failure_observation_count": case_error_count,
+        "invalid_evidence_observation_count": evidence_failure_run_count,
+        "expectation_failed_observation_count": quality_failure_run_count,
+        "required_execution_failure_observation_count": required_case_error_count,
+        "required_invalid_evidence_observation_count": (
+            required_evidence_failure_run_count
         ),
-        "case_error_count": case_error_count,
-        "quality_failure_run_count": quality_failure_run_count,
-        "required_case_error_count": required_case_error_count,
-        "required_quality_failure_run_count": required_quality_failure_run_count,
-        "skipped_run_count": skipped_run_count,
-        "required_skipped_run_count": required_skipped_run_count,
-        "suite_identity_failure_count": suite_identity_failure_count,
-        "release_threshold_checks": threshold_checks,
+        "required_expectation_failed_observation_count": (
+            required_quality_failure_run_count
+        ),
+        "fixture_skipped_observation_count": skipped_run_count,
+        "required_fixture_skipped_observation_count": required_skipped_run_count,
+        "identity_failed_check_count": identity_failure_count,
+        "observation_identity_failed_check_count": (observation_identity_failure_count),
+        "suite_identity_failed_check_count": suite_identity_failure_count,
+        "sentinel_threshold_checks": threshold_checks,
         "release_identity": release_identity,
         "release_identity_recheck": release_identity_recheck,
         "release_identity_recheck_checks": release_identity_recheck_checks,
+        "evaluator_identity": evaluator_identity,
+        "run_context": run_context,
         "results": results,
+        "observation_summary": _suite_observation_summary(results),
+        "outcome_class_summary": _suite_outcome_summary(results),
         "reliability": _suite_reliability_summary(results),
     }
     summary_path = suite_dir / "suite-summary.json"
     _write_json_exclusive(summary_path, suite_summary)
     print(f"\nsuite summary: {summary_path}")
-    return (
-        1
-        if suite_identity_failure_count
-        or any(check["passed"] is not True for check in threshold_checks)
-        else 0
-    )
+    return 1 if not receipt_complete or not sentinel_checks_pass else 0
 
 
 def _release_run_identity(
@@ -1447,6 +1769,7 @@ def _release_run_identity(
     cases_path: Path,
     requested_model_id: str | None,
     require_clean_source: bool,
+    config: ApiConfig | None = None,
 ) -> JsonObject:
     tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
     if require_clean_source and tracked_status:
@@ -1454,8 +1777,7 @@ def _release_run_identity(
             "Live release execution requires a clean tracked source revision."
         )
     source_revision = _git_output("rev-parse", "HEAD")
-    build = {
-        "app_version": LOCAL_APP_VERSION,
+    stable_build = {
         "source_revision": source_revision,
         "harness_sha256": _release_input_sha256(
             Path(__file__),
@@ -1466,12 +1788,16 @@ def _release_run_identity(
             label="battle cases",
         ),
     }
+    build = {
+        "app_version": LOCAL_APP_VERSION,
+        **stable_build,
+    }
     prompt_hashes = {
         case.case_id: hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
         for case in cases
     }
     model = {"requested_id": requested_model_id}
-    return {
+    identity = {
         "source": {
             "revision": source_revision,
             "revision_sha256": hashlib.sha256(
@@ -1479,12 +1805,67 @@ def _release_run_identity(
             ).hexdigest(),
             "tracked_clean": not tracked_status,
         },
-        "build": {**build, "sha256": _canonical_sha256(build)},
+        "build": {**build, "sha256": _canonical_sha256(stable_build)},
         "model": {**model, "sha256": _canonical_sha256(model)},
         "prompts": {
             "case_sha256_by_id": prompt_hashes,
             "sha256": _canonical_sha256(prompt_hashes),
         },
+    }
+    if config is not None:
+        target = _target_runtime_identity(
+            config,
+            expected_source_revision=source_revision,
+        )
+        if target.get("verified") is not True:
+            raise ValueError(
+                "Release target /version does not match the local source revision."
+            )
+        identity["target"] = target
+    return identity
+
+
+def _target_runtime_identity(
+    config: ApiConfig,
+    *,
+    expected_source_revision: str,
+) -> JsonObject:
+    if len(expected_source_revision) < 12:
+        raise ValueError(
+            "Expected source revision must contain at least 12 characters."
+        )
+    expected_app_version = f"DEV-{expected_source_revision[:12]}"
+    parsed_base = urlsplit(config.base_url.rstrip("/"))
+    if not parsed_base.path.endswith("/api/v1"):
+        raise ValueError(
+            "--base-url must end in /api/v1 so the backend /version endpoint "
+            "can be verified."
+        )
+    root_path = parsed_base.path[: -len("/api/v1")]
+    version_url = urlunsplit(
+        (parsed_base.scheme, parsed_base.netloc, f"{root_path}/version", "", "")
+    )
+    request = Request(
+        version_url,
+        headers={"Accept": "application/json", "X-API-Key": config.api_key},
+        method="GET",
+    )
+    with urlopen(request, timeout=config.timeout_seconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    version = payload.get("version") if isinstance(payload, Mapping) else None
+    version = version.strip() if isinstance(version, str) else None
+    comparable = {
+        "api_base_url": config.base_url,
+        "version": version,
+        "expected_app_version": expected_app_version,
+        "expected_source_revision": expected_source_revision,
+        "source_revision_verification": "git_commit_prefix_via_app_version",
+    }
+    verified = bool(version) and version == expected_app_version
+    return {
+        **comparable,
+        "verified": verified,
+        "sha256": _canonical_sha256(comparable),
     }
 
 
@@ -1512,6 +1893,7 @@ def _required_case_identity_checks(
     case: BattleCase,
     release_identity: Mapping[str, object],
     provenance: Mapping[str, object],
+    observation_input_identity: Mapping[str, object] | None = None,
 ) -> list[JsonObject]:
     release_source = release_identity.get("source")
     release_source = release_source if isinstance(release_source, Mapping) else {}
@@ -1532,14 +1914,13 @@ def _required_case_identity_checks(
     release_build = release_build if isinstance(release_build, Mapping) else {}
     live_build = provenance.get("build")
     live_build = live_build if isinstance(live_build, Mapping) else {}
-    build_keys = (
-        "app_version",
+    stable_build_keys = (
         "source_revision",
         "harness_sha256",
         "cases_sha256",
     )
-    release_build_payload = {key: release_build.get(key) for key in build_keys}
-    live_build_payload = {key: live_build.get(key) for key in build_keys}
+    release_build_payload = {key: release_build.get(key) for key in stable_build_keys}
+    live_build_payload = {key: live_build.get(key) for key in stable_build_keys}
     build_identity_matches = (
         release_build_payload == live_build_payload
         and release_build.get("sha256") == _canonical_sha256(release_build_payload)
@@ -1551,9 +1932,15 @@ def _required_case_identity_checks(
     live_model = provenance.get("model")
     live_model = live_model if isinstance(live_model, Mapping) else {}
     release_model_payload = {"requested_id": release_model.get("requested_id")}
-    model_identity_matches = release_model.get("sha256") == _canonical_sha256(
-        release_model_payload
-    ) and release_model.get("requested_id") == live_model.get("requested_id")
+    requested_model_id = release_model.get("requested_id")
+    model_identity_matches = (
+        isinstance(requested_model_id, str)
+        and bool(requested_model_id)
+        and release_model.get("sha256") == _canonical_sha256(release_model_payload)
+        and requested_model_id == live_model.get("requested_id")
+        and requested_model_id == live_model.get("resolved_id")
+        and live_model.get("observed_matches_resolved") is True
+    )
 
     release_prompts = release_identity.get("prompts")
     release_prompts = release_prompts if isinstance(release_prompts, Mapping) else {}
@@ -1570,7 +1957,7 @@ def _required_case_identity_checks(
         and live_prompt.get("case_sha256") == case_prompt_sha256
     )
 
-    return [
+    checks = [
         {
             "name": "suite_source_revision_identity",
             "passed": source_identity_matches,
@@ -1586,8 +1973,8 @@ def _required_case_identity_checks(
         {
             "name": "suite_requested_model_identity",
             "passed": model_identity_matches,
-            "actual": live_model.get("requested_id"),
-            "expected": release_model.get("requested_id"),
+            "actual": dict(live_model),
+            "expected": requested_model_id,
         },
         {
             "name": "suite_case_prompt_identity",
@@ -1596,22 +1983,52 @@ def _required_case_identity_checks(
             "expected": release_prompt_hashes.get(case.case_id),
         },
     ]
+    observation_input_identity = observation_input_identity or {}
+    checks.append(
+        {
+            "name": "suite_observation_input_identity",
+            "passed": observation_input_identity.get("verified") is True
+            and _is_sha256(observation_input_identity.get("sha256")),
+            "actual": dict(observation_input_identity),
+            "expected": (
+                "declared attachment evidence-text and runtime file checksums "
+                "match observed evidence"
+            ),
+        }
+    )
+    return checks
 
 
 def _release_identity_recheck_checks(
     *,
     expected: Mapping[str, object],
     actual: Mapping[str, object],
+    require_verified_target: bool = False,
 ) -> list[JsonObject]:
-    return [
+    components = ["source", "build", "model", "prompts"]
+    if "target" in expected or "target" in actual:
+        components.append("target")
+    checks = [
         {
             "name": f"suite_{component}_identity_unchanged",
             "passed": actual.get(component) == expected.get(component),
             "actual": actual.get(component),
             "expected": expected.get(component),
         }
-        for component in ("source", "build", "model", "prompts")
+        for component in components
     ]
+    if require_verified_target and "target" in expected:
+        target = actual.get("target")
+        target = target if isinstance(target, Mapping) else {}
+        checks.append(
+            {
+                "name": "suite_target_runtime_verified",
+                "passed": target.get("verified") is True,
+                "actual": dict(target),
+                "expected": "running backend version matches the local benchmark build",
+            }
+        )
+    return checks
 
 
 def _evaluate_release_thresholds(
@@ -1673,7 +2090,16 @@ def _run_case(
         session_id = _required_string(initial_session, "session_id")
         print(f"created session {session_id}")
 
+    session_models = _request_json(
+        config=config,
+        method="GET",
+        path=f"/flows/ai-builder/sessions/{session_id}/models",
+    )
+
     file_ids = _case_file_ids(case, args)
+    runtime_file_paths = (
+        _case_runtime_file_paths(case) if case.runtime_file_path_envs else ()
+    )
     interactions: list[JsonObject] = []
     first = _send_and_fetch(
         config=config,
@@ -1758,7 +2184,7 @@ def _run_case(
         runtime_evidence = _execute_and_collect_runtime_evidence(
             config=config,
             flow_id=_required_string(apply_result, "flow_id"),
-            runtime_file_paths=_case_runtime_file_paths(case),
+            runtime_file_paths=runtime_file_paths,
             timeout_seconds=args.timeout_seconds,
             artifact_output_dir=artifact_output_dir,
             case_id=case.case_id,
@@ -1774,6 +2200,12 @@ def _run_case(
         config=config,
         method="GET",
         path=(f"/flows/ai-builder/sessions/{session_id}/_diagnostics/classifier-slots"),
+    )
+    observation_input_identity = _observation_input_identity(
+        case=case,
+        attached_file_ids=file_ids,
+        classifier_diagnostics=classifier_diagnostics,
+        runtime_evidence=runtime_evidence,
     )
     quality_report = _quality_report(
         plan=plan,
@@ -1801,22 +2233,21 @@ def _run_case(
         ),
         classifier_diagnostics=classifier_diagnostics,
         requested_model_id=args.model_id,
+        session_models=session_models,
         event_summary=event_summary,
+        interactions=interactions,
     )
-    if case.required:
-        checks = quality_report.get("checks")
-        if isinstance(checks, list):
-            checks.extend(
-                _live_provenance_checks(
-                    live_execution_provenance,
-                    expected=case.expected or {},
-                )
-            )
+    quality_report = _quality_report_with_live_provenance(
+        quality_report,
+        provenance=live_execution_provenance,
+        expected=case.expected or {},
+    )
 
     return {
         "artifact_mode": "live_execution",
         "case_identity": _case_identity(case),
         "live_execution_provenance": live_execution_provenance,
+        "observation_input_identity": observation_input_identity,
         "created_at": started_at,
         "app_version": LOCAL_APP_VERSION,
         "base_url": config.base_url,
@@ -1828,11 +2259,17 @@ def _run_case(
             "required": case.required,
             "apply_plan": case.apply_plan,
             "execute_flow": case.execute_flow,
+            "release_dimensions": list(case.release_dimensions),
             "prompt": case.prompt,
             "expected": case.expected or {},
             "file_ids": list(file_ids),
+            "direct_file_slot_count": len(case.file_ids),
             "file_id_envs": list(case.file_id_envs),
+            "attachment_evidence_sha256_envs": list(
+                case.attachment_evidence_sha256_envs
+            ),
             "runtime_file_path_envs": list(case.runtime_file_path_envs),
+            "runtime_file_sha256_envs": list(case.runtime_file_sha256_envs),
             "synthetic_user_profile": case.synthetic_user_profile,
             "cohorts": list(case.cohorts),
             "configured_question_answers": case.configured_question_answers or {},
@@ -2297,11 +2734,18 @@ def _missing_file_id_envs(
     case: BattleCase,
     args: argparse.Namespace,
 ) -> tuple[str, ...]:
-    if tuple(getattr(args, "file_ids", None) or ()):
-        return ()
+    attachment_envs = (
+        ()
+        if tuple(getattr(args, "file_ids", None) or ())
+        else (*case.file_id_envs, *case.attachment_evidence_sha256_envs)
+    )
     return tuple(
         env_name
-        for env_name in (*case.file_id_envs, *case.runtime_file_path_envs)
+        for env_name in (
+            *attachment_envs,
+            *case.runtime_file_path_envs,
+            *case.runtime_file_sha256_envs,
+        )
         if not os.getenv(env_name, "").strip()
     )
 
@@ -2325,6 +2769,205 @@ def _case_runtime_file_paths(case: BattleCase) -> tuple[Path, ...]:
             + ", ".join(invalid_paths)
         )
     return paths
+
+
+def _attachment_evidence_sha256s(
+    *,
+    attached_file_ids: tuple[str, ...],
+    classifier_diagnostics: Mapping[str, object] | None,
+) -> list[str | None]:
+    source_sha256s_by_file_id: dict[str, set[str]] = {}
+    for run in _classifier_runs(classifier_diagnostics):
+        inventory = run.get("source_inventory")
+        if not isinstance(inventory, list):
+            continue
+        for source in inventory:
+            if not isinstance(source, Mapping) or source.get("kind") != "uploaded_file":
+                continue
+            file_id = _optional_string(source, "file_id")
+            source_sha256 = _optional_string(source, "source_sha256")
+            if file_id is not None and _is_sha256(source_sha256):
+                source_sha256s_by_file_id.setdefault(file_id, set()).add(source_sha256)
+    return [
+        next(iter(source_sha256s_by_file_id.get(file_id, set())), None)
+        if len(source_sha256s_by_file_id.get(file_id, set())) == 1
+        else None
+        for file_id in attached_file_ids
+    ]
+
+
+def _observation_input_identity(
+    *,
+    case: BattleCase,
+    attached_file_ids: tuple[str, ...],
+    classifier_diagnostics: Mapping[str, object] | None,
+    runtime_evidence: Mapping[str, object] | None,
+) -> JsonObject:
+    declared_attachment_evidence_sha256s = [
+        os.getenv(env_name, "").strip()
+        for env_name in case.attachment_evidence_sha256_envs
+    ]
+    declared_evidence_contract_complete = len(
+        declared_attachment_evidence_sha256s
+    ) == len(attached_file_ids) and all(
+        _is_sha256(value) for value in declared_attachment_evidence_sha256s
+    )
+
+    observed_attachment_evidence_sha256s = _attachment_evidence_sha256s(
+        attached_file_ids=attached_file_ids,
+        classifier_diagnostics=classifier_diagnostics,
+    )
+    attachment_evidence_complete = all(
+        _is_sha256(value) for value in observed_attachment_evidence_sha256s
+    )
+    declared_runtime_sha256s = [
+        os.getenv(env_name, "").strip() for env_name in case.runtime_file_sha256_envs
+    ]
+    runtime_sha256s, runtime_evidence_status = _runtime_lineage_sha256s(
+        runtime_evidence,
+        expected_count=len(declared_runtime_sha256s),
+    )
+    runtime_contract_complete = len(declared_runtime_sha256s) == len(
+        runtime_sha256s
+    ) and all(_is_sha256(value) for value in declared_runtime_sha256s)
+
+    mismatches: list[str] = []
+    if attached_file_ids and not declared_evidence_contract_complete:
+        mismatches.append("attachment_evidence_digest_contract")
+    if attached_file_ids and not attachment_evidence_complete:
+        mismatches.append("attachment_evidence")
+    if (
+        declared_evidence_contract_complete
+        and attachment_evidence_complete
+        and observed_attachment_evidence_sha256s != declared_attachment_evidence_sha256s
+    ):
+        mismatches.append("attachment_evidence_content")
+    if declared_runtime_sha256s and not runtime_contract_complete:
+        mismatches.append("runtime_digest_contract")
+    if declared_runtime_sha256s and runtime_evidence_status != "complete":
+        mismatches.append("runtime_evidence")
+    if (
+        runtime_contract_complete
+        and runtime_evidence_status == "complete"
+        and runtime_sha256s != declared_runtime_sha256s
+    ):
+        mismatches.append("runtime_content")
+
+    fingerprint_payload = {
+        "attachment_evidence_sha256s": observed_attachment_evidence_sha256s,
+        "runtime_source_sha256s": runtime_sha256s,
+    }
+    fingerprint_complete = all(
+        value is not None for value in observed_attachment_evidence_sha256s
+    ) and all(_is_sha256(value) for value in runtime_sha256s)
+    return {
+        **fingerprint_payload,
+        "declared_attachment_evidence_sha256s": (declared_attachment_evidence_sha256s),
+        "declared_runtime_sha256s": declared_runtime_sha256s,
+        "runtime_evidence_status": runtime_evidence_status,
+        "verified": not mismatches and fingerprint_complete,
+        "mismatches": mismatches,
+        "sha256": (
+            _canonical_sha256(fingerprint_payload) if fingerprint_complete else None
+        ),
+    }
+
+
+def _runtime_lineage_sha256s(
+    runtime_evidence: Mapping[str, object] | None,
+    *,
+    expected_count: int,
+) -> tuple[list[str | None], str]:
+    if expected_count == 0:
+        return [], "not_required"
+    if runtime_evidence is None:
+        return [None] * expected_count, "missing"
+    contract = runtime_evidence.get("run_contract")
+    contract = contract if isinstance(contract, Mapping) else {}
+    input_steps = _mapping_list(contract.get("steps_requiring_input"))
+    if len(input_steps) != 1:
+        return [None] * expected_count, "input_step_ambiguous"
+    input_step_id = _optional_string(input_steps[0], "step_id")
+    if input_step_id is None:
+        return [None] * expected_count, "input_step_missing"
+
+    uploaded_files = _mapping_list(runtime_evidence.get("uploaded_files"))
+    uploaded_file_ids = [
+        _optional_string(uploaded_file, "id") for uploaded_file in uploaded_files
+    ]
+    if (
+        len(uploaded_file_ids) != expected_count
+        or any(file_id is None for file_id in uploaded_file_ids)
+        or len(set(uploaded_file_ids)) != expected_count
+    ):
+        return [None] * expected_count, "uploaded_files_invalid"
+
+    current_step_results = [
+        result
+        for result in _mapping_list(runtime_evidence.get("step_results"))
+        if result.get("step_id") == input_step_id
+    ]
+    if len(current_step_results) != 1:
+        return [None] * expected_count, "current_step_ambiguous"
+    current_step = current_step_results[0]
+    current_attempt_no = current_step.get("current_attempt_no")
+    if (
+        not isinstance(current_attempt_no, int)
+        or isinstance(current_attempt_no, bool)
+        or current_attempt_no < 1
+        or current_step.get("status") != "completed"
+        or _string_list(current_step.get("runtime_input_file_ids")) != uploaded_file_ids
+    ):
+        return [None] * expected_count, "current_step_invalid"
+
+    current_attempts = [
+        attempt
+        for attempt in _mapping_list(runtime_evidence.get("step_attempts"))
+        if attempt.get("step_id") == input_step_id
+        and attempt.get("attempt_no") == current_attempt_no
+    ]
+    if len(current_attempts) != 1:
+        return [None] * expected_count, "current_attempt_ambiguous"
+    current_attempt = current_attempts[0]
+    if (
+        current_attempt.get("status") != "completed"
+        or current_attempt.get("superseded_by_attempt_id") is not None
+    ):
+        return [None] * expected_count, "current_attempt_invalid"
+    lineage = current_attempt.get("resolved_input_lineage")
+    if not isinstance(lineage, Mapping):
+        return [None] * expected_count, "current_lineage_missing"
+    lineage_status = lineage.get("status")
+    if lineage_status != "tracked":
+        return [None] * expected_count, str(lineage_status or "invalid")
+    edges = lineage.get("edges")
+    if not isinstance(edges, list):
+        return [None] * expected_count, "current_lineage_invalid"
+
+    checksum_by_ordinal: dict[int, str] = {}
+    for edge in edges:
+        if not isinstance(edge, Mapping):
+            return [None] * expected_count, "current_lineage_invalid"
+        source = edge.get("source")
+        if not isinstance(source, Mapping) or source.get("kind") != "runtime_file":
+            continue
+        ordinal = source.get("input_file_ordinal")
+        checksum = source.get("checksum")
+        if (
+            not isinstance(ordinal, int)
+            or isinstance(ordinal, bool)
+            or ordinal not in range(expected_count)
+            or source.get("file_id") != uploaded_file_ids[ordinal]
+            or not _is_sha256(checksum)
+            or ordinal in checksum_by_ordinal
+        ):
+            return [None] * expected_count, "current_lineage_invalid"
+        checksum_by_ordinal[ordinal] = checksum
+
+    expected_ordinals = set(range(expected_count))
+    if set(checksum_by_ordinal) != expected_ordinals:
+        return [None] * expected_count, "incomplete"
+    return [checksum_by_ordinal[index] for index in range(expected_count)], "complete"
 
 
 def _skipped_case_bundle(
@@ -2370,54 +3013,140 @@ def _write_bundle(output_dir: Path, bundle: JsonObject, *, suffix: str) -> Path:
     return path
 
 
-def _live_execution_provenance(
+def _resolved_model_identity(
     *,
-    case: BattleCase,
-    cases_path: Path | None = DEFAULT_CASES_FILE,
-    latest_session: Mapping[str, object] | None,
-    classifier_diagnostics: Mapping[str, object] | None,
+    session_models: Mapping[str, object] | None,
     requested_model_id: str | None,
-    event_summary: Mapping[str, object] | None = None,
+    planner_observed_model_ids: list[str],
+    classifier_observed_model_ids: list[str],
+    planner_interaction_count: int | None = None,
+    planner_observations: list[JsonObject] | None = None,
+    missing_planner_interaction_indices: list[int] | None = None,
 ) -> JsonObject:
-    source_revision = _git_output("rev-parse", "HEAD")
-    tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
-    source_revision_sha256 = hashlib.sha256(source_revision.encode("utf-8")).hexdigest()
-    harness_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-    cases_sha256 = (
-        hashlib.sha256(cases_path.read_bytes()).hexdigest()
-        if cases_path is not None
+    session_models = session_models or {}
+    raw_models = session_models.get("models")
+    models = (
+        [model for model in raw_models if isinstance(model, Mapping)]
+        if isinstance(raw_models, list)
+        else []
+    )
+    selected_id = requested_model_id or _optional_string(
+        session_models, "default_model_id"
+    )
+    selected_model = next(
+        (model for model in models if _optional_string(model, "id") == selected_id),
+        None,
+    )
+    resolved_name = (
+        _optional_string(selected_model, "name") if selected_model is not None else None
+    )
+    resolved_provider = (
+        _optional_string(selected_model, "provider")
+        if selected_model is not None
         else None
     )
-    build_payload = {
-        "app_version": LOCAL_APP_VERSION,
-        "source_revision": source_revision,
-        "harness_sha256": harness_sha256,
-        "cases_sha256": cases_sha256,
-    }
-    telemetry = (
-        latest_session.get("telemetry")
-        if isinstance(latest_session, Mapping)
-        and isinstance(latest_session.get("telemetry"), Mapping)
-        else {}
+    expected_observed_ids = _clean_strings(
+        [
+            (
+                f"{resolved_provider}/{resolved_name}"
+                if resolved_provider is not None and resolved_name is not None
+                else None
+            )
+        ]
     )
-    model_ids = list(
+    observed_model_ids = list(
+        dict.fromkeys([*planner_observed_model_ids, *classifier_observed_model_ids])
+    )
+    planner_observations = planner_observations or []
+    missing_planner_interaction_indices = missing_planner_interaction_indices or []
+    planner_evidence_complete = bool(planner_observed_model_ids)
+    if planner_interaction_count is not None:
+        planner_evidence_complete = (
+            planner_interaction_count > 0
+            and len(planner_observations) == planner_interaction_count
+            and not missing_planner_interaction_indices
+        )
+    return {
+        "requested_id": requested_model_id,
+        "resolved_id": selected_id if selected_model is not None else None,
+        "resolved_name": resolved_name,
+        "resolved_provider": resolved_provider,
+        "expected_observed_ids": expected_observed_ids,
+        "planner_interaction_count": planner_interaction_count,
+        "planner_observations": planner_observations,
+        "missing_planner_interaction_indices": (missing_planner_interaction_indices),
+        "planner_observed_ids": planner_observed_model_ids,
+        "classifier_observed_ids": classifier_observed_model_ids,
+        "observed_ids": observed_model_ids,
+        "observed_matches_resolved": planner_evidence_complete
+        and bool(expected_observed_ids)
+        and all(item in expected_observed_ids for item in observed_model_ids),
+    }
+
+
+def _planner_model_evidence_from_interactions(
+    interactions: object,
+) -> tuple[list[str], list[JsonObject], list[int], int]:
+    if not isinstance(interactions, list):
+        return [], [], [], 0
+    observed: list[str] = []
+    observations: list[JsonObject] = []
+    missing_indices: list[int] = []
+    for interaction_index, interaction in enumerate(interactions, start=1):
+        if not isinstance(interaction, Mapping):
+            missing_indices.append(interaction_index)
+            continue
+        events = interaction.get("events")
+        if not isinstance(events, list):
+            missing_indices.append(interaction_index)
+            continue
+        interaction_models: list[str] = []
+        for event in events:
+            if not isinstance(event, Mapping) or event.get("event") != "usage":
+                continue
+            data = event.get("data")
+            model = (
+                _optional_string(data, "last_model")
+                if isinstance(data, Mapping)
+                else None
+            )
+            if model is not None and model not in interaction_models:
+                interaction_models.append(model)
+        if len(interaction_models) != 1:
+            missing_indices.append(interaction_index)
+            continue
+        model = interaction_models[0]
+        observations.append({"interaction_index": interaction_index, "model_id": model})
+        if model not in observed:
+            observed.append(model)
+    return observed, observations, missing_indices, len(interactions)
+
+
+def _classifier_model_ids(
+    classifier_diagnostics: Mapping[str, object] | None,
+) -> list[str]:
+    return list(
         dict.fromkeys(
             _clean_strings(
                 [
-                    requested_model_id,
-                    telemetry.get("last_model")
-                    if isinstance(telemetry, Mapping)
-                    else None,
-                    *[
-                        run.get("model")
-                        for run in _classifier_runs(classifier_diagnostics)
-                        if isinstance(run.get("model"), str)
-                    ],
+                    (
+                        str(run["model"])
+                        if "/" in str(run["model"])
+                        else f"{run['provider']}/{run['model']}"
+                    )
+                    for run in _classifier_runs(classifier_diagnostics)
+                    if isinstance(run.get("model"), str)
+                    and isinstance(run.get("provider"), str)
                 ]
             )
         )
     )
-    classifier_prompt_hashes = list(
+
+
+def _classifier_prompt_hashes(
+    classifier_diagnostics: Mapping[str, object] | None,
+) -> list[str]:
+    return list(
         dict.fromkeys(
             _clean_strings(
                 [
@@ -2428,6 +3157,84 @@ def _live_execution_provenance(
             )
         )
     )
+
+
+def _proposal_progress_payload(progress: Mapping[str, object]) -> JsonObject:
+    return {
+        key: progress.get(key)
+        for key in (
+            "source",
+            "call_count",
+            "repair_attempts",
+            "parse_repair_attempts",
+            "attempts",
+            "provider_failure_status",
+            "public_error_code_count",
+        )
+    }
+
+
+def _live_execution_provenance(
+    *,
+    case: BattleCase,
+    cases_path: Path | None = DEFAULT_CASES_FILE,
+    latest_session: Mapping[str, object] | None,
+    classifier_diagnostics: Mapping[str, object] | None,
+    requested_model_id: str | None,
+    session_models: Mapping[str, object] | None = None,
+    event_summary: Mapping[str, object] | None = None,
+    interactions: object = None,
+) -> JsonObject:
+    source_revision = _git_output("rev-parse", "HEAD")
+    tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
+    source_revision_sha256 = hashlib.sha256(source_revision.encode("utf-8")).hexdigest()
+    harness_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    cases_sha256 = (
+        hashlib.sha256(cases_path.read_bytes()).hexdigest()
+        if cases_path is not None
+        else None
+    )
+    stable_build_payload = {
+        "source_revision": source_revision,
+        "harness_sha256": harness_sha256,
+        "cases_sha256": cases_sha256,
+    }
+    build_payload = {
+        "app_version": LOCAL_APP_VERSION,
+        **stable_build_payload,
+    }
+    telemetry = (
+        latest_session.get("telemetry")
+        if isinstance(latest_session, Mapping)
+        and isinstance(latest_session.get("telemetry"), Mapping)
+        else {}
+    )
+    (
+        planner_observed_model_ids,
+        planner_observations,
+        missing_planner_interaction_indices,
+        planner_interaction_count,
+    ) = _planner_model_evidence_from_interactions(interactions)
+    if interactions is None:
+        planner_observed_model_ids = _clean_strings([telemetry.get("last_model")])
+        planner_observations = (
+            [{"interaction_index": 1, "model_id": planner_observed_model_ids[0]}]
+            if planner_observed_model_ids
+            else []
+        )
+        planner_interaction_count = 1
+        missing_planner_interaction_indices = [] if planner_observed_model_ids else [1]
+    classifier_observed_model_ids = _classifier_model_ids(classifier_diagnostics)
+    model_identity = _resolved_model_identity(
+        session_models=session_models,
+        requested_model_id=requested_model_id,
+        planner_observed_model_ids=planner_observed_model_ids,
+        classifier_observed_model_ids=classifier_observed_model_ids,
+        planner_interaction_count=planner_interaction_count,
+        planner_observations=planner_observations,
+        missing_planner_interaction_indices=(missing_planner_interaction_indices),
+    )
+    classifier_prompt_hashes = _classifier_prompt_hashes(classifier_diagnostics)
     classifier_request_composite_fingerprint = (
         _canonical_sha256({"classifier_prompt_hashes": classifier_prompt_hashes})
         if classifier_prompt_hashes
@@ -2525,7 +3332,7 @@ def _live_execution_provenance(
                 "token_usage_estimated": token_usage_estimated,
             }
         )
-    progress_payload: JsonObject = {
+    progress_values: JsonObject = {
         "source": "single_call_committed_session_summary",
         "call_count": model_calls,
         "repair_attempts": repair_attempts,
@@ -2543,12 +3350,11 @@ def _live_execution_provenance(
         },
         "build": {
             **build_payload,
-            "sha256": _canonical_sha256(build_payload),
+            "sha256": _canonical_sha256(stable_build_payload),
         },
         "model": {
-            "requested_id": requested_model_id,
-            "observed_ids": model_ids,
-            "sha256": _canonical_sha256(model_ids),
+            **model_identity,
+            "sha256": _canonical_sha256(model_identity),
         },
         "prompt": {
             "case_sha256": hashlib.sha256(case.prompt.encode("utf-8")).hexdigest(),
@@ -2562,8 +3368,8 @@ def _live_execution_provenance(
             ),
         },
         "proposal_progress": {
-            **progress_payload,
-            "fingerprint": _canonical_sha256(progress_payload),
+            **progress_values,
+            "fingerprint": _canonical_sha256(progress_values),
         },
         "usage": {
             "prompt_tokens": prompt_tokens,
@@ -2647,7 +3453,12 @@ def _live_provenance_checks(
         for key in ("harness_sha256", "cases_sha256", "sha256")
     ) and isinstance(build.get("app_version"), str)
     observed_model_ids = _string_list(model.get("observed_ids"))
-    model_complete = bool(observed_model_ids) and _is_sha256(model.get("sha256"))
+    model_complete = (
+        bool(observed_model_ids)
+        and isinstance(model.get("resolved_id"), str)
+        and model.get("observed_matches_resolved") is True
+        and _is_sha256(model.get("sha256"))
+    )
     classifier_hashes = _string_list(prompt.get("classifier_hashes"))
     prompt_complete = (
         _is_sha256(prompt.get("case_sha256"))
@@ -2655,7 +3466,9 @@ def _live_provenance_checks(
         and all(_is_sha256(item) for item in classifier_hashes)
     )
     usage_complete = all(
-        isinstance(usage.get(key), int) and usage.get(key) >= 0
+        isinstance(usage.get(key), int)
+        and not isinstance(usage.get(key), bool)
+        and usage.get(key) >= 0
         for key in (
             "prompt_tokens",
             "completion_tokens",
@@ -2663,7 +3476,9 @@ def _live_provenance_checks(
             "model_calls",
         )
     ) and all(
-        isinstance(raw_reads.get(key), int) and raw_reads.get(key) >= 0
+        isinstance(raw_reads.get(key), int)
+        and not isinstance(raw_reads.get(key), bool)
+        and raw_reads.get(key) >= 0
         for key in (
             "classifier_run_count",
             "source_inventory_entry_count",
@@ -2720,6 +3535,343 @@ def _live_provenance_checks(
     return checks
 
 
+def _quality_report_with_live_provenance(
+    report: JsonObject,
+    *,
+    provenance: Mapping[str, object],
+    expected: Mapping[str, object],
+) -> JsonObject:
+    """Return one complete report for both live execution and reanalysis."""
+
+    checks = report.get("checks")
+    if not isinstance(checks, list):
+        raise ValueError("quality report has no checks collection")
+    return {
+        **report,
+        "checks": [
+            *checks,
+            *_live_provenance_checks(provenance, expected=expected),
+        ],
+    }
+
+
+def _observation_evidence_report(bundle: Mapping[str, object]) -> JsonObject:
+    """Recompute whether a completed observation is safe to evaluate."""
+
+    case = bundle.get("case")
+    case = case if isinstance(case, Mapping) else {}
+    case_identity = bundle.get("case_identity")
+    case_identity = case_identity if isinstance(case_identity, Mapping) else {}
+    case_contract = bundle.get("case_contract")
+    case_contract = case_contract if isinstance(case_contract, Mapping) else {}
+    expected_case_identity = {
+        "id": case_contract.get("id"),
+        "required": case_contract.get("required"),
+        "complexity": case_contract.get("complexity"),
+        "domain": case_contract.get("domain"),
+        "cohorts": case_contract.get("cohorts"),
+    }
+    case_contract_complete = (
+        bool(case_contract)
+        and _observed_case_contract_payload(case) == dict(case_contract)
+        and dict(case_identity) == expected_case_identity
+        and bundle.get("case_contract_sha256") == _canonical_sha256(dict(case_contract))
+    )
+    attachment_fixture = case_contract.get("attachment_fixture")
+    attachment_fixture = (
+        attachment_fixture if isinstance(attachment_fixture, Mapping) else {}
+    )
+    file_ids = case.get("file_ids")
+    file_id_envs = attachment_fixture.get("file_id_envs")
+    direct_file_slot_count = attachment_fixture.get("direct_file_slot_count")
+    resolved_attachment_count_complete = (
+        isinstance(file_ids, list)
+        and isinstance(file_id_envs, list)
+        and isinstance(direct_file_slot_count, int)
+        and not isinstance(direct_file_slot_count, bool)
+        and len(file_ids) == direct_file_slot_count + len(file_id_envs)
+    )
+    case_contract_complete = (
+        case_contract_complete and resolved_attachment_count_complete
+    )
+
+    provenance = bundle.get("live_execution_provenance")
+    provenance = provenance if isinstance(provenance, Mapping) else {}
+    source = provenance.get("source")
+    source = source if isinstance(source, Mapping) else {}
+    revision = _optional_string(source, "revision")
+    source_complete = (
+        revision is not None
+        and source.get("revision_sha256")
+        == hashlib.sha256(revision.encode("utf-8")).hexdigest()
+        and source.get("tracked_clean") is True
+    )
+
+    build = provenance.get("build")
+    build = build if isinstance(build, Mapping) else {}
+    stable_build_payload = {
+        key: build.get(key)
+        for key in ("source_revision", "harness_sha256", "cases_sha256")
+    }
+    build_complete = (
+        build.get("source_revision") == revision
+        and all(
+            _is_sha256(build.get(key)) for key in ("harness_sha256", "cases_sha256")
+        )
+        and isinstance(build.get("app_version"), str)
+        and build.get("sha256") == _canonical_sha256(stable_build_payload)
+    )
+
+    interactions = bundle.get("interactions")
+    (
+        planner_model_ids,
+        planner_observations,
+        missing_planner_indices,
+        planner_interaction_count,
+    ) = _planner_model_evidence_from_interactions(interactions)
+    classifier_diagnostics = bundle.get("classifier_diagnostics")
+    classifier_diagnostics = (
+        classifier_diagnostics if isinstance(classifier_diagnostics, Mapping) else None
+    )
+    classifier_contract_complete = _classifier_evidence_contract_is_valid(
+        classifier_diagnostics
+    )
+    classifier_model_ids = _classifier_model_ids(classifier_diagnostics)
+    model = provenance.get("model")
+    model = model if isinstance(model, Mapping) else {}
+    model_payload = dict(model)
+    model_sha256 = model_payload.pop("sha256", None)
+    resolved_name = _optional_string(model, "resolved_name")
+    resolved_provider = _optional_string(model, "resolved_provider")
+    expected_model_ids = (
+        [f"{resolved_provider}/{resolved_name}"]
+        if resolved_provider is not None and resolved_name is not None
+        else []
+    )
+    observed_model_ids = list(
+        dict.fromkeys([*planner_model_ids, *classifier_model_ids])
+    )
+    model_complete = (
+        bool(expected_model_ids)
+        and classifier_contract_complete
+        and isinstance(model.get("resolved_id"), str)
+        and model.get("expected_observed_ids") == expected_model_ids
+        and model_sha256 == _canonical_sha256(model_payload)
+        and model.get("planner_interaction_count") == planner_interaction_count
+        and model.get("planner_observations") == planner_observations
+        and model.get("missing_planner_interaction_indices") == missing_planner_indices
+        and model.get("planner_observed_ids") == planner_model_ids
+        and model.get("classifier_observed_ids") == classifier_model_ids
+        and model.get("observed_ids") == observed_model_ids
+        and model.get("observed_matches_resolved") is True
+        and not missing_planner_indices
+        and planner_interaction_count > 0
+        and all(model_id in expected_model_ids for model_id in observed_model_ids)
+    )
+
+    prompt = provenance.get("prompt")
+    prompt = prompt if isinstance(prompt, Mapping) else {}
+    prompt_text = _optional_string(case, "prompt")
+    classifier_hashes = _classifier_prompt_hashes(classifier_diagnostics)
+    prompt_complete = (
+        prompt_text is not None
+        and prompt.get("case_sha256")
+        == hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
+        and bool(classifier_hashes)
+        and all(_is_sha256(value) for value in classifier_hashes)
+        and prompt.get("classifier_hashes") == classifier_hashes
+    )
+
+    capability = provenance.get("capability")
+    capability = capability if isinstance(capability, Mapping) else {}
+    capability_complete = (
+        capability.get("source") == "slot_classification_prompt_hash_composite"
+        and capability.get("classifier_prompt_hashes") == classifier_hashes
+        and capability.get("classifier_request_composite_fingerprint")
+        == _canonical_sha256({"classifier_prompt_hashes": classifier_hashes})
+    )
+
+    progress = provenance.get("proposal_progress")
+    progress = progress if isinstance(progress, Mapping) else {}
+    progress_complete = set(progress) == set(_proposal_progress_payload(progress)) | {
+        "fingerprint"
+    } and progress.get("fingerprint") == _canonical_sha256(
+        _proposal_progress_payload(progress)
+    )
+
+    observation_input = bundle.get("observation_input_identity")
+    observation_input = (
+        observation_input if isinstance(observation_input, Mapping) else {}
+    )
+    attachment_sha256s = observation_input.get("attachment_evidence_sha256s")
+    runtime_sha256s = observation_input.get("runtime_source_sha256s")
+    declared_attachment_sha256s = observation_input.get(
+        "declared_attachment_evidence_sha256s"
+    )
+    declared_runtime_sha256s = observation_input.get("declared_runtime_sha256s")
+    attached_file_ids = tuple(_string_list(case.get("file_ids")))
+    expected_attachment_digest_count = len(
+        _string_list(attachment_fixture.get("attachment_evidence_sha256_envs"))
+    )
+    expected_runtime_digest_count = len(
+        _string_list(attachment_fixture.get("runtime_file_sha256_envs"))
+    )
+    recomputed_attachment_sha256s = _attachment_evidence_sha256s(
+        attached_file_ids=attached_file_ids,
+        classifier_diagnostics=classifier_diagnostics,
+    )
+    runtime_evidence = bundle.get("runtime_evidence")
+    recomputed_runtime_sha256s, recomputed_runtime_status = _runtime_lineage_sha256s(
+        runtime_evidence if isinstance(runtime_evidence, Mapping) else None,
+        expected_count=expected_runtime_digest_count,
+    )
+    fingerprint_payload = {
+        "attachment_evidence_sha256s": recomputed_attachment_sha256s,
+        "runtime_source_sha256s": recomputed_runtime_sha256s,
+    }
+    expected_mismatches: list[str] = []
+    attachment_contract_complete = (
+        expected_attachment_digest_count == len(attached_file_ids)
+        and isinstance(declared_attachment_sha256s, list)
+        and len(declared_attachment_sha256s) == expected_attachment_digest_count
+        and all(_is_sha256(value) for value in declared_attachment_sha256s)
+    )
+    attachment_evidence_complete = all(
+        _is_sha256(value) for value in recomputed_attachment_sha256s
+    )
+    if attached_file_ids and not attachment_contract_complete:
+        expected_mismatches.append("attachment_evidence_digest_contract")
+    if attached_file_ids and not attachment_evidence_complete:
+        expected_mismatches.append("attachment_evidence")
+    if (
+        attachment_contract_complete
+        and attachment_evidence_complete
+        and recomputed_attachment_sha256s != declared_attachment_sha256s
+    ):
+        expected_mismatches.append("attachment_evidence_content")
+    runtime_contract_complete = (
+        isinstance(declared_runtime_sha256s, list)
+        and len(declared_runtime_sha256s) == expected_runtime_digest_count
+        and all(_is_sha256(value) for value in declared_runtime_sha256s)
+    )
+    if expected_runtime_digest_count and not runtime_contract_complete:
+        expected_mismatches.append("runtime_digest_contract")
+    if expected_runtime_digest_count and recomputed_runtime_status != "complete":
+        expected_mismatches.append("runtime_evidence")
+    if (
+        runtime_contract_complete
+        and recomputed_runtime_status == "complete"
+        and recomputed_runtime_sha256s != declared_runtime_sha256s
+    ):
+        expected_mismatches.append("runtime_content")
+    fingerprint_complete = all(
+        _is_sha256(value) for value in recomputed_attachment_sha256s
+    ) and all(_is_sha256(value) for value in recomputed_runtime_sha256s)
+    input_complete = (
+        isinstance(attachment_sha256s, list)
+        and isinstance(runtime_sha256s, list)
+        and isinstance(declared_attachment_sha256s, list)
+        and isinstance(declared_runtime_sha256s, list)
+        and all(_is_sha256(value) for value in attachment_sha256s)
+        and all(_is_sha256(value) for value in runtime_sha256s)
+        and attachment_sha256s == recomputed_attachment_sha256s
+        and runtime_sha256s == recomputed_runtime_sha256s
+        and observation_input.get("runtime_evidence_status")
+        == recomputed_runtime_status
+        and observation_input.get("mismatches") == expected_mismatches
+        and observation_input.get("verified")
+        == (not expected_mismatches and fingerprint_complete)
+        and observation_input.get("sha256") == _canonical_sha256(fingerprint_payload)
+    )
+
+    provenance_shape_complete = all(
+        check.get("passed") is True for check in _live_provenance_checks(provenance)
+    )
+    checks: list[JsonObject] = [
+        {
+            "name": "observation_case_contract_consistent",
+            "passed": case_contract_complete,
+            "actual": {
+                "case_contract_sha256": bundle.get("case_contract_sha256"),
+                "case_identity": dict(case_identity),
+            },
+            "expected": {
+                "case_contract_sha256": (
+                    _canonical_sha256(dict(case_contract)) if case_contract else None
+                ),
+                "case_identity": expected_case_identity,
+            },
+        },
+        {
+            "name": "observation_source_provenance_consistent",
+            "passed": source_complete,
+            "actual": dict(source),
+            "expected": "revision hash recomputes and tracked source is clean",
+        },
+        {
+            "name": "observation_build_provenance_consistent",
+            "passed": build_complete,
+            "actual": dict(build),
+            "expected": "build hash recomputes from the observed source and inputs",
+        },
+        {
+            "name": "observation_model_provenance_consistent",
+            "passed": model_complete,
+            "actual": dict(model),
+            "expected": {
+                "planner_interaction_count": planner_interaction_count,
+                "planner_observations": planner_observations,
+                "missing_planner_interaction_indices": missing_planner_indices,
+                "classifier_observed_ids": classifier_model_ids,
+            },
+        },
+        {
+            "name": "observation_prompt_provenance_consistent",
+            "passed": prompt_complete,
+            "actual": dict(prompt),
+            "expected": {
+                "case_sha256": (
+                    hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
+                    if prompt_text is not None
+                    else None
+                ),
+                "classifier_hashes": classifier_hashes,
+            },
+        },
+        {
+            "name": "observation_capability_provenance_consistent",
+            "passed": capability_complete,
+            "actual": dict(capability),
+            "expected": "classifier prompt composite recomputes",
+        },
+        {
+            "name": "observation_progress_provenance_consistent",
+            "passed": progress_complete,
+            "actual": dict(progress),
+            "expected": "proposal progress fingerprint recomputes",
+        },
+        {
+            "name": "observation_input_identity_consistent",
+            "passed": input_complete,
+            "actual": dict(observation_input),
+            "expected": "declared and observed input hashes match and recompute",
+        },
+        {
+            "name": "observation_provenance_shape_complete",
+            "passed": provenance_shape_complete,
+            "actual": _live_provenance_checks(provenance),
+            "expected": "all required live provenance fields are complete",
+        },
+    ]
+    failed_checks = [check for check in checks if check.get("passed") is not True]
+    return {
+        "valid": not failed_checks,
+        "failed_check_count": len(failed_checks),
+        "failed_checks": failed_checks,
+        "checks": checks,
+    }
+
+
 def _first_pass_provenance_checks(
     *,
     provenance: Mapping[str, object],
@@ -2742,18 +3894,7 @@ def _first_pass_provenance_checks(
     )
     progress = provenance.get("proposal_progress")
     progress = progress if isinstance(progress, Mapping) else {}
-    progress_payload = {
-        key: progress.get(key)
-        for key in (
-            "source",
-            "call_count",
-            "repair_attempts",
-            "parse_repair_attempts",
-            "attempts",
-            "provider_failure_status",
-            "public_error_code_count",
-        )
-    }
+    progress_payload = _proposal_progress_payload(progress)
     progress_fingerprint = progress.get("fingerprint")
     progress_complete = (
         expected.get("require_progress_fingerprint") is True
@@ -2905,12 +4046,22 @@ def _write_bytes_exclusive(path: Path, payload: bytes) -> None:
 def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
     report = bundle.get("quality_report")
     checks = report.get("checks") if isinstance(report, Mapping) else []
+    identity_checks = bundle.get("release_identity_checks")
+    identity_checks = identity_checks if isinstance(identity_checks, list) else []
     warnings = report.get("warnings") if isinstance(report, Mapping) else []
     metrics = report.get("metrics") if isinstance(report, Mapping) else {}
     event_summary = bundle.get("event_summary")
     event_summary = event_summary if isinstance(event_summary, Mapping) else {}
+    journey = bundle.get("journey")
+    journey = dict(journey) if isinstance(journey, Mapping) else {}
     case_identity = bundle.get("case_identity")
     case_identity = dict(case_identity) if isinstance(case_identity, Mapping) else {}
+    observation_input_identity = bundle.get("observation_input_identity")
+    observation_input_identity = (
+        observation_input_identity
+        if isinstance(observation_input_identity, Mapping)
+        else {}
+    )
     provenance = bundle.get("live_execution_provenance")
     usage = (
         provenance.get("usage")
@@ -2918,11 +4069,52 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         and isinstance(provenance.get("usage"), Mapping)
         else {}
     )
-    failed_checks = [
+    raw_failed_checks = [
         check
         for check in checks
         if isinstance(check, Mapping) and check.get("passed") is not True
     ]
+    failed_identity_checks = [
+        check
+        for check in identity_checks
+        if isinstance(check, Mapping) and check.get("passed") is not True
+    ]
+    completed_live_execution = (
+        bundle.get("artifact_mode") == "live_execution"
+        and bundle.get("skipped") is not True
+    )
+    evidence_report = (
+        _observation_evidence_report(bundle) if completed_live_execution else {}
+    )
+    evidence_valid = (
+        evidence_report.get("valid") is True if completed_live_execution else None
+    )
+    evidence_failed_checks = evidence_report.get("failed_checks")
+    evidence_failed_checks = (
+        evidence_failed_checks if isinstance(evidence_failed_checks, list) else []
+    )
+    if bundle.get("skipped") is True:
+        outcome_class = "fixture_skip"
+        observation_status = "fixture_skip"
+        expectation_verdict = "not_evaluated"
+    elif bundle.get("artifact_mode") == "live_execution_failure":
+        outcome_class = "execution_failure"
+        observation_status = "execution_failure"
+        expectation_verdict = "not_evaluated"
+    elif completed_live_execution and evidence_valid is not True:
+        outcome_class = "invalid_evidence"
+        observation_status = "invalid_evidence"
+        expectation_verdict = "not_evaluated"
+    elif isinstance(journey.get("outcome_class"), str):
+        outcome_class = journey["outcome_class"]
+        observation_status = "completed"
+        expectation_verdict = "fail" if raw_failed_checks else "pass"
+    else:
+        outcome_class = "unclassified"
+        observation_status = "completed"
+        expectation_verdict = "fail" if raw_failed_checks else "pass"
+    failed_checks = raw_failed_checks if expectation_verdict in {"pass", "fail"} else []
+    bundle_bytes = bundle_path.read_bytes()
     return {
         "artifact_mode": bundle.get("artifact_mode"),
         "case_identity": case_identity,
@@ -2934,7 +4126,19 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         "session_id": bundle.get("session_id"),
         "plan_id": bundle.get("plan_id"),
         "repetition": bundle.get("repetition"),
-        "bundle_path": str(bundle_path),
+        "case_contract_sha256": bundle.get("case_contract_sha256"),
+        "observation_input_sha256": observation_input_identity.get("sha256"),
+        "observation_input_verified": (
+            observation_input_identity.get("verified") is True
+        ),
+        "bundle_file": bundle_path.name,
+        "bundle_sha256": hashlib.sha256(bundle_bytes).hexdigest(),
+        "observation_status": observation_status,
+        "expectation_verdict": expectation_verdict,
+        "outcome_class": outcome_class,
+        "evidence_valid": evidence_valid,
+        "evidence_failed_check_count": len(evidence_failed_checks),
+        "evidence_failed_checks": evidence_failed_checks,
         "error": bundle.get("error") if isinstance(bundle.get("error"), str) else None,
         "client_turn_id": (
             bundle.get("client_turn_id")
@@ -2948,17 +4152,15 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
         "step_count": bundle.get("plan_summary", {}).get("step_count")
         if isinstance(bundle.get("plan_summary"), Mapping)
         else None,
-        "failed_check_count": len(failed_checks),
+        "failed_expectation_check_count": len(failed_checks),
         "failed_checks": failed_checks,
+        "identity_failed_check_count": len(failed_identity_checks),
+        "identity_failed_checks": failed_identity_checks,
         "warning_count": len(warnings) if isinstance(warnings, list) else 0,
         "warnings": warnings if isinstance(warnings, list) else [],
         "metrics": metrics if isinstance(metrics, Mapping) else {},
         "event_summary": dict(event_summary),
-        "journey": (
-            dict(bundle["journey"])
-            if isinstance(bundle.get("journey"), Mapping)
-            else {}
-        ),
+        "journey": journey,
         "authoring_usage": dict(usage),
         "assumptions": _string_list(event_summary.get("assumptions")),
         "failure_summary": bundle.get("failure_summary")
@@ -2984,7 +4186,7 @@ def _failed_check_names(result: Mapping[str, Any]) -> list[str]:
 def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
     grouped: dict[str, list[JsonObject]] = {}
     for result in results:
-        if result.get("skipped") is True:
+        if result.get("observation_status") == "fixture_skip":
             continue
         case_id = result.get("case_id")
         if isinstance(case_id, str):
@@ -2992,14 +4194,24 @@ def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
 
     summary: JsonObject = {}
     for case_id, case_results in grouped.items():
-        run_count = len(case_results)
-        plan_count = sum(1 for result in case_results if result.get("plan_id"))
+        completed_results = [
+            result
+            for result in case_results
+            if result.get("observation_status") == "completed"
+        ]
+        run_count = len(completed_results)
+        execution_failure_count = sum(
+            1
+            for result in case_results
+            if result.get("observation_status") == "execution_failure"
+        )
+        plan_count = sum(1 for result in completed_results if result.get("plan_id"))
         repair_failure_count = 0
         invalid_plan_count = 0
         text_only_question_count = 0
         assumptions: list[str] = []
         error_code_counts: dict[str, int] = {}
-        for result in case_results:
+        for result in completed_results:
             _extend_unique_strings(assumptions, _string_list(result.get("assumptions")))
             event_summary = result.get("event_summary")
             if not isinstance(event_summary, Mapping):
@@ -3018,6 +4230,7 @@ def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
             )
         summary[case_id] = {
             "run_count": run_count,
+            "execution_failure_observation_count": execution_failure_count,
             "plan_created_count": plan_count,
             "plan_rate": plan_count / run_count if run_count else None,
             "error_code_counts": error_code_counts,
@@ -3029,11 +4242,224 @@ def _suite_reliability_summary(results: list[JsonObject]) -> JsonObject:
     return summary
 
 
+def _suite_outcome_summary(results: list[JsonObject]) -> JsonObject:
+    counts: dict[str, int] = {}
+    by_cohort: dict[str, dict[str, int]] = {}
+    for result in results:
+        outcome_class = result.get("outcome_class")
+        if not isinstance(outcome_class, str) or not outcome_class:
+            outcome_class = "unclassified"
+        counts[outcome_class] = counts.get(outcome_class, 0) + 1
+        for cohort in _string_list(result.get("cohorts")):
+            cohort_counts = by_cohort.setdefault(cohort, {})
+            cohort_counts[outcome_class] = cohort_counts.get(outcome_class, 0) + 1
+    return {
+        "counts": dict(sorted(counts.items())),
+        "by_cohort": {
+            cohort: dict(sorted(cohort_counts.items()))
+            for cohort, cohort_counts in sorted(by_cohort.items())
+        },
+    }
+
+
+def _suite_observation_summary(results: list[JsonObject]) -> JsonObject:
+    status_counts: dict[str, int] = {}
+    verdict_counts: dict[str, int] = {}
+    for result in results:
+        status = result.get("observation_status")
+        if not isinstance(status, str) or not status:
+            status = "unknown"
+        status_counts[status] = status_counts.get(status, 0) + 1
+        verdict = result.get("expectation_verdict")
+        if not isinstance(verdict, str) or not verdict:
+            verdict = "unknown"
+        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+    return {
+        "status_counts": dict(sorted(status_counts.items())),
+        "verdict_counts": dict(sorted(verdict_counts.items())),
+    }
+
+
+def _observation_key(value: Mapping[str, object]) -> tuple[str, int] | None:
+    case_id = value.get("case_id")
+    repetition = value.get("repetition")
+    if (
+        not isinstance(case_id, str)
+        or not case_id
+        or not isinstance(repetition, int)
+        or isinstance(repetition, bool)
+        or repetition < 1
+    ):
+        return None
+    return case_id, repetition
+
+
+def _observation_key_payload(key: tuple[str, int]) -> JsonObject:
+    return {"case_id": key[0], "repetition": key[1]}
+
+
+def _suite_receipt_integrity(
+    *,
+    expected_observations: list[JsonObject],
+    results: list[JsonObject],
+    suite_dir: Path,
+) -> JsonObject:
+    expected_by_key: dict[tuple[str, int], str] = {}
+    invalid_expected_keys: list[JsonObject] = []
+    for expected in expected_observations:
+        key = _observation_key(expected)
+        contract_sha256 = expected.get("case_contract_sha256")
+        if key is None or not _is_sha256(contract_sha256) or key in expected_by_key:
+            invalid_expected_keys.append(dict(expected))
+            continue
+        expected_by_key[key] = str(contract_sha256)
+
+    actual_counts: dict[tuple[str, int], int] = {}
+    actual_results: dict[tuple[str, int], JsonObject] = {}
+    invalid_actual_keys: list[JsonObject] = []
+    for result in results:
+        key = _observation_key(result)
+        if key is None:
+            invalid_actual_keys.append(
+                {
+                    "case_id": result.get("case_id"),
+                    "repetition": result.get("repetition"),
+                }
+            )
+            continue
+        actual_counts[key] = actual_counts.get(key, 0) + 1
+        actual_results.setdefault(key, result)
+
+    expected_keys = set(expected_by_key)
+    actual_keys = set(actual_counts)
+    missing_keys = sorted(expected_keys - actual_keys)
+    unexpected_keys = sorted(actual_keys - expected_keys)
+    duplicate_keys = sorted(key for key, count in actual_counts.items() if count > 1)
+    case_contract_mismatches: list[JsonObject] = []
+    invalid_bundle_references: list[JsonObject] = []
+    for key in sorted(expected_keys & actual_keys):
+        result = actual_results[key]
+        if result.get("case_contract_sha256") != expected_by_key[key]:
+            case_contract_mismatches.append(_observation_key_payload(key))
+        bundle_file = result.get("bundle_file")
+        bundle_sha256 = result.get("bundle_sha256")
+        if (
+            not isinstance(bundle_file, str)
+            or not bundle_file
+            or Path(bundle_file).is_absolute()
+            or Path(bundle_file).name != bundle_file
+        ):
+            invalid_bundle_references.append(
+                {**_observation_key_payload(key), "reason": "invalid_relative_path"}
+            )
+            continue
+        if not _is_sha256(bundle_sha256):
+            invalid_bundle_references.append(
+                {**_observation_key_payload(key), "reason": "invalid_sha256"}
+            )
+            continue
+        bundle_path = suite_dir / bundle_file
+        if not bundle_path.is_file():
+            invalid_bundle_references.append(
+                {**_observation_key_payload(key), "reason": "missing_bundle"}
+            )
+            continue
+        if hashlib.sha256(bundle_path.read_bytes()).hexdigest() != bundle_sha256:
+            invalid_bundle_references.append(
+                {**_observation_key_payload(key), "reason": "sha256_mismatch"}
+            )
+
+    complete = not any(
+        (
+            invalid_expected_keys,
+            invalid_actual_keys,
+            missing_keys,
+            unexpected_keys,
+            duplicate_keys,
+            case_contract_mismatches,
+            invalid_bundle_references,
+        )
+    )
+    return {
+        "status": "complete" if complete else "partial",
+        "expected_observation_count": len(expected_observations),
+        "actual_observation_count": len(results),
+        "missing_observation_keys": [
+            _observation_key_payload(key) for key in missing_keys
+        ],
+        "unexpected_observation_keys": [
+            _observation_key_payload(key) for key in unexpected_keys
+        ],
+        "duplicate_observation_keys": [
+            _observation_key_payload(key) for key in duplicate_keys
+        ],
+        "invalid_expected_observation_keys": invalid_expected_keys,
+        "invalid_actual_observation_keys": invalid_actual_keys,
+        "case_contract_mismatches": case_contract_mismatches,
+        "invalid_bundle_references": invalid_bundle_references,
+    }
+
+
+def _verified_suite_receipt_membership(
+    *,
+    suite_summary_path: Path,
+    bundle_path: Path,
+    bundle: Mapping[str, object],
+    bundle_sha256: str,
+) -> JsonObject:
+    try:
+        summary_bytes = suite_summary_path.read_bytes()
+        summary = json.loads(summary_bytes.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(
+            f"invalid suite receipt {suite_summary_path}: {error}"
+        ) from error
+    if not isinstance(summary, Mapping):
+        raise ValueError(f"{suite_summary_path} did not contain a suite receipt")
+    receipt_integrity = summary.get("receipt_integrity")
+    if (
+        not isinstance(receipt_integrity, Mapping)
+        or receipt_integrity.get("status") != "complete"
+    ):
+        raise ValueError(f"{suite_summary_path} is not a complete suite receipt")
+    if bundle_path.resolve().parent != suite_summary_path.resolve().parent:
+        raise ValueError(f"{bundle_path} is not stored beside {suite_summary_path}")
+    case = bundle.get("case")
+    case_id = _optional_string(case, "id") if isinstance(case, Mapping) else None
+    repetition = bundle.get("repetition")
+    results = summary.get("results")
+    matching_results = (
+        [
+            result
+            for result in results
+            if isinstance(result, Mapping)
+            and result.get("case_id") == case_id
+            and result.get("repetition") == repetition
+            and result.get("bundle_file") == bundle_path.name
+        ]
+        if isinstance(results, list)
+        else []
+    )
+    if len(matching_results) != 1:
+        raise ValueError(f"{bundle_path} has no unique suite receipt membership")
+    result = matching_results[0]
+    if result.get("bundle_sha256") != bundle_sha256 or result.get(
+        "case_contract_sha256"
+    ) != bundle.get("case_contract_sha256"):
+        raise ValueError(f"{bundle_path} does not match its suite receipt digest")
+    return {
+        "source_authenticity": "suite_receipt_verified",
+        "suite_summary_file": suite_summary_path.name,
+        "suite_summary_sha256": hashlib.sha256(summary_bytes).hexdigest(),
+    }
+
+
 def _reanalyze_bundles(
     *,
     bundle_paths: list[Path],
     output_dir: Path,
     expected_overrides_by_case_id: Mapping[str, Mapping[str, Any]] | None = None,
+    suite_summary_path: Path | None = None,
 ) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(output_dir, 0o700)
@@ -3042,9 +4468,21 @@ def _reanalyze_bundles(
     for bundle_path in bundle_paths:
         try:
             source_bytes = bundle_path.read_bytes()
-            bundle = json.loads(source_bytes.decode("utf-8"))
-            if not isinstance(bundle, dict):
-                raise ValueError(f"{bundle_path} did not contain a JSON object.")
+            bundle = _validated_reanalysis_bundle(
+                bundle_path,
+                json.loads(source_bytes.decode("utf-8")),
+            )
+            source_bundle_sha256 = hashlib.sha256(source_bytes).hexdigest()
+            source_authenticity = (
+                _verified_suite_receipt_membership(
+                    suite_summary_path=suite_summary_path,
+                    bundle_path=bundle_path,
+                    bundle=bundle,
+                    bundle_sha256=source_bundle_sha256,
+                )
+                if suite_summary_path is not None
+                else {"source_authenticity": "unverified_standalone"}
+            )
             case = bundle.get("case")
             case_id = (
                 _optional_string(case, "id") if isinstance(case, Mapping) else None
@@ -3102,12 +4540,25 @@ def _reanalyze_bundles(
                     else None
                 ),
             )
+            provenance = bundle.get("live_execution_provenance")
+            if not isinstance(provenance, Mapping):
+                raise ValueError(f"{bundle_path} has no live execution provenance")
+            report = _quality_report_with_live_provenance(
+                report,
+                provenance=provenance,
+                expected=expected,
+            )
             refreshed = {
-                **bundle,
+                **{
+                    key: value
+                    for key, value in bundle.items()
+                    if key != "evidence_report"
+                },
                 "artifact_mode": "reanalysis",
                 "reanalyzed_at": time.strftime("%Y%m%dT%H%M%S"),
                 "reanalysis_provenance": {
-                    "source_bundle_sha256": hashlib.sha256(source_bytes).hexdigest(),
+                    "source_bundle_sha256": source_bundle_sha256,
+                    **source_authenticity,
                     "reanalyzer_source_revision": _git_output("rev-parse", "HEAD"),
                     "reanalyzer_harness_sha256": hashlib.sha256(
                         Path(__file__).read_bytes()
@@ -3129,6 +4580,90 @@ def _reanalyze_bundles(
             failures += 1
             print(f"reanalyze failed for {bundle_path}: {error}", file=sys.stderr)
     return 1 if failures else 0
+
+
+def _validated_reanalysis_bundle(path: Path, value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} did not contain a JSON object.")
+    if value.get("artifact_schema_version") != SUPPORTED_RECEIPT_ARTIFACT_VERSION:
+        raise ValueError(
+            f"{path} is not a {SUPPORTED_RECEIPT_ARTIFACT_VERSION} artifact."
+        )
+    if value.get("artifact_mode") != "live_execution" or value.get("skipped") is True:
+        raise ValueError(
+            f"{path} is not a completed live-execution observation bundle."
+        )
+    case = value.get("case")
+    case_identity = value.get("case_identity")
+    if not isinstance(case, Mapping) or not isinstance(case_identity, Mapping):
+        raise ValueError(f"{path} has no complete case identity.")
+    case_id = _optional_string(case, "id")
+    if case_id is None or case_id != _optional_string(case_identity, "id"):
+        raise ValueError(f"{path} has inconsistent case identity.")
+    if not isinstance(case.get("expected"), Mapping):
+        raise ValueError(f"{path} has no case expectation contract.")
+    if not isinstance(value.get("case_contract"), Mapping) or not _is_sha256(
+        value.get("case_contract_sha256")
+    ):
+        raise ValueError(f"{path} has no valid case contract fingerprint.")
+    repetition = value.get("repetition")
+    if (
+        not isinstance(repetition, int)
+        or isinstance(repetition, bool)
+        or repetition < 1
+    ):
+        raise ValueError(f"{path} has no valid repetition identity.")
+    interactions = value.get("interactions")
+    if (
+        not isinstance(interactions, list)
+        or not interactions
+        or not all(isinstance(interaction, Mapping) for interaction in interactions)
+    ):
+        raise ValueError(f"{path} has no complete interaction evidence.")
+    if value.get("plan") is not None and not isinstance(value.get("plan"), dict):
+        raise ValueError(f"{path} has an invalid plan payload.")
+    for key in (
+        "live_execution_provenance",
+        "observation_input_identity",
+        "classifier_diagnostics",
+        "quality_report",
+    ):
+        if not isinstance(value.get(key), Mapping):
+            raise ValueError(f"{path} has no valid {key} evidence.")
+    classifier_runs = value["classifier_diagnostics"].get("classifier_runs")
+    if (
+        not isinstance(classifier_runs, list)
+        or not classifier_runs
+        or not all(isinstance(run, Mapping) for run in classifier_runs)
+    ):
+        raise ValueError(f"{path} has incomplete classifier diagnostics.")
+    source_quality_report = value["quality_report"]
+    checks = source_quality_report.get("checks")
+    warnings = source_quality_report.get("warnings")
+    metrics = source_quality_report.get("metrics")
+    if (
+        not isinstance(checks, list)
+        or not checks
+        or not all(
+            isinstance(check, Mapping)
+            and isinstance(check.get("name"), str)
+            and isinstance(check.get("passed"), bool)
+            for check in checks
+        )
+        or not isinstance(warnings, list)
+        or not isinstance(metrics, Mapping)
+    ):
+        raise ValueError(f"{path} has incomplete source quality evidence.")
+    evidence_report = _observation_evidence_report(value)
+    if evidence_report.get("valid") is not True:
+        failed_names = _failed_check_names(
+            {"failed_checks": evidence_report.get("failed_checks")}
+        )
+        raise ValueError(
+            f"{path} has internally inconsistent live evidence: "
+            + ", ".join(failed_names or ["unknown evidence check"])
+        )
+    return value
 
 
 def _write_reanalysis_bundle(
@@ -3709,6 +5244,14 @@ def _journey_summary(
     preferred_ids = set(_string_list(expected.get("preferred_question_event_ids")))
     allowed_ids = set(_string_list(expected.get("allowed_question_event_ids")))
     forbidden_ids = set(_string_list(expected.get("forbidden_question_event_ids")))
+    relevance_rubric_declared = any(
+        key in expected
+        for key in (
+            "preferred_question_event_ids",
+            "allowed_question_event_ids",
+            "forbidden_question_event_ids",
+        )
+    )
     occurrences: list[tuple[int, JsonObject]] = []
     for interaction_index, interaction in enumerate(interactions):
         if not isinstance(interaction, Mapping):
@@ -3739,6 +5282,7 @@ def _journey_summary(
             preferred_ids=preferred_ids,
             allowed_ids=allowed_ids,
             forbidden_ids=forbidden_ids,
+            rubric_declared=relevance_rubric_declared,
         )
         answer_interaction = (
             interactions[interaction_index + 1]
@@ -3852,13 +5396,10 @@ def _journey_summary(
     parse_repair_attempts = (
         _int_value(telemetry.get("parse_repair_attempts_total")) or 0
     )
+    error_codes = _string_list(event_summary.get("error_codes"))
     if not has_plan:
         plan_outcome_kind = "terminal_failure"
-    elif (
-        repair_attempts
-        or parse_repair_attempts
-        or _string_list(event_summary.get("error_codes"))
-    ):
+    elif repair_attempts or parse_repair_attempts or error_codes:
         plan_outcome_kind = "repaired_success"
     else:
         plan_outcome_kind = "first_pass_success"
@@ -3869,11 +5410,40 @@ def _journey_summary(
             if question.get("resolution") == "reopened"
         )
     )
+    if has_plan:
+        if repair_attempts or parse_repair_attempts:
+            outcome_class = "plan_repaired"
+        elif error_codes:
+            outcome_class = "plan_with_error"
+        else:
+            outcome_class = "plan_first_pass"
+    elif "session_turn_provider_outcome_unknown" in error_codes:
+        outcome_class = "provider_outcome_unknown"
+    elif error_codes:
+        outcome_class = "builder_error"
+    elif (
+        termination == "unanswered_question"
+        and expected.get("allow_question_instead_of_plan") is True
+        and questions
+        and not reopened_ids
+        and all(
+            question.get("relevance") in {"preferred", "allowed"}
+            for question in questions
+        )
+    ):
+        outcome_class = "clarification_stop_intended"
+    elif termination == "unanswered_question":
+        outcome_class = "stalled_unanswered_question"
+    elif termination == "interaction_limit":
+        outcome_class = "interaction_limit_reached"
+    else:
+        outcome_class = "requirements_unconfirmed"
     resolved_count = sum(
         question.get("resolution") == "resolved" for question in questions
     )
     return {
         "termination": termination,
+        "outcome_class": outcome_class,
         "turn_count": len(interactions),
         "question_event_count": len(questions),
         "question_event_ids": [question["question_id"] for question in questions],
@@ -3897,7 +5467,13 @@ def _journey_summary(
             relevance: sum(
                 question.get("relevance") == relevance for question in questions
             )
-            for relevance in ("preferred", "allowed", "forbidden", "unclassified")
+            for relevance in (
+                "preferred",
+                "allowed",
+                "forbidden",
+                "unclassified",
+                "unassessed",
+            )
         },
         "questions": questions,
         "plan_outcome": {
@@ -3915,7 +5491,10 @@ def _question_relevance(
     preferred_ids: set[str],
     allowed_ids: set[str],
     forbidden_ids: set[str],
+    rubric_declared: bool,
 ) -> str:
+    if not rubric_declared:
+        return "unassessed"
     if question_id in preferred_ids:
         return "preferred"
     if question_id in allowed_ids:
@@ -4048,6 +5627,24 @@ def _classifier_runs(
     if diagnostics is None:
         return []
     return _mapping_list(diagnostics.get("classifier_runs"))
+
+
+def _classifier_evidence_contract_is_valid(
+    diagnostics: Mapping[str, object] | None,
+) -> bool:
+    """Validate raw diagnostics through the product-owned response contract."""
+
+    if diagnostics is None:
+        return False
+    try:
+        from eneo.flows.ai_builder.ai_builder_api_models import (
+            AIBuilderClassifierDiagnosticsResponse,
+        )
+
+        AIBuilderClassifierDiagnosticsResponse.model_validate(diagnostics)
+    except (ImportError, ValueError):
+        return False
+    return True
 
 
 def _latest_classifier_claim(
@@ -4326,8 +5923,15 @@ def _quality_report(
     preferred_question_ids = set(
         _string_list(expected.get("preferred_question_event_ids"))
     )
-    allowed_question_ids = set(_string_list(expected.get("allowed_question_event_ids")))
-    if preferred_question_ids or allowed_question_ids or forbidden_question_ids:
+    relevance_rubric_declared = any(
+        key in expected
+        for key in (
+            "preferred_question_event_ids",
+            "allowed_question_event_ids",
+            "forbidden_question_event_ids",
+        )
+    )
+    if relevance_rubric_declared:
         relevance_counts = journey.get("question_relevance_counts")
         relevance_counts = (
             relevance_counts if isinstance(relevance_counts, Mapping) else {}
@@ -4521,13 +6125,14 @@ def _quality_report(
                 expected=expected_review_policy,
             )
         )
-        checks.extend(
-            _review_policy_checks(
-                scope="applied",
-                summary=_summarize_applied_flow(applied_flow),
-                expected=expected_review_policy,
+        if applied_flow is not None:
+            checks.extend(
+                _review_policy_checks(
+                    scope="applied",
+                    summary=_summarize_applied_flow(applied_flow),
+                    expected=expected_review_policy,
+                )
             )
-        )
     expected_first_pass = expected.get("expected_first_pass_authoring")
     if isinstance(expected_first_pass, Mapping):
         checks.extend(
@@ -4548,13 +6153,14 @@ def _quality_report(
                 expected_targets=review_targets,
             )
         )
-        checks.extend(
-            _first_pass_review_policy_checks(
-                scope="applied",
-                summary=_summarize_applied_flow(applied_flow),
-                expected_targets=review_targets,
+        if applied_flow is not None:
+            checks.extend(
+                _first_pass_review_policy_checks(
+                    scope="applied",
+                    summary=_summarize_applied_flow(applied_flow),
+                    expected_targets=review_targets,
+                )
             )
-        )
     expected_runtime_evidence = expected.get("expected_runtime_evidence")
     if isinstance(expected_runtime_evidence, Mapping):
         checks.extend(
@@ -4749,7 +6355,8 @@ def _quality_report(
 
     expected_leaf_fields = _field_expectation_groups(expected)
     if expected_leaf_fields:
-        actual_leaf_fields = _all_output_fields(summary)
+        field_evidence = _output_field_evidence(summary, expected_leaf_fields)
+        actual_leaf_fields = _string_list(field_evidence.get("fields"))
         missing_groups = [
             group
             for group in expected_leaf_fields
@@ -4762,7 +6369,7 @@ def _quality_report(
         add_check(
             "expected_leaf_output_fields",
             not missing_groups,
-            actual_leaf_fields,
+            field_evidence,
             expected_leaf_fields,
         )
 
@@ -5250,7 +6857,6 @@ def _runtime_evidence_checks(
 
     runtime_file_ids: list[str] = []
     documents: list[Mapping[str, object]] = []
-    model_call_count = 0
     for step in steps:
         _extend_unique_strings(
             runtime_file_ids,
@@ -5260,18 +6866,33 @@ def _runtime_evidence_checks(
         step_documents = _first_mapping_list_for_key(output_payload, "documents")
         if step_documents is not None:
             documents.extend(step_documents)
-        parameters = step.get("model_parameters_json")
-        per_source_calls = (
-            _int_value(parameters.get("per_source_call_count"))
-            if isinstance(parameters, Mapping)
-            else None
-        )
-        if per_source_calls is not None and per_source_calls > 0:
-            model_call_count += per_source_calls
-        elif (_int_value(step.get("num_tokens_input")) or 0) > 0 or (
-            _int_value(step.get("num_tokens_output")) or 0
-        ) > 0:
-            model_call_count += 1
+
+    provider_calls = evidence.get("provider_calls")
+    provider_calls = provider_calls if isinstance(provider_calls, Mapping) else None
+    total_count_truncated = (
+        provider_calls.get("total_count_truncated")
+        if provider_calls is not None
+        else None
+    )
+    raw_provider_call_count = (
+        provider_calls.get("total_count") if provider_calls is not None else None
+    )
+    provider_call_count = (
+        raw_provider_call_count
+        if isinstance(raw_provider_call_count, int)
+        and not isinstance(raw_provider_call_count, bool)
+        and raw_provider_call_count >= 0
+        and total_count_truncated is False
+        else None
+    )
+    if provider_calls is None:
+        provider_call_evidence_status = "missing"
+    elif total_count_truncated is True:
+        provider_call_evidence_status = "truncated"
+    elif total_count_truncated is not False or provider_call_count is None:
+        provider_call_evidence_status = "invalid"
+    else:
+        provider_call_evidence_status = "complete"
 
     source_labels = list(
         dict.fromkeys(
@@ -5481,9 +7102,14 @@ def _runtime_evidence_checks(
             "name": "runtime_model_call_count",
             "passed": (
                 expected_model_calls is not None
-                and model_call_count == expected_model_calls
+                and provider_call_evidence_status == "complete"
+                and provider_call_count == expected_model_calls
             ),
-            "actual": model_call_count,
+            "actual": {
+                "count": provider_call_count,
+                "evidence_status": provider_call_evidence_status,
+                "total_count_truncated": total_count_truncated,
+            },
             "expected": expected_model_calls,
         },
         {
@@ -5569,14 +7195,9 @@ def _artifact_source_sections(
     return sections
 
 
-def _all_output_fields(summary: Mapping[str, Any]) -> list[str]:
+def _output_fields(steps: list[Mapping[str, Any]]) -> list[str]:
     fields: list[str] = []
-    steps = summary.get("steps")
-    if not isinstance(steps, list):
-        return fields
     for step in steps:
-        if not isinstance(step, Mapping):
-            continue
         for key in (
             "output_contract_properties",
             "output_contract_nested_properties",
@@ -5586,6 +7207,37 @@ def _all_output_fields(summary: Mapping[str, Any]) -> list[str]:
             if isinstance(raw, list):
                 fields.extend(str(field) for field in raw)
     return list(dict.fromkeys(fields))
+
+
+def _output_field_evidence(
+    summary: Mapping[str, Any],
+    expected_groups: list[list[str]],
+) -> JsonObject:
+    steps = _step_summaries(summary)
+    all_fields = _output_fields(steps)
+    if summary.get("terminal_output_type") != "json" or not steps:
+        return {
+            "boundary": "all_steps",
+            "fields": all_fields,
+            "intermediate_only_matches": [],
+        }
+
+    terminal_fields = _output_fields([steps[-1]])
+    intermediate_only_matches = [
+        actual_name
+        for actual_name in all_fields
+        if actual_name not in terminal_fields
+        and any(
+            _field_name_matches(expected_name, actual_name)
+            for group in expected_groups
+            for expected_name in group
+        )
+    ]
+    return {
+        "boundary": "terminal_json",
+        "fields": terminal_fields,
+        "intermediate_only_matches": intermediate_only_matches,
+    }
 
 
 def _step_summaries(summary: Mapping[str, Any]) -> list[Mapping[str, Any]]:

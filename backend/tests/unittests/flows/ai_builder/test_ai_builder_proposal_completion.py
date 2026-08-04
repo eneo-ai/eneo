@@ -63,11 +63,11 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest as ProposalCompletionRequestContract,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationInput,
     SlotClassificationSource,
-    classify_slots,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classifier import classify_slots
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,

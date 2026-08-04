@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ClassifierRetentionClass,
+    SlotClassificationOutputSchemaFieldsMetadata,
     question_answer_from_metadata,
     slot_classification_from_metadata,
 )
@@ -75,11 +76,11 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SchemaLimitExceeded,
     build_schema_evidence,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFields,
+    ClassifiedOutputSchemaFieldDelta,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
@@ -92,6 +93,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
+    CheckpointIntent,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
     FileRole,
@@ -139,6 +141,7 @@ CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozense
     {
         "slot",
         "file_role",
+        "checkpoint_update",
         "form_intake",
         "output_schema_fields",
         "example_output_constraint",
@@ -272,15 +275,21 @@ def _replay_slot_classification_metadata(
     replayed = False
     for message in conversation:
         classification = slot_classification_from_metadata(message.metadata)
-        if classification is None:
+        if classification is None or classification.outcome != "resolved":
             continue
+        prompt_hash = classification.prompt_hash
+        assert prompt_hash is not None
         merge_llm_resolved_slots(
             state,
             classification.to_result(),
-            prompt_hash=classification.prompt_hash,
+            prompt_hash=prompt_hash,
             freeform_text=freeform_text,
             model_blocked_slots=model_blocked_slots,
             defer_output_schema_relevance=True,
+        )
+        _apply_replayed_output_schema_fields(
+            state,
+            snapshot=classification.output_schema_fields,
         )
         replayed = True
     if replayed:
@@ -550,6 +559,10 @@ def merge_llm_resolved_slots(
         raise ValueError("prompt_hash must be non-empty")
 
     apply_model_blocked_slots(state, model_blocked_slots=model_blocked_slots)
+    _merge_model_checkpoint_updates(
+        state,
+        classification_result=classification_result,
+    )
     _merge_model_result_obligations(
         state,
         classification_result=classification_result,
@@ -633,6 +646,41 @@ def merge_llm_resolved_slots(
         _clear_prose_output_schema_for_non_json_terminal(state)
 
 
+def _merge_model_checkpoint_updates(
+    state: PlanningState,
+    *,
+    classification_result: SlotClassificationResult,
+) -> None:
+    producer_kinds = [
+        update.producer_kind for update in classification_result.checkpoint_updates
+    ]
+    if len(producer_kinds) != len(set(producer_kinds)):
+        raise ValueError("checkpoint_updates must contain unique producer_kind values")
+    intents_by_producer = {
+        intent.producer_kind: intent for intent in state.checkpoint_intents
+    }
+    for update in classification_result.checkpoint_updates:
+        if update.confidence == "low" or not update.evidence:
+            raise ValueError("checkpoint update requires supported cited evidence")
+        if update.operation == "clear":
+            if update.mode is not None:
+                raise ValueError("checkpoint clear must not carry a review mode")
+            intents_by_producer.pop(update.producer_kind, None)
+            continue
+        if update.mode is None:
+            raise ValueError("checkpoint update requires a review mode")
+        intents_by_producer[update.producer_kind] = CheckpointIntent(
+            producer_kind=update.producer_kind,
+            mode=update.mode,
+            confidence=update.confidence,
+            evidence=[item.planning_reference() for item in update.evidence],
+        )
+    state.checkpoint_intents = sorted(
+        intents_by_producer.values(),
+        key=lambda intent: intent.producer_kind,
+    )
+
+
 def _clear_prose_output_schema_for_non_json_terminal(state: PlanningState) -> None:
     terminal_output = state.resolved_slots.get("terminal_output")
     current = state.output_schema_evidence
@@ -652,32 +700,31 @@ def _clear_prose_output_schema_for_non_json_terminal(state: PlanningState) -> No
 def _merge_model_output_schema_fields(
     state: PlanningState,
     *,
-    classified_fields: ClassifiedOutputSchemaFields | None,
+    classified_fields: ClassifiedOutputSchemaFieldDelta | None,
 ) -> None:
     terminal_output = state.resolved_slots.get("terminal_output")
     terminal_is_json = (
         terminal_output is not None and terminal_output.value == "structured_json"
     )
-    replaying_trusted_snapshot = (
-        classified_fields is not None and classified_fields.operation == "replace"
-    )
     if (
         classified_fields is None
         or classified_fields.confidence == "low"
         or not classified_fields.evidence
-        or not (terminal_is_json or replaying_trusted_snapshot)
+        or not terminal_is_json
     ):
         return
     current = state.output_schema_evidence
     if current is not None and current.source == "declared_schema":
         return
     if classified_fields.operation == "clear":
-        if current is not None and current.source == "prose_field_names":
-            state.replace_schema_resolution(
-                input_evidence=state.input_schema_evidence,
-                output_evidence=None,
-                example_inference=state.example_output_schema_inference,
-            )
+        _replace_prose_output_schema_fields(
+            state,
+            field_names=(),
+            confidence=classified_fields.confidence,
+            provenance=tuple(
+                item.planning_reference() for item in classified_fields.evidence
+            ),
+        )
         return
     current_prose = (
         current
@@ -689,28 +736,58 @@ def _merge_model_output_schema_fields(
         if current_prose is not None
         else ()
     )
-    if classified_fields.operation == "replace":
-        field_names = classified_fields.field_names
-        provenance = tuple(
-            item.planning_reference() for item in classified_fields.evidence
-        )
-    else:
-        removed = set(classified_fields.removed_field_names)
-        field_names = tuple(
-            name for name in current_field_names if name not in removed
-        ) + tuple(
-            name
-            for name in classified_fields.field_names
-            if name not in current_field_names and name not in removed
-        )
-        provenance = tuple(
-            dict.fromkeys(
-                (
-                    *(current_prose.evidence if current_prose is not None else ()),
-                    *(item.planning_reference() for item in classified_fields.evidence),
-                )
+    removed = set(classified_fields.removed_field_names)
+    field_names = tuple(
+        name for name in current_field_names if name not in removed
+    ) + tuple(
+        name
+        for name in classified_fields.field_names
+        if name not in current_field_names and name not in removed
+    )
+    provenance = tuple(
+        dict.fromkeys(
+            (
+                *(current_prose.evidence if current_prose is not None else ()),
+                *(item.planning_reference() for item in classified_fields.evidence),
             )
         )
+    )
+    _replace_prose_output_schema_fields(
+        state,
+        field_names=field_names,
+        confidence=classified_fields.confidence,
+        provenance=provenance,
+    )
+
+
+def _apply_replayed_output_schema_fields(
+    state: PlanningState,
+    *,
+    snapshot: SlotClassificationOutputSchemaFieldsMetadata | None,
+) -> None:
+    if snapshot is None or snapshot.confidence == "low" or not snapshot.evidence:
+        return
+    _replace_prose_output_schema_fields(
+        state,
+        field_names=tuple(snapshot.field_names),
+        confidence=snapshot.confidence,
+        provenance=tuple(
+            item.to_classified_evidence().planning_reference()
+            for item in snapshot.evidence
+        ),
+    )
+
+
+def _replace_prose_output_schema_fields(
+    state: PlanningState,
+    *,
+    field_names: tuple[str, ...],
+    confidence: SlotConfidence,
+    provenance: tuple[str, ...],
+) -> None:
+    current = state.output_schema_evidence
+    if current is not None and current.source == "declared_schema":
+        return
     if len(provenance) > SCHEMA_PROVENANCE_MAX_ITEMS:
         raise AIBuilderBadRequestException(
             "The named JSON-field history exceeds the Builder safety limit. "
@@ -737,7 +814,7 @@ def _merge_model_output_schema_fields(
                 "properties": {name: {} for name in field_names},
             },
             source="prose_field_names",
-            confidence=classified_fields.confidence,
+            confidence=confidence,
             evidence=provenance,
         )
     except SchemaLimitExceeded as error:

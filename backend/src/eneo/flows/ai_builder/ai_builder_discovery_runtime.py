@@ -16,12 +16,13 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
+    SlotClassificationOutputSchemaFieldsMetadata,
     StructuredQuestionAnswerMetadata,
     question_answer_from_metadata,
     question_answer_values,
     question_response_from_metadata,
     slot_classification_from_metadata,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from eneo.flows.ai_builder.ai_builder_discovery_models import (
@@ -56,13 +57,16 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     resolve_example_output_schema_inference,
     resolve_structured_schema_direction,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
-    ClassifiedOutputSchemaFields,
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    ClassifiedOutputSchemaFieldDelta,
     ClassifiedSchemaDirection,
+    SlotClassificationAttempt,
     SlotClassificationBias,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     classify_slots,
     slot_classification_prompt_hash,
     slot_classification_provider_identity,
@@ -237,6 +241,14 @@ def build_slot_classification_input(
             code=AIBuilderErrorCode.BAD_REQUEST,
         )
 
+    current_user_message_id = next(
+        (
+            message.message_id
+            for message in reversed(conversation)
+            if message.role == "user"
+        ),
+        None,
+    )
     transcript_sources: list[SlotClassificationSource] = []
     pending_question_id: str | None = None
     for message in conversation:
@@ -294,7 +306,10 @@ def build_slot_classification_input(
                     truncated=item.coverage != "fully_seen",
                 )
             )
-    return SlotClassificationInput(sources=tuple(sources))
+    return SlotClassificationInput(
+        sources=tuple(sources),
+        current_user_message_id=current_user_message_id,
+    )
 
 
 def _bound_classification_transcript(
@@ -588,16 +603,36 @@ async def build_runtime_discovery_context(
     output_schema_fields_relevant = _output_schema_field_classification_is_relevant(
         state
     )
+    checkpoint_updates_relevant = any(
+        source.kind in {"user_message", "structured_answer"}
+        and source.message_id == classification_input.current_user_message_id
+        for source in classification_input.sources
+    )
+    provider = slot_classification_provider_identity(
+        provider_type=completion_model_route.provider_type,
+        litellm_kwargs=completion_model_route.litellm_kwargs,
+    )
     if (
         not allowed_values
         and not schema_direction_pending
         and not output_schema_fields_relevant
+        and not checkpoint_updates_relevant
     ):
+        skipped_attempt = SlotClassificationAttempt(
+            outcome="skipped_no_resolvable_slots"
+        )
         return _complete_runtime_discovery_context(
             state,
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=False,
+            slot_classification_metadata=slot_classification_metadata_from_attempt(
+                skipped_attempt,
+                prompt_hash=None,
+                classification_input=classification_input,
+                model=completion_model_route.litellm_model,
+                provider=provider,
+            ),
         )
     bias = _targeted_classification_bias(
         conversation,
@@ -607,32 +642,6 @@ async def build_runtime_discovery_context(
     prior_output_schema_classification = _latest_matching_output_schema_classification(
         conversation,
         state=state,
-    )
-    result = await classify_slots(
-        litellm_client=litellm_client,
-        completion_model_route=completion_model_route,
-        classification_input=classification_input,
-        allowed_slot_values=allowed_values,
-        schema_candidates=(schema_candidates if schema_direction_pending else ()),
-        tenant_id=tenant_id,
-        ui_language=ui_language,
-        bias=bias,
-        usage_tracker=usage_tracker,
-        before_provider_call=before_provider_call,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
-        safety_buffer_tokens=safety_buffer_tokens,
-    )
-    if result is None:
-        return _complete_runtime_discovery_context(
-            state,
-            attachment_context=attachment_context,
-            schema_candidates=schema_candidates,
-            schema_direction_pending=schema_direction_pending,
-        )
-    provider = slot_classification_provider_identity(
-        provider_type=completion_model_route.provider_type,
-        litellm_kwargs=completion_model_route.litellm_kwargs,
     )
     prompt_hash = slot_classification_prompt_hash(
         classification_input=classification_input,
@@ -647,14 +656,88 @@ async def build_runtime_discovery_context(
         max_output_tokens=max_output_tokens,
         safety_buffer_tokens=safety_buffer_tokens,
     )
+    attempt = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=completion_model_route,
+        classification_input=classification_input,
+        allowed_slot_values=allowed_values,
+        schema_candidates=(schema_candidates if schema_direction_pending else ()),
+        tenant_id=tenant_id,
+        ui_language=ui_language,
+        bias=bias,
+        usage_tracker=usage_tracker,
+        before_provider_call=before_provider_call,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
+    )
+    if attempt.outcome != "resolved":
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+            slot_classification_metadata=slot_classification_metadata_from_attempt(
+                attempt,
+                prompt_hash=prompt_hash,
+                classification_input=classification_input,
+                model=completion_model_route.litellm_model,
+                provider=provider,
+            ),
+        )
+
+    result = attempt.result
+    assert result is not None
+    candidate_state = state.model_copy(deep=True)
     merge_llm_resolved_slots(
-        state,
+        candidate_state,
         result,
         prompt_hash=prompt_hash,
         freeform_text=text,
         model_blocked_slots=model_blocked_slots,
     )
-    classified_direction = result.schema_direction
+    if (
+        not _output_schema_field_classification_is_relevant(candidate_state)
+        and result.output_schema_fields is not None
+    ):
+        result = replace(result, output_schema_fields=None)
+    output_schema_fields_snapshot = _materialized_output_schema_field_snapshot(
+        candidate_state,
+        classified_fields=result.output_schema_fields,
+        prior_classification=prior_output_schema_classification,
+    )
+    if (
+        result.output_schema_fields is not None
+        and output_schema_fields_snapshot is None
+    ):
+        result = replace(result, output_schema_fields=None)
+    admitted_metadata = slot_classification_metadata_from_attempt(
+        replace(attempt, result=result),
+        prompt_hash=prompt_hash,
+        classification_input=classification_input,
+        model=completion_model_route.litellm_model,
+        provider=provider,
+        retained_source_inventory=(
+            prior_output_schema_classification.source_inventory
+            if prior_output_schema_classification is not None
+            and output_schema_fields_snapshot is not None
+            and output_schema_fields_snapshot.operation == "replace"
+            else ()
+        ),
+        output_schema_fields_snapshot=output_schema_fields_snapshot,
+    )
+    admitted_result = replace(
+        admitted_metadata.to_result(),
+        output_schema_fields=result.output_schema_fields,
+    )
+    merge_llm_resolved_slots(
+        state,
+        admitted_result,
+        prompt_hash=prompt_hash,
+        freeform_text=text,
+        model_blocked_slots=model_blocked_slots,
+    )
+    classified_direction = admitted_result.schema_direction
     if (
         schema_direction_pending
         and classified_direction is not None
@@ -666,41 +749,14 @@ async def build_runtime_discovery_context(
             direction=classified_direction,
         )
         schema_direction_pending = False
-    if (
-        not _output_schema_field_classification_is_relevant(state)
-        and result.output_schema_fields is not None
-    ):
-        result = replace(result, output_schema_fields=None)
-    else:
-        result = replace(
-            result,
-            output_schema_fields=_materialized_output_schema_field_classification(
-                state,
-                classified_fields=result.output_schema_fields,
-                prior_classification=prior_output_schema_classification,
-            ),
-        )
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
     return _complete_runtime_discovery_context(
         state,
         attachment_context=attachment_context,
         schema_candidates=schema_candidates,
         schema_direction_pending=schema_direction_pending,
-        slot_classification_result=result,
-        slot_classification_metadata=slot_classification_metadata_from_result(
-            result,
-            prompt_hash=prompt_hash,
-            classification_input=classification_input,
-            model=completion_model_route.litellm_model,
-            provider=provider,
-            retained_source_inventory=(
-                prior_output_schema_classification.source_inventory
-                if prior_output_schema_classification is not None
-                and result.output_schema_fields is not None
-                and result.output_schema_fields.operation == "replace"
-                else ()
-            ),
-        ),
+        slot_classification_result=admitted_result,
+        slot_classification_metadata=admitted_metadata,
     )
 
 
@@ -746,16 +802,22 @@ def _latest_matching_output_schema_classification(
     return None
 
 
-def _materialized_output_schema_field_classification(
+def _materialized_output_schema_field_snapshot(
     state: PlanningState,
     *,
-    classified_fields: ClassifiedOutputSchemaFields | None,
+    classified_fields: ClassifiedOutputSchemaFieldDelta | None,
     prior_classification: SlotClassificationMetadata | None,
-) -> ClassifiedOutputSchemaFields | None:
+) -> SlotClassificationOutputSchemaFieldsMetadata | None:
     if classified_fields is None or classified_fields.confidence == "low":
         return None
     if classified_fields.operation == "clear":
-        return classified_fields
+        return SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+            operation="clear",
+            field_names=(),
+            confidence=classified_fields.confidence,
+            reason=classified_fields.reason,
+            evidence=classified_fields.evidence,
+        )
     prior_evidence = (
         tuple(
             item.to_classified_evidence()
@@ -768,14 +830,14 @@ def _materialized_output_schema_field_classification(
     evidence = tuple(dict.fromkeys((*prior_evidence, *classified_fields.evidence)))
     field_names = _current_prose_output_schema_field_names(state)
     if not field_names:
-        return ClassifiedOutputSchemaFields(
+        return SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
             operation="clear",
             field_names=(),
             confidence=classified_fields.confidence,
             reason=classified_fields.reason,
             evidence=classified_fields.evidence,
         )
-    return ClassifiedOutputSchemaFields(
+    return SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
         operation="replace",
         field_names=field_names,
         confidence=classified_fields.confidence,

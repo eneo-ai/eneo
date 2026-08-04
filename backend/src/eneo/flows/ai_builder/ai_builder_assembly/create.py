@@ -4,10 +4,14 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Literal, NoReturn
+from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
+)
+from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
+    DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK,
+    lower_document_report_topology,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     fixed_audio_transcription_step,
@@ -15,14 +19,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     template_fill_step,
     template_variable_reader_step,
 )
-from eneo.flows.ai_builder.ai_builder_assembly.lower import (
-    COMPOSE_OVERALL_OVERVIEW_KEY,
-    COMPOSE_REPORT_TITLE_KEY,
-    COMPOSE_SECTION_BODY_KEY,
-    COMPOSE_SECTION_TITLE_KEY,
-    COMPOSE_SOURCE_LABEL_KEY,
-    lower_assembly_plan,
-)
+from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
     PlannedStep,
@@ -60,7 +57,7 @@ from eneo.flows.ai_builder.pattern_registry import (
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
-from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.ai_builder.planning_state import AggregationIntent, ReportDisposition
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -163,8 +160,7 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
         "template variables."
     ),
     "document_report_compose_topology_missing": (
-        "Document report flows with source sections must end with a deterministic "
-        "compose_text body writer before the renderer."
+        DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK
     ),
     "empty_steps": "The proposal must contain at least one semantic step.",
     "explicit_refs_not_supported": (
@@ -266,7 +262,7 @@ def try_compile_create_intent_with_assembly(
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
-    report_disposition: str | None,
+    report_disposition: ReportDisposition | None,
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
@@ -315,7 +311,7 @@ def _assemble_create_intent(
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
-    report_disposition: str | None,
+    report_disposition: ReportDisposition | None,
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
@@ -411,6 +407,7 @@ def _assemble_create_intent(
         runtime_input_type=runtime_input_type,
         final_semantic_output_type=terminal_semantic_output_type,
         source_reader_required_fields=source_reader_required_fields,
+        report_disposition=report_disposition,
         ui_language=ui_language,
     )
     semantic_steps = _semantic_steps_with_terminal_obligation(
@@ -422,12 +419,13 @@ def _assemble_create_intent(
         final_semantic_output_type=terminal_semantic_output_type,
         ui_language=ui_language,
     )
-    semantic_steps = _semantic_steps_with_result_contract_fields(
-        semantic_steps,
-        runtime_input_type=runtime_input_type,
-        final_semantic_output_type=terminal_semantic_output_type,
-        result_contract_output_fields=result_contract_output_fields,
-    )
+    if report_disposition is None:
+        semantic_steps = _semantic_steps_with_result_contract_fields(
+            semantic_steps,
+            runtime_input_type=runtime_input_type,
+            final_semantic_output_type=terminal_semantic_output_type,
+            result_contract_output_fields=result_contract_output_fields,
+        )
     previous_output_type: OutputType | None = None
     has_source_prefix = False
     if runtime_input_type == InputType.AUDIO:
@@ -558,44 +556,16 @@ def _assemble_create_intent(
         completed_steps,
         ui_language=ui_language,
     )
-    completed_steps = _ensure_document_report_section_writer(
+    completed_steps = lower_document_report_topology(
         completed_steps,
         report_disposition=report_disposition,
+        runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
-        ui_language=ui_language,
-    )
-    completed_steps = _apply_previous_document_item_map_execution(
-        completed_steps,
-        ui_language=ui_language,
-    )
-    completed_steps = _ensure_document_report_overview_writer(
-        completed_steps,
-        report_disposition=report_disposition,
-        final_output_type=final_output_type,
-        ui_language=ui_language,
-    )
-    completed_steps = _replace_document_report_body_writer_with_compose(
-        completed_steps,
-        report_disposition=report_disposition,
-        final_output_type=final_output_type,
-        ui_language=ui_language,
-    )
-    if _document_report_compose_required(
-        completed_steps,
-        report_disposition=report_disposition,
-        final_output_type=final_output_type,
-    ) and not _has_terminal_compose_renderer_topology(completed_steps):
-        _raise_document_report_compose_topology_missing(
-            runtime_input_type=runtime_input_type,
-            final_output_type=final_output_type,
-            final_output_mode=final_output_mode,
-            pattern_ids=pattern_ids,
-            chain_steps=chain_steps,
-            semantic_step_count=len(semantic_steps),
-        )
-    completed_steps = _annotate_report_disposition(
-        completed_steps,
-        report_disposition=report_disposition,
+        final_output_mode=final_output_mode,
+        pattern_ids=pattern_ids,
+        chain_steps=chain_steps,
+        semantic_step_count=len(semantic_steps),
+        result_contract_output_fields=result_contract_output_fields,
         ui_language=ui_language,
     )
     section_writer_material = _resolve_section_writer_structured_sources(
@@ -714,6 +684,7 @@ def _semantic_steps_with_single_source_report_reader(
     runtime_input_type: InputType,
     final_semantic_output_type: OutputType,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
+    report_disposition: ReportDisposition | None,
     ui_language: str | None,
 ) -> tuple[SemanticStepIntent, ...]:
     semantic_steps = tuple(steps)
@@ -731,11 +702,22 @@ def _semantic_steps_with_single_source_report_reader(
             source_reader_required_fields
         )
     if not source_fields:
-        return semantic_steps
+        if report_disposition is None:
+            return semantic_steps
+        source_fields = (_default_document_report_source_field(ui_language),)
     source_fields = complete_structured_source_reader_fields(
         source_fields,
         required_fields=(),
     )
+    if report_disposition is not None and not structured_fields_have_document_items(
+        source_fields
+    ):
+        source_fields = (
+            _document_report_source_array_field(
+                source_fields,
+                ui_language=ui_language,
+            ),
+        )
 
     reader_step = semantic_step.model_copy(
         update={
@@ -759,6 +741,39 @@ def _semantic_steps_with_single_source_report_reader(
         }
     )
     return (reader_step, writer_step)
+
+
+def _document_report_source_array_field(
+    source_fields: tuple[StructuredFieldDraft, ...],
+    *,
+    ui_language: str | None,
+) -> StructuredFieldDraft:
+    description = (
+        "Source-grounded report material for the current document."
+        if ui_language == "en"
+        else "Källgrundat rapportunderlag för det aktuella dokumentet."
+    )
+    return StructuredFieldDraft(
+        name="documents",
+        field_type="array",
+        description=description,
+        item_fields=list(source_fields),
+    )
+
+
+def _default_document_report_source_field(
+    ui_language: str | None,
+) -> StructuredFieldDraft:
+    description = (
+        "Source-grounded material needed to write the requested report."
+        if ui_language == "en"
+        else "Källgrundat underlag som behövs för att skriva den begärda rapporten."
+    )
+    return StructuredFieldDraft(
+        name="source_material",
+        field_type="string",
+        description=description,
+    )
 
 
 def _semantic_steps_with_terminal_text_fields_folded(
@@ -1473,640 +1488,6 @@ def _append_per_source_reader_instruction(
             "med ett dokumentobjekt."
         )
     if addition in instructions:
-        return instructions
-    return f"{instructions}\n\n{addition}"
-
-
-def _ensure_document_report_section_writer(
-    planned_steps: tuple[PlannedStep, ...],
-    *,
-    report_disposition: str | None,
-    final_output_type: OutputType,
-    ui_language: str | None,
-) -> tuple[PlannedStep, ...]:
-    if (
-        final_output_type not in _DOCUMENT_OUTPUT_TYPES
-        or report_disposition not in {"both", "per_source_sections"}
-        or len(planned_steps) < 3
-        or _source_section_single_array_index(planned_steps) is not None
-    ):
-        return planned_steps
-
-    reader_index = _per_source_document_reader_index(planned_steps)
-    if reader_index is None:
-        return planned_steps
-    reader_step = planned_steps[reader_index]
-    section_step = PlannedStep(
-        role="transform",
-        name=_document_report_section_writer_name(ui_language),
-        instructions=_document_report_section_writer_instructions(ui_language),
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.JSON,
-        output_type=OutputType.JSON,
-        output_mode=OutputMode.PASS_THROUGH,
-        underlag_channel=derive_underlag_channel(
-            input_source=InputSource.PREVIOUS_STEP,
-            input_type=InputType.JSON,
-            previous_step=reader_step,
-            previous_field_refs=(),
-        ),
-        output_fields=(_document_report_section_array_field(ui_language),),
-    )
-    logger.info(
-        "ai_builder_document_report_section_writer_inserted",
-        extra={"reader_step_name": reader_step.name},
-    )
-    replaced_index = reader_index + 1
-    if replaced_index < len(planned_steps) and _step_outputs_weak_section_text(
-        planned_steps[replaced_index]
-    ):
-        logger.info(
-            "ai_builder_document_report_weak_section_writer_replaced",
-            extra={"replaced_step_name": planned_steps[replaced_index].name},
-        )
-        return (
-            *planned_steps[: reader_index + 1],
-            replace(
-                section_step,
-                form_field_refs=planned_steps[replaced_index].form_field_refs,
-            ),
-            *planned_steps[replaced_index + 1 :],
-        )
-    return (
-        *planned_steps[: reader_index + 1],
-        section_step,
-        *planned_steps[reader_index + 1 :],
-    )
-
-
-def _per_source_document_reader_index(
-    planned_steps: tuple[PlannedStep, ...],
-) -> int | None:
-    for index, planned_step in enumerate(planned_steps):
-        if (
-            planned_step_is_source_reader(planned_step)
-            and planned_step.runtime_input_execution_mode == "per_source"
-            and structured_fields_have_document_items(planned_step.output_fields)
-        ):
-            return index
-    return None
-
-
-def _source_section_single_array_index(
-    planned_steps: tuple[PlannedStep, ...],
-) -> int | None:
-    for index, planned_step in enumerate(planned_steps):
-        if _step_outputs_source_section_array(planned_step):
-            return index
-    return None
-
-
-def _step_outputs_source_section_array(planned_step: PlannedStep) -> bool:
-    if len(planned_step.output_fields) != 1:
-        return False
-    field = planned_step.output_fields[0]
-    if field.field_type != "array":
-        return False
-    item_field_names = {item.name for item in field.item_fields or ()}
-    return {COMPOSE_SECTION_TITLE_KEY, COMPOSE_SECTION_BODY_KEY}.issubset(
-        item_field_names
-    )
-
-
-def _step_outputs_weak_section_text(planned_step: PlannedStep) -> bool:
-    if (
-        planned_step.input_source != InputSource.PREVIOUS_STEP
-        or planned_step.input_type != InputType.JSON
-        or planned_step.output_type != OutputType.JSON
-        or len(planned_step.output_fields) != 1
-    ):
-        return False
-    field = planned_step.output_fields[0]
-    if field.field_type == "string":
-        return _is_section_text_field_name(field.name)
-    if field.field_type != "array":
-        return False
-    return any(
-        item.field_type == "string" and _is_section_text_field_name(item.name)
-        for item in field.item_fields or ()
-    )
-
-
-def _is_section_text_field_name(name: str) -> bool:
-    return name in {"section_text", COMPOSE_SECTION_BODY_KEY}
-
-
-def _document_report_section_writer_name(ui_language: str | None) -> str:
-    if ui_language == "en":
-        return "Build source sections"
-    return "Bygg källavsnitt"
-
-
-def _document_report_section_writer_instructions(ui_language: str | None) -> str:
-    if ui_language == "en":
-        return (
-            "Write one finished report section for the current document item. "
-            "Use the document title or topic as section_title, not the uploaded "
-            "filename. Put the full source-specific prose in section_body."
-        )
-    return (
-        "Skriv ett färdigt rapportavsnitt för den aktuella dokumentposten. "
-        "Använd dokumentets titel eller ämne som section_title, inte det "
-        "uppladdade filnamnet. Lägg hela den källspecifika rapporttexten i "
-        "section_body."
-    )
-
-
-def _document_report_section_array_field(
-    ui_language: str | None,
-) -> StructuredFieldDraft:
-    description = (
-        "One finished report section per source document."
-        if ui_language == "en"
-        else "Ett färdigt rapportavsnitt per källdokument."
-    )
-    return StructuredFieldDraft(
-        name="source_sections",
-        field_type="array",
-        description=description,
-        item_fields=[
-            _section_title_field(ui_language),
-            _section_body_field(ui_language),
-        ],
-    )
-
-
-def _apply_previous_document_item_map_execution(
-    planned_steps: tuple[PlannedStep, ...],
-    *,
-    ui_language: str | None,
-) -> tuple[PlannedStep, ...]:
-    updated_steps: list[PlannedStep] = []
-    changed = False
-    for planned_step in planned_steps:
-        previous_step = updated_steps[-1] if updated_steps else None
-        output_array = _single_output_array_field_name(planned_step.output_fields)
-        if (
-            previous_step is None
-            or not planned_step_is_source_reader(previous_step)
-            or previous_step.runtime_input_execution_mode != "per_source"
-            or planned_step.input_source != InputSource.PREVIOUS_STEP
-            or planned_step.input_type != InputType.JSON
-            or planned_step.output_type != OutputType.JSON
-            or output_array is None
-        ):
-            updated_steps.append(planned_step)
-            continue
-        annotated_step = replace(
-            planned_step,
-            instructions=_append_previous_document_item_map_instruction(
-                planned_step.instructions,
-                output_array=output_array,
-                ui_language=ui_language,
-            ),
-            previous_item_map_enabled=True,
-        )
-        updated_steps.append(annotated_step)
-        changed = changed or annotated_step != planned_step
-    return tuple(updated_steps) if changed else planned_steps
-
-
-def _single_output_array_field_name(
-    output_fields: tuple[StructuredFieldDraft, ...],
-) -> str | None:
-    if len(output_fields) != 1:
-        return None
-    field = output_fields[0]
-    if field.field_type != "array":
-        return None
-    return field.name
-
-
-def _append_previous_document_item_map_instruction(
-    instructions: str,
-    *,
-    output_array: str,
-    ui_language: str | None,
-) -> str:
-    if ui_language == "en":
-        addition = (
-            "This step runs once per documents[] item from the previous reader. "
-            f"Use only the current document item and return {output_array} with "
-            "one item."
-        )
-    else:
-        addition = (
-            "Det här steget körs en gång per documents[]-post från föregående "
-            f"läsare. Använd bara den aktuella dokumentposten och returnera "
-            f"{output_array} med en post."
-        )
-    if addition in instructions:
-        return instructions
-    return f"{instructions}\n\n{addition}"
-
-
-def _ensure_document_report_overview_writer(
-    planned_steps: tuple[PlannedStep, ...],
-    *,
-    report_disposition: str | None,
-    final_output_type: OutputType,
-    ui_language: str | None,
-) -> tuple[PlannedStep, ...]:
-    if (
-        final_output_type not in _DOCUMENT_OUTPUT_TYPES
-        or report_disposition != "both"
-        or len(planned_steps) < 4
-        or planned_steps[-1].role != "renderer"
-        or planned_steps[-2].role != "body_writer"
-    ):
-        return planned_steps
-
-    body_writer_index = len(planned_steps) - 2
-    section_index = _source_section_item_map_index(planned_steps[:body_writer_index])
-    if section_index is None:
-        return planned_steps
-    if (
-        _overview_writer_index(
-            planned_steps=planned_steps,
-            after_index=section_index,
-            before_index=body_writer_index,
-        )
-        is not None
-    ):
-        return planned_steps
-
-    section_step = planned_steps[section_index]
-    overview_step = PlannedStep(
-        role="transform",
-        name=_document_report_overview_writer_name(ui_language),
-        instructions=_document_report_overview_writer_instructions(ui_language),
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.JSON,
-        output_type=OutputType.JSON,
-        output_mode=OutputMode.PASS_THROUGH,
-        underlag_channel=derive_underlag_channel(
-            input_source=InputSource.PREVIOUS_STEP,
-            input_type=InputType.JSON,
-            previous_step=section_step,
-            previous_field_refs=(),
-        ),
-        output_fields=_report_overview_fields(ui_language),
-    )
-    logger.info(
-        "ai_builder_document_report_overview_writer_inserted",
-        extra={"section_step_name": section_step.name},
-    )
-    return (
-        *planned_steps[: section_index + 1],
-        overview_step,
-        *planned_steps[section_index + 1 :],
-    )
-
-
-def _document_report_overview_writer_name(ui_language: str | None) -> str:
-    if ui_language == "en":
-        return "Write overview"
-    return "Skriv översikt"
-
-
-def _document_report_overview_writer_instructions(ui_language: str | None) -> str:
-    if ui_language == "en":
-        return (
-            "Write a concise report title and synthesized overview across the "
-            "completed source sections. Use only the supplied section content."
-        )
-    return (
-        "Skriv en koncis rapporttitel och samlad översikt över de färdiga "
-        "källavsnitten. Använd endast det tillhandahållna avsnittsinnehållet."
-    )
-
-
-def _replace_document_report_body_writer_with_compose(
-    planned_steps: tuple[PlannedStep, ...],
-    *,
-    report_disposition: str | None,
-    final_output_type: OutputType,
-    ui_language: str | None,
-) -> tuple[PlannedStep, ...]:
-    if (
-        final_output_type not in _DOCUMENT_OUTPUT_TYPES
-        or report_disposition not in {"both", "per_source_sections"}
-        or len(planned_steps) < 4
-        or planned_steps[-1].role != "renderer"
-        or planned_steps[-2].role != "body_writer"
-    ):
-        return planned_steps
-
-    renderer_step = planned_steps[-1]
-    body_writer_step = planned_steps[-2]
-    body_writer_index = len(planned_steps) - 2
-    section_index = _source_section_item_map_index(planned_steps[:body_writer_index])
-    if section_index is None:
-        return planned_steps
-    overview_index = (
-        _overview_writer_index(
-            planned_steps=planned_steps,
-            after_index=section_index,
-            before_index=body_writer_index,
-        )
-        if report_disposition == "both"
-        else None
-    )
-    if report_disposition == "both" and overview_index is None:
-        return planned_steps
-
-    updated_steps = list(planned_steps[:body_writer_index])
-    updated_steps[section_index] = _complete_source_section_fields_for_compose(
-        updated_steps[section_index],
-        ui_language=ui_language,
-    )
-    if overview_index is not None:
-        updated_steps[overview_index] = replace(
-            updated_steps[overview_index],
-            output_fields=_report_overview_fields(ui_language),
-        )
-
-    compose_step = PlannedStep(
-        role="body_writer",
-        name=body_writer_step.name,
-        instructions=_compose_step_instructions(ui_language),
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.TEXT,
-        output_type=OutputType.TEXT,
-        output_mode=OutputMode.COMPOSE_TEXT,
-        underlag_channel="whole_object",
-        form_field_refs=body_writer_step.form_field_refs,
-    )
-    return (*updated_steps, compose_step, renderer_step)
-
-
-def _document_report_compose_required(
-    planned_steps: tuple[PlannedStep, ...],
-    *,
-    report_disposition: str | None,
-    final_output_type: OutputType,
-) -> bool:
-    return (
-        final_output_type in _DOCUMENT_OUTPUT_TYPES
-        and report_disposition in {"both", "per_source_sections"}
-        and len(planned_steps) >= 2
-        and planned_steps[-1].role == "renderer"
-    )
-
-
-def _has_terminal_compose_renderer_topology(
-    planned_steps: tuple[PlannedStep, ...],
-) -> bool:
-    return (
-        len(planned_steps) >= 2
-        and planned_steps[-2].role == "body_writer"
-        and planned_steps[-2].output_mode == OutputMode.COMPOSE_TEXT
-        and planned_steps[-1].role == "renderer"
-    )
-
-
-def _raise_document_report_compose_topology_missing(
-    *,
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-    final_output_mode: OutputMode | None,
-    pattern_ids: tuple[str, ...],
-    chain_steps: tuple[str, ...],
-    semantic_step_count: int,
-) -> NoReturn:
-    raise AIBuilderArchitectureError(
-        public_code="architecture_materialization_failed",
-        detail=_REJECTION_FEEDBACK["document_report_compose_topology_missing"],
-        log_context={
-            "failure_code": "assembly_document_report_compose_topology_missing",
-            "reason": "document_report_compose_topology_missing",
-            "runtime_input_type": runtime_input_type.value,
-            "final_output_type": final_output_type.value,
-            "final_output_mode": (
-                final_output_mode.value if final_output_mode is not None else None
-            ),
-            "pattern_ids": ",".join(pattern_ids),
-            "chain_steps": ",".join(chain_steps),
-            "semantic_step_count": semantic_step_count,
-        },
-    )
-
-
-def _source_section_item_map_index(
-    planned_steps: tuple[PlannedStep, ...],
-) -> int | None:
-    for index in range(len(planned_steps) - 1, -1, -1):
-        planned_step = planned_steps[index]
-        if (
-            planned_step.previous_item_map_enabled
-            and _single_output_array_field_name(planned_step.output_fields) is not None
-        ):
-            return index
-    return None
-
-
-def _overview_writer_index(
-    *,
-    planned_steps: tuple[PlannedStep, ...],
-    after_index: int,
-    before_index: int,
-) -> int | None:
-    for index in range(before_index - 1, after_index, -1):
-        planned_step = planned_steps[index]
-        if (
-            planned_step.output_type == OutputType.JSON
-            and not planned_step.previous_item_map_enabled
-            and planned_step.output_fields
-        ):
-            return index
-    return None
-
-
-def _complete_source_section_fields_for_compose(
-    planned_step: PlannedStep,
-    *,
-    ui_language: str | None,
-) -> PlannedStep:
-    if len(planned_step.output_fields) != 1:
-        return planned_step
-    array_field = planned_step.output_fields[0]
-    if array_field.field_type != "array":
-        return planned_step
-    item_fields = list(array_field.item_fields or ())
-    item_fields = _ensure_structured_field(
-        item_fields,
-        _section_title_field(ui_language),
-    )
-    item_fields = _ensure_structured_field(
-        item_fields,
-        _section_body_field(ui_language),
-    )
-    item_fields = _ensure_structured_field(
-        item_fields,
-        _runtime_source_label_field(ui_language),
-    )
-    item_fields = _ensure_structured_field(
-        item_fields,
-        _runtime_source_file_id_field(ui_language),
-    )
-    completed_array_field = array_field.model_copy(update={"item_fields": item_fields})
-    return replace(planned_step, output_fields=(completed_array_field,))
-
-
-def _ensure_structured_field(
-    fields: list[StructuredFieldDraft],
-    field: StructuredFieldDraft,
-) -> list[StructuredFieldDraft]:
-    if any(existing.name == field.name for existing in fields):
-        return fields
-    return [*fields, field]
-
-
-def _section_title_field(ui_language: str | None) -> StructuredFieldDraft:
-    description = (
-        "Human-readable section heading from the document title or topic, not the uploaded filename."
-        if ui_language == "en"
-        else "Mänsklig avsnittsrubrik från dokumentets titel eller ämne, inte uppladdat filnamn."
-    )
-    return StructuredFieldDraft(
-        name=COMPOSE_SECTION_TITLE_KEY,
-        field_type="string",
-        description=description,
-    )
-
-
-def _section_body_field(ui_language: str | None) -> StructuredFieldDraft:
-    description = (
-        "Finished source-specific report section body."
-        if ui_language == "en"
-        else "Färdig källspecifik rapporttext för avsnittet."
-    )
-    return StructuredFieldDraft(
-        name=COMPOSE_SECTION_BODY_KEY,
-        field_type="string",
-        description=description,
-    )
-
-
-def _runtime_source_label_field(ui_language: str | None) -> StructuredFieldDraft:
-    description = (
-        "Runtime-owned uploaded source label. The runtime fills this field."
-        if ui_language == "en"
-        else "Runtimeägd källetikett för uppladdad fil. Runtime fyller fältet."
-    )
-    return StructuredFieldDraft(
-        name=COMPOSE_SOURCE_LABEL_KEY,
-        field_type="string",
-        description=description,
-    )
-
-
-def _runtime_source_file_id_field(ui_language: str | None) -> StructuredFieldDraft:
-    description = (
-        "Runtime-owned uploaded source file id. The runtime fills this field."
-        if ui_language == "en"
-        else "Runtimeägt fil-id för uppladdad källa. Runtime fyller fältet."
-    )
-    return StructuredFieldDraft(
-        name="source_file_id",
-        field_type="string",
-        description=description,
-    )
-
-
-def _report_overview_fields(
-    ui_language: str | None,
-) -> tuple[StructuredFieldDraft, ...]:
-    if ui_language == "en":
-        return (
-            StructuredFieldDraft(
-                name=COMPOSE_REPORT_TITLE_KEY,
-                field_type="string",
-                description="Final report title.",
-            ),
-            StructuredFieldDraft(
-                name=COMPOSE_OVERALL_OVERVIEW_KEY,
-                field_type="string",
-                description="Synthesized overview or conclusion across all sources.",
-            ),
-        )
-    return (
-        StructuredFieldDraft(
-            name=COMPOSE_REPORT_TITLE_KEY,
-            field_type="string",
-            description="Slutrapportens titel.",
-        ),
-        StructuredFieldDraft(
-            name=COMPOSE_OVERALL_OVERVIEW_KEY,
-            field_type="string",
-            description="Samlad översikt eller slutsats över alla källor.",
-        ),
-    )
-
-
-def _compose_step_instructions(ui_language: str | None) -> str:
-    if ui_language == "en":
-        return "Assemble the final report deterministically from completed sections."
-    return "Sätt ihop slutrapporten deterministiskt från färdiga avsnitt."
-
-
-def _annotate_report_disposition(
-    planned_steps: tuple[PlannedStep, ...],
-    *,
-    report_disposition: str | None,
-    ui_language: str | None,
-) -> tuple[PlannedStep, ...]:
-    if report_disposition is None:
-        return planned_steps
-    updated_steps: list[PlannedStep] = []
-    changed = False
-    for planned_step in planned_steps:
-        if (
-            planned_step.role != "body_writer"
-            or planned_step.output_mode == OutputMode.COMPOSE_TEXT
-        ):
-            updated_steps.append(planned_step)
-            continue
-        annotated_step = replace(
-            planned_step,
-            instructions=_append_report_disposition_instruction(
-                planned_step.instructions,
-                report_disposition=report_disposition,
-                ui_language=ui_language,
-            ),
-        )
-        updated_steps.append(annotated_step)
-        changed = changed or annotated_step.instructions != planned_step.instructions
-    return tuple(updated_steps) if changed else planned_steps
-
-
-def _append_report_disposition_instruction(
-    instructions: str,
-    *,
-    report_disposition: str,
-    ui_language: str | None,
-) -> str:
-    additions = (
-        {
-            "per_source_sections": "Write the report as one clear section per source.",
-            "synthesized_overview": "Write the report as one synthesized overview across all sources.",
-            "both": (
-                "Write source-specific sections and end with a synthesized "
-                "conclusion across all sources."
-            ),
-        }
-        if ui_language == "en"
-        else {
-            "per_source_sections": "Skriv rapporten som ett tydligt avsnitt per källa.",
-            "synthesized_overview": "Skriv rapporten som en samlad översikt över alla källor.",
-            "both": (
-                "Skriv källspecifika avsnitt och avsluta med en samlad "
-                "slutsats över alla källor."
-            ),
-        }
-    )
-    addition = additions.get(report_disposition)
-    if addition is None or addition in instructions:
         return instructions
     return f"{instructions}\n\n{addition}"
 

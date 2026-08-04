@@ -13,11 +13,12 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     conversation_serialized_size_bytes,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationOutputSchemaFieldsMetadata,
     SlotClassificationSourceMetadata,
     metadata_with_slot_classification,
     question_response_from_metadata,
     slot_classification_from_metadata,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
@@ -34,12 +35,13 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     resolve_structured_schema_direction,
     schema_direction_option_values,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFields,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -54,6 +56,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _msg(
@@ -120,6 +123,8 @@ def _classifier_result_msg(
     *,
     uploaded_file_id: UUID | None = None,
     retained_source_inventory: tuple[SlotClassificationSourceMetadata, ...] = (),
+    output_schema_fields_snapshot: SlotClassificationOutputSchemaFieldsMetadata
+    | None = None,
 ) -> ConversationMessage:
     source_id = (
         f"uploaded_file:{uploaded_file_id}"
@@ -135,11 +140,19 @@ def _classifier_result_msg(
                 for file_role in result.file_roles
                 for evidence in file_role.evidence
             ],
+            *[
+                evidence
+                for checkpoint_update in result.checkpoint_updates
+                for evidence in checkpoint_update.evidence
+            ],
             *([] if result.form_intake is None else result.form_intake.evidence),
             *(
                 []
-                if result.output_schema_fields is None
-                else result.output_schema_fields.evidence
+                if output_schema_fields_snapshot is None
+                else [
+                    item.to_classified_evidence()
+                    for item in output_schema_fields_snapshot.evidence
+                ]
             ),
             *(
                 []
@@ -149,8 +162,8 @@ def _classifier_result_msg(
         )
     ]
     source_text = "\n".join(evidence_quotes) or "classifier source"
-    classification = slot_classification_metadata_from_result(
-        result,
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash=hashlib.sha256(message_id.encode()).hexdigest(),
         classification_input=SlotClassificationInput(
             sources=(
@@ -164,11 +177,15 @@ def _classifier_result_msg(
                     file_id=uploaded_file_id,
                     coverage="fully_seen" if uploaded_file_id is not None else None,
                 ),
-            )
+            ),
+            current_user_message_id=(
+                None if uploaded_file_id is not None else message_id
+            ),
         ),
         model="openai/gpt-test",
         provider="openai",
         retained_source_inventory=retained_source_inventory,
+        output_schema_fields_snapshot=output_schema_fields_snapshot,
     )
     assert classification is not None
     metadata = metadata_with_slot_classification(None, classification)
@@ -484,6 +501,126 @@ def test_byte_compaction_rebuild_matches_after_later_slot_correction() -> None:
     assert classification.contradictions == ["conversation_compaction:bytes"]
 
 
+def test_compaction_retains_latest_checkpoint_update_for_rebuild() -> None:
+    first_quote = "Approve the report before delivery."
+    latest_quote = "Edit the report before delivery."
+    conversation = [
+        _classifier_result_msg(
+            "checkpoint-view",
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="update",
+                        producer_kind="report_text",
+                        mode=FlowStepReviewMode.VIEW,
+                        confidence="high",
+                        reason="Report approval requested.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:checkpoint-view",
+                                quote=first_quote,
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        _classifier_result_msg(
+            "checkpoint-edit",
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="update",
+                        producer_kind="report_text",
+                        mode=FlowStepReviewMode.EDIT,
+                        confidence="high",
+                        reason="Report editing requested.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:checkpoint-edit",
+                                quote=latest_quote,
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+    expected = build_planning_state_from_conversation(conversation)
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=5,
+        tail_messages=3,
+    )
+
+    assert build_planning_state_from_conversation(compacted) == expected
+    assert [
+        (intent.producer_kind, intent.mode.value)
+        for intent in expected.checkpoint_intents
+    ] == [("report_text", "edit")]
+
+
+def test_compaction_retains_checkpoint_revocation_for_rebuild() -> None:
+    quote = "Approve the report before delivery."
+    clear_quote = "Do not pause for report approval anymore."
+    conversation = [
+        _classifier_result_msg(
+            "checkpoint-required",
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="update",
+                        producer_kind="report_text",
+                        mode=FlowStepReviewMode.VIEW,
+                        confidence="high",
+                        reason="Report approval requested.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:checkpoint-required",
+                                quote=quote,
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        _classifier_result_msg(
+            "checkpoint-revoked",
+            SlotClassificationResult(
+                checkpoint_updates=(
+                    ClassifiedCheckpointUpdate(
+                        operation="clear",
+                        producer_kind="report_text",
+                        mode=None,
+                        confidence="high",
+                        reason="Report approval removed.",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id="user_message:checkpoint-revoked",
+                                quote=clear_quote,
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=5,
+        tail_messages=3,
+    )
+
+    assert build_planning_state_from_conversation(conversation).checkpoint_intents == []
+    assert build_planning_state_from_conversation(compacted).checkpoint_intents == []
+
+
 def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
     first_source = "user_message:json-fields-old"
     latest_source = "user_message:json-fields-new"
@@ -517,7 +654,9 @@ def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
                     ),
                 ),
             ),
-            output_schema_fields=ClassifiedOutputSchemaFields(
+        ),
+        output_schema_fields_snapshot=(
+            SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
                 operation="replace",
                 field_names=("case_id",),
                 confidence="high",
@@ -528,7 +667,7 @@ def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
                         quote=first_quote,
                     ),
                 ),
-            ),
+            )
         ),
     )
     first_message = ConversationMessage(
@@ -547,8 +686,10 @@ def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
             content="Keep case_id and add status.",
             metadata=_classifier_result_msg(
                 "json-fields-new",
-                SlotClassificationResult(
-                    output_schema_fields=ClassifiedOutputSchemaFields(
+                SlotClassificationResult(),
+                retained_source_inventory=tuple(first_classification.source_inventory),
+                output_schema_fields_snapshot=(
+                    SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
                         operation="replace",
                         field_names=("case_id", "status"),
                         confidence="high",
@@ -563,9 +704,8 @@ def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:
                                 quote="Keep case_id and add status.",
                             ),
                         ),
-                    ),
+                    )
                 ),
-                retained_source_inventory=tuple(first_classification.source_inventory),
             ).metadata,
         ),
         _classifier_msg(

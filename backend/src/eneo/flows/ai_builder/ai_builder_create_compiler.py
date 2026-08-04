@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommit,
     PlanningState,
+    ReportDisposition,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
@@ -93,7 +94,7 @@ class CreateCompileContext:
     terminal_output_schema: JsonObject | None = None
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
     result_contract_output_fields: tuple[StructuredFieldDraft, ...] = ()
-    report_disposition: str | None = None
+    report_disposition: ReportDisposition | None = None
 
     def __post_init__(self) -> None:
         if self.runtime_input_type is InputType.ANY:

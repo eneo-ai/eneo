@@ -47,6 +47,8 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     AttachmentCoverage,
+    CheckpointIntent,
+    CheckpointProducerKind,
     ExampleOutputSchemaInferenceReason,
     FileRole,
     FileRoleEvidence,
@@ -60,6 +62,7 @@ from eneo.flows.ai_builder.question_catalog import (
     render_question,
     render_summary_label,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 _MAX_CONFIRMATION_ATTACHMENT_DETAILS = 10
 _MAX_CONFIRMATION_EXAMPLE_HEADINGS = 8
@@ -169,6 +172,13 @@ def _attachment_evidence_fingerprint(
                 for item in sorted(
                     session_state.file_roles,
                     key=lambda item: str(item.file_id),
+                )
+            ],
+            "checkpoint_intents": [
+                intent.model_dump(mode="json")
+                for intent in sorted(
+                    session_state.checkpoint_intents,
+                    key=lambda item: item.producer_kind,
                 )
             ],
             "input_schema": (
@@ -377,6 +387,10 @@ def _confirm_requirements_payload(
     architecture_decision = _architecture_decision(session_state, locale)
     if architecture_decision is not None:
         key_decisions.append(architecture_decision)
+    key_decisions.extend(
+        _checkpoint_decision(intent, locale)
+        for intent in session_state.checkpoint_intents
+    )
     input_description = _input_description(resolved, locale)
     output_description = _output_description(resolved, locale)
     summary = _summary_text(resolved, locale)
@@ -409,6 +423,74 @@ def _confirm_requirements_payload(
             *_example_output_assumptions(session_state, locale),
         ],
         manual_setup_notes=[],
+    )
+
+
+def _checkpoint_decision(
+    intent: CheckpointIntent,
+    locale: Locale,
+) -> KeyDecisionPayload:
+    topics_sv: dict[CheckpointProducerKind, str] = {
+        "transcript": "Granskning av transkribering",
+        "structured_result": "Granskning av strukturerat resultat",
+        "report_text": "Granskning av rapporttext",
+    }
+    topics_en: dict[CheckpointProducerKind, str] = {
+        "transcript": "Transcript review",
+        "structured_result": "Structured-result review",
+        "report_text": "Report-text review",
+    }
+    decisions_sv: dict[
+        tuple[CheckpointProducerKind, FlowStepReviewMode],
+        str,
+    ] = {
+        ("transcript", FlowStepReviewMode.VIEW): (
+            "Transkriberingen måste godkännas innan flödet fortsätter."
+        ),
+        ("transcript", FlowStepReviewMode.EDIT): (
+            "Transkriberingen kan redigeras innan flödet fortsätter."
+        ),
+        ("structured_result", FlowStepReviewMode.VIEW): (
+            "Det strukturerade resultatet måste godkännas innan flödet fortsätter."
+        ),
+        ("structured_result", FlowStepReviewMode.EDIT): (
+            "Det strukturerade resultatet kan redigeras innan flödet fortsätter."
+        ),
+        ("report_text", FlowStepReviewMode.VIEW): (
+            "Rapporttexten måste godkännas innan flödet fortsätter."
+        ),
+        ("report_text", FlowStepReviewMode.EDIT): (
+            "Rapporttexten kan redigeras innan flödet fortsätter."
+        ),
+    }
+    decisions_en: dict[
+        tuple[CheckpointProducerKind, FlowStepReviewMode],
+        str,
+    ] = {
+        ("transcript", FlowStepReviewMode.VIEW): (
+            "The transcript must be approved before the flow continues."
+        ),
+        ("transcript", FlowStepReviewMode.EDIT): (
+            "The transcript can be edited before the flow continues."
+        ),
+        ("structured_result", FlowStepReviewMode.VIEW): (
+            "The structured result must be approved before the flow continues."
+        ),
+        ("structured_result", FlowStepReviewMode.EDIT): (
+            "The structured result can be edited before the flow continues."
+        ),
+        ("report_text", FlowStepReviewMode.VIEW): (
+            "The report text must be approved before the flow continues."
+        ),
+        ("report_text", FlowStepReviewMode.EDIT): (
+            "The report text can be edited before the flow continues."
+        ),
+    }
+    return KeyDecisionPayload(
+        topic=(topics_sv if locale == "sv" else topics_en)[intent.producer_kind],
+        decision=(decisions_sv if locale == "sv" else decisions_en)[
+            (intent.producer_kind, intent.mode)
+        ],
     )
 
 
@@ -571,25 +653,28 @@ def _output_schema_summary_line(
             visible_count = len(projection.fields)
             if locale == "sv":
                 return (
-                    "Förhandsvisning av namngivna JSON-fält "
+                    "Förhandsvisning av JSON-nycklar som normaliserats från citerade "
+                    "fält som användaren namngett "
                     f"(visar {visible_count} av {projection.total_count}): "
-                    f"{field_text}. Exakta fältnamn bevaras i schemat; "
-                    "fälttyper och struktur är inte fastställda."
+                    f"{field_text}. Nycklar inom citattecken eller backticks bevaras "
+                    "ordagrant i schemat. Fälttyper och struktur är inte fastställda."
                 )
             return (
-                "Named JSON field preview "
+                "JSON key preview normalized from cited user-named fields "
                 f"(showing {visible_count} of {projection.total_count}): "
-                f"{field_text}. Exact field names remain in the schema; "
-                "field types and structure are not yet fixed."
+                f"{field_text}. Quoted or backticked keys remain literal in the schema. "
+                "Field types and structure are not yet fixed."
             )
         if locale == "sv":
             return (
-                "Användaren har uttryckligen namngett fält som JSON-resultatet ska "
-                f"innehålla: {field_text}. Fälttyper och struktur är inte fastställda."
+                "JSON-nycklarna har normaliserats från citerade fält som användaren "
+                f"namngett: {field_text}. Nycklar inom citattecken eller backticks "
+                "bevaras ordagrant. Fälttyper och struktur är inte fastställda."
             )
         return (
-            "The user explicitly named fields that the JSON result must contain: "
-            f"{field_text}. Field types and structure are not yet fixed."
+            "The JSON keys were normalized from cited user-named fields: "
+            f"{field_text}. Quoted or backticked keys remain literal. Field types and "
+            "structure are not yet fixed."
         )
     if evidence.strength == "explicit":
         if locale == "sv":

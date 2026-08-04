@@ -38,7 +38,7 @@ from eneo.flows.ai_builder.ai_builder_signal_confidence import (
     ScoredSignal,
     score_conversation_signals,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     SlotClassificationResult,
 )

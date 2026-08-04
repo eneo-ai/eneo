@@ -554,6 +554,60 @@ async def test_resolve_step_input_compose_source_refs_render_item_template_witho
 
 
 @pytest.mark.asyncio
+async def test_resolve_step_input_compose_source_refs_serialize_typed_values(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="typed report values",
+            structured={
+                "confidence": 0.8,
+                "report_metadata": {"owner": "Case team"},
+                "tags": ["urgent", "reviewed"],
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": field_name,
+                    "label": label,
+                }
+                for field_name, label in (
+                    ("confidence", "Confidence"),
+                    ("report_metadata", "Report metadata"),
+                    ("tags", "Tags"),
+                )
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == (
+        'Confidence:\n0.8\n\nReport metadata:\n{"owner": "Case team"}'
+        '\n\nTags:\n["urgent", "reviewed"]'
+    )
+
+
+@pytest.mark.asyncio
 async def test_resolve_step_input_compose_source_ref_rejects_file_backed_text(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)

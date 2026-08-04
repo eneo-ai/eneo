@@ -47,6 +47,8 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-03 | **Classifier attempts remain observable without weakening failure ownership**: the existing classifier metadata now records a closed resolved, no-content, parse-failed, or skipped-no-resolvable-slots outcome; only resolved attempts carry or replay semantic facts, provider failures remain in the typed provider-turn lifecycle, invalid internal input fails before provider work, and validated metadata is admitted before live planning state changes. Route and source identities are preserved without unrelated local caps, malformed non-string responses remain measurable even when provider usage is absent, and the strict response parser shares its envelope owner with the emitted schema (`3afe6e947`; Codex gate green 8/10, 3,054 Builder tests passed) |
+| 2026-08-03 | **Complete source-capture requirements**: compiler guidance now renders every already-admitted typed field in deterministic order, preserves complete descriptions, and no longer suppresses requirements through 8-field, 96-character, 900-character, or substring heuristics. The selected Flow-step model's existing save-time prompt admission and typed runtime context-window failure remain the fit owners; no replacement cap or admin setting was added (`aa411ec1c`; Codex gate green 9/10, 6 focused tests plus reused admission/overflow checks passed) |
 | 2026-08-03 | **Related document packages remain linear**: several related files in one run no longer imply cross-step Flow fan-in; only explicit commit-grade same-run comparison selects non-linear dataflow, so document-package journeys can compile their declared JSON terminal contract instead of failing after proposal. The separate compare-to-JSON product decision remains fail-closed and unchanged (`85516be94`; Codex gate green 8/10, 3,045 Builder tests passed) |
 | 2026-08-03 | **Explicit Builder evidence admission**: source-validated explicit requirements now retain their evidence level through replay into strict persisted planning state; cited medium-confidence facts can commit without a redundant question, inferred facts remain assumptions, incoherent model provenance fails validation, and confirmation uses the same provenance boundary. Parser-to-policy and JSONB round-trip proofs cover both admission and downgrade (`ef4a45416`; supporting type and test-contract corrections `f0a425b8c`, `74d014ad3`; Codex gate green 8/10, 2,988 Builder tests passed) |
 | 2026-08-03 | **Intent-led Builder questions and durable confirmation**: discovery now owns which unresolved consequential question is asked while action policy preserves its order instead of reconstructing heuristic or pattern questions; typed planning-state reconciliation removes stale document/comparison answers after input changes; visible legal assumptions survive confirmation through the existing requirements contract; fixed-choice questions no longer advertise unsupported custom answers, and the bounded mapped-file question appears only for a coherent document/file architecture with its actual organization ceiling. The duplicate forced-ask and prompt-reconstruction paths are deleted (`b1e9b3ae8`; Codex gate green 9/10, Claude Opus gate green 8/10, 493 changed-file behavior tests passed) |
@@ -229,9 +231,12 @@ external release gate (item 10); BM0.2 is external (item 10).
    for every catalog slot. (h) after a product decision on purpose-first versus
    input-first vague interviews, delete the remaining processing-goal phrase
    family and move its critic consumer to typed planning/result evidence; do not
-   replace it with another matcher. (i) persist every classifier attempt with a
-   closed resolved/no-content/parse-failed/skipped-no-resolvable-slots outcome;
-   add no retry policy. (j) move aggregate classifier transcript admission into the
+   replace it with another matcher. (i) **LANDED `3afe6e947`** — every classifier
+   attempt now persists through the existing classifier metadata with a closed
+   resolved/no-content/parse-failed/skipped-no-resolvable-slots outcome. Only
+   resolved attempts carry or replay facts, provider failures stay in the existing
+   provider-turn lifecycle, and no retry policy or second ledger was added. (j)
+   move aggregate classifier transcript admission into the
    existing model-aware/admin budget owner only after those attempt outcomes are
    measurable; keep named per-source parser-shape invariants fixed until item 10
    benchmarks them. (k) keep ask/progress/plan/diagram as typed server events
@@ -390,9 +395,24 @@ external release gate (item 10); BM0.2 is external (item 10).
     evidence; (7) after product decisions, delete goal phrase inference and gate
     metadata timing; (8) close evaluator aliases and answer coverage before the
     next full diagnostic. This order is authoritative. The first correction
-    landed at `85516be94`; it does not decide genuine compare/corpus-to-JSON
-    support. Use the locked smoke plus the affected cohort between slices; save
+    landed at `85516be94`; the second landed at `3afe6e947` and adds attempt
+    observability without changing interview decisions. Neither decides genuine
+    compare/corpus-to-JSON support. Use the locked smoke plus the affected cohort between slices; save
     another full 120-case run for a multi-slice diagnostic checkpoint.
+    The affected 11-case related-document JSON cohort then ran once against
+    product behavior `85516be94` with the locked Luna route and the latest
+    harness. Seven journeys reached plans (three first pass, four repaired) and
+    five passed every configured case check. The former aggregate/JSON failure
+    remained in only the procurement journey, whose prompt explicitly requests
+    same-run comparison and therefore belongs to the unresolved B9(e2) product
+    decision rather than the related-package correction. Residual failures were
+    separately owned: one typed critic source-capture issue, one incomplete
+    self-correction payload, one prose-leaf miss, one allowed rather than
+    preferred first question, and one unanswered question. The cohort still
+    spent 36 model calls, 177,127 tokens, and eight repair attempts. Treat this
+    as directional proof that related-package admission is no longer the shared
+    blocker, not as a broad quality or efficiency win; later slices must remove
+    the newly exposed owner-specific failures before the next full diagnostic.
     The identical 12-case smoke ran once more on 2026-08-03 after explicit-
     evidence admission landed at `5e7956f8d`. The per-case prompt hashes and
     locked Luna route matched the preceding receipt. Plan creation rose from
@@ -608,8 +628,10 @@ plan above controls all other ordering.
   (h) after the purpose-first/input-first product decision,
   replace the remaining processing-goal phrase consumers with admitted typed
   planning/result evidence, including critic enforcement, then delete the
-  phrase family and its behavior-locking tests. (i) persist typed classifier
-  attempt outcomes. (j) only then join aggregate classifier transcript admission
+  phrase family and its behavior-locking tests. (i) **LANDED `3afe6e947`** —
+  persist typed classifier attempt outcomes in the existing metadata owner, with
+  resolved as the only fact-carrying/replayed outcome and provider failure owned
+  separately. (j) only then join aggregate classifier transcript admission
   to the existing model-aware/admin budget owner while source-count and
   structured-value bounds remain named parser-shape invariants pending item 10.
   No classifier expansion for intentionally structured-only lanes. *(L)*
@@ -673,17 +695,16 @@ plan above controls all other ordering.
   a schema-valid refusal; later steps recovered only because they also reread
   the raw transcript, spending 52,640 completion-input and 10,301 output tokens.
   Fix the topology and actual-input instructions at the compiler boundary; do
-  not add language-specific refusal matching. No generic dataflow DSL. (d) make
-  every typed source-capture requirement survive compilation: delete the fixed
-  eight-field, 96-character description, and 900-character block limits plus
-  substring-based suppression rather than replacing them with another Builder
-  heuristic. Render the complete admitted `SourceCaptureField` set and let the
-  selected Flow-step model's existing save-time prompt admission and runtime
-  context-window refusal own the budget. Do not couple this to the Builder model,
-  add an admin knob for a correctness invariant, or silently truncate. Prove more
-  than eight fields, a long description, and a short name already occurring as a
-  substring in authored instructions; reuse the existing model-fit and typed
-  runtime-overflow tests instead of duplicating them. (e) make
+  not add language-specific refusal matching. No generic dataflow DSL. (d)
+  **LANDED `aa411ec1c`** — every typed source-capture requirement now survives
+  compilation: the fixed eight-field, 96-character description, and 900-character
+  block limits plus substring-based suppression are deleted instead of replaced
+  by another Builder heuristic. The compiler renders the complete admitted
+  `SourceCaptureField` set, while the selected Flow-step model's existing
+  save-time prompt admission and typed runtime context-window refusal remain the
+  fit owners. More than eight fields, a complete long description, and a short
+  name already occurring inside authored instructions are covered without a
+  duplicate test matrix or admin setting. (e) make
   document-report lowering total for each supported committed report disposition
   so per-source readers, overview/body composition, and deterministic rendering
   cannot enter a futile model-repair loop; keep the low-level assembly invariant

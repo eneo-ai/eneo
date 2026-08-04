@@ -42,7 +42,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultObligation,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import canonical_schema_bytes
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     CLASSIFICATION_NOTE_MAX_LENGTH,
@@ -51,12 +51,15 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
     UNKNOWN_SLOT_VALUE,
+    CheckpointUpdateOperation,
+    ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFields,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
+    SlotClassificationAttempt,
+    SlotClassificationAttemptOutcome,
     SlotClassificationConfidence,
     SlotClassificationEvidenceLevel,
     SlotClassificationInput,
@@ -70,11 +73,13 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 )
 from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
+    CheckpointProducerKind,
     ExampleOutputConstraintEvidence,
     FileRole,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -109,6 +114,7 @@ LLMResolvableSlotName: TypeAlias = Literal[
 ClassifierRetentionClass: TypeAlias = Literal[
     "slot",
     "file_role",
+    "checkpoint_update",
     "form_intake",
     "output_schema_fields",
     "example_output_constraint",
@@ -120,6 +126,7 @@ CLASSIFIER_RETENTION_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
     {
         "slot",
         "file_role",
+        "checkpoint_update",
         "form_intake",
         "output_schema_fields",
         "example_output_constraint",
@@ -137,7 +144,7 @@ _MAX_REQUIREMENTS_VERSION_LENGTH = 128
 class SlotClassificationEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_id: str = Field(min_length=1, max_length=256)
+    source_id: str = Field(min_length=1)
     quote: str = Field(min_length=1, max_length=CLASSIFICATION_EVIDENCE_MAX_LENGTH)
 
     def to_classified_evidence(self) -> ClassifiedEvidence:
@@ -147,12 +154,12 @@ class SlotClassificationEvidence(BaseModel):
 class SlotClassificationSourceMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_id: str = Field(min_length=1, max_length=256)
+    source_id: str = Field(min_length=1)
     kind: SlotClassificationSourceKind
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    message_id: str | None = Field(default=None, min_length=1, max_length=128)
-    question_id: str | None = Field(default=None, min_length=1, max_length=128)
-    selected_value: str | None = Field(default=None, max_length=500)
+    message_id: str | None = Field(default=None, min_length=1)
+    question_id: str | None = Field(default=None, min_length=1)
+    selected_value: str | None = None
     file_id: UUID | None = None
     coverage: AttachmentCoverage | None = None
     truncated: bool = False
@@ -212,6 +219,39 @@ class SlotClassificationFileRoleMetadata(BaseModel):
             reason=self.reason,
             evidence=tuple(item.to_classified_evidence() for item in self.evidence),
             evidence_level=self.evidence_level,
+        )
+
+
+class SlotClassificationCheckpointUpdateMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: CheckpointUpdateOperation
+    producer_kind: CheckpointProducerKind
+    mode: FlowStepReviewMode | None = None
+    confidence: SlotClassificationConfidence
+    reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
+    evidence: list[SlotClassificationEvidence] = Field(
+        default_factory=_empty_slot_classification_evidence,
+        min_length=1,
+        max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+    )
+
+    @model_validator(mode="after")
+    def validate_update_contract(self) -> SlotClassificationCheckpointUpdateMetadata:
+        if self.confidence == "low":
+            raise ValueError("checkpoint update requires supported confidence")
+        if (self.operation == "update") != (self.mode is not None):
+            raise ValueError("checkpoint update mode must match its operation")
+        return self
+
+    def to_classified_checkpoint_update(self) -> ClassifiedCheckpointUpdate:
+        return ClassifiedCheckpointUpdate(
+            operation=self.operation,
+            producer_kind=self.producer_kind,
+            mode=self.mode,
+            confidence=self.confidence,
+            reason=self.reason,
+            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
         )
 
 
@@ -295,8 +335,8 @@ class SlotClassificationOutputSchemaFieldsMetadata(BaseModel):
     @field_validator("field_names")
     @classmethod
     def require_unique_nonempty_names(cls, field_names: list[str]) -> list[str]:
-        if any(not name.strip() or name != name.strip() for name in field_names):
-            raise ValueError("output schema field names must be non-empty and stripped")
+        if any(not name for name in field_names):
+            raise ValueError("output schema field names must be non-empty")
         if len(field_names) != len(set(field_names)):
             raise ValueError("output schema field names must be unique")
         return field_names
@@ -316,13 +356,31 @@ class SlotClassificationOutputSchemaFieldsMetadata(BaseModel):
             )
         return self
 
-    def to_classified_output_schema_fields(self) -> ClassifiedOutputSchemaFields:
-        return ClassifiedOutputSchemaFields(
-            operation=self.operation,
-            field_names=tuple(self.field_names),
-            confidence=self.confidence,
-            reason=self.reason,
-            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
+    @classmethod
+    def from_materialized_state(
+        cls,
+        *,
+        operation: Literal["replace", "clear"],
+        field_names: Sequence[str],
+        confidence: SlotClassificationConfidence,
+        reason: str,
+        evidence: Sequence[ClassifiedEvidence],
+    ) -> "SlotClassificationOutputSchemaFieldsMetadata":
+        return cls(
+            operation=operation,
+            field_names=list(field_names),
+            confidence=confidence,
+            reason=_bounded_metadata_text(
+                reason,
+                fallback="output schema field classification",
+            ),
+            evidence=[
+                SlotClassificationEvidence(
+                    source_id=item.source_id,
+                    quote=item.quote,
+                )
+                for item in evidence
+            ],
         )
 
 
@@ -401,6 +459,12 @@ def _empty_slot_classification_file_roles() -> list[SlotClassificationFileRoleMe
     return []
 
 
+def _empty_slot_classification_checkpoint_updates() -> list[
+    SlotClassificationCheckpointUpdateMetadata
+]:
+    return []
+
+
 def _empty_slot_classification_notes() -> list[SlotClassificationNote]:
     return []
 
@@ -413,9 +477,10 @@ class SlotClassificationMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: int
-    prompt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    model: str = Field(min_length=1, max_length=256)
-    provider: str = Field(min_length=1, max_length=128)
+    outcome: SlotClassificationAttemptOutcome
+    prompt_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    model: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
     source_inventory: list[SlotClassificationSourceMetadata] = Field(
         default_factory=_empty_slot_classification_sources,
         max_length=500,
@@ -427,6 +492,10 @@ class SlotClassificationMetadata(BaseModel):
     file_roles: list[SlotClassificationFileRoleMetadata] = Field(
         default_factory=_empty_slot_classification_file_roles,
         max_length=100,
+    )
+    checkpoint_updates: list[SlotClassificationCheckpointUpdateMetadata] = Field(
+        default_factory=_empty_slot_classification_checkpoint_updates,
+        max_length=len(get_args(CheckpointProducerKind)),
     )
     secondary_obligations: list[ResultObligation] = Field(
         default_factory=_empty_result_obligations,
@@ -487,13 +556,57 @@ class SlotClassificationMetadata(BaseModel):
             )
         return file_roles
 
+    @field_validator("checkpoint_updates")
+    @classmethod
+    def ensure_unique_checkpoint_producers(
+        cls,
+        checkpoint_updates: list[SlotClassificationCheckpointUpdateMetadata],
+    ) -> list[SlotClassificationCheckpointUpdateMetadata]:
+        producers = [update.producer_kind for update in checkpoint_updates]
+        if len(producers) != len(set(producers)):
+            raise ValueError(
+                "slot classification metadata must not duplicate checkpoint producers"
+            )
+        return checkpoint_updates
+
     @model_validator(mode="after")
     def validate_evidence_sources(self) -> "SlotClassificationMetadata":
+        if self.outcome == "skipped_no_resolvable_slots":
+            if self.prompt_hash is not None:
+                raise ValueError(
+                    "skipped slot classification metadata must not carry prompt_hash"
+                )
+        elif self.prompt_hash is None:
+            raise ValueError(
+                "provider-call slot classification metadata requires prompt_hash"
+            )
+        if self.outcome != "resolved" and any(
+            (
+                self.slots,
+                self.file_roles,
+                self.checkpoint_updates,
+                self.secondary_obligations,
+                self.form_intake is not None,
+                self.output_schema_fields is not None,
+                self.example_output_constraints is not None,
+                self.schema_direction is not None,
+                self.assumptions,
+                self.contradictions,
+            )
+        ):
+            raise ValueError(
+                "non-resolved slot classification metadata cannot carry semantic facts"
+            )
         sources_by_id = {source.source_id: source for source in self.source_inventory}
         source_ids = set(sources_by_id)
         evidence_items = [evidence for slot in self.slots for evidence in slot.evidence]
         evidence_items.extend(
             evidence for file_role in self.file_roles for evidence in file_role.evidence
+        )
+        evidence_items.extend(
+            evidence
+            for checkpoint_update in self.checkpoint_updates
+            for evidence in checkpoint_update.evidence
         )
         if self.form_intake is not None:
             evidence_items.extend(self.form_intake.evidence)
@@ -506,6 +619,14 @@ class SlotClassificationMetadata(BaseModel):
         source_kinds_by_id: dict[str, SlotClassificationSourceKind] = {
             source.source_id: source.kind for source in self.source_inventory
         }
+        if any(
+            not classification_evidence_has_user_owned_source(
+                (evidence.source_id for evidence in update.evidence),
+                source_kinds_by_id=source_kinds_by_id,
+            )
+            for update in self.checkpoint_updates
+        ):
+            raise ValueError("checkpoint updates require user-owned evidence")
         if any(
             slot.slot_name == "terminal_output"
             and not classification_evidence_has_user_owned_source(
@@ -586,19 +707,22 @@ class SlotClassificationMetadata(BaseModel):
         return self
 
     def to_result(self) -> SlotClassificationResult:
+        if self.outcome != "resolved":
+            raise ValueError(
+                "Only resolved slot classification metadata carries a result"
+            )
         return SlotClassificationResult(
             slots=tuple(slot.to_classified_slot() for slot in self.slots),
             file_roles=tuple(
                 file_role.to_classified_file_role() for file_role in self.file_roles
             ),
+            checkpoint_updates=tuple(
+                update.to_classified_checkpoint_update()
+                for update in self.checkpoint_updates
+            ),
             form_intake=self.form_intake.to_classified_form_intake()
             if self.form_intake is not None
             else None,
-            output_schema_fields=(
-                self.output_schema_fields.to_classified_output_schema_fields()
-                if self.output_schema_fields is not None
-                else None
-            ),
             example_output_constraints=self.example_output_constraints,
             schema_direction=(
                 self.schema_direction.to_classified_schema_direction()
@@ -612,6 +736,8 @@ class SlotClassificationMetadata(BaseModel):
 
     def effective_retention_identities(self) -> frozenset[ClassifierRetentionIdentity]:
         """Return classifier facts that can affect deterministic rebuild replay."""
+        if self.outcome != "resolved":
+            return frozenset()
         identities: set[ClassifierRetentionIdentity] = set()
         for slot in self.slots:
             if slot.value == UNKNOWN_SLOT_VALUE or (
@@ -622,6 +748,10 @@ class SlotClassificationMetadata(BaseModel):
             ("file_role", str(file_role.file_id))
             for file_role in self.file_roles
             if file_role.confidence != "low" and file_role.evidence
+        )
+        identities.update(
+            ("checkpoint_update", update.producer_kind)
+            for update in self.checkpoint_updates
         )
         if (
             self.form_intake is not None
@@ -662,6 +792,11 @@ class SlotClassificationMetadata(BaseModel):
             for file_role in self.file_roles
             if ("file_role", str(file_role.file_id)) in identities
         ]
+        checkpoint_updates = [
+            update
+            for update in self.checkpoint_updates
+            if ("checkpoint_update", update.producer_kind) in identities
+        ]
         form_intake = (
             self.form_intake if ("form_intake", "form_intake") in identities else None
         )
@@ -693,6 +828,11 @@ class SlotClassificationMetadata(BaseModel):
                     evidence
                     for file_role in file_roles
                     for evidence in file_role.evidence
+                ],
+                *[
+                    evidence
+                    for checkpoint_update in checkpoint_updates
+                    for evidence in checkpoint_update.evidence
                 ],
                 *([] if form_intake is None else form_intake.evidence),
                 *(
@@ -737,6 +877,7 @@ class SlotClassificationMetadata(BaseModel):
                 "source_inventory": source_inventory,
                 "slots": slots,
                 "file_roles": file_roles,
+                "checkpoint_updates": checkpoint_updates,
                 "secondary_obligations": secondary_obligations,
                 "form_intake": form_intake,
                 "output_schema_fields": output_schema_fields,
@@ -1123,15 +1264,25 @@ def requirements_confirmation_from_metadata(
         return None
 
 
-def slot_classification_metadata_from_result(
-    result: SlotClassificationResult,
+def slot_classification_metadata_from_attempt(
+    attempt: SlotClassificationAttempt,
     *,
-    prompt_hash: str,
+    prompt_hash: str | None,
     classification_input: SlotClassificationInput,
     model: str,
     provider: str,
     retained_source_inventory: Sequence[SlotClassificationSourceMetadata] = (),
-) -> SlotClassificationMetadata | None:
+    output_schema_fields_snapshot: SlotClassificationOutputSchemaFieldsMetadata
+    | None = None,
+) -> SlotClassificationMetadata:
+    result = attempt.result or SlotClassificationResult()
+    if (
+        result.output_schema_fields is not None
+        and output_schema_fields_snapshot is None
+    ):
+        raise ValueError(
+            "Live output schema field deltas require a materialized replay snapshot"
+        )
     slot_payloads: list[dict[str, object]] = []
     seen_slot_names: set[str] = set()
     for slot in result.slots:
@@ -1144,12 +1295,13 @@ def slot_classification_metadata_from_result(
         slot_payloads.append(payload)
         seen_slot_names.add(slot_name)
     form_intake_payload = _slot_classification_form_intake_payload(result.form_intake)
-    output_schema_fields_payload = _slot_classification_output_schema_fields_payload(
-        result.output_schema_fields
-    )
     file_role_payloads = [
         _slot_classification_file_role_payload(file_role)
         for file_role in result.file_roles
+    ]
+    checkpoint_update_payloads = [
+        _slot_classification_checkpoint_update_payload(update)
+        for update in result.checkpoint_updates
     ]
     secondary_obligations = [
         obligation
@@ -1159,8 +1311,8 @@ def slot_classification_metadata_from_result(
     retained_source_ids = {
         item.source_id
         for item in (
-            result.output_schema_fields.evidence
-            if result.output_schema_fields is not None
+            output_schema_fields_snapshot.evidence
+            if output_schema_fields_snapshot is not None
             else ()
         )
     }
@@ -1175,41 +1327,44 @@ def slot_classification_metadata_from_result(
             for source in classification_input.sources
         }
     )
-    try:
-        return SlotClassificationMetadata.model_validate(
-            {
-                "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
-                "prompt_hash": prompt_hash,
-                "model": model,
-                "provider": provider,
-                "source_inventory": list(source_inventory_by_id.values()),
-                "slots": slot_payloads,
-                "file_roles": file_role_payloads,
-                "secondary_obligations": secondary_obligations,
-                "form_intake": form_intake_payload,
-                "output_schema_fields": output_schema_fields_payload,
-                "example_output_constraints": (
-                    result.example_output_constraints.model_dump(mode="python")
-                    if result.example_output_constraints is not None
-                    else None
-                ),
-                "schema_direction": _slot_classification_schema_direction_payload(
-                    result.schema_direction
-                ),
-                "assumptions": [
-                    _bounded_metadata_text(value, fallback="assumption")
-                    for value in result.assumptions
-                    if value.strip()
-                ][:CLASSIFICATION_NOTES_MAX_ITEMS],
-                "contradictions": [
-                    _bounded_metadata_text(value, fallback="contradiction")
-                    for value in result.contradictions
-                    if value.strip()
-                ][:CLASSIFICATION_NOTES_MAX_ITEMS],
-            }
-        )
-    except ValidationError:
-        return None
+    return SlotClassificationMetadata.model_validate(
+        {
+            "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
+            "outcome": attempt.outcome,
+            "prompt_hash": prompt_hash,
+            "model": model,
+            "provider": provider,
+            "source_inventory": list(source_inventory_by_id.values()),
+            "slots": slot_payloads,
+            "file_roles": file_role_payloads,
+            "checkpoint_updates": checkpoint_update_payloads,
+            "secondary_obligations": secondary_obligations,
+            "form_intake": form_intake_payload,
+            "output_schema_fields": (
+                output_schema_fields_snapshot.model_dump(mode="python")
+                if output_schema_fields_snapshot is not None
+                else None
+            ),
+            "example_output_constraints": (
+                result.example_output_constraints.model_dump(mode="python")
+                if result.example_output_constraints is not None
+                else None
+            ),
+            "schema_direction": _slot_classification_schema_direction_payload(
+                result.schema_direction
+            ),
+            "assumptions": [
+                _bounded_metadata_text(value, fallback="assumption")
+                for value in result.assumptions
+                if value.strip()
+            ][:CLASSIFICATION_NOTES_MAX_ITEMS],
+            "contradictions": [
+                _bounded_metadata_text(value, fallback="contradiction")
+                for value in result.contradictions
+                if value.strip()
+            ][:CLASSIFICATION_NOTES_MAX_ITEMS],
+        }
+    )
 
 
 def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object] | None:
@@ -1253,25 +1408,6 @@ def _slot_classification_form_intake_payload(
     }
 
 
-def _slot_classification_output_schema_fields_payload(
-    output_schema_fields: ClassifiedOutputSchemaFields | None,
-) -> dict[str, object] | None:
-    if output_schema_fields is None or output_schema_fields.operation == "update":
-        return None
-    return {
-        "operation": output_schema_fields.operation,
-        "field_names": list(output_schema_fields.field_names),
-        "confidence": output_schema_fields.confidence,
-        "reason": _bounded_metadata_text(
-            output_schema_fields.reason,
-            fallback="output schema field classification",
-        ),
-        "evidence": _slot_classification_evidence_payloads(
-            output_schema_fields.evidence
-        ),
-    }
-
-
 def _slot_classification_schema_direction_payload(
     direction: ClassifiedSchemaDirection | None,
 ) -> dict[str, object] | None:
@@ -1304,6 +1440,22 @@ def _slot_classification_file_role_payload(
         ),
         "evidence": _slot_classification_evidence_payloads(file_role.evidence),
         "evidence_level": file_role.evidence_level,
+    }
+
+
+def _slot_classification_checkpoint_update_payload(
+    update: ClassifiedCheckpointUpdate,
+) -> dict[str, object]:
+    return {
+        "operation": update.operation,
+        "producer_kind": update.producer_kind,
+        "mode": update.mode.value if update.mode is not None else None,
+        "confidence": update.confidence,
+        "reason": _bounded_metadata_text(
+            update.reason,
+            fallback="checkpoint update classification",
+        ),
+        "evidence": _slot_classification_evidence_payloads(update.evidence),
     }
 
 

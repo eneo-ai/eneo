@@ -1234,6 +1234,15 @@ def _validate_source_ref_contracts(
         )
         target_type = _schema_type_hint(target_schema)
         if target_type == "array":
+            raw_items = target_schema.get("items")
+            if (
+                ref.item_template is None
+                and ref.field_path
+                and isinstance(raw_items, dict)
+                and _schema_type_hint(cast(FlowPersistedJsonObject, raw_items))
+                in {"string", "number", "integer", "boolean", "null"}
+            ):
+                continue
             _validate_compose_array_source_ref(
                 step_order=step.step_order,
                 schema=target_schema,
@@ -1247,7 +1256,10 @@ def _validate_source_ref_contracts(
                 context={"field": "input_bindings", "key": "source_refs"},
                 step_order=step.step_order,
             )
-        if target_type != "string":
+        if target_type != "string" and not (
+            ref.field_path
+            and target_type in {"number", "integer", "boolean", "object", "null"}
+        ):
             raise FlowStepValidationError(
                 f"Step {step.step_order}: compose_text structured source_refs without "
                 "item_template must resolve to a string field.",

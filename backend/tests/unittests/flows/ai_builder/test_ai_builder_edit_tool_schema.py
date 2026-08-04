@@ -305,6 +305,7 @@ class TestBuildEditFlowToolSchema:
             "properties"
         ]["name"]
         assert "ASCII English JSON schema key" in field_name_schema["description"]
+        assert field_name_schema["pattern"] == r"^[A-Za-z_][A-Za-z0-9_]*$"
         assert "uses_previous_fields" not in add_payload["properties"]
         assert "uses_previous_outputs" not in add_payload["properties"]
         assert add_payload["properties"]["review_mode"]["enum"] == [

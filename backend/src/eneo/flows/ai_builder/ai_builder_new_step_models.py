@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -17,6 +18,7 @@ DocumentDeliveryMode = Literal["not_applicable", "generated", "template_fill"]
 StructuredFieldType = Literal["string", "number", "boolean", "object", "array"]
 
 MAX_STRUCTURED_FIELD_DEPTH = 3
+STRUCTURED_FIELD_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
 
 def normalize_authoring_string_list(values: list[str]) -> list[str]:
@@ -98,12 +100,27 @@ class StructuredFieldDraft(BaseModel):
     fields: list["StructuredFieldDraft"] | None = None
     item_fields: list["StructuredFieldDraft"] | None = None
 
-    @field_validator("name", "description")
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not re.fullmatch(STRUCTURED_FIELD_NAME_PATTERN, normalized):
+            raise ValueError(
+                "structured field names must be ASCII identifiers beginning "
+                "with a letter or underscore"
+            )
+        return normalized
+
+    @field_validator("description")
     @classmethod
     def _strip_required_text(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
             raise ValueError("Structured fields require non-empty text values.")
+        if "{{" in normalized or "}}" in normalized:
+            raise ValueError(
+                "structured field descriptions must not contain template variables"
+            )
         return normalized
 
     @model_validator(mode="after")

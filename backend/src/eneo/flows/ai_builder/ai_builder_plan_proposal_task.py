@@ -93,7 +93,7 @@ def build_plan_proposal_system_prompt(
         "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, form fields, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
         "- Use JSON output fields when later steps need specific structured facts.",
-        "- JSON output field names are schema keys: use ASCII English names such as `summary` or `date_or_year`; put Swedish or other localized wording in descriptions and user-facing text.",
+        "- For JSON output fields not fixed by schema evidence, use ASCII English keys such as `summary` or `date_or_year`; preserve canonical schema keys exactly.",
         "- For source-material reports, include every final-report fact or per-item short summary that must come from the source in the source-reading JSON output_fields. Do not leave user-named facts only in instructions or hide them inside generic facts/notes fields; later text or document steps should consume those fields instead of introducing new source-derived facts only in prose.",
         *([section_rule] if section_rule is not None else []),
         *([terminal_document_rule] if terminal_document_rule is not None else []),
@@ -348,19 +348,19 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
         )
     if evidence.source == "prose_field_names":
         field_label = (
-            "explicitly named top-level field preview"
+            "top-level key preview normalized from cited user-named fields"
             if projection.lossy
-            else "explicitly named top-level fields"
+            else "top-level keys normalized from cited user-named fields"
         )
         preservation_instruction = (
-            "- The canonical schema retains the exact user-named fields; this "
-            "display is only a normalized or truncated preview. Keep output_fields "
+            "- The canonical schema retains the normalized keys; this display is "
+            "only a truncated preview. Keep output_fields "
             "consistent with the canonical schema and do not infer missing names, "
             "types, nesting, requiredness, or validation constraints."
             if projection.lossy
-            else "- Preserve these exact user-named fields. Their types, nesting, "
-            "requiredness, and validation constraints remain unspecified; do not "
-            "invent them unless supported elsewhere in the conversation."
+            else "- Preserve these canonical keys exactly. Unquoted phrases were "
+            "normalized; quoted or backticked literal keys were preserved. Types, "
+            "nesting, requiredness, and validation constraints remain unspecified."
         )
         return "\n".join(
             [

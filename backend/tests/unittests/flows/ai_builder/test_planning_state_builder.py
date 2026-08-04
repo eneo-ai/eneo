@@ -23,8 +23,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationOutputSchemaFieldsMetadata,
     metadata_with_slot_classification,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -45,12 +46,15 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     canonical_schema_bytes,
     derive_freeform_schema_candidates,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    CheckpointUpdateOperation,
+    ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFields,
+    ClassifiedOutputSchemaFieldDelta,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationConfidence,
     SlotClassificationEvidenceLevel,
     SlotClassificationInput,
@@ -64,6 +68,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
     AttachmentCoverage,
+    CheckpointProducerKind,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
@@ -88,6 +93,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     merge_llm_resolved_slots,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _state(
@@ -356,12 +362,21 @@ def _slot_classification_metadata(
     *slots: ClassifiedSlot,
     prompt_hash: str = "a" * 64,
     form_intake: ClassifiedFormIntake | None = None,
+    checkpoint_updates: tuple[ClassifiedCheckpointUpdate, ...] = (),
 ) -> dict[str, object]:
     evidence_quotes = [item.quote for slot in slots for item in slot.evidence]
     if form_intake is not None:
         evidence_quotes.extend(item.quote for item in form_intake.evidence)
-    metadata = slot_classification_metadata_from_result(
-        SlotClassificationResult(slots=slots, form_intake=form_intake),
+    evidence_quotes.extend(
+        item.quote for update in checkpoint_updates for item in update.evidence
+    )
+    result = SlotClassificationResult(
+        slots=slots,
+        form_intake=form_intake,
+        checkpoint_updates=checkpoint_updates,
+    )
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash=prompt_hash,
         classification_input=SlotClassificationInput(
             sources=(
@@ -401,23 +416,24 @@ def test_conversation_replay_overlays_live_attachment_role_evidence() -> None:
             ),
         )
     )
-    metadata = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            file_roles=(
-                ClassifiedFileRole(
-                    file_id=file_id,
-                    role="example_output",
-                    confidence="high",
-                    reason="The user identified the example output.",
-                    evidence=(
-                        ClassifiedEvidence(
-                            source_id="user_message:file-role",
-                            quote="This attachment is the example output.",
-                        ),
+    result = SlotClassificationResult(
+        file_roles=(
+            ClassifiedFileRole(
+                file_id=file_id,
+                role="example_output",
+                confidence="high",
+                reason="The user identified the example output.",
+                evidence=(
+                    ClassifiedEvidence(
+                        source_id="user_message:file-role",
+                        quote="This attachment is the example output.",
                     ),
                 ),
-            )
-        ),
+            ),
+        )
+    )
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=classification_input,
         model="openai/gpt-test",
@@ -1864,6 +1880,93 @@ class TestRuntimeMetadataClassificationBoundaries:
 
 
 class TestSlotClassificationMetadataReplay:
+    def test_replay_applies_checkpoint_updates_per_producer(
+        self,
+    ) -> None:
+        def checkpoint_update(
+            operation: CheckpointUpdateOperation,
+            producer_kind: CheckpointProducerKind,
+            mode: FlowStepReviewMode | None,
+            quote: str,
+        ) -> ClassifiedCheckpointUpdate:
+            return ClassifiedCheckpointUpdate(
+                operation=operation,
+                producer_kind=producer_kind,
+                mode=mode,
+                confidence="high",
+                reason="Typed checkpoint requirement.",
+                evidence=_model_evidence(quote),
+            )
+
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="assistant",
+                    content="Classifier evidence.",
+                    metadata=_slot_classification_metadata(
+                        checkpoint_updates=(
+                            checkpoint_update(
+                                "update",
+                                "transcript",
+                                FlowStepReviewMode.VIEW,
+                                "Approve the transcript before analysis.",
+                            ),
+                            checkpoint_update(
+                                "update",
+                                "structured_result",
+                                FlowStepReviewMode.VIEW,
+                                "Approve the structured result before delivery.",
+                            ),
+                        ),
+                    ),
+                ),
+                ConversationMessage(
+                    role="assistant",
+                    content="Unrelated classifier evidence.",
+                    metadata=_slot_classification_metadata(checkpoint_updates=()),
+                ),
+                ConversationMessage(
+                    role="assistant",
+                    content="Updated classifier evidence.",
+                    metadata=_slot_classification_metadata(
+                        checkpoint_updates=(
+                            checkpoint_update(
+                                "update",
+                                "transcript",
+                                FlowStepReviewMode.EDIT,
+                                "Edit the transcript before analysis.",
+                            ),
+                        )
+                    ),
+                ),
+                ConversationMessage(
+                    role="assistant",
+                    content="Checkpoint removal evidence.",
+                    metadata=_slot_classification_metadata(
+                        checkpoint_updates=(
+                            checkpoint_update(
+                                "clear",
+                                "structured_result",
+                                None,
+                                "Do not pause for structured result approval.",
+                            ),
+                        )
+                    ),
+                ),
+            ]
+        )
+
+        assert [
+            (intent.producer_kind, intent.mode.value, intent.evidence)
+            for intent in state.checkpoint_intents
+        ] == [
+            (
+                "transcript",
+                "edit",
+                ["quote:user_message:test-source:Edit the transcript before analysis."],
+            ),
+        ]
+
     def test_replays_terminal_output_and_runtime_fields_from_conversation_metadata(
         self,
     ) -> None:
@@ -2146,6 +2249,31 @@ class TestSlotClassificationMetadataReplay:
 
 
 class TestModelSlotMerge:
+    def test_duplicate_checkpoint_producer_is_rejected_at_merge_boundary(
+        self,
+    ) -> None:
+        checkpoint = ClassifiedCheckpointUpdate(
+            operation="update",
+            producer_kind="report_text",
+            mode=FlowStepReviewMode.VIEW,
+            confidence="high",
+            reason="Report approval requested.",
+            evidence=_model_evidence("Approve the report before delivery."),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="checkpoint_updates must contain unique producer_kind values",
+        ):
+            merge_llm_resolved_slots(
+                _state(),
+                SlotClassificationResult(
+                    checkpoint_updates=(checkpoint, checkpoint),
+                ),
+                prompt_hash="a" * 64,
+                freeform_text="Approve the report before delivery.",
+            )
+
     def test_mixed_attachment_evidence_cannot_enter_output_schema_provenance(
         self,
     ) -> None:
@@ -2166,6 +2294,7 @@ class TestModelSlotMerge:
                 {
                     "slots": [],
                     "file_roles": [],
+                    "checkpoint_updates": [],
                     "form_intake": None,
                     "output_schema_fields": {
                         "operation": "update",
@@ -2193,7 +2322,8 @@ class TestModelSlotMerge:
             ),
             allowed_slot_values={},
             classification_input=SlotClassificationInput(
-                sources=(user_source, attachment_source)
+                sources=(user_source, attachment_source),
+                current_user_message_id="user-1",
             ),
         )
         assert parsed is not None
@@ -2224,7 +2354,7 @@ class TestModelSlotMerge:
             "quote:user_message:user-1:JSON output field: case_id."
         ]
 
-    def test_cited_output_field_names_become_terminal_schema_evidence(self) -> None:
+    def test_cited_output_fields_survive_replay_and_declared_schema_wins(self) -> None:
         state = _state()
         state.resolved_slots["terminal_output"] = _slot(
             name="terminal_output",
@@ -2235,7 +2365,7 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFields(
+                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
                     operation="update",
                     field_names=("case_id", "status"),
                     confidence="high",
@@ -2261,6 +2391,87 @@ class TestModelSlotMerge:
             "quote:user_message:test-source:JSON-resultatet ska innehålla "
             "case_id och status."
         ]
+
+        source = SlotClassificationSource(
+            source_id="user_message:test-source",
+            kind="user_message",
+            text="JSON-resultatet ska innehålla case_id och status.",
+            message_id="test-source",
+        )
+        snapshot = SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+            operation="replace",
+            field_names=("case_id", "status"),
+            confidence="high",
+            reason="The current complete user-named field snapshot.",
+            evidence=_model_evidence(source.text),
+        )
+        classification = slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(
+                outcome="resolved",
+                result=SlotClassificationResult(
+                    slots=(
+                        ClassifiedSlot(
+                            slot_name="terminal_output",
+                            value="structured_json",
+                            confidence="high",
+                            reason="The user explicitly requested JSON.",
+                            evidence=_model_evidence(source.text),
+                            evidence_level="explicit",
+                        ),
+                    ),
+                ),
+            ),
+            prompt_hash="b" * 64,
+            classification_input=SlotClassificationInput(sources=(source,)),
+            model="openai/gpt-test",
+            provider="openai",
+            output_schema_fields_snapshot=snapshot,
+        )
+        metadata = metadata_with_slot_classification(None, classification)
+        assert metadata is not None
+        replayed = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    message_id="test-source",
+                    role="user",
+                    content=source.text,
+                    metadata=metadata,
+                )
+            ]
+        )
+        replayed_evidence = replayed.output_schema_evidence
+        assert replayed_evidence is not None
+        assert replayed_evidence.json_schema == evidence.json_schema
+
+        declared = build_schema_evidence(
+            json_schema={
+                "type": "object",
+                "properties": {"official_id": {"type": "string"}},
+            },
+            source="declared_schema",
+            confidence="high",
+            evidence=("message:user-2",),
+        )
+        replayed.replace_schema_resolution(
+            input_evidence=None,
+            output_evidence=declared,
+            example_inference=None,
+        )
+        merge_llm_resolved_slots(
+            replayed,
+            SlotClassificationResult(
+                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
+                    operation="update",
+                    field_names=("priority",),
+                    confidence="high",
+                    reason="The user named another field.",
+                    evidence=_model_evidence("Lägg även till priority."),
+                )
+            ),
+            prompt_hash="c" * 64,
+            freeform_text="Lägg även till priority.",
+        )
+        assert replayed.output_schema_evidence == declared
 
     def test_accumulated_output_fields_report_typed_schema_limit(
         self,
@@ -2293,7 +2504,7 @@ class TestModelSlotMerge:
             merge_llm_resolved_slots(
                 state,
                 SlotClassificationResult(
-                    output_schema_fields=ClassifiedOutputSchemaFields(
+                    output_schema_fields=ClassifiedOutputSchemaFieldDelta(
                         operation="update",
                         field_names=("status",),
                         confidence="high",
@@ -2338,7 +2549,7 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFields(
+                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
                     operation="update",
                     field_names=("case_id", "status"),
                     confidence="high",
@@ -2372,7 +2583,7 @@ class TestModelSlotMerge:
         merge_llm_resolved_slots(
             state,
             SlotClassificationResult(
-                output_schema_fields=ClassifiedOutputSchemaFields(
+                output_schema_fields=ClassifiedOutputSchemaFieldDelta(
                     operation="clear",
                     field_names=(),
                     confidence="high",
@@ -2475,6 +2686,13 @@ class TestModelSlotMerge:
                             "evidence_level": "explicit",
                         },
                     ],
+                    "file_roles": [],
+                    "checkpoint_updates": [],
+                    "form_intake": None,
+                    "output_schema_fields": None,
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
                     "assumptions": [],
                     "contradictions": [],
                 }
@@ -2532,6 +2750,13 @@ class TestModelSlotMerge:
                             "evidence_level": "explicit",
                         }
                     ],
+                    "file_roles": [],
+                    "checkpoint_updates": [],
+                    "form_intake": None,
+                    "output_schema_fields": None,
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
                     "assumptions": [],
                     "contradictions": [],
                 }

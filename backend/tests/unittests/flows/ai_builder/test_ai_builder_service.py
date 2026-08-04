@@ -56,6 +56,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+    slot_classification_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -105,6 +106,9 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreflight,
     SessionTurnPreparationBaseline,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationAttempt,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     ConfirmRequirements,
@@ -113,6 +117,9 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
+)
+from eneo.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
@@ -1689,6 +1696,47 @@ class TestSendMessage:
 
 class TestSendMessageToolCall:
     @pytest.mark.anyio
+    async def test_parse_failed_classification_is_persisted_and_reloads_as_diagnostic(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(status=SessionStatus.CHATTING, tenant_id=user.tenant_id)
+        repo.get_session.return_value = session
+        service = _make_service(user=user, repo=repo)
+
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(
+                return_value=_make_llm_response(content="{not-json")
+            )
+            await _collect_events(
+                service.send_message(
+                    session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Build from plain text"),
+                    message="Build from plain text",
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                )
+            )
+
+        persisted_message = repo.append_session_messages.await_args.kwargs[
+            "conversation"
+        ][0]
+        reloaded = slot_classification_from_metadata(persisted_message.metadata)
+
+        assert reloaded is not None
+        assert reloaded.outcome == "parse_failed"
+        assert reloaded.prompt_hash is not None
+        assert reloaded.slots == []
+        assert reloaded.assumptions == []
+        assert reloaded.contradictions == []
+        assert (
+            build_planning_state_from_conversation([persisted_message]).resolved_slots
+            == {}
+        )
+
+    @pytest.mark.anyio
     async def test_backend_discovery_prioritizes_unresolved_core_input_after_partial_classification(
         self,
     ):
@@ -2239,7 +2287,7 @@ class TestSendMessageStructuredQuestion:
 
         with patch(
             "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
-            new=AsyncMock(return_value=None),
+            new=AsyncMock(return_value=SlotClassificationAttempt(outcome="no_content")),
         ):
             events = await _collect_events(
                 service.send_message(

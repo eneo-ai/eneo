@@ -51,10 +51,11 @@ from eneo.flows.enums import (
     FlowOutputType,
 )
 from eneo.flows.flow_capability_manifest import FCM_VERSION
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 13
+BUILDER_SCHEMA_VERSION: int = 14
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -86,6 +87,11 @@ SlotSource = Literal[
 
 SlotConfidence = Literal["high", "medium", "low"]
 SlotEvidenceLevel = Literal["explicit", "inferred"]
+CheckpointProducerKind = Literal[
+    "transcript",
+    "structured_result",
+    "report_text",
+]
 MappedFileLimitProvenance = Literal["policy_default", "authored"]
 MappedFileLimitDiagnostic = Literal[
     "confirmation_required",
@@ -247,6 +253,21 @@ class ResolvedSlot(_PlanningModel):
                     )
                 )
         return assert_never(self.source)
+
+
+class CheckpointIntent(_PlanningModel):
+    producer_kind: CheckpointProducerKind
+    mode: FlowStepReviewMode
+    confidence: SlotConfidence
+    evidence: list[str] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def require_commit_grade_evidence(self) -> CheckpointIntent:
+        if self.confidence == "low":
+            raise ValueError("checkpoint intent requires supported confidence")
+        if any(not item.startswith("quote:") for item in self.evidence):
+            raise ValueError("checkpoint intent requires cited classifier evidence")
+        return self
 
 
 class StepTriple(_PlanningModel):
@@ -647,6 +668,9 @@ class PlanningState(_PlanningModel):
         default_factory=dict[str, ResolvedSlot]
     )
     file_roles: list[FileRoleEvidence] = Field(default_factory=list[FileRoleEvidence])
+    checkpoint_intents: list[CheckpointIntent] = Field(
+        default_factory=list[CheckpointIntent]
+    )
     schema_resolution: SchemaResolution = Field(default_factory=SchemaResolution)
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     example_output_schema_inference: ExampleOutputSchemaInferenceOutcome | None = None
@@ -681,7 +705,14 @@ class PlanningState(_PlanningModel):
         )
 
     @model_validator(mode="after")
-    def _file_role_ids_are_unique(self) -> PlanningState:
+    def _owned_collections_are_valid(self) -> PlanningState:
+        checkpoint_producers = [
+            intent.producer_kind for intent in self.checkpoint_intents
+        ]
+        if len(checkpoint_producers) != len(set(checkpoint_producers)):
+            raise ValueError(
+                "checkpoint_intents must contain unique producer_kind values"
+            )
         seen: set[UUID] = set()
         for item in self.file_roles:
             if item.file_id in seen:

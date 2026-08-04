@@ -27,6 +27,9 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.flows.ai_builder import (
     ai_builder_error_contract as error_contract_module,
 )
+from eneo.flows.ai_builder import (
+    ai_builder_slot_classification_contract as classification_contract,
+)
 from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -39,13 +42,15 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTele
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedSchemaDirection,
     SlotClassificationInput,
     SlotClassificationSource,
-    classify_slots,
     parse_slot_classification_response,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    classify_slots,
     slot_classification_prompt_hash,
 )
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -68,6 +73,7 @@ def _classification_input(
                 message_id="user-1",
             ),
         ),
+        current_user_message_id="user-1",
     )
 
 
@@ -75,7 +81,29 @@ def _evidence(quote: str, *, source_id: str = "user_message:user-1") -> dict[str
     return {"source_id": source_id, "quote": quote}
 
 
-def _make_response(content: str) -> MagicMock:
+_VALID_CLASSIFICATION_RESPONSE: dict[str, object] = {
+    "slots": [],
+    "file_roles": [],
+    "checkpoint_updates": [],
+    "form_intake": None,
+    "output_schema_fields": None,
+    "example_output_constraints": None,
+    "schema_direction": None,
+    "secondary_obligations": [],
+    "assumptions": [],
+    "contradictions": [],
+}
+
+
+def _make_response(content: object) -> MagicMock:
+    if isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if isinstance(payload, dict):
+                content = json.dumps({**_VALID_CLASSIFICATION_RESPONSE, **payload})
     message = MagicMock()
     message.content = content
     choice = MagicMock()
@@ -85,42 +113,183 @@ def _make_response(content: str) -> MagicMock:
     return response
 
 
-def test_parser_accepts_exact_user_cited_output_schema_fields() -> None:
-    quote = "JSON output fields must be case_id, status, and assigned_team."
+def test_checkpoint_updates_require_current_user_owned_evidence() -> None:
+    user_quote = "Let the case worker edit the transcript before the analysis."
+    attachment_quote = "A sample transcript that mentions case workers."
+    attachment_source_id = f"uploaded_file:{uuid4()}"
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id="user_message:user-1",
+                kind="user_message",
+                text=user_quote,
+                message_id="user-1",
+            ),
+            SlotClassificationSource(
+                source_id=attachment_source_id,
+                kind="uploaded_file",
+                text=attachment_quote,
+                file_id=uuid4(),
+            ),
+        ),
+        current_user_message_id="user-1",
+    )
 
-    result = parse_slot_classification_response(
+    def parse(evidence: list[dict[str, str]], *, confidence: str = "high"):
+        return parse_slot_classification_response(
+            json.dumps(
+                {
+                    **_VALID_CLASSIFICATION_RESPONSE,
+                    "checkpoint_updates": [
+                        {
+                            "operation": "update",
+                            "producer_kind": "transcript",
+                            "mode": "edit",
+                            "confidence": confidence,
+                            "reason": "The user requests transcript editing.",
+                            "evidence": evidence,
+                        }
+                    ],
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=classification_input,
+        )
+
+    mixed = parse(
+        [
+            _evidence(user_quote),
+            _evidence(attachment_quote, source_id=attachment_source_id),
+        ]
+    )
+
+    assert mixed is not None
+    assert len(mixed.checkpoint_updates) == 1
+    assert mixed.checkpoint_updates[0].mode is not None
+    assert mixed.checkpoint_updates[0].mode.value == "edit"
+    assert parse([_evidence(attachment_quote, source_id=attachment_source_id)]) is None
+    assert parse([_evidence(user_quote)], confidence="low") is None
+
+
+def test_parser_accepts_cited_clear_and_rejects_duplicate_checkpoint_producer() -> None:
+    quote = "Do not pause for report approval anymore."
+    clear = {
+        "operation": "clear",
+        "producer_kind": "report_text",
+        "confidence": "high",
+        "reason": "The user removed report approval.",
+        "evidence": [_evidence(quote)],
+    }
+
+    accepted = parse_slot_classification_response(
         json.dumps(
             {
-                "slots": [],
-                "file_roles": [],
-                "form_intake": None,
-                "output_schema_fields": {
-                    "operation": "update",
-                    "field_names": ["case_id", "status", "assigned_team"],
-                    "removed_field_names": [],
-                    "confidence": "high",
-                    "reason": "The user explicitly enumerated JSON fields.",
-                    "evidence": [_evidence(quote)],
-                },
-                "example_output_constraints": None,
-                "schema_direction": None,
-                "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "checkpoint_updates": [clear],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+    duplicate = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "checkpoint_updates": [clear, clear],
             }
         ),
         allowed_slot_values={},
         classification_input=_classification_input(quote),
     )
 
-    assert result is not None
-    assert result.output_schema_fields is not None
-    assert result.output_schema_fields.operation == "update"
-    assert result.output_schema_fields.field_names == (
-        "case_id",
-        "status",
-        "assigned_team",
+    assert accepted is not None
+    assert accepted.checkpoint_updates[0].operation == "clear"
+    assert accepted.checkpoint_updates[0].mode is None
+    assert duplicate is None
+
+
+@pytest.mark.asyncio
+async def test_non_string_response_records_parse_failure_with_usage_telemetry() -> None:
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(return_value=_make_response(["unexpected"]))
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-slot-non-string",
+        model="gpt-test",
+        target_kind=TargetKind.CREATE,
     )
+
+    attempt = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(model="gpt-test"),
+        classification_input=_classification_input("Build a text flow."),
+        allowed_slot_values={"primary_runtime_input": {"text"}},
+        tenant_id=uuid4(),
+        usage_tracker=usage_tracker,
+    )
+
+    assert attempt.outcome == "parse_failed"
+    assert usage_tracker.llm_calls_made == 1
+    assert usage_tracker.token_usages[0].source == "litellm_estimate"
+
+
+def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
+    def parse_fields(
+        *,
+        quote: str,
+        field_names: list[str],
+    ) -> tuple[str, ...] | None:
+        result = parse_slot_classification_response(
+            json.dumps(
+                {
+                    **_VALID_CLASSIFICATION_RESPONSE,
+                    "output_schema_fields": {
+                        "operation": "update",
+                        "field_names": field_names,
+                        "removed_field_names": [],
+                        "confidence": "high",
+                        "reason": "The user explicitly enumerated JSON fields.",
+                        "evidence": [_evidence(quote)],
+                    },
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=_classification_input(quote),
+        )
+        assert result is not None
+        return (
+            result.output_schema_fields.field_names
+            if result.output_schema_fields is not None
+            else None
+        )
+
+    quote = (
+        "JSON-resultatet ska innehålla sökta insatser, mottagna uppgifter, "
+        "Åtgärd ٢ och den bokstavliga nyckeln `Case ID`."
+    )
+    assert parse_fields(
+        quote=quote,
+        field_names=[
+            "sökta insatser",
+            "mottagna uppgifter",
+            "Åtgärd ٢",
+            "Case ID",
+        ],
+    ) == ("sokta_insatser", "mottagna_uppgifter", "atgard_٢", "Case ID")
+    assert (
+        parse_fields(
+            quote="JSON-resultatet ska innehålla sökta insatser och sokta-insatser.",
+            field_names=["sökta insatser", "sokta-insatser"],
+        )
+        is None
+    )
+    assert (
+        parse_fields(
+            quote='JSON-resultatet ska innehålla "Case ID" och Case ID.',
+            field_names=["Case ID"],
+        )
+        is None
+    )
+    assert parse_fields(quote=quote, field_names=["sökta insatser", "beslut"]) is None
 
 
 @pytest.mark.parametrize(
@@ -137,6 +306,7 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -192,6 +362,7 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -234,7 +405,6 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
         (["id"], "Return id[0] in the JSON output."),
         (["id"], "Return user:id in the JSON output."),
         (["id"], "Return id\N{COMBINING ACUTE ACCENT} in the JSON output."),
-        ([" id "], 'Return the literal field " id ".'),
     ],
 )
 def test_parser_refuses_unverified_output_schema_fields(
@@ -246,6 +416,7 @@ def test_parser_refuses_unverified_output_schema_fields(
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -287,6 +458,7 @@ def test_parser_refuses_short_citations_of_nested_or_list_field_names(
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -330,6 +502,7 @@ def test_parser_accepts_only_cited_output_field_deltas(
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
@@ -367,6 +540,7 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "clear",
@@ -393,7 +567,7 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
     assert result.output_schema_fields.field_names == ()
 
 
-def test_parser_accepts_many_cited_field_additions_across_user_sources() -> None:
+def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> None:
     field_names = tuple(f"field_{index}" for index in range(4))
     sources = tuple(
         SlotClassificationSource(
@@ -410,13 +584,14 @@ def test_parser_accepts_many_cited_field_additions_across_user_sources() -> None
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "output_schema_fields": {
                     "operation": "update",
                     "field_names": list(field_names),
                     "removed_field_names": [],
                     "confidence": "high",
-                    "reason": "Current complete JSON field set.",
+                    "reason": "Reconstructed complete JSON field set.",
                     "evidence": [
                         {
                             "source_id": source.source_id,
@@ -437,8 +612,7 @@ def test_parser_accepts_many_cited_field_additions_across_user_sources() -> None
     )
 
     assert result is not None
-    assert result.output_schema_fields is not None
-    assert result.output_schema_fields.field_names == field_names
+    assert result.output_schema_fields is None
 
 
 def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries() -> (
@@ -451,8 +625,10 @@ def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "example_output_constraints": None,
                 "schema_direction": {
@@ -490,8 +666,10 @@ def test_parser_rejects_schema_direction_outside_complete_candidate_set() -> Non
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "example_output_constraints": None,
                 "schema_direction": {
@@ -698,8 +876,7 @@ def test_parse_slot_classification_response_uses_canonical_slots_shape_only() ->
         classification_input=_classification_input("PDF report"),
     )
 
-    assert result is not None
-    assert result.slots == ()
+    assert result is None
 
 
 def test_parse_slot_classification_response_filters_invalid_entries() -> None:
@@ -709,6 +886,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "terminal_output",
@@ -779,6 +957,7 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "primary_runtime_input",
@@ -824,6 +1003,7 @@ def test_inventory_only_attachment_evidence_cannot_promote_semantic_file_role() 
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "file_roles": [
                     {
                         "file_id": str(file_id),
@@ -834,7 +1014,7 @@ def test_inventory_only_attachment_evidence_cannot_promote_semantic_file_role() 
                             _evidence("filename: example.pdf", source_id=source_id)
                         ],
                     }
-                ]
+                ],
             }
         ),
         allowed_slot_values={},
@@ -860,6 +1040,7 @@ def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "primary_runtime_input",
@@ -869,7 +1050,7 @@ def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
                         "evidence": [_evidence("User requested documents")],
                         "evidence_level": "explicit",
                     }
-                ]
+                ],
             }
         ),
         allowed_slot_values={"primary_runtime_input": {"documents"}},
@@ -888,6 +1069,7 @@ def test_attachment_only_evidence_cannot_classify_terminal_output() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "terminal_output",
@@ -899,7 +1081,7 @@ def test_attachment_only_evidence_cannot_classify_terminal_output() -> None:
                         ],
                         "evidence_level": "explicit",
                     }
-                ]
+                ],
             }
         ),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
@@ -926,6 +1108,7 @@ def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> Non
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "report_disposition",
@@ -957,7 +1140,7 @@ def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> Non
                         ],
                         "evidence_level": "explicit",
                     },
-                ]
+                ],
             }
         ),
         allowed_slot_values={
@@ -999,6 +1182,7 @@ def test_file_role_rejects_evidence_from_a_different_file() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1041,6 +1225,7 @@ def test_parse_slot_classification_response_filters_secondary_obligations() -> N
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "secondary_obligations": [
                     "risks",
@@ -1063,6 +1248,7 @@ def test_parse_slot_classification_response_filters_file_roles() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1136,6 +1322,7 @@ def test_example_output_constraints_keep_typed_citations_and_downgrade_attachmen
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1220,6 +1407,7 @@ def test_example_output_constraints_keep_high_confidence_with_independent_user_e
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1287,6 +1475,7 @@ def test_example_output_constraints_reject_inventory_only_content_claims() -> No
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1331,6 +1520,7 @@ def test_example_output_constraints_reject_fabricated_citations() -> None:
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "file_roles": [
                     {
@@ -1375,6 +1565,7 @@ def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> No
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [
                     {
                         "slot_name": "terminal_output",
@@ -1409,6 +1600,7 @@ def test_parse_slot_classification_response_accepts_form_intake_evidence() -> No
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "form_intake": {
                     "needs_form_fields": True,
@@ -1444,6 +1636,7 @@ def test_parse_slot_classification_response_downgrades_unsupported_form_intake()
     result = parse_slot_classification_response(
         json.dumps(
             {
+                **_VALID_CLASSIFICATION_RESPONSE,
                 "slots": [],
                 "form_intake": {
                     "needs_form_fields": True,
@@ -1565,7 +1758,7 @@ def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
         litellm_model="openai/gpt-test",
         provider="openai",
         supported_model_kwargs=_route().supported_model_kwargs,
-        bias=classifier.SlotClassificationBias(
+        bias=classification_contract.SlotClassificationBias(
             target_slot_name="terminal_output",
             asked_question_id="final_output_mode",
             answer_source_id="user_message:user-1",
@@ -1731,10 +1924,10 @@ async def test_classification_cache_separates_provider_execution_targets(
         tenant_id=uuid4(),
     )
 
-    assert first is not None
-    assert second is not None
-    assert first.cached is False
-    assert second.cached is False
+    assert first.result is not None
+    assert second.result is not None
+    assert first.result.cached is False
+    assert second.result.cached is False
     assert litellm_client.acompletion.await_count == 2
 
 
@@ -1797,8 +1990,10 @@ async def test_classification_cache_ignores_credential_only_differences() -> Non
 
     assert first is not None
     assert second is not None
-    assert first.cached is False
-    assert second.cached is True
+    assert first.result is not None
+    assert second.result is not None
+    assert first.result.cached is False
+    assert second.result.cached is True
     assert litellm_client.acompletion.await_count == 1
 
 
@@ -1849,8 +2044,10 @@ async def test_classification_cache_separates_effective_optional_kwargs() -> Non
 
     assert first is not None
     assert second is not None
-    assert first.cached is False
-    assert second.cached is False
+    assert first.result is not None
+    assert second.result is not None
+    assert first.result.cached is False
+    assert second.result.cached is False
     assert litellm_client.acompletion.await_count == 2
     assert "temperature" not in litellm_client.acompletion.await_args_list[0].kwargs
     assert litellm_client.acompletion.await_args_list[1].kwargs["temperature"] == 0.0
@@ -1893,7 +2090,7 @@ def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
         classification_input=_classification_input("en fil jag kan ladda ner"),
         allowed_slot_values={"terminal_output": frozenset({"docx_document"})},
         ui_language="sv",
-        bias=classifier.SlotClassificationBias(
+        bias=classification_contract.SlotClassificationBias(
             target_slot_name="terminal_output",
             asked_question_id="final_output_mode",
             answer_source_id="user_message:user-1",
@@ -2005,14 +2202,17 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
     prompt = "\n".join(message["content"] for message in messages)
 
     assert (
-        f"1-{classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes for each "
-        "slot, file_role, and form_intake classification" in prompt
+        f"1-{classification_contract.CLASSIFICATION_EVIDENCE_MAX_ITEMS} evidence quotes for each "
+        "slot, file_role, form_intake, and checkpoint_update classification" in prompt
     )
     assert (
-        f"up to {classifier.OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
+        f"up to {classification_contract.OUTPUT_SCHEMA_FIELD_EVIDENCE_MAX_ITEMS} exact evidence "
         "quotes" in prompt
     )
-    assert f"at most {classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH}" in prompt
+    assert (
+        f"at most {classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH}"
+        in prompt
+    )
     assert "exact_quote_str" in prompt
     assert "form_intake" in prompt
     assert (
@@ -2082,13 +2282,15 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
 
     assert first is not None
     assert second is not None
-    assert first.cached is False
-    assert second.cached is True
-    assert first.slots[0].confidence == "high"
-    assert first.slots[0].evidence == (
+    assert first.result is not None
+    assert second.result is not None
+    assert first.result.cached is False
+    assert second.result.cached is True
+    assert first.result.slots[0].confidence == "high"
+    assert first.result.slots[0].evidence == (
         ClassifiedEvidence(source_id="user_message:user-1", quote=text),
     )
-    assert second.slots == first.slots
+    assert second.result.slots == first.result.slots
     assert litellm_client.acompletion.await_count == 1
 
 
@@ -2102,17 +2304,20 @@ async def test_classify_slots_refuses_duplicate_source_ids() -> None:
         message_id="duplicate",
     )
 
-    result = await classify_slots(
-        litellm_client=litellm_client,
-        completion_model_route=_route(model="openai/gpt-test"),
-        classification_input=SlotClassificationInput(
-            sources=(duplicate_source, duplicate_source)
-        ),
-        allowed_slot_values={"terminal_output": {"structured_text"}},
-        tenant_id=uuid4(),
-    )
+    with pytest.raises(
+        ValueError,
+        match="Slot classification input must contain unique, valid sources",
+    ):
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(model="openai/gpt-test"),
+            classification_input=SlotClassificationInput(
+                sources=(duplicate_source, duplicate_source)
+            ),
+            allowed_slot_values={"terminal_output": {"structured_text"}},
+            tenant_id=uuid4(),
+        )
 
-    assert result is None
     litellm_client.acompletion.assert_not_awaited()
 
 
@@ -2185,6 +2390,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
                 "assumptions": [],
@@ -2209,7 +2415,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert response_format["type"] == "json_schema"
     json_schema = response_format["json_schema"]
     assert json_schema["name"] == (
-        f"ai_builder_slot_classification_v{classifier.SLOT_CLASSIFICATION_SCHEMA_VERSION}"
+        f"ai_builder_slot_classification_v{classification_contract.SLOT_CLASSIFICATION_SCHEMA_VERSION}"
     )
     assert json_schema["strict"] is False
 
@@ -2217,6 +2423,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert schema["required"] == [
         "slots",
         "file_roles",
+        "checkpoint_updates",
         "form_intake",
         "output_schema_fields",
         "example_output_constraints",
@@ -2242,7 +2449,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert "maxItems" not in output_fields_schema["properties"]["field_names"]
     assert "maxItems" not in output_fields_schema["properties"]["removed_field_names"]
     assert output_fields_schema["properties"]["field_names"]["items"]["maxLength"] == (
-        classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH
+        classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH
     )
     slot_schema = schema["properties"]["slots"]
     assert slot_schema["maxItems"] == 1
@@ -2263,25 +2470,25 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     ]
     assert (
         slot_variant["properties"]["reason"]["maxLength"]
-        == classifier.CLASSIFICATION_REASON_MAX_LENGTH
+        == classification_contract.CLASSIFICATION_REASON_MAX_LENGTH
     )
     assert (
         slot_variant["properties"]["evidence"]["maxItems"]
-        == classifier.CLASSIFICATION_EVIDENCE_MAX_ITEMS
+        == classification_contract.CLASSIFICATION_EVIDENCE_MAX_ITEMS
     )
     assert (
         slot_variant["properties"]["evidence"]["items"]["properties"]["quote"][
             "maxLength"
         ]
-        == classifier.CLASSIFICATION_EVIDENCE_MAX_LENGTH
+        == classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH
     )
     assert (
         schema["properties"]["assumptions"]["maxItems"]
-        == classifier.CLASSIFICATION_NOTES_MAX_ITEMS
+        == classification_contract.CLASSIFICATION_NOTES_MAX_ITEMS
     )
     assert (
         schema["properties"]["assumptions"]["items"]["maxLength"]
-        == classifier.CLASSIFICATION_NOTE_MAX_LENGTH
+        == classification_contract.CLASSIFICATION_NOTE_MAX_LENGTH
     )
     example_schema = schema["properties"]["example_output_constraints"]["anyOf"][0]
     assert example_schema["required"] == [
@@ -2294,14 +2501,14 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     assert example_schema["properties"]["source_file_ids"]["maxItems"] == 100
     assert (
         example_schema["properties"]["headings"]["maxItems"]
-        == classifier.EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS
+        == classification_contract.EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS
     )
     assert example_schema["properties"]["style_constraints"]["items"]["properties"][
         "category"
     ]["enum"] == ["tone", "detail_level", "organization", "formatting", "audience"]
     assert (
         example_schema["properties"]["evidence"]["maxItems"]
-        == classifier.EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS
+        == classification_contract.EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS
     )
 
 
@@ -2313,6 +2520,7 @@ async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
                 "assumptions": [],
@@ -2398,6 +2606,7 @@ async def test_classification_uses_real_resolved_route_without_discovery_call() 
             {
                 "slots": [],
                 "file_roles": [],
+                "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
                 "assumptions": [],

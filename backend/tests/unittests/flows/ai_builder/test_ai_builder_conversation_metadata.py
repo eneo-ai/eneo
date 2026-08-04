@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     CLASSIFIER_RETENTION_CLASSES,
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
+    SlotClassificationOutputSchemaFieldsMetadata,
     SlotClassificationSchemaDirectionMetadata,
     loose_tool_call_name,
     loose_tool_call_names_from_message,
@@ -30,17 +31,18 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     requirements_summary_from_metadata,
     requirements_summary_to_metadata,
     slot_classification_from_metadata,
-    slot_classification_metadata_from_result,
+    slot_classification_metadata_from_attempt,
     tool_calls_from_message,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
+    ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
-    ClassifiedOutputSchemaFields,
     ClassifiedSlot,
+    SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
@@ -55,6 +57,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     CLASSIFIER_REBUILD_INPUT_CLASSES,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
@@ -76,13 +79,15 @@ def _classification_input(*quotes: str) -> SlotClassificationInput:
                 text="\n".join(quotes),
                 message_id="user-1",
             ),
-        )
+        ),
+        current_user_message_id="user-1",
     )
 
 
 def _persisted_classification_header() -> dict[str, object]:
     return {
         "schema_version": SLOT_CLASSIFICATION_SCHEMA_VERSION,
+        "outcome": "resolved",
         "prompt_hash": "a" * 64,
         "model": "openai/gpt-test",
         "provider": "openai",
@@ -425,13 +430,6 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
             evidence=(_classified_evidence("fritext under varje rubrik"),),
             evidence_level="explicit",
         ),
-        output_schema_fields=ClassifiedOutputSchemaFields(
-            operation="replace",
-            field_names=("case_id", "status"),
-            confidence="high",
-            reason="explicit JSON field names",
-            evidence=(_classified_evidence("JSON fields: case_id and status"),),
-        ),
         file_roles=(
             ClassifiedFileRole(
                 file_id=file_id,
@@ -446,9 +444,18 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
         assumptions=("User wants runtime form fields.",),
         contradictions=("No contradiction.",),
     )
+    output_schema_fields_snapshot = (
+        SlotClassificationOutputSchemaFieldsMetadata.from_materialized_state(
+            operation="replace",
+            field_names=("case_id", "status"),
+            confidence="high",
+            reason="explicit JSON field names",
+            evidence=(_classified_evidence("JSON fields: case_id and status"),),
+        )
+    )
 
-    classification = slot_classification_metadata_from_result(
-        result,
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=SlotClassificationInput(
             sources=(
@@ -476,6 +483,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
         ),
         model="openai/gpt-test",
         provider="openai",
+        output_schema_fields_snapshot=output_schema_fields_snapshot,
     )
     metadata = metadata_with_slot_classification(None, classification)
     parsed = slot_classification_from_metadata(metadata)
@@ -486,12 +494,175 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert set(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
     assert parsed.to_result().slots == result.slots
     assert parsed.to_result().form_intake == result.form_intake
-    assert parsed.to_result().output_schema_fields == result.output_schema_fields
+    assert parsed.output_schema_fields == output_schema_fields_snapshot
+    assert parsed.to_result().output_schema_fields is None
     assert parsed.to_result().file_roles == result.file_roles
     assert parsed.to_result().secondary_obligations == ("risks", "actions")
     assert parsed.model == "openai/gpt-test"
     assert parsed.provider == "openai"
     assert parsed.source_inventory[0].source_id == _CLASSIFICATION_SOURCE_ID
+
+
+def test_slot_classification_round_trips_checkpoint_update_with_cited_source() -> None:
+    quote = "Let a reviewer approve the structured result before delivery."
+    result = SlotClassificationResult(
+        checkpoint_updates=(
+            ClassifiedCheckpointUpdate(
+                operation="update",
+                producer_kind="structured_result",
+                mode=FlowStepReviewMode.VIEW,
+                confidence="high",
+                reason="The user requests approval of the structured result.",
+                evidence=(_classified_evidence(quote),),
+            ),
+        )
+    )
+
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
+        prompt_hash="a" * 64,
+        classification_input=_classification_input(quote),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    parsed = slot_classification_from_metadata(
+        metadata_with_slot_classification(None, classification)
+    )
+
+    assert parsed is not None
+    assert parsed.to_result().checkpoint_updates == result.checkpoint_updates
+    assert parsed.effective_retention_identities() == frozenset(
+        {("checkpoint_update", "structured_result")}
+    )
+
+
+def test_slot_classification_rejects_duplicate_checkpoint_producer() -> None:
+    quote = "Let a reviewer approve the report before delivery."
+    checkpoint = ClassifiedCheckpointUpdate(
+        operation="update",
+        producer_kind="report_text",
+        mode=FlowStepReviewMode.VIEW,
+        confidence="high",
+        reason="The user requests report approval.",
+        evidence=(_classified_evidence(quote),),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="must not duplicate checkpoint producers",
+    ):
+        slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(
+                outcome="resolved",
+                result=SlotClassificationResult(
+                    checkpoint_updates=(checkpoint, checkpoint)
+                ),
+            ),
+            prompt_hash="a" * 64,
+            classification_input=_classification_input(quote),
+            model="openai/gpt-test",
+            provider="openai",
+        )
+
+
+def test_checkpoint_update_metadata_requires_user_owned_evidence() -> None:
+    file_id = uuid4()
+    file_source_id = f"uploaded_file:{file_id}"
+    user_quote = "Let a reviewer approve the report before delivery."
+    attachment_quote = "Example report with an approval heading."
+
+    def persist(evidence: tuple[ClassifiedEvidence, ...]):
+        return slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(
+                outcome="resolved",
+                result=SlotClassificationResult(
+                    checkpoint_updates=(
+                        ClassifiedCheckpointUpdate(
+                            operation="update",
+                            producer_kind="report_text",
+                            mode=FlowStepReviewMode.VIEW,
+                            confidence="high",
+                            reason="The user requests report approval.",
+                            evidence=evidence,
+                        ),
+                    )
+                ),
+            ),
+            prompt_hash="a" * 64,
+            classification_input=SlotClassificationInput(
+                sources=(
+                    SlotClassificationSource(
+                        source_id=_CLASSIFICATION_SOURCE_ID,
+                        kind="user_message",
+                        text=user_quote,
+                        message_id="user-1",
+                    ),
+                    SlotClassificationSource(
+                        source_id=file_source_id,
+                        kind="uploaded_file",
+                        text=attachment_quote,
+                        file_id=file_id,
+                        coverage="fully_seen",
+                    ),
+                ),
+                current_user_message_id="user-1",
+            ),
+            model="openai/gpt-test",
+            provider="openai",
+        )
+
+    with pytest.raises(
+        ValidationError,
+        match="checkpoint updates require user-owned evidence",
+    ):
+        persist(
+            (
+                ClassifiedEvidence(
+                    source_id=file_source_id,
+                    quote=attachment_quote,
+                ),
+            )
+        )
+
+    mixed = persist(
+        (
+            _classified_evidence(user_quote),
+            ClassifiedEvidence(source_id=file_source_id, quote=attachment_quote),
+        )
+    )
+    assert len(mixed.checkpoint_updates) == 1
+
+
+def test_classifier_metadata_preserves_supplier_owned_identifiers() -> None:
+    message_id = f"message-{'m' * 300}"
+    source_id = f"user_message:{message_id}"
+    model = f"openai/{'model' * 80}"
+    provider = "provider" * 30
+
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(),
+        ),
+        prompt_hash="a" * 64,
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=source_id,
+                    kind="user_message",
+                    text="Build a flow.",
+                    message_id=message_id,
+                ),
+            )
+        ),
+        model=model,
+        provider=provider,
+    )
+
+    assert classification.model == model
+    assert classification.provider == provider
+    assert classification.source_inventory[0].source_id == source_id
+    assert classification.source_inventory[0].message_id == message_id
 
 
 def test_classifier_rebuild_classes_all_have_canonical_retention_rules() -> None:
@@ -501,63 +672,62 @@ def test_classifier_rebuild_classes_all_have_canonical_retention_rules() -> None
 def test_classifier_metadata_rejects_attachment_only_terminal_output() -> None:
     file_id = uuid4()
     source_id = f"uploaded_file:{file_id}"
-
-    classification = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value="structured_json",
-                    confidence="medium",
-                    reason="the attachment contains JSON",
-                    evidence=(
-                        ClassifiedEvidence(source_id=source_id, quote='{"id": 1}'),
-                    ),
-                    evidence_level="inferred",
-                ),
-            )
-        ),
-        prompt_hash="a" * 64,
-        classification_input=SlotClassificationInput(
-            sources=(
-                SlotClassificationSource(
-                    source_id=source_id,
-                    kind="uploaded_file",
-                    text='{"id": 1}',
-                    file_id=file_id,
-                    coverage="fully_seen",
-                ),
-            )
-        ),
-        model="openai/gpt-test",
-        provider="openai",
+    result = SlotClassificationResult(
+        slots=(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value="structured_json",
+                confidence="medium",
+                reason="the attachment contains JSON",
+                evidence=(ClassifiedEvidence(source_id=source_id, quote='{"id": 1}'),),
+                evidence_level="inferred",
+            ),
+        )
     )
 
-    assert classification is None
+    with pytest.raises(ValidationError):
+        slot_classification_metadata_from_attempt(
+            SlotClassificationAttempt(outcome="resolved", result=result),
+            prompt_hash="a" * 64,
+            classification_input=SlotClassificationInput(
+                sources=(
+                    SlotClassificationSource(
+                        source_id=source_id,
+                        kind="uploaded_file",
+                        text='{"id": 1}',
+                        file_id=file_id,
+                        coverage="fully_seen",
+                    ),
+                )
+            ),
+            model="openai/gpt-test",
+            provider="openai",
+        )
 
 
 def test_classifier_retention_identities_follow_replay_confidence_rules() -> None:
-    classification = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value="structured_text",
-                    confidence="low",
-                    reason="not effective",
-                    evidence=(_classified_evidence("weak output guess"),),
-                ),
-                ClassifiedSlot(
-                    slot_name="primary_runtime_input",
-                    value="unknown",
-                    confidence="low",
-                    reason="explicit clearing result",
-                    evidence=(),
-                ),
+    result = SlotClassificationResult(
+        slots=(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value="structured_text",
+                confidence="low",
+                reason="not effective",
+                evidence=(_classified_evidence("weak output guess"),),
             ),
-            assumptions=("diagnostic note",),
-            contradictions=("another diagnostic note",),
+            ClassifiedSlot(
+                slot_name="primary_runtime_input",
+                value="unknown",
+                confidence="low",
+                reason="explicit clearing result",
+                evidence=(),
+            ),
         ),
+        assumptions=("diagnostic note",),
+        contradictions=("another diagnostic note",),
+    )
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=_classification_input("weak output guess"),
         model="openai/gpt-test",
@@ -598,8 +768,9 @@ def test_example_output_constraints_round_trip_with_replay_sources() -> None:
             ),
         ],
     )
-    classification = slot_classification_metadata_from_result(
-        SlotClassificationResult(example_output_constraints=constraints),
+    result = SlotClassificationResult(example_output_constraints=constraints)
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=SlotClassificationInput(
             sources=(
@@ -854,18 +1025,19 @@ def test_slot_classification_metadata_rejects_missing_evidence() -> None:
 
 
 def test_slot_classification_writer_bounds_reason_text() -> None:
-    classification = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value="structured_text",
-                    confidence="high",
-                    reason="x" * 800,
-                    evidence=(_classified_evidence("user asked for a report"),),
-                ),
-            )
-        ),
+    result = SlotClassificationResult(
+        slots=(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value="structured_text",
+                confidence="high",
+                reason="x" * 800,
+                evidence=(_classified_evidence("user asked for a report"),),
+            ),
+        )
+    )
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=_classification_input("user asked for a report"),
         model="openai/gpt-test",
@@ -881,32 +1053,33 @@ def test_slot_classification_writer_bounds_reason_text() -> None:
 
 
 def test_slot_classification_writer_filters_invalid_and_keeps_low_diagnostic() -> None:
-    classification = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value="structured_text",
-                    confidence="high",
-                    reason="valid",
-                    evidence=(_classified_evidence("valid quote"),),
-                ),
-                ClassifiedSlot(
-                    slot_name="runtime_metadata_fields",
-                    value="not_a_runtime_metadata_value",
-                    confidence="high",
-                    reason="invalid",
-                    evidence=(_classified_evidence("invalid quote"),),
-                ),
-                ClassifiedSlot(
-                    slot_name="primary_runtime_input",
-                    value="unknown",
-                    confidence="low",
-                    reason="retained for negative calibration",
-                    evidence=(_classified_evidence("uncertain quote"),),
-                ),
-            )
-        ),
+    result = SlotClassificationResult(
+        slots=(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value="structured_text",
+                confidence="high",
+                reason="valid",
+                evidence=(_classified_evidence("valid quote"),),
+            ),
+            ClassifiedSlot(
+                slot_name="runtime_metadata_fields",
+                value="not_a_runtime_metadata_value",
+                confidence="high",
+                reason="invalid",
+                evidence=(_classified_evidence("invalid quote"),),
+            ),
+            ClassifiedSlot(
+                slot_name="primary_runtime_input",
+                value="unknown",
+                confidence="low",
+                reason="retained for negative calibration",
+                evidence=(_classified_evidence("uncertain quote"),),
+            ),
+        )
+    )
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=_classification_input(
             "valid quote",
@@ -925,25 +1098,26 @@ def test_slot_classification_writer_filters_invalid_and_keeps_low_diagnostic() -
 
 
 def test_slot_classification_writer_keeps_first_duplicate_slot() -> None:
-    classification = slot_classification_metadata_from_result(
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value="structured_text",
-                    confidence="high",
-                    reason="first valid slot",
-                    evidence=(_classified_evidence("first quote"),),
-                ),
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value="structured_json",
-                    confidence="high",
-                    reason="duplicate valid slot",
-                    evidence=(_classified_evidence("second quote"),),
-                ),
-            )
-        ),
+    result = SlotClassificationResult(
+        slots=(
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value="structured_text",
+                confidence="high",
+                reason="first valid slot",
+                evidence=(_classified_evidence("first quote"),),
+            ),
+            ClassifiedSlot(
+                slot_name="terminal_output",
+                value="structured_json",
+                confidence="high",
+                reason="duplicate valid slot",
+                evidence=(_classified_evidence("second quote"),),
+            ),
+        )
+    )
+    classification = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
         classification_input=_classification_input("first quote", "second quote"),
         model="openai/gpt-test",

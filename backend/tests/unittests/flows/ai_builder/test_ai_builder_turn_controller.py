@@ -52,6 +52,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    CheckpointIntent,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
@@ -432,15 +433,24 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_swedis
 
 
 @pytest.mark.parametrize(
-    ("ui_language", "expected"),
+    ("ui_language", "normalization_text", "schema_text"),
     [
-        ("sv", "Fälttyper och struktur är inte fastställda."),
-        ("en", "Field types and structure are not yet fixed."),
+        (
+            "sv",
+            "normaliserats från citerade fält som användaren namngett",
+            "Fälttyper och struktur är inte fastställda.",
+        ),
+        (
+            "en",
+            "normalized from cited user-named fields",
+            "Field types and structure are not yet fixed.",
+        ),
     ],
 )
 def test_server_confirmation_distinguishes_named_json_fields_from_full_schema(
     ui_language: str,
-    expected: str,
+    normalization_text: str,
+    schema_text: str,
 ) -> None:
     state = _state(primary_runtime_input="text", terminal_output="structured_json")
     state.output_schema_evidence = build_schema_evidence(
@@ -457,14 +467,22 @@ def test_server_confirmation_distinguishes_named_json_fields_from_full_schema(
     decision = _decision(state=state, ui_language=ui_language)
 
     assert isinstance(decision, ConfirmRequirements)
-    assert expected in decision.payload.summary
+    assert normalization_text in decision.payload.summary
+    assert schema_text in decision.payload.summary
 
 
 @pytest.mark.parametrize(
     ("ui_language", "expected"),
     [
-        ("sv", "Förhandsvisning av namngivna JSON-fält (visar 8 av 9)"),
-        ("en", "Named JSON field preview (showing 8 of 9)"),
+        (
+            "sv",
+            "Förhandsvisning av JSON-nycklar som normaliserats från citerade fält "
+            "som användaren namngett (visar 8 av 9)",
+        ),
+        (
+            "en",
+            "JSON key preview normalized from cited user-named fields (showing 8 of 9)",
+        ),
     ],
 )
 def test_server_confirmation_discloses_bounded_named_field_preview(
@@ -952,6 +970,86 @@ def test_server_confirmation_summarizes_processing_goal() -> None:
     assert {decision.decision for decision in payload.key_decisions} >= {
         "Beslut, nästa steg och uppföljning",
     }
+
+
+@pytest.mark.parametrize(
+    ("ui_language", "topic", "decision_text"),
+    [
+        (
+            "en",
+            "Transcript review",
+            "The transcript can be edited before the flow continues.",
+        ),
+        (
+            "sv",
+            "Granskning av transkribering",
+            "Transkriberingen kan redigeras innan flödet fortsätter.",
+        ),
+    ],
+)
+def test_confirmation_exposes_committed_checkpoint_intent(
+    ui_language: str,
+    topic: str,
+    decision_text: str,
+) -> None:
+    state = _state(primary_runtime_input="audio", terminal_output="structured_text")
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            mode="edit",
+            confidence="high",
+            evidence=["quote:user_message:user-1:edit the transcript"],
+        )
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language=ui_language)
+
+    assert isinstance(decision, ConfirmRequirements)
+    decisions = {item.topic: item.decision for item in decision.payload.key_decisions}
+    assert decisions[topic] == decision_text
+
+
+def test_checkpoint_intent_change_requires_fresh_confirmation() -> None:
+    state = _state(primary_runtime_input="audio", terminal_output="structured_text")
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            mode="view",
+            confidence="high",
+            evidence=["quote:user_message:user-1:approve the transcript"],
+        )
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+    prior = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(prior, ConfirmRequirements)
+
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            mode="edit",
+            confidence="high",
+            evidence=["quote:user_message:user-1:edit the transcript"],
+        )
+    ]
+    current = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        confirmed_attachment_evidence_fingerprint=(
+            prior.attachment_evidence_fingerprint
+        ),
+        ui_language="en",
+    ).decision
+
+    assert isinstance(current, ConfirmRequirements)
+    assert (
+        current.attachment_evidence_fingerprint != prior.attachment_evidence_fingerprint
+    )
 
 
 def test_server_confirmation_names_json_to_json_architecture() -> None:
