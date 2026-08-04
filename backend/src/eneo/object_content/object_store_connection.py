@@ -602,10 +602,10 @@ class ObjectStoreConnectionService:
 
         try:
             async with asyncio.timeout(_PROBE_END_TO_END_TIMEOUT_SECONDS):
+                await store.check_ready()
                 if binding is None:
                     await _await_quiescent(probe_binding_creation())
                 else:
-                    await store.check_ready()
                     if (
                         binding.deployment_id != probe_settings.deployment_id
                         or binding.binding_id is None

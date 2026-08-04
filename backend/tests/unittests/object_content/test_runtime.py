@@ -27,6 +27,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionDatabaseUnavailable,
     ObjectStoreConnectionInput,
     ObjectStoreConnectionService,
+    ObjectStoreConnectionSource,
     ObjectStoreCredentialRotation,
     StoredObjectStoreConnection,
 )
@@ -328,6 +329,45 @@ async def test_readiness_recovers_after_cache_expiry_without_process_restart(
 
     await runtime.stop()
     assert store.closed
+
+
+@pytest.mark.asyncio
+async def test_readiness_recovery_adopts_validated_legacy_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings()
+    legacy_store = _ReadinessStore([False, True])
+    admin_store = _ReadinessStore()
+    stores = iter((legacy_store, admin_store))
+    stored = MagicMock(spec=StoredObjectStoreConnection)
+    stored.revision = 1
+    connection_service = MagicMock(spec=ObjectStoreConnectionService)
+    connection_service.get = AsyncMock(return_value=None)
+    connection_service.adopt_legacy = AsyncMock(return_value=stored)
+    connection_service.settings_for = MagicMock(return_value=settings)
+    monkeypatch.setattr(
+        "eneo.object_content.runtime.load_object_content_settings",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        "eneo.object_content.runtime.ObjectStoreConnectionService",
+        lambda **_kwargs: connection_service,
+    )
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+    runtime.start(
+        core_settings=ObjectContentCoreSettings(_env_file=None),
+        store_factory=lambda _settings: cast(S3ObjectStore, next(stores)),
+    )
+
+    with pytest.raises(ObjectContentUnavailableError):
+        await runtime.validate_configuration()
+    recovered = await runtime.readiness()
+
+    assert recovered.code is ObjectContentReadinessCode.READY
+    assert runtime.object_store_connection_source is ObjectStoreConnectionSource.ADMIN
+    connection_service.adopt_legacy.assert_awaited_once_with(settings)
+
+    await runtime.stop()
 
 
 @pytest.mark.asyncio

@@ -439,6 +439,9 @@ class ObjectContentRuntime:
                 ready=True,
                 code=ObjectContentReadinessCode.STORE_DEGRADED,
             )
+        provider = self._object_store_provider
+        if provider is not None:
+            await provider.adopt_validated_legacy()
         return ObjectContentReadiness(
             ready=True,
             code=ObjectContentReadinessCode.READY,

@@ -568,8 +568,10 @@ async def test_admin_mutations_report_unknown_commit_outcome(
 
 
 @pytest.mark.asyncio
-async def test_credential_rotation_requires_bucket_readiness_before_persistence(
+@pytest.mark.parametrize("operation", ["create", "rotate"])
+async def test_admin_connection_requires_bucket_readiness_before_persistence(
     monkeypatch: pytest.MonkeyPatch,
+    operation: str,
 ) -> None:
     stored = _stored_connection()
     store = _ListDeniedStore()
@@ -587,11 +589,13 @@ async def test_credential_rotation_requires_bucket_readiness_before_persistence(
     async def get_connection(
         _repository: ObjectStoreConnectionRepository,
     ) -> StoredObjectStoreConnection | None:
-        return stored
+        return None if operation == "create" else stored
 
-    async def bound_snapshot(
+    async def binding_snapshot(
         _repository: ObjectContentReconciliationRepository,
     ) -> StoreBindingSnapshot:
+        if operation == "create":
+            return StoreBindingSnapshot(None, None, False)
         return StoreBindingSnapshot(
             stored.deployment_id,
             UUID("86a18657-8af1-4b6b-8e90-b78e6b41e7cb"),
@@ -610,23 +614,35 @@ async def test_credential_rotation_requires_bucket_readiness_before_persistence(
     monkeypatch.setattr(
         ObjectContentReconciliationRepository,
         "store_binding_snapshot",
-        bound_snapshot,
+        binding_snapshot,
     )
     monkeypatch.setattr(
         ObjectStoreConnectionRepository,
-        "rotate_credentials",
+        "create" if operation == "create" else "rotate_credentials",
         persist_rotation,
     )
 
     with pytest.raises(ObjectStoreProbeUnavailable):
-        await service.rotate_credentials(
-            ObjectStoreCredentialRotation(
-                expected_revision=stored.revision,
-                access_key_id="replacement-access",
-                secret_access_key="replacement-secret",
-            ),
-            actor_user_id=stored.deployment_id,
-        )
+        if operation == "create":
+            await service.create(
+                ObjectStoreConnectionInput(
+                    endpoint_url=stored.endpoint_url,
+                    region=stored.region,
+                    bucket=stored.bucket,
+                    access_key_id="access",
+                    secret_access_key="secret",
+                ),
+                actor_user_id=stored.deployment_id,
+            )
+        else:
+            await service.rotate_credentials(
+                ObjectStoreCredentialRotation(
+                    expected_revision=stored.revision,
+                    access_key_id="replacement-access",
+                    secret_access_key="replacement-secret",
+                ),
+                actor_user_id=stored.deployment_id,
+            )
 
     assert store.readiness_checks == 1
     assert persistence_attempted is False
