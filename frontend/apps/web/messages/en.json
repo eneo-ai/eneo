@@ -4233,6 +4233,8 @@
   "storage_connection_summary_configured": "Connected",
   "storage_connection_summary_unconfigured": "Not connected",
   "storage_connection_created_title": "The connection has been saved",
+  "storage_connection_already_configured_title": "Object storage is already connected",
+  "storage_connection_already_configured_description": "A connection already exists. Review the current destination before making more changes.",
   "storage_connection_rotated_title": "The credentials have been replaced",
   "storage_connection_created_description": "Eneo can reach and verify the service. Choose Object storage under the storage target when new files should use it.",
   "storage_connection_rotated_description": "The new credentials were verified and saved. New storage operations now use them.",

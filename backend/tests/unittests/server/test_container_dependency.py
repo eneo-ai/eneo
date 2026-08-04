@@ -130,6 +130,7 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
         knowledge_audio_maximum_bytes=15,
     )
     loader = AsyncMock(return_value=snapshot)
+    refresh_connection = AsyncMock()
     monkeypatch.setattr(
         container_dependency,
         "load_upload_admission_snapshot",
@@ -139,6 +140,7 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
         container_dependency,
         "object_content_runtime",
         SimpleNamespace(
+            refresh_object_store_configuration=refresh_connection,
             inline_maximum_bytes=99,
             object_store_maximum_bytes=199,
         ),
@@ -149,6 +151,7 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
 
     assert resolved is snapshot
     assert container.upload_admission() is snapshot
+    refresh_connection.assert_awaited_once_with()
     loader.assert_awaited_once_with(
         session,
         inline_maximum_bytes=99,

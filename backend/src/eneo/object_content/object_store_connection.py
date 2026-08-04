@@ -348,7 +348,7 @@ class ObjectStoreConnectionService:
         async with self._transaction(mutation=True) as session:
             if await ObjectStoreConnectionRepository(session).get() is not None:
                 raise ObjectStoreConnectionAlreadyConfigured(
-                    "Object storage was configured by another administrator"
+                    "Object storage is already configured"
                 )
             await self._require_unbound_destination(session)
             stored = await ObjectStoreConnectionRepository(session).create(
@@ -360,7 +360,7 @@ class ObjectStoreConnectionService:
             )
             if stored is None:
                 raise ObjectStoreConnectionAlreadyConfigured(
-                    "Object storage was configured by another administrator"
+                    "Object storage is already configured"
                 )
             return stored
 
@@ -579,6 +579,7 @@ class ObjectStoreConnectionService:
                 if binding is None:
                     await store.prepare_binding_creation(uuid4())
                 else:
+                    await store.check_ready()
                     if (
                         binding.deployment_id != probe_settings.deployment_id
                         or binding.binding_id is None

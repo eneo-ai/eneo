@@ -380,6 +380,69 @@ describe("admin storage settings page", () => {
       .toBeChecked();
   });
 
+  test("reloads the existing connection after a setup conflict", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    const configuredConnection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "unconfigured",
+        configured: false,
+        credentials_can_be_managed: true,
+        revision: null,
+        endpoint_url: null,
+        region: null,
+        bucket: null,
+        addressing_style: null,
+        updated_at: null
+      })
+      .mockResolvedValueOnce(configuredConnection);
+    createObjectStoreConnection.mockRejectedValue(
+      new EneoError(
+        "Object storage is already configured",
+        "RESPONSE",
+        409,
+        0,
+        { code: "object_store_connection_already_configured" },
+        { endpoint: "POST@/admin/object-store-connection" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_add_action" }).click();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://objects.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_save" }).click();
+
+    await expect
+      .element(page.getByText("storage_connection_already_configured_title"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_create_title" }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByText("https://objects.example.test")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "storage_connection_add_action" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+    expect(getPolicy).toHaveBeenCalledTimes(2);
+  });
+
   test("replaces the complete key pair without presenting the destination as editable", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(policy());

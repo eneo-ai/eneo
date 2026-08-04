@@ -28,6 +28,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreEndpointNotPermitted,
     ObjectStoreProbeCleanupFailed,
     ObjectStoreProbeConnectionFailed,
+    ObjectStoreProbeUnavailable,
     StoredObjectStoreConnection,
 )
 from eneo.object_content.reconciliation_repository import (
@@ -53,6 +54,9 @@ class _DelayedUploadStore:
     ) -> StoreBindingCreation | None:
         return None
 
+    async def check_ready(self) -> None:
+        return None
+
     async def upload(self, _key: str, _content: CapturedContent) -> None:
         await asyncio.sleep(0.05)
         self.object_exists = True
@@ -62,6 +66,16 @@ class _DelayedUploadStore:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class _ListDeniedStore(_DelayedUploadStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.readiness_checks = 0
+
+    async def check_ready(self) -> None:
+        self.readiness_checks += 1
+        raise ObjectStoreUnavailableError("list permission denied")
 
 
 class _CleanupFailureStore(_DelayedUploadStore):
@@ -370,3 +384,71 @@ async def test_admin_mutations_report_unknown_commit_outcome(
             )
 
     assert database.transactions == 2
+
+
+@pytest.mark.asyncio
+async def test_credential_rotation_requires_bucket_readiness_before_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored = _stored_connection()
+    store = _ListDeniedStore()
+    database = _SequencedCommitFailureDatabase()
+    service = _service(
+        store,
+        database,
+        operator_settings=ObjectStoreOperatorSettings(
+            _env_file=None,
+            admin_allowed_endpoint_origins=("https://objects.example.test",),
+        ),
+    )
+    persistence_attempted = False
+
+    async def get_connection(
+        _repository: ObjectStoreConnectionRepository,
+    ) -> StoredObjectStoreConnection | None:
+        return stored
+
+    async def bound_snapshot(
+        _repository: ObjectContentReconciliationRepository,
+    ) -> StoreBindingSnapshot:
+        return StoreBindingSnapshot(
+            stored.deployment_id,
+            UUID("86a18657-8af1-4b6b-8e90-b78e6b41e7cb"),
+            True,
+        )
+
+    async def persist_rotation(
+        _repository: ObjectStoreConnectionRepository,
+        **_kwargs: object,
+    ) -> StoredObjectStoreConnection:
+        nonlocal persistence_attempted
+        persistence_attempted = True
+        return stored
+
+    monkeypatch.setattr(ObjectStoreConnectionRepository, "get", get_connection)
+    monkeypatch.setattr(
+        ObjectContentReconciliationRepository,
+        "store_binding_snapshot",
+        bound_snapshot,
+    )
+    monkeypatch.setattr(
+        ObjectStoreConnectionRepository,
+        "rotate_credentials",
+        persist_rotation,
+    )
+
+    with pytest.raises(ObjectStoreProbeUnavailable):
+        await service.rotate_credentials(
+            ObjectStoreCredentialRotation(
+                expected_revision=stored.revision,
+                access_key_id="replacement-access",
+                secret_access_key="replacement-secret",
+            ),
+            actor_user_id=stored.deployment_id,
+        )
+
+    assert store.readiness_checks == 1
+    assert persistence_attempted is False
+    assert stored.revision == 1
+    assert stored.access_key_id_encrypted == "encrypted-access"
+    assert stored.secret_access_key_encrypted == "encrypted-secret"

@@ -4233,6 +4233,8 @@
   "storage_connection_summary_configured": "Ansluten",
   "storage_connection_summary_unconfigured": "Inte ansluten",
   "storage_connection_created_title": "Anslutningen har sparats",
+  "storage_connection_already_configured_title": "Objektlagringen är redan ansluten",
+  "storage_connection_already_configured_description": "Det finns redan en anslutning. Kontrollera den aktuella destinationen innan du gör fler ändringar.",
   "storage_connection_rotated_title": "Inloggningsuppgifterna har bytts ut",
   "storage_connection_created_description": "Eneo kan nå och verifiera tjänsten. Välj Objektlagring under lagringsmål när nya filer ska använda den.",
   "storage_connection_rotated_description": "De nya inloggningsuppgifterna har verifierats och sparats. Nya lagringsoperationer använder dem nu.",

@@ -59,6 +59,7 @@
   let submissionCode = $state<string | null>(null);
   let submissionUnknown = $state(false);
   let mutationOutcomeUnknown = $state(false);
+  let connectionAlreadyConfigured = $state(false);
   let success = $state<DialogMode | null>(null);
   let alertRef = $state<HTMLElement | null>(null);
 
@@ -120,7 +121,7 @@
   }
 
   async function recoverConnection(): Promise<void> {
-    if ((await loadConnection()) && mutationOutcomeUnknown) {
+    if ((await loadConnection()) && (mutationOutcomeUnknown || connectionAlreadyConfigured)) {
       await onConnectionChanged?.();
     }
   }
@@ -139,6 +140,7 @@
     resetSecrets();
     resetSubmissionState();
     mutationOutcomeUnknown = false;
+    connectionAlreadyConfigured = false;
     advancedOpen = false;
     dialogOpen = true;
   }
@@ -153,6 +155,7 @@
     resetSecrets();
     resetSubmissionState();
     mutationOutcomeUnknown = false;
+    connectionAlreadyConfigured = false;
     advancedOpen = false;
     dialogOpen = true;
   }
@@ -198,6 +201,7 @@
       dialogOpen = false;
       success = completedMode;
       mutationOutcomeUnknown = false;
+      connectionAlreadyConfigured = false;
       await onConnectionChanged?.();
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
@@ -213,6 +217,12 @@
           dialogOpen = false;
           success = null;
           mutationOutcomeUnknown = true;
+          await recoverConnection();
+        } else if (reasonCode === "object_store_connection_already_configured") {
+          resetSecrets();
+          dialogOpen = false;
+          success = null;
+          connectionAlreadyConfigured = true;
           await recoverConnection();
         } else {
           submissionCode = reasonCode;
@@ -303,6 +313,16 @@
       <Alert.Title>{m.storage_connection_mutation_outcome_unknown_title()}</Alert.Title>
       <Alert.Description>
         {m.storage_connection_mutation_outcome_unknown_description()}
+      </Alert.Description>
+    </Alert.Root>
+  {/if}
+
+  {#if connectionAlreadyConfigured}
+    <Alert.Root aria-live="polite">
+      <CheckCircle2 />
+      <Alert.Title>{m.storage_connection_already_configured_title()}</Alert.Title>
+      <Alert.Description>
+        {m.storage_connection_already_configured_description()}
       </Alert.Description>
     </Alert.Root>
   {/if}
