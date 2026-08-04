@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -13,8 +15,9 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
-from eneo.files.file_models import FileType
+from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
+from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -24,8 +27,11 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_MAX_ATTACHMENTS,
     AIBuilderAttachmentContext,
+    AIBuilderAttachmentContextPolicy,
     AIBuilderAttachmentEvidence,
     AIBuilderAttachmentSchemaDiscovery,
+    build_ai_builder_attachment_context_for_model,
+    render_ai_builder_attachment_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationOutputSchemaFieldsMetadata,
@@ -151,6 +157,16 @@ def _route(
     )
 
 
+def _classification_input(
+    conversation: list[ConversationMessage],
+    attachment_context: AIBuilderAttachmentContext | None = None,
+) -> SlotClassificationInput:
+    return build_slot_classification_input(
+        conversation,
+        attachment_context,
+    )
+
+
 def _cited(quote: str, *, message_id: str = "user-1") -> dict[str, str]:
     return {"source_id": f"user_message:{message_id}", "quote": quote}
 
@@ -239,6 +255,8 @@ async def test_discovery_analyzes_carried_commit_before_mapped_limit_gate() -> N
             ),
         ],
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         allow_classification=False,
         mapped_execution_policy=FlowMappedExecutionPolicy(
             max_provider_calls_per_mapped_step=8,
@@ -411,7 +429,7 @@ def test_slot_classification_input_preserves_typed_source_chronology() -> None:
         truncated=False,
     )
 
-    classification_input = build_slot_classification_input(
+    classification_input = _classification_input(
         conversation,
         attachment_context,
     )
@@ -433,7 +451,7 @@ def test_slot_classification_input_preserves_typed_source_chronology() -> None:
 
 
 def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
-    classification_input = build_slot_classification_input(
+    classification_input = _classification_input(
         [
             ConversationMessage(
                 message_id="user-prior",
@@ -506,14 +524,14 @@ def test_slot_classification_input_rejects_attachment_inventory_over_limit() -> 
     )
 
     with pytest.raises(AIBuilderBadRequestException) as error:
-        build_slot_classification_input([], attachment_context)
+        _classification_input([], attachment_context)
 
     assert error.value.code is AIBuilderErrorCode.BAD_REQUEST
     assert str(AI_BUILDER_MAX_ATTACHMENTS) in str(error.value)
 
 
 def test_slot_classification_input_preserves_selected_option_only_answer() -> None:
-    classification_input = build_slot_classification_input(
+    classification_input = _classification_input(
         [
             ConversationMessage(
                 message_id="user-option",
@@ -540,7 +558,7 @@ def test_slot_classification_input_preserves_selected_option_only_answer() -> No
 
 
 def test_slot_classification_input_carries_each_answering_question_identity() -> None:
-    classification_input = build_slot_classification_input(
+    classification_input = _classification_input(
         [
             ConversationMessage(
                 message_id="assistant-input",
@@ -582,49 +600,91 @@ def test_slot_classification_input_carries_each_answering_question_identity() ->
     ]
 
 
-def test_slot_classification_input_bounds_transcript_without_starving_late_sources() -> (
-    None
-):
-    classification_input = build_slot_classification_input(
+@pytest.mark.asyncio
+async def test_runtime_fills_reserved_conversation_capacity() -> None:
+    long_text = ("alpha beta gamma delta " * 3_000)[:50_000]
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(json.dumps({}))
+
+    context = await build_runtime_discovery_context(
         [
             ConversationMessage(
-                message_id="user-old",
+                message_id="user-1",
                 role="user",
-                content="old:" + "A" * 9_000,
-            ),
-            ConversationMessage(
-                message_id="user-answer",
-                role="user",
-                content="structured_json",
-                metadata={
-                    "question_answer": {
-                        "question_id": "terminal_output",
-                        "selected_value": "structured_json",
-                    }
-                },
-            ),
-            ConversationMessage(
-                message_id="user-latest",
-                role="user",
-                content="latest:" + "B" * 9_000,
-            ),
+                content=long_text,
+            )
         ],
-        None,
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=16_000,
+        max_output_tokens=1_000,
+        safety_buffer_tokens=1_000,
+        minimum_conversation_tokens=4_000,
     )
 
-    assert [source.source_id for source in classification_input.sources] == [
-        "user_message:user-old",
-        "structured_answer:user-answer:0",
-        "user_message:user-latest",
-    ]
-    assert sum(len(source.text) for source in classification_input.sources) == (
-        runtime._MAX_CLASSIFICATION_TRANSCRIPT_CHARS
+    litellm_client.acompletion.assert_awaited_once()
+    provider_request = litellm_client.acompletion.await_args.kwargs
+    user_prompt = provider_request["messages"][1]["content"]
+    admitted_text = user_prompt.split(
+        "Typed evidence sources in conversation chronology, followed by stable "
+        "file-id order:\n",
+        1,
+    )[1].split("\n\nUnresolved slots and allowed values:", 1)[0]
+    admitted_text = admitted_text.split("\n", 1)[1]
+    assert 49_000 <= len(admitted_text) < len(long_text)
+    assert classifier.slot_classification_request_fits_model(
+        messages=provider_request["messages"],
+        response_format=provider_request["response_format"],
+        litellm_model="gpt-test",
+        max_input_tokens=16_000,
+        max_output_tokens=1_000,
+        safety_buffer_tokens=1_000,
     )
-    assert classification_input.sources[0].truncated is True
-    assert classification_input.sources[1].truncated is False
-    assert classification_input.sources[2].truncated is True
-    assert classification_input.sources[1].selected_value == "structured_json"
-    assert classification_input.sources[-1].text.startswith("latest:")
+    assert context.slot_classification_metadata is not None
+    assert [
+        item.truncated for item in context.slot_classification_metadata.source_inventory
+    ] == [True]
+
+
+def test_slot_classification_input_keeps_parser_shape_invariants() -> None:
+    conversation = [
+        ConversationMessage(
+            message_id=f"user-{index}",
+            role="user",
+            content=f"message-{index}",
+        )
+        for index in range(120)
+    ]
+    conversation.append(
+        ConversationMessage(
+            message_id="user-latest",
+            role="user",
+            content="latest-message",
+        )
+    )
+
+    classification_input = _classification_input(conversation)
+    structured_source = runtime._bound_classification_transcript(
+        [
+            SlotClassificationSource(
+                source_id="structured_answer:user-answer:0",
+                kind="structured_answer",
+                text="X" * 600,
+                message_id="user-answer",
+                question_id="terminal_output",
+                selected_value="X" * 600,
+            )
+        ]
+    )[0]
+
+    assert len(classification_input.sources) == 120
+    assert classification_input.sources[0].source_id == "user_message:user-1"
+    assert classification_input.sources[-1].source_id == "user_message:user-latest"
+    assert structured_source.source_id == "structured_answer:user-answer:0"
+    assert len(structured_source.text) == 500
+    assert structured_source.selected_value == structured_source.text
+    assert structured_source.truncated is True
 
 
 def test_discovery_analysis_carries_classifier_assumptions() -> None:
@@ -657,6 +717,8 @@ async def test_runtime_planning_state_classifies_current_turn_when_slots_are_str
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
         )
     ).planning_state
 
@@ -713,6 +775,8 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
         )
     ).planning_state
 
@@ -732,6 +796,8 @@ async def test_runtime_planning_state_skips_model_when_freeform_text_is_empty() 
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
     )
 
     litellm_client.acompletion.assert_not_awaited()
@@ -769,6 +835,8 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
             litellm_client=AsyncMock(),
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             attachment_context=attachment_context,
         )
     ).planning_state
@@ -839,6 +907,8 @@ async def test_degraded_turn_replays_semantic_role_over_fresh_attachment_facts()
                 )
             ],
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             allow_classification=False,
             attachment_context=AIBuilderAttachmentContext(
                 context=None,
@@ -890,6 +960,8 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
             litellm_client=AsyncMock(),
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             ui_language="sv",
             allow_classification=False,
             attachment_context=AIBuilderAttachmentContext(
@@ -966,6 +1038,8 @@ async def test_runtime_retains_attachment_schema_as_unassigned_candidate() -> No
     context = await build_runtime_discovery_context(
         [],
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         allow_classification=False,
         attachment_context=AIBuilderAttachmentContext(
             context=None,
@@ -1032,6 +1106,8 @@ async def test_runtime_input_schema_does_not_override_requested_docx_output() ->
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         attachment_context=AIBuilderAttachmentContext(
             context=None,
             evidence=(),
@@ -1106,6 +1182,8 @@ async def test_attachment_only_direction_citation_does_not_assign_schema() -> No
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         attachment_context=AIBuilderAttachmentContext(
             context=excerpt,
             evidence=(
@@ -1170,6 +1248,8 @@ async def test_runtime_does_not_treat_template_placeholders_as_json_terminal() -
                 )
             ],
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             allow_classification=False,
             attachment_context=AIBuilderAttachmentContext(
                 context=None,
@@ -1255,6 +1335,8 @@ async def test_runtime_infers_schema_only_after_example_output_classification() 
                 litellm_client=AsyncMock(),
                 completion_model_route=_route(),
                 tenant_id=uuid4(),
+                max_input_tokens=100_000,
+                max_output_tokens=2_000,
                 attachment_context=attachment_context,
             )
         ).planning_state
@@ -1348,6 +1430,8 @@ async def test_runtime_records_incomplete_example_json_without_guessing_schema()
                 litellm_client=AsyncMock(),
                 completion_model_route=_route(),
                 tenant_id=uuid4(),
+                max_input_tokens=100_000,
+                max_output_tokens=2_000,
                 attachment_context=attachment_context,
             )
         ).planning_state
@@ -1369,10 +1453,175 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         allow_classification=False,
     )
 
     litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_records_skipped_context_budget_when_minimum_request_cannot_fit() -> (
+    None
+):
+    litellm_client = AsyncMock()
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="B",
+            )
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100,
+        max_output_tokens=70,
+        safety_buffer_tokens=20,
+        minimum_conversation_tokens=10,
+    )
+
+    assert context.slot_classification_metadata is not None
+    assert context.slot_classification_metadata.outcome == "skipped_context_budget"
+    assert context.slot_classification_metadata.prompt_hash is None
+    assert context.slot_classification_metadata.source_inventory[0].source_id == (
+        "user_message:user-1"
+    )
+    assert context.slot_classification_metadata.source_inventory[0].source_sha256 == (
+        hashlib.sha256(b"B").hexdigest()
+    )
+    assert context.slot_classification_metadata.source_inventory[0].truncated is False
+    litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_refits_saturated_attachment_before_admitting_transcript() -> (
+    None
+):
+    attachment = File(
+        id=uuid4(),
+        name="evidence.txt",
+        checksum="checksum",
+        size=200_000,
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        text="attachment evidence " * 10_000,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
+        tenant_id=uuid4(),
+    )
+    attachment_context = build_ai_builder_attachment_context_for_model(
+        [attachment],
+        policy=AIBuilderAttachmentContextPolicy(),
+        model_name="gpt-test",
+        max_input_tokens=16_000,
+        max_output_tokens=1_000,
+        safety_buffer_tokens=1_000,
+        minimum_conversation_tokens=4_000,
+    )
+    assert attachment_context is not None
+    original_uploaded_text = render_ai_builder_attachment_evidence(
+        attachment_context.evidence[0]
+    )
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(json.dumps({}))
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="Summarize the attached evidence.",
+            )
+        ],
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=16_000,
+        max_output_tokens=1_000,
+        safety_buffer_tokens=1_000,
+        minimum_conversation_tokens=4_000,
+        attachment_context=attachment_context,
+    )
+
+    provider_request = litellm_client.acompletion.await_args.kwargs
+    assert classifier.slot_classification_request_fits_model(
+        messages=provider_request["messages"],
+        response_format=provider_request["response_format"],
+        litellm_model="gpt-test",
+        max_input_tokens=16_000,
+        max_output_tokens=1_000,
+        safety_buffer_tokens=1_000,
+    )
+    assert context.slot_classification_metadata is not None
+    assert [
+        source.kind for source in context.slot_classification_metadata.source_inventory
+    ] == ["user_message", "uploaded_file"]
+    uploaded_inventory = context.slot_classification_metadata.source_inventory[1]
+    assert (
+        uploaded_inventory.source_sha256
+        != hashlib.sha256(original_uploaded_text.encode("utf-8")).hexdigest()
+    )
+    assert uploaded_inventory.coverage == "excerpt_truncated"
+    assert uploaded_inventory.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_exact_admitted_source_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admitted_input: SlotClassificationInput | None = None
+
+    async def capture_classification_input(
+        **kwargs: object,
+    ) -> SlotClassificationAttempt:
+        nonlocal admitted_input
+        candidate = kwargs["classification_input"]
+        assert isinstance(candidate, SlotClassificationInput)
+        admitted_input = candidate
+        return SlotClassificationAttempt(
+            outcome="resolved", result=SlotClassificationResult()
+        )
+
+    monkeypatch.setattr(runtime, "classify_slots", capture_classification_input)
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-old",
+                role="user",
+                content="old:" + "alpha beta gamma delta " * 1_500,
+            ),
+            ConversationMessage(
+                message_id="user-latest",
+                role="user",
+                content="latest:" + "epsilon zeta eta theta " * 1_500,
+            ),
+        ],
+        litellm_client=AsyncMock(),
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=12_000,
+        max_output_tokens=1_000,
+        safety_buffer_tokens=200,
+        minimum_conversation_tokens=500,
+    )
+
+    assert admitted_input is not None
+    assert context.slot_classification_metadata is not None
+    persisted = context.slot_classification_metadata.source_inventory
+    assert [item.source_id for item in persisted] == [
+        source.source_id for source in admitted_input.sources
+    ]
+    assert [item.source_sha256 for item in persisted] == [
+        hashlib.sha256(source.text.encode("utf-8")).hexdigest()
+        for source in admitted_input.sources
+    ]
+    assert [item.truncated for item in persisted] == [
+        source.truncated for source in admitted_input.sources
+    ]
 
 
 @pytest.mark.parametrize(
@@ -1437,6 +1686,8 @@ async def test_runtime_persists_classifier_attempt_outcomes_before_state_mutatio
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
     )
 
     assert context.slot_classification_metadata is not None
@@ -1519,6 +1770,8 @@ async def test_resolved_session_classifies_current_checkpoint_change(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
     )
 
     litellm_client.acompletion.assert_awaited_once()
@@ -1583,6 +1836,8 @@ async def test_runtime_does_not_mutate_planning_state_when_metadata_admission_fa
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
         )
 
     assert state.resolved_slots == {}
@@ -1643,6 +1898,8 @@ async def test_runtime_classifies_named_json_fields_after_slots_are_resolved(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
     )
 
     litellm_client.acompletion.assert_awaited_once()
@@ -1775,6 +2032,8 @@ async def test_runtime_atomically_resolves_json_terminal_and_named_fields(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
     )
 
     assert context.planning_state.resolved_slots["terminal_output"].value == (
@@ -1883,6 +2142,8 @@ async def test_runtime_updates_replayed_field_snapshot_from_current_delta() -> N
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         ui_language="en",
     )
 
@@ -2000,6 +2261,8 @@ async def test_runtime_discards_named_json_fields_for_non_json_terminal_output(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
     )
 
     assert context.planning_state.output_schema_evidence is None
@@ -2052,6 +2315,8 @@ async def test_runtime_planning_state_overlays_heuristic_slots_with_model_eviden
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             ui_language="sv",
         )
     ).planning_state
@@ -2114,6 +2379,8 @@ async def test_runtime_planning_state_lets_classifier_correct_heuristic_input_gu
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             ui_language="sv",
         )
     ).planning_state
@@ -2144,6 +2411,8 @@ async def test_runtime_planning_state_passes_uploaded_file_evidence_to_classifie
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         ui_language="sv",
         attachment_context=_attachment_context(),
     )
@@ -2193,6 +2462,8 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             ui_language="sv",
             attachment_context=AIBuilderAttachmentContext(
                 context=None,
@@ -2316,6 +2587,8 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         ui_language="sv",
         attachment_context=AIBuilderAttachmentContext(
             context=None,
@@ -2382,6 +2655,8 @@ async def test_uploaded_docx_evidence_alone_does_not_deterministically_resolve_t
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             ui_language="sv",
             attachment_context=_attachment_context(),
         )
@@ -2437,6 +2712,8 @@ async def test_runtime_planning_state_accepts_model_classified_json_input(
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             ui_language="sv",
         )
     ).planning_state
@@ -2508,6 +2785,8 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             ui_language="sv",
         )
     ).planning_state
@@ -2571,6 +2850,8 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=2_000,
             ui_language="sv",
         )
     ).planning_state
@@ -2643,6 +2924,8 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
             kwargs=provider_kwargs,
         ),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         ui_language="sv",
     )
     analysis = result.discovery_analysis
@@ -2702,6 +2985,8 @@ async def test_runtime_discovery_blocks_output_classification_when_user_is_uncer
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         ui_language="sv",
     )
     analysis = result.discovery_analysis
@@ -2774,6 +3059,8 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         ui_language="sv",
     )
     analysis = result.discovery_analysis
@@ -2842,6 +3129,8 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
         ui_language="sv",
     )
     message = build_discovery_block_message(
@@ -2882,7 +3171,7 @@ def test_targeted_bias_canonicalizes_legacy_question_id_to_slot() -> None:
     bias = _targeted_classification_bias(
         conversation,
         {"terminal_output": {"docx_document", "structured_text"}},
-        build_slot_classification_input(conversation, None),
+        _classification_input(conversation),
     )
 
     assert bias is not None
@@ -2902,7 +3191,7 @@ def test_targeted_bias_uses_neutral_response_identity_after_compaction() -> None
             },
         ),
     ]
-    classification_input = build_slot_classification_input(conversation, None)
+    classification_input = _classification_input(conversation)
 
     bias = _targeted_classification_bias(
         conversation,
@@ -2928,7 +3217,7 @@ def test_targeted_bias_is_none_when_target_already_resolved() -> None:
     bias = _targeted_classification_bias(
         conversation,
         {"primary_runtime_input": {"text", "documents"}},
-        build_slot_classification_input(conversation, None),
+        _classification_input(conversation),
     )
 
     assert bias is None

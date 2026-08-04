@@ -547,9 +547,19 @@ def build_ai_builder_attachment_context_for_model(
 def fit_ai_builder_attachment_context(
     attachment_context: AIBuilderAttachmentContext,
     *,
-    fits_context: Callable[[str | None], bool],
+    fits_context: Callable[[str | None], bool] | None = None,
+    fits_attachment_context: Callable[[AIBuilderAttachmentContext], bool] | None = None,
 ) -> AIBuilderAttachmentContext:
     """Fit readable attachment text fairly without inventing file or char quotas."""
+
+    if (fits_context is None) == (fits_attachment_context is None):
+        raise ValueError("Attachment fitting requires exactly one fit predicate")
+
+    def fits(candidate: AIBuilderAttachmentContext) -> bool:
+        if fits_attachment_context is not None:
+            return fits_attachment_context(candidate)
+        assert fits_context is not None
+        return fits_context(candidate.context)
 
     readable_items = sorted(
         (
@@ -560,7 +570,7 @@ def fit_ai_builder_attachment_context(
         key=lambda item: str(item[0]),
     )
     if not readable_items:
-        if fits_context(attachment_context.context):
+        if fits(attachment_context):
             return attachment_context
         return replace(
             attachment_context,
@@ -570,18 +580,16 @@ def fit_ai_builder_attachment_context(
             truncated=attachment_context.truncated
             or attachment_context.context is not None,
         )
-    if not fits_context(None):
-        return _render_attachment_context_with_allocations(
-            attachment_context,
-            allocations={},
-        )
+    empty_context = _render_attachment_context_with_allocations(
+        attachment_context,
+        allocations={},
+    )
+    if not fits(empty_context):
+        return empty_context
 
     total_available_chars = sum(len(text) for _, text in readable_items)
     if total_available_chars == 0:
-        return _render_attachment_context_with_allocations(
-            attachment_context,
-            allocations={},
-        )
+        return empty_context
 
     def render(char_budget: int) -> AIBuilderAttachmentContext:
         bounded_budget = min(max(char_budget, 0), total_available_chars)
@@ -593,16 +601,16 @@ def fit_ai_builder_attachment_context(
 
     lower = 0
     upper = 1
-    while upper < total_available_chars and fits_context(render(upper).context):
+    while upper < total_available_chars and fits(render(upper)):
         lower = upper
         upper = min(total_available_chars, upper * 2)
 
-    if fits_context(render(upper).context):
+    if fits(render(upper)):
         return render(upper)
 
     while lower + 1 < upper:
         midpoint = (lower + upper) // 2
-        if fits_context(render(midpoint).context):
+        if fits(render(midpoint)):
             lower = midpoint
         else:
             upper = midpoint

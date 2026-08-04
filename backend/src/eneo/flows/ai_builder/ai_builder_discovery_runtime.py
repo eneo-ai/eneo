@@ -67,6 +67,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    admit_slot_classification_input,
     classify_slots,
     slot_classification_prompt_hash,
     slot_classification_provider_identity,
@@ -88,8 +89,9 @@ if TYPE_CHECKING:
         ResolvedCompletionModelRoute,
     )
 
-_MAX_CLASSIFICATION_TRANSCRIPT_CHARS = 12_000
+# Parser-shape invariant, fixed pending item-10 platform benchmarks.
 _MAX_CLASSIFICATION_TRANSCRIPT_SOURCES = 120
+# Parser-shape invariant, fixed pending item-10 platform benchmarks.
 _MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS = 500
 
 
@@ -328,29 +330,7 @@ def _bound_classification_transcript(
         else source
         for source in sources
     ]
-    retained = bounded_sources[-_MAX_CLASSIFICATION_TRANSCRIPT_SOURCES:]
-    fair_share = _MAX_CLASSIFICATION_TRANSCRIPT_CHARS // len(retained)
-    included_lengths = [min(len(source.text), fair_share) for source in retained]
-    remaining = _MAX_CLASSIFICATION_TRANSCRIPT_CHARS - sum(included_lengths)
-    for index in range(len(retained) - 1, -1, -1):
-        if remaining <= 0:
-            break
-        available = len(retained[index].text) - included_lengths[index]
-        added = min(available, remaining)
-        included_lengths[index] += added
-        remaining -= added
-
-    return tuple(
-        replace(
-            source,
-            text=source.text[:included_length],
-            truncated=source.truncated or included_length < len(source.text),
-            selected_value=source.text[:included_length]
-            if source.kind == "structured_answer"
-            else source.selected_value,
-        )
-        for source, included_length in zip(retained, included_lengths, strict=True)
-    )
+    return tuple(bounded_sources[-_MAX_CLASSIFICATION_TRANSCRIPT_SOURCES:])
 
 
 def _structured_answer_values(
@@ -531,9 +511,10 @@ async def build_runtime_discovery_context(
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
-    max_input_tokens: int | None = None,
-    max_output_tokens: int | None = None,
+    max_input_tokens: int,
+    max_output_tokens: int,
     safety_buffer_tokens: int = 0,
+    minimum_conversation_tokens: int = 0,
 ) -> RuntimeDiscoveryContext:
     schema_candidates = (
         prepared_schema_candidates
@@ -639,6 +620,33 @@ async def build_runtime_discovery_context(
         allowed_values,
         classification_input,
     )
+    classification_input, request_fits = admit_slot_classification_input(
+        classification_input=classification_input,
+        attachment_context=attachment_context,
+        allowed_slot_values=allowed_values,
+        schema_candidates=(schema_candidates if schema_direction_pending else ()),
+        ui_language=ui_language,
+        bias=bias,
+        litellm_model=completion_model_route.litellm_model,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
+        minimum_conversation_tokens=minimum_conversation_tokens,
+    )
+    if not request_fits:
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+            slot_classification_metadata=slot_classification_metadata_from_attempt(
+                SlotClassificationAttempt(outcome="skipped_context_budget"),
+                prompt_hash=None,
+                classification_input=classification_input,
+                model=completion_model_route.litellm_model,
+                provider=provider,
+            ),
+        )
     prior_output_schema_classification = _latest_matching_output_schema_classification(
         conversation,
         state=state,
@@ -862,9 +870,10 @@ async def build_discovery_runtime_result(
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
     persisted_planning_state: PlanningState | None = None,
     attached_file_ids: Collection[UUID] = frozenset(),
-    max_input_tokens: int | None = None,
-    max_output_tokens: int | None = None,
+    max_input_tokens: int,
+    max_output_tokens: int,
     safety_buffer_tokens: int = 0,
+    minimum_conversation_tokens: int = 0,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -882,6 +891,7 @@ async def build_discovery_runtime_result(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         safety_buffer_tokens=safety_buffer_tokens,
+        minimum_conversation_tokens=minimum_conversation_tokens,
     )
     carry_forward_persisted_planner_state(
         context.planning_state,

@@ -571,7 +571,10 @@ class SlotClassificationMetadata(BaseModel):
 
     @model_validator(mode="after")
     def validate_evidence_sources(self) -> "SlotClassificationMetadata":
-        if self.outcome == "skipped_no_resolvable_slots":
+        if self.outcome in {
+            "skipped_context_budget",
+            "skipped_no_resolvable_slots",
+        }:
             if self.prompt_hash is not None:
                 raise ValueError(
                     "skipped slot classification metadata must not carry prompt_hash"

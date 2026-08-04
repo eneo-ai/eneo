@@ -368,7 +368,10 @@ def test_long_template_placeholders_keep_complete_distinct_identity() -> None:
         f"{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{second}"
         in result.evidence[0].role_evidence
     )
-    classification_input = build_slot_classification_input([], result)
+    classification_input = build_slot_classification_input(
+        [],
+        result,
+    )
     role_evidence_lines = [
         line
         for line in classification_input.sources[0].text.splitlines()
@@ -947,7 +950,10 @@ def test_large_file_inventory_keeps_the_last_stable_id_beyond_legacy_prefix_budg
     )
     assert len(rendered_inventory) > 4_000
     last_file_id = max((file.id for file in files), key=str)
-    classification_input = build_slot_classification_input([], result)
+    classification_input = build_slot_classification_input(
+        [],
+        result,
+    )
     last_source = classification_input.sources[-1]
     assert last_source.source_id == f"uploaded_file:{last_file_id}"
     assert last_source.file_id == last_file_id

@@ -1811,6 +1811,8 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
+                max_input_tokens=100_000,
+                max_output_tokens=2_000,
             )
 
         assert context.planning_state.resolved_slots["post_processing_goal"].source == (
@@ -1870,6 +1872,8 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
+                max_input_tokens=100_000,
+                max_output_tokens=2_000,
             )
 
         analysis = analyze_discovery(
@@ -2189,6 +2193,8 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
+                max_input_tokens=100_000,
+                max_output_tokens=2_000,
             )
 
         assert "structured_analysis_need" not in captured_allowed_values
@@ -2243,6 +2249,8 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
+                max_input_tokens=100_000,
+                max_output_tokens=2_000,
             )
 
         analysis = analyze_discovery(
@@ -2315,6 +2323,8 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
+                max_input_tokens=100_000,
+                max_output_tokens=2_000,
             )
 
         goal = context.planning_state.resolved_slots["post_processing_goal"]

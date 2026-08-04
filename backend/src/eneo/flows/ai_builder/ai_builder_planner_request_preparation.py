@@ -228,6 +228,9 @@ async def prepare_planner_request(
         max_input_tokens=request.max_input_tokens,
         max_output_tokens=request.max_output_tokens,
         safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
+        minimum_conversation_tokens=(
+            request.budget_policy.minimum_conversation_budget_tokens
+        ),
     )
     discovery_analysis = discovery_runtime.discovery_analysis
     rebuilt_planning_state = discovery_runtime.planning_state

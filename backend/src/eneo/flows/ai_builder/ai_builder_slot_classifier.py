@@ -15,6 +15,11 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.flows.ai_builder import (
     ai_builder_slot_classification_contract as slot_classification_contract,
 )
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
+    fit_ai_builder_attachment_context,
+    render_ai_builder_attachment_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -34,6 +39,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationBias,
     SlotClassificationInput,
     SlotClassificationResult,
+    SlotClassificationSource,
     normalize_slot_classification_values,
     slot_classification_input_is_valid,
     slot_classification_json_schema,
@@ -229,6 +235,215 @@ async def classify_slots(
     return SlotClassificationAttempt(outcome="resolved", result=result)
 
 
+def slot_classification_request_fits_model(
+    *,
+    messages: list[dict[str, Any]],
+    response_format: dict[str, object],
+    litellm_model: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    safety_buffer_tokens: int,
+) -> bool:
+    request_tokens = count_message_tokens(messages, litellm_model) + count_tokens(
+        json.dumps(response_format, ensure_ascii=False, separators=(",", ":")),
+        litellm_model,
+    )
+    required_context_tokens = request_tokens + max_output_tokens + safety_buffer_tokens
+    return required_context_tokens <= max_input_tokens
+
+
+def admit_slot_classification_input(
+    *,
+    classification_input: SlotClassificationInput,
+    attachment_context: AIBuilderAttachmentContext | None,
+    allowed_slot_values: Mapping[str, Collection[str]],
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...],
+    ui_language: str | None,
+    bias: SlotClassificationBias | None,
+    litellm_model: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    safety_buffer_tokens: int,
+    minimum_conversation_tokens: int,
+) -> tuple[SlotClassificationInput, bool]:
+    normalized_values = normalize_slot_classification_values(allowed_slot_values)
+    response_format = _slot_classification_response_format(
+        normalized_values,
+        schema_candidate_fingerprints=tuple(
+            candidate.fingerprint for candidate in schema_candidates
+        ),
+    )
+
+    def fits(
+        candidate: SlotClassificationInput,
+        *,
+        input_token_limit: int = max_input_tokens,
+    ) -> bool:
+        return slot_classification_request_fits_model(
+            messages=_build_slot_classification_prompt(
+                classification_input=candidate,
+                allowed_slot_values=normalized_values,
+                schema_candidates=schema_candidates,
+                ui_language=ui_language,
+                bias=bias,
+            ),
+            response_format=response_format,
+            litellm_model=litellm_model,
+            max_input_tokens=input_token_limit,
+            max_output_tokens=max_output_tokens,
+            safety_buffer_tokens=safety_buffer_tokens,
+        )
+
+    if attachment_context is not None:
+        attachment_input_token_limit = max(
+            0,
+            max_input_tokens - minimum_conversation_tokens,
+        )
+        transcript_only_input = replace(
+            classification_input,
+            sources=tuple(
+                source
+                for source in classification_input.sources
+                if source.kind != "uploaded_file"
+            ),
+        )
+
+        def fits_attachment(candidate: AIBuilderAttachmentContext) -> bool:
+            return fits(
+                _with_slot_classification_attachment_context(
+                    replace(transcript_only_input, sources=()),
+                    candidate,
+                ),
+                input_token_limit=attachment_input_token_limit,
+            )
+
+        fitted_attachment_context = fit_ai_builder_attachment_context(
+            attachment_context,
+            fits_attachment_context=fits_attachment,
+        )
+        classification_input = _with_slot_classification_attachment_context(
+            transcript_only_input,
+            fitted_attachment_context,
+        )
+
+    if fits(classification_input):
+        return classification_input, True
+
+    transcript_sources = [
+        source
+        for source in classification_input.sources
+        if source.kind != "uploaded_file"
+    ]
+    if not transcript_sources:
+        return classification_input, False
+    total_available_chars = sum(len(source.text) for source in transcript_sources)
+
+    def render(char_budget: int) -> SlotClassificationInput:
+        included_lengths = _fair_classification_source_allocations(
+            transcript_sources,
+            char_budget,
+        )
+        allocation_by_id = {
+            source.source_id: included_length
+            for source, included_length in zip(
+                transcript_sources,
+                included_lengths,
+                strict=True,
+            )
+        }
+        return replace(
+            classification_input,
+            sources=tuple(
+                replace(
+                    source,
+                    text=source.text[: allocation_by_id[source.source_id]],
+                    truncated=(
+                        source.truncated
+                        or allocation_by_id[source.source_id] < len(source.text)
+                    ),
+                    selected_value=source.text[: allocation_by_id[source.source_id]]
+                    if source.kind == "structured_answer"
+                    else source.selected_value,
+                )
+                if source.source_id in allocation_by_id
+                else source
+                for source in classification_input.sources
+            ),
+        )
+
+    minimum_char_budget = len(transcript_sources)
+    minimum = render(minimum_char_budget)
+    if not fits(minimum):
+        return minimum, False
+    lower = minimum_char_budget
+    upper = minimum_char_budget
+    while upper < total_available_chars:
+        upper = min(total_available_chars, upper * 2)
+        if upper == total_available_chars:
+            break
+        if not fits(render(upper)):
+            break
+        lower = upper
+    if lower == total_available_chars:
+        return render(lower), True
+    while lower + 1 < upper:
+        midpoint = (lower + upper) // 2
+        if fits(render(midpoint)):
+            lower = midpoint
+        else:
+            upper = midpoint
+    return render(lower), True
+
+
+def _with_slot_classification_attachment_context(
+    classification_input: SlotClassificationInput,
+    attachment_context: AIBuilderAttachmentContext,
+) -> SlotClassificationInput:
+    transcript_sources = tuple(
+        source
+        for source in classification_input.sources
+        if source.kind != "uploaded_file"
+    )
+    uploaded_file_sources = tuple(
+        SlotClassificationSource(
+            source_id=f"uploaded_file:{item.file_id}",
+            kind="uploaded_file",
+            text=render_ai_builder_attachment_evidence(item),
+            file_id=item.file_id,
+            coverage=item.coverage,
+            truncated=item.coverage != "fully_seen",
+        )
+        for item in sorted(
+            attachment_context.evidence,
+            key=lambda candidate: str(candidate.file_id),
+        )
+    )
+    return replace(
+        classification_input,
+        sources=(*transcript_sources, *uploaded_file_sources),
+    )
+
+
+def _fair_classification_source_allocations(
+    sources: list[SlotClassificationSource],
+    char_budget: int,
+) -> list[int]:
+    bounded_budget = min(
+        max(char_budget, len(sources)), sum(len(source.text) for source in sources)
+    )
+    fair_share = bounded_budget // len(sources)
+    included_lengths = [max(1, min(len(source.text), fair_share)) for source in sources]
+    remaining = bounded_budget - sum(included_lengths)
+    for index in range(len(sources) - 1, -1, -1):
+        if remaining <= 0:
+            break
+        available = len(sources[index].text) - included_lengths[index]
+        added = min(available, remaining)
+        included_lengths[index] += added
+        remaining -= added
+    return included_lengths
+
+
 def _ensure_slot_classification_request_fits_model(
     *,
     messages: list[dict[str, Any]],
@@ -240,16 +455,23 @@ def _ensure_slot_classification_request_fits_model(
 ) -> None:
     if max_input_tokens is None:
         return
+    output_reserve_tokens = max_output_tokens or 0
+    if slot_classification_request_fits_model(
+        messages=messages,
+        response_format=response_format,
+        litellm_model=litellm_model,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=output_reserve_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
+    ):
+        return
     request_tokens = count_message_tokens(messages, litellm_model) + count_tokens(
         json.dumps(response_format, ensure_ascii=False, separators=(",", ":")),
         litellm_model,
     )
-    output_reserve_tokens = max_output_tokens or 0
     required_context_tokens = (
         request_tokens + output_reserve_tokens + safety_buffer_tokens
     )
-    if required_context_tokens <= max_input_tokens:
-        return
     raise AIBuilderBadRequestException(
         "The selected Builder model cannot fit the requirement-classification "
         "request. Choose a model with a larger context window or shorten the "
@@ -360,7 +582,7 @@ def _bias_prompt_section(bias: SlotClassificationBias | None) -> str:
     )
 
 
-def _render_classification_sources(
+def _render_slot_classification_sources(
     classification_input: SlotClassificationInput,
 ) -> str:
     blocks: list[str] = []
@@ -564,7 +786,7 @@ def _build_slot_classification_prompt(
         f"{_bias_prompt_section(bias)}"
         "Typed evidence sources in conversation chronology, followed by stable "
         "file-id order:\n"
-        f"{_render_classification_sources(classification_input)}\n\n"
+        f"{_render_slot_classification_sources(classification_input)}\n\n"
         "Unresolved slots and allowed values:\n"
         f"{chr(10).join(dimension_lines)}\n\n"
         "Current declared schema candidates (complete set):\n"

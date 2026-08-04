@@ -489,7 +489,10 @@ def test_semantic_corpus_preserves_classifier_source_chronology(
         )
         for index, text in enumerate(scenario.source_texts, start=1)
     ]
-    classification_input = build_slot_classification_input(conversation, None)
+    classification_input = build_slot_classification_input(
+        conversation,
+        None,
+    )
     assert [source.text for source in classification_input.sources] == (
         scenario.source_texts
     )
