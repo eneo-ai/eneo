@@ -267,6 +267,73 @@ async def test_edit_preserving_body_writer_renderer_adjacency_has_no_topology_ad
 
 
 @pytest.mark.asyncio
+async def test_edit_enforces_template_preparation_stage_limit() -> None:
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extract template variables",
+            input_type="document",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "source_facts": {"type": "array", "items": {"type": "string"}},
+                    "uncertainties": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Fill DOCX template",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={"bindings": {"summary": "{{ föregående_steg }}"}},
+        ),
+    )
+
+    def arguments_with_stage_count(stage_count: int) -> dict[str, object]:
+        return {
+            "plan_rationale": "Prepare content before filling the template.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                *[
+                    {
+                        "kind": "add",
+                        "step": {
+                            "name": f"Prepare template content {index}",
+                            "instructions": (
+                                f"Prepare template content for stage {index}."
+                            ),
+                            "output_type": "text",
+                        },
+                    }
+                    for index in range(1, stage_count + 1)
+                ],
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        }
+
+    accepted = await _process(flow=flow, arguments=arguments_with_stage_count(5))
+
+    assert accepted.failure_kind is None
+    assert accepted.compiled_proposal is not None
+    assert len(accepted.compiled_proposal.content.spec.steps) == 7
+
+    rejected = await _process(flow=flow, arguments=arguments_with_stage_count(6))
+
+    assert rejected.compiled_proposal is None
+    assert rejected.failure_kind == "validation"
+    assert rejected.failure_codes == frozenset(
+        {"template_preparation_stage_limit_exceeded"}
+    )
+
+
+@pytest.mark.asyncio
 async def test_edit_removing_required_source_reader_field_is_rejected() -> None:
     flow = _source_reader_flow()
 

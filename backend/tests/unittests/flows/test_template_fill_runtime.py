@@ -74,6 +74,8 @@ def _build_builder_template_bytes() -> bytes:
     document.add_paragraph("Titel: {{title}}")
     document.add_paragraph("Författare: {{author}}")
     document.add_paragraph("Sammanfattning: {{step_a.output.text}}")
+    document.add_paragraph("Analys: {{step_b.output.structured.summary}}")
+    document.add_paragraph("Malltext: {{föregående_steg}}")
     document.add_paragraph("Kund: {{customer   name}}")
     document.add_paragraph("Transkribering: {{transkribering}}")
     document.add_paragraph("Flow-indata: {{flow_input.transkribering}}")
@@ -122,7 +124,12 @@ def _run() -> FlowRun:
     )
 
 
-def _completed_result(*, run: FlowRun) -> FlowStepResult:
+def _completed_result(
+    *,
+    run: FlowRun,
+    step_order: int = 1,
+    output_payload: dict[str, object] | None = None,
+) -> FlowStepResult:
     now = datetime.now(timezone.utc)
     return FlowStepResult(
         id=uuid4(),
@@ -130,11 +137,15 @@ def _completed_result(*, run: FlowRun) -> FlowStepResult:
         flow_id=run.flow_id,
         tenant_id=run.tenant_id,
         step_id=uuid4(),
-        step_order=1,
+        step_order=step_order,
         assistant_id=uuid4(),
         input_payload_json={"text": "ignored"},
         effective_prompt="prompt",
-        output_payload_json={"text": "Detta är sammanfattningen."},
+        output_payload_json=(
+            output_payload
+            if output_payload is not None
+            else {"text": "Detta är sammanfattningen."}
+        ),
         model_parameters_json={},
         num_tokens_input=10,
         num_tokens_output=20,
@@ -146,14 +157,21 @@ def _completed_result(*, run: FlowRun) -> FlowStepResult:
     )
 
 
-def _state(*, result: FlowStepResult) -> RunExecutionState:
+def _state(
+    *,
+    result: FlowStepResult,
+    additional_results: tuple[FlowStepResult, ...] = (),
+) -> RunExecutionState:
+    results = (result, *additional_results)
     return RunExecutionState(
-        completed_by_order={1: result},
-        prior_results=[result],
+        completed_by_order={item.step_order: item for item in results},
+        prior_results=list(results),
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
-        step_names_by_order={1: "Sammanfatta"},
+        step_names_by_order={
+            item.step_order: f"Step {item.step_order}" for item in results
+        },
     )
 
 
@@ -490,7 +508,22 @@ async def test_builder_approved_template_contract_materializes_and_renders_witho
         transcript="Verifierad transkribering",
     ).apply_to(run.input_payload_json)
     prior_result = _completed_result(run=run)
-    state = _state(result=prior_result)
+    analysis_result = _completed_result(
+        run=run,
+        step_order=2,
+        output_payload={
+            "structured": {"summary": "Verifierad mellananalys"},
+        },
+    )
+    writer_result = _completed_result(
+        run=run,
+        step_order=3,
+        output_payload={"text": "Färdig malltext från skrivsteget."},
+    )
+    state = _state(
+        result=prior_result,
+        additional_results=(analysis_result, writer_result),
+    )
     flow_id = run.flow_id
     file_id = uuid4()
     template_bytes = _build_builder_template_bytes()
@@ -498,6 +531,8 @@ async def test_builder_approved_template_contract_materializes_and_renders_witho
         "title",
         "author",
         "step_a.output.text",
+        "step_b.output.structured.summary",
+        "föregående_steg",
         "customer   name",
         "transkribering",
         "flow_input.transkribering",
@@ -517,6 +552,26 @@ async def test_builder_approved_template_contract_materializes_and_renders_witho
                 ),
                 StepSpec(
                     plan_step_ref="step_b",
+                    name="Analyze",
+                    assistant_spec=AssistantSpec(instructions="Analyze."),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                StepSpec(
+                    plan_step_ref="step_c",
+                    name="Write",
+                    assistant_spec=AssistantSpec(instructions="Write."),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                StepSpec(
+                    plan_step_ref="step_d",
                     name="Fill",
                     assistant_spec=AssistantSpec(instructions="Fill the template."),
                     input_source=InputSource.PREVIOUS_STEP,
@@ -548,7 +603,7 @@ async def test_builder_approved_template_contract_materializes_and_renders_witho
     materialized = await materialize_template_attachment(
         intent=TemplateAttachmentIntent(
             file_id=file_id,
-            terminal_plan_step_ref="step_b",
+            terminal_plan_step_ref="step_d",
         ),
         changeset=changeset,
         flow_id=flow_id,
@@ -589,6 +644,8 @@ async def test_builder_approved_template_contract_materializes_and_renders_witho
     )
 
     assert "Detta är sammanfattningen." in output.full_text
+    assert "Verifierad mellananalys" in output.full_text
+    assert "Färdig malltext från skrivsteget." in output.full_text
     assert "Ada Lovelace" in output.full_text
     assert output.full_text.count("Verifierad transkribering") == 3
     assert output.num_tokens_input == 0
@@ -598,6 +655,10 @@ async def test_builder_approved_template_contract_materializes_and_renders_witho
             "title": "{{ flow_input.title }}",
             "author": "{{ flow_input.author }}",
             "step_a.output.text": "{{ step_1.output.text }}",
+            "step_b.output.structured.summary": (
+                "{{ step_2.output.structured.summary }}"
+            ),
+            "föregående_steg": "{{ föregående_steg }}",
             "customer   name": "{{ flow_input.customer name }}",
             "transkribering": "{{ transkribering }}",
             "flow_input.transkribering": "{{ flow_input.transkribering }}",

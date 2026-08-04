@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID
@@ -20,7 +21,13 @@ from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
     create_compile_context_from_planning_state,
 )
+from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+    evaluate_critic_invariants,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
+    build_conversation_critic_context,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     FlowInputFieldIntent,
     ProposalIntentArgumentError,
@@ -33,11 +40,15 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
+from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    apply_template_attachment_contract,
+)
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.pattern_registry import (
     EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
     FLOW_INPUT_DOCUMENT_UPLOAD,
+    PREPARE_TEMPLATE_CONTENT_STEP,
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
@@ -2846,51 +2857,72 @@ def test_audio_artifact_overlay_still_rejects_conflicting_patterns(
     )
 
 
-def test_compiler_uses_assembly_path_for_docx_template_fill() -> None:
+def test_compiler_admits_three_semantic_steps_before_fixed_template_fill() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
             "flow_description": "Fill a DOCX template from source documents.",
-            "plan_rationale": "Extract source facts, prepare content, fill template.",
-            "input_fields": [
-                {
-                    "variable_name": "case_id",
-                    "label": "Case ID",
-                    "field_type": "text",
-                    "required": True,
-                }
-            ],
+            "plan_rationale": "Analyze, validate, write, and fill the template.",
             "steps": [
                 {
-                    "name": "Prepare template content",
-                    "instructions": "Prepare the content for the DOCX template.",
+                    "name": "Analyze source facts",
+                    "instructions": "Analyze the source facts for the report.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "case_summary",
+                            "field_type": "string",
+                            "description": "A source-grounded case summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Validate source facts",
+                    "instructions": "Validate the analyzed facts for consistency.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "validated_summary",
+                            "field_type": "string",
+                            "description": "The validated case summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write template content",
+                    "instructions": "Write the prepared result as template content.",
                     "output_type": "text",
-                    "uses_form_fields": ["case_id"],
-                }
+                },
             ],
         }
     )
 
-    compiled = compile_create_intent_to_spec(
-        intent,
-        context=CreateCompileContext(
-            runtime_input_type=InputType.DOCUMENT,
-            final_output_type=OutputType.DOCX,
-            final_output_mode=OutputMode.TEMPLATE_FILL,
-            pattern_ids=("document_to_docx_template",),
-            pattern_chain_steps=(
-                FLOW_INPUT_DOCUMENT_UPLOAD,
-                EXTRACT_TEMPLATE_VARIABLES_STEP,
-                TEMPLATE_FILL_DOCX_STEP,
-            ),
-            runtime_max_files=2,
+    context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        pattern_ids=("document_to_docx_template",),
+        pattern_chain_steps=(
+            FLOW_INPUT_DOCUMENT_UPLOAD,
+            EXTRACT_TEMPLATE_VARIABLES_STEP,
+            PREPARE_TEMPLATE_CONTENT_STEP,
+            TEMPLATE_FILL_DOCX_STEP,
+        ),
+        runtime_max_files=2,
+        selected_template_count=1,
+        selected_template_placeholders=(
+            "step_a.output.structured.source_facts",
+            "step_b.output.structured.case_summary",
+            "step_c.output.structured.validated_summary",
+            "föregående_steg",
         ),
     )
+    compiled = compile_create_intent_to_spec(intent, context=context)
 
-    assert len(compiled.steps) == 3
+    assert len(compiled.steps) == 5
     reader_step = compiled.steps[0]
-    content_step = compiled.steps[1]
-    template_step = compiled.steps[2]
+    analysis_step, validation_step, content_step = compiled.steps[1:4]
+    template_step = compiled.steps[4]
     assert reader_step.input_source == InputSource.FLOW_INPUT
     assert reader_step.input_type == InputType.DOCUMENT
     assert reader_step.output_type == OutputType.JSON
@@ -2905,18 +2937,181 @@ def test_compiler_uses_assembly_path_for_docx_template_fill() -> None:
     assert runtime_input["required"] is True
     assert runtime_input["max_files"] == 2
     assert runtime_input["input_format"] == "document"
+    assert analysis_step.output_type == OutputType.JSON
+    assert validation_step.output_type == OutputType.JSON
     assert content_step.input_source == InputSource.PREVIOUS_STEP
-    assert content_step.input_type == InputType.TEXT
+    assert content_step.input_type == InputType.JSON
     assert content_step.output_type == OutputType.TEXT
-    question = _question(content_step.input_bindings)
-    assert "{{ step_a.output.structured }}" in question
-    assert "case_id: {{ flow_input.case_id }}" in question
     assert template_step.input_source == InputSource.PREVIOUS_STEP
     assert template_step.input_type == InputType.TEXT
     assert template_step.output_type == OutputType.DOCX
     assert template_step.output_mode == OutputMode.TEMPLATE_FILL
     assert template_step.input_bindings is None
+    assert template_step.output_config == {
+        "bindings": {
+            "step_a.output.structured.source_facts": (
+                "{{ step_a.output.structured.source_facts }}"
+            ),
+            "step_b.output.structured.case_summary": (
+                "{{ step_b.output.structured.case_summary }}"
+            ),
+            "step_c.output.structured.validated_summary": (
+                "{{ step_c.output.structured.validated_summary }}"
+            ),
+            "föregående_steg": "{{ föregående_steg }}",
+        }
+    }
+
+    single_step_intent = intent.model_copy(update={"steps": [intent.steps[-1]]})
+    fixed_terminal = compile_create_intent_to_spec(
+        single_step_intent,
+        context=replace(
+            context,
+            selected_template_count=None,
+            selected_template_placeholders=None,
+        ),
+    ).steps[-1]
+    assert (
+        template_step.model_copy(
+            update={
+                "plan_step_ref": fixed_terminal.plan_step_ref,
+                "output_config": fixed_terminal.output_config,
+            }
+        )
+        == fixed_terminal
+    )
+
+    critic_issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            build_conversation_critic_context([], compiled)
+        )
+    }
+    assert "terminal_renderer_must_not_consume_review_only_step" not in (
+        critic_issue_ids
+    )
+    assert "final_text_step_must_reference_relevant_structured_outputs" not in (
+        critic_issue_ids
+    )
     assert validate_spec(compiled).valid
+
+
+def test_compiler_enforces_template_preparation_stage_limit() -> None:
+    def intent_with_stage_count(stage_count: int):
+        preparation_steps = [
+            {
+                "name": f"Prepare source facts {index}",
+                "instructions": f"Prepare source facts for stage {index}.",
+                "output_type": "json",
+                "output_fields": [
+                    {
+                        "name": f"prepared_facts_{index}",
+                        "field_type": "string",
+                        "description": f"Prepared source facts from stage {index}.",
+                    }
+                ],
+            }
+            for index in range(1, stage_count)
+        ]
+        return parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Template report",
+                "plan_rationale": "Prepare source facts and fill the template.",
+                "steps": [
+                    *preparation_steps,
+                    {
+                        "name": "Write template content",
+                        "instructions": "Write the prepared facts as template content.",
+                        "output_type": "text",
+                    },
+                ],
+            }
+        )
+
+    context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        pattern_ids=("document_to_docx_template",),
+        pattern_chain_steps=(
+            FLOW_INPUT_DOCUMENT_UPLOAD,
+            EXTRACT_TEMPLATE_VARIABLES_STEP,
+            PREPARE_TEMPLATE_CONTENT_STEP,
+            TEMPLATE_FILL_DOCX_STEP,
+        ),
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent_with_stage_count(5),
+        context=context,
+    )
+
+    assert len(compiled.steps) == 7
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent_with_stage_count(6),
+            context=context,
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "template_preparation_stage_limit_exceeded"
+    )
+    assert "Consolidate" in exc_info.value.detail
+
+
+def test_docx_template_unsupported_shapes_keep_typed_failure_codes() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Template report",
+            "plan_rationale": "Write content and fill the template.",
+            "steps": [
+                {
+                    "name": "Write template content",
+                    "instructions": "Write the template content.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+    context = CreateCompileContext(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        pattern_ids=("document_to_docx_template",),
+        pattern_chain_steps=(
+            FLOW_INPUT_DOCUMENT_UPLOAD,
+            EXTRACT_TEMPLATE_VARIABLES_STEP,
+            PREPARE_TEMPLATE_CONTENT_STEP,
+            TEMPLATE_FILL_DOCX_STEP,
+        ),
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as nonlinear_exc:
+        compile_create_intent_to_spec(
+            intent,
+            context=replace(context, aggregation_intent="compare"),
+        )
+    assert nonlinear_exc.value.log_context["failure_code"] == (
+        "assembly_docx_template_shape_unsupported"
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+    step_after_fill = compiled.steps[-2].model_copy(
+        update={"plan_step_ref": "step_after_fill"}
+    )
+    invalid_position = compiled.model_copy(
+        update={"steps": [*compiled.steps, step_after_fill]}
+    )
+    with pytest.raises(AIBuilderArchitectureError) as position_exc:
+        apply_template_attachment_contract(
+            invalid_position,
+            selected_template_count=1,
+            placeholders=(),
+        )
+    assert position_exc.value.log_context["failure_code"] == (
+        "template_fill_position_invalid"
+    )
 
 
 def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> None:

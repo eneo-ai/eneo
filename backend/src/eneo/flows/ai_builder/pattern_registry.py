@@ -37,6 +37,7 @@ FLOW_INPUT_DOCUMENT_UPLOAD = "flow_input_document_upload"
 FLOW_INPUT_SECTIONED_FORM_FIELDS = "flow_input_sectioned_form_fields"
 EXTRACT_TEMPLATE_VARIABLES_STEP = "extract_template_variables_step"
 COMPOSE_SECTIONS_STEP = "compose_sections_step"
+PREPARE_TEMPLATE_CONTENT_STEP = "prepare_template_content_step"
 TEMPLATE_FILL_DOCX_STEP = "template_fill_docx_step"
 TERMINAL_ARTIFACT_STEP = "terminal_artifact_step"
 
@@ -80,6 +81,10 @@ CHAIN_STEP_DESCRIPTORS: Mapping[str, ChainStepDescriptor] = MappingProxyType(
         COMPOSE_SECTIONS_STEP: ChainStepDescriptor(
             token=COMPOSE_SECTIONS_STEP,
             label="compose sections",
+        ),
+        PREPARE_TEMPLATE_CONTENT_STEP: ChainStepDescriptor(
+            token=PREPARE_TEMPLATE_CONTENT_STEP,
+            label="analyze, validate, and prepare template content",
         ),
         TEMPLATE_FILL_DOCX_STEP: ChainStepDescriptor(
             token=TEMPLATE_FILL_DOCX_STEP,
@@ -253,6 +258,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         chain_steps=(
             FLOW_INPUT_DOCUMENT_UPLOAD,
             EXTRACT_TEMPLATE_VARIABLES_STEP,
+            PREPARE_TEMPLATE_CONTENT_STEP,
             TEMPLATE_FILL_DOCX_STEP,
         ),
         chain_kind="compiled",

@@ -51,7 +51,9 @@ from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    MAX_TEMPLATE_PREPARATION_STAGES,
     apply_template_attachment_contract,
+    template_preparation_stage_limit_exceeded,
 )
 from eneo.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
@@ -179,6 +181,20 @@ def compile_edit_proposal(
         form_fields=compiled_form_fields,
         document_body_writer_step_refs=(normalized_spec.document_body_writer_step_refs),
     )
+    if template_preparation_stage_limit_exceeded(compiled_spec):
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail=(
+                "DOCX template-fill flows support at most "
+                f"{MAX_TEMPLATE_PREPARATION_STAGES} semantic preparation stages. "
+                "Consolidate related analysis, validation, or writing stages and "
+                "try again."
+            ),
+            log_context={
+                "failure_code": "template_preparation_stage_limit_exceeded",
+                "reason": "template_preparation_stage_limit_exceeded",
+            },
+        )
 
     advisories: list[EditAdvisory] = _build_normalization_advisories(
         normalization_changes

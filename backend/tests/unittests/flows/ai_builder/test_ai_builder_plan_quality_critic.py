@@ -250,6 +250,7 @@ def _step(
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     output_contract: dict | None = None,
     input_bindings: dict | None = None,
+    output_config: dict | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=ref,
@@ -261,6 +262,7 @@ def _step(
         output_type=output_type,
         output_contract=output_contract,
         input_bindings=input_bindings,
+        output_config=output_config,
     )
 
 
@@ -3167,6 +3169,82 @@ class TestTerminalRendererRejectsReviewOnlyPreviousStep:
 
         assert any(issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues)
 
+    def test_template_fill_fires_when_binding_consumes_review_notes_alias(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Template report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Skriv rapport",
+                    "Skriv rapporten.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Granska kvalitet och luckor",
+                    "Granska rapporten och lista kvalitetsproblem.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Fyll DOCX-mall",
+                    "Fyll dokumentmallen.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_config={"bindings": {"comments": "{{ föregående_steg }}"}},
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues)
+
+    def test_template_fill_fires_when_binding_directly_consumes_review_notes(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Template report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Skriv rapport",
+                    "Skriv rapporten.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Granska kvalitet och luckor",
+                    "Granska rapporten och lista kvalitetsproblem.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Fyll DOCX-mall",
+                    "Fyll dokumentmallen.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_config={
+                        "bindings": {"comments": "{{ step_b.output.text }}"}
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues)
+
     def test_typed_writer_ref_overrides_review_markers_before_docx(self) -> None:
         spec = FlowDraftSpecCore(
             flow_name="Meeting report",
@@ -3400,6 +3478,131 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
         assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues), (
             "rule must nudge a previous_step composer with two JSON priors "
             "to pull structured fields from earlier predecessors"
+        )
+
+    def test_template_fill_alias_still_omits_earlier_structured_producer(
+        self,
+    ) -> None:
+        spec = self._template_fill_structured_spec(
+            bindings={"summary": "{{ föregående_steg }}"}
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_template_fill_direct_structured_bindings_cover_producers(self) -> None:
+        spec = self._template_fill_structured_spec(
+            bindings={
+                "product": "{{ step_a.output.structured.product }}",
+                "customer": "{{ step_b.output.structured.customer }}",
+            }
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_template_fill_accepts_two_consumed_of_three_structured_producers(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Structured template report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract product",
+                    "Extract product data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("product"),
+                ),
+                _step(
+                    "step_b",
+                    "Extract customer",
+                    "Extract customer data.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("customer"),
+                ),
+                _step(
+                    "step_c",
+                    "Extract delivery",
+                    "Extract delivery data.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("delivery"),
+                ),
+                _step(
+                    "step_d",
+                    "Write report",
+                    "Write the report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_e",
+                    "Fill template",
+                    "Fill the template.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_config={
+                        "bindings": {
+                            "product": "{{ step_a.output.structured.product }}",
+                            "summary": "{{ föregående_steg }}",
+                        }
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    @staticmethod
+    def _template_fill_structured_spec(
+        *, bindings: dict[str, str]
+    ) -> FlowDraftSpecCore:
+        return FlowDraftSpecCore(
+            flow_name="Structured template report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract product",
+                    "Extract product data.",
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("product"),
+                ),
+                _step(
+                    "step_b",
+                    "Extract customer",
+                    "Extract customer data.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("customer"),
+                ),
+                _step(
+                    "step_c",
+                    "Write report",
+                    "Write the report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Fill template",
+                    "Fill the template.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_config={"bindings": bindings},
+                ),
+            ],
         )
 
     def test_silent_on_single_json_prior_refinement_chain(self) -> None:

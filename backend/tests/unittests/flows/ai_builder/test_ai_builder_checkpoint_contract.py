@@ -2,6 +2,7 @@
 
 from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
     checkpoint_intent_mismatches,
+    project_checkpoint_intents,
 )
 from eneo.flows.ai_builder.planning_state import CheckpointIntent
 from eneo.flows.flow_authoring_spec import (
@@ -294,3 +295,74 @@ def test_report_checkpoint_falls_back_to_last_compose_step() -> None:
     )
 
     assert checkpoint_intent_mismatches(spec, [_report_intent()]) == ()
+
+
+def test_template_fill_checkpoint_targets_prefill_producer_and_refuses_renderer_review() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Template report",
+        steps=[
+            _text_step(
+                "analyze",
+                output_type=OutputType.JSON,
+                existing_step_ref="existing_analyze",
+            ),
+            _text_step(
+                "validate",
+                output_type=OutputType.JSON,
+                existing_step_ref="existing_validate",
+            ),
+            _text_step("write", existing_step_ref="existing_write"),
+            _text_step(
+                "fill",
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_type=OutputType.DOCX,
+                existing_step_ref="existing_fill",
+            ),
+        ],
+    )
+    intent = _set_structured_intent()
+
+    projected = project_checkpoint_intents(spec, [intent])
+
+    assert projected.steps[1].review_policy is not None
+    assert projected.steps[1].review_policy.mode is FlowStepReviewMode.EDIT
+    assert projected.steps[2].review_policy is None
+    assert projected.steps[-1].review_policy is None
+    assert checkpoint_intent_mismatches(projected, [intent]) == ()
+
+    reviewed_fill = projected.model_copy(
+        update={
+            "steps": [
+                *projected.steps[:-1],
+                projected.steps[-1].model_copy(
+                    update={
+                        "review_policy": FlowStepReviewPolicy(
+                            mode=FlowStepReviewMode.VIEW
+                        )
+                    }
+                ),
+            ]
+        }
+    )
+    mismatches = checkpoint_intent_mismatches(reviewed_fill, [intent])
+    assert [mismatch.kind for mismatch in mismatches] == [
+        "template_fill_review_forbidden"
+    ]
+    apply_mismatches = checkpoint_intent_mismatches(
+        reviewed_fill,
+        [intent],
+        enforce_unrequested_reviews=False,
+    )
+    assert [mismatch.kind for mismatch in apply_mismatches] == [
+        "template_fill_review_forbidden"
+    ]
+    assert (
+        checkpoint_intent_mismatches(
+            projected,
+            [intent],
+            baseline_spec=reviewed_fill,
+        )
+        == ()
+    )

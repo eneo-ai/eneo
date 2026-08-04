@@ -54,6 +54,7 @@ from eneo.flows.ai_builder.pattern_registry import (
     EXTRACT_TEMPLATE_VARIABLES_STEP,
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
     FLOW_INPUT_DOCUMENT_UPLOAD,
+    PREPARE_TEMPLATE_CONTENT_STEP,
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
@@ -98,6 +99,7 @@ _DOCX_TEMPLATE_PATTERN_CHAIN_STEPS = frozenset(
     {
         FLOW_INPUT_DOCUMENT_UPLOAD,
         EXTRACT_TEMPLATE_VARIABLES_STEP,
+        PREPARE_TEMPLATE_CONTENT_STEP,
         TEMPLATE_FILL_DOCX_STEP,
     }
 )
@@ -156,8 +158,8 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
         "in the content-writing semantic step."
     ),
     "docx_template_shape_unsupported": (
-        "DOCX template-fill flows require one text-writing semantic step for the "
-        "template variables."
+        "DOCX template-fill flows require a linear chain of JSON or text semantic "
+        "steps ending in one text-writing step for the template variables."
     ),
     "document_report_compose_topology_missing": (
         DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK
@@ -1031,55 +1033,102 @@ def _assemble_docx_template_fill(
     field_provenance: dict[str, FlowInputFieldProvenance] | None,
     field_diagnostics: list[LintWarning] | None,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
-    if (
-        runtime_input_type not in _FILE_INPUT_TYPES
-        or aggregation_intent != "linear"
-        or len(intent.steps) != 1
-    ):
+    if runtime_input_type not in _FILE_INPUT_TYPES or aggregation_intent != "linear":
         return _reject("docx_template_shape_unsupported")
-    semantic_step = intent.steps[0]
-    if (
-        semantic_step.output_fields
-        or semantic_step.uses_previous_fields
-        or semantic_step.uses_previous_outputs
-        or semantic_step.output_type not in {None, OutputType.TEXT}
-    ):
-        return _reject("docx_template_shape_unsupported", step_index=1)
     form_field_names = {field.name for field in form_fields}
-    if set(semantic_step.uses_form_fields) != form_field_names:
-        return _reject("docx_template_form_fields_mismatch", step_index=1)
-
     reader_step = template_variable_reader_step(
         runtime_input_type=runtime_input_type,
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
         ui_language=ui_language,
     )
-    content_input_type = (
-        InputType.TEXT if semantic_step.uses_form_fields else InputType.JSON
-    )
-    content_step = PlannedStep(
-        role="transform",
-        name=semantic_step.name,
-        instructions=semantic_step.instructions,
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=content_input_type,
-        output_type=OutputType.TEXT,
-        output_mode=OutputMode.PASS_THROUGH,
-        underlag_channel=derive_underlag_channel(
+    semantic_steps: list[PlannedStep] = []
+    previous_step = reader_step
+    for index, semantic_step in enumerate(intent.steps):
+        is_terminal_semantic_step = index == len(intent.steps) - 1
+        step_index = index + 1
+        if semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs:
+            return _reject(
+                "docx_template_shape_unsupported",
+                step_index=step_index,
+            )
+        if is_terminal_semantic_step:
+            if semantic_step.output_fields or semantic_step.output_type not in {
+                None,
+                OutputType.TEXT,
+            }:
+                return _reject(
+                    "docx_template_shape_unsupported",
+                    step_index=step_index,
+                )
+            if set(semantic_step.uses_form_fields) != form_field_names:
+                return _reject(
+                    "docx_template_form_fields_mismatch",
+                    step_index=step_index,
+                )
+            step_output_type = OutputType.TEXT
+            step_input_type = (
+                InputType.TEXT
+                if semantic_step.uses_form_fields
+                or previous_step.output_type == OutputType.TEXT
+                else InputType.JSON
+            )
+        else:
+            if semantic_step.uses_form_fields:
+                return _reject(
+                    "docx_template_shape_unsupported",
+                    step_index=step_index,
+                )
+            step_output_type = _linear_step_output_type(
+                output_type=semantic_step.output_type,
+                output_fields=semantic_step.output_fields,
+                final_output_type=OutputType.TEXT,
+                is_terminal=False,
+            )
+            if (
+                step_output_type is None
+                or step_output_type not in {OutputType.JSON, OutputType.TEXT}
+                or (
+                    step_output_type == OutputType.JSON
+                    and not semantic_step.output_fields
+                )
+            ):
+                return _reject(
+                    "docx_template_shape_unsupported",
+                    step_index=step_index,
+                )
+            step_input_type = _linear_step_input_type(
+                input_source=InputSource.PREVIOUS_STEP,
+                runtime_input_type=runtime_input_type,
+                previous_output_type=previous_step.output_type,
+                output_type=step_output_type,
+            )
+        planned_step = PlannedStep(
+            role="transform",
+            name=semantic_step.name,
+            instructions=semantic_step.instructions,
             input_source=InputSource.PREVIOUS_STEP,
-            input_type=content_input_type,
-            previous_step=reader_step,
-            previous_field_refs=(),
-        ),
-        form_field_refs=tuple(semantic_step.uses_form_fields),
-        model_ref=semantic_step.model_ref,
-        knowledge_refs=tuple(semantic_step.knowledge_refs),
-        citations_requested=semantic_step.citations_requested,
-        review_mode=semantic_step.review_mode,
-    )
+            input_type=step_input_type,
+            output_type=step_output_type,
+            output_mode=OutputMode.PASS_THROUGH,
+            underlag_channel=derive_underlag_channel(
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=step_input_type,
+                previous_step=previous_step,
+                previous_field_refs=(),
+            ),
+            form_field_refs=tuple(semantic_step.uses_form_fields),
+            output_fields=tuple(semantic_step.output_fields or ()),
+            model_ref=semantic_step.model_ref,
+            knowledge_refs=tuple(semantic_step.knowledge_refs),
+            citations_requested=semantic_step.citations_requested,
+            review_mode=semantic_step.review_mode,
+        )
+        semantic_steps.append(planned_step)
+        previous_step = planned_step
+
     fixed_template_fill_step = template_fill_step(ui_language=ui_language)
-    planned_steps = (reader_step, content_step, fixed_template_fill_step)
+    planned_steps = (reader_step, *semantic_steps, fixed_template_fill_step)
     completed_steps = _complete_planned_source_reader_contracts(
         planned_steps,
         terminal_output_schema=None,

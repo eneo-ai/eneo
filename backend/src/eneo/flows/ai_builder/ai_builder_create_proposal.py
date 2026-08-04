@@ -66,6 +66,7 @@ _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
         "flow_input_schema_target_missing",
         "section_writer_structured_source_ambiguous",
         "template_attachment_selection_invalid",
+        "template_attachment_unreadable",
         "template_placeholder_unresolved",
     }
 )

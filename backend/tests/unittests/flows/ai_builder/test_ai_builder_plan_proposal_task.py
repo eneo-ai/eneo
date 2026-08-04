@@ -509,8 +509,23 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
     )
+    edit_prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(
+            summary="Fill the uploaded DOCX template."
+        ),
+        attachment_context=None,
+        flow_context="Existing template flow",
+        is_edit_mode=True,
+        resource_catalog=_empty_catalog(),
+    )
 
     assert "template placeholder fields: kundnamn, datum" in prompt
+    for rendered_prompt in (prompt, edit_prompt):
+        assert (
+            "For DOCX template-fill mode, use at most 5 semantic preparation steps"
+            in rendered_prompt
+        )
     assert "Prefer source-derived output_fields" in prompt
     assert "use input_fields only for values the user must provide at runtime" in prompt
     assert "Use output_fields consistent with these user-declared fields." not in prompt

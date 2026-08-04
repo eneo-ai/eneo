@@ -38,6 +38,7 @@ _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
     }
 )
 _MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH = 80
+MAX_TEMPLATE_PREPARATION_STAGES = 5
 _TRANSCRIPTION_PLACEHOLDERS = frozenset(
     {
         FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -45,6 +46,23 @@ _TRANSCRIPTION_PLACEHOLDERS = frozenset(
         f"flow.input.{FLOW_INPUT_TRANSCRIPTION_KEY}",
     }
 )
+
+
+def template_preparation_stage_limit_exceeded(spec: FlowDraftSpecCore) -> bool:
+    if (
+        len(spec.steps) < 2
+        or spec.steps[-1].output_mode is not OutputMode.TEMPLATE_FILL
+    ):
+        return False
+    root_step = spec.steps[0]
+    has_fixed_reader = (
+        root_step.input_source is InputSource.FLOW_INPUT
+        and root_step.input_type in {InputType.DOCUMENT, InputType.FILE}
+        and root_step.output_type is OutputType.JSON
+        and root_step.output_mode is OutputMode.PASS_THROUGH
+    )
+    preparation_steps = spec.steps[1:-1] if has_fixed_reader else spec.steps[:-1]
+    return len(preparation_steps) > MAX_TEMPLATE_PREPARATION_STAGES
 
 
 def apply_template_attachment_contract(
@@ -312,4 +330,8 @@ def _architecture_error(
     )
 
 
-__all__ = ["apply_template_attachment_contract"]
+__all__ = [
+    "MAX_TEMPLATE_PREPARATION_STAGES",
+    "apply_template_attachment_contract",
+    "template_preparation_stage_limit_exceeded",
+]

@@ -51,6 +51,7 @@ CheckpointMismatchKind = Literal[
     "producer_missing",
     "review_missing",
     "review_mode_mismatch",
+    "template_fill_review_forbidden",
     "unexpected_review",
 ]
 
@@ -127,6 +128,7 @@ def checkpoint_intent_mismatches(
             (step.existing_step_ref or step.plan_step_ref): step.review_policy.mode
             for step in baseline_spec.steps
             if step.review_policy is not None
+            and step.output_mode != OutputMode.TEMPLATE_FILL
         }
 
     expected_by_step_ref: dict[str, CheckpointIntent] = {}
@@ -164,6 +166,17 @@ def checkpoint_intent_mismatches(
         actual_mode = (
             step.review_policy.mode if step.review_policy is not None else None
         )
+        if step.output_mode == OutputMode.TEMPLATE_FILL and actual_mode is not None:
+            mismatches.append(
+                CheckpointIntentMismatch(
+                    kind="template_fill_review_forbidden",
+                    producer_kind=None,
+                    step_ref=step.plan_step_ref,
+                    expected_mode=None,
+                    actual_mode=actual_mode,
+                )
+            )
+            continue
         if intent is not None:
             expected_mode = intent.mode
             producer_kind: CheckpointProducerKind | None = intent.producer_kind

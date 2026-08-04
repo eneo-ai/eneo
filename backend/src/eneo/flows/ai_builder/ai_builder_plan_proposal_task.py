@@ -37,6 +37,9 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     project_schema_fields,
 )
+from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    MAX_TEMPLATE_PREPARATION_STAGES,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
@@ -88,7 +91,10 @@ def build_plan_proposal_system_prompt(
         "",
         "Design rules:",
         "- Use a short human-readable `flow_name` with words and spaces; never copy internal pattern ids, capability ids, or snake_case tokens into the name.",
-        "- Use as many steps as the requested workflow needs, up to the tool schema limit.",
+        "- Use as many steps as the requested workflow needs, up to the tool schema "
+        "limit. For DOCX template-fill mode, use at most "
+        f"{MAX_TEMPLATE_PREPARATION_STAGES} semantic preparation steps before the "
+        "backend-owned fill step.",
         "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, form fields, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
         "- Use JSON output fields when later steps need specific structured facts.",

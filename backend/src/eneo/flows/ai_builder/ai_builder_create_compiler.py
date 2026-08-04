@@ -43,7 +43,9 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
+    MAX_TEMPLATE_PREPARATION_STAGES,
     apply_template_attachment_contract,
+    template_preparation_stage_limit_exceeded,
 )
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
@@ -309,6 +311,20 @@ def compile_create_intent_to_spec(
                 compiled_spec,
                 selected_template_count=context.selected_template_count,
                 placeholders=context.selected_template_placeholders,
+            )
+        if template_preparation_stage_limit_exceeded(compiled_spec):
+            raise AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                detail=(
+                    "DOCX template-fill flows support at most "
+                    f"{MAX_TEMPLATE_PREPARATION_STAGES} semantic preparation "
+                    "stages. Consolidate related analysis, validation, or writing "
+                    "stages and try again."
+                ),
+                log_context={
+                    "failure_code": "template_preparation_stage_limit_exceeded",
+                    "reason": "template_preparation_stage_limit_exceeded",
+                },
             )
         if context is None or context.checkpoint_intents is None:
             return compiled_spec

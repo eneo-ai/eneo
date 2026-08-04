@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -66,6 +66,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
 from eneo.flows.input_binding_contract_rules import (
     effective_question_binding,
     source_ref_bindings,
@@ -75,6 +76,7 @@ from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
 )
+from eneo.flows.variable_resolver import iter_template_expressions
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -1061,9 +1063,42 @@ def _terminal_renderer_must_not_consume_review_only_step_evidence(
     previous = context.spec.steps[-2]
     if not _is_renderer_step(terminal):
         return False
+    if terminal.output_mode == OutputMode.TEMPLATE_FILL:
+        binding_templates = _template_fill_binding_templates(terminal)
+        consumes_previous_alias = any(
+            PREVIOUS_STEP_TEXT_ALIAS in iter_template_expressions(template)
+            for template in binding_templates
+        )
+        step_refs = {
+            step.plan_step_ref: index for index, step in enumerate(context.spec.steps)
+        }
+        form_field_names = {field.name for field in (context.spec.form_fields or [])}
+        consumes_previous_directly = any(
+            reference.kind is TemplateReferenceKind.STEP
+            and reference.path_error_code is None
+            and reference.step_order == len(context.spec.steps) - 2
+            for template in binding_templates
+            for reference in analyze_template(
+                template,
+                step_refs=step_refs,
+                form_field_names=form_field_names,
+            )
+        )
+        if not consumes_previous_alias and not consumes_previous_directly:
+            return False
     if previous.output_type != OutputType.TEXT or _is_renderer_step(previous):
         return False
     return _looks_like_review_only_text_step(context.spec, previous)
+
+
+def _template_fill_binding_templates(step: StepSpec) -> tuple[str, ...]:
+    if step.output_mode != OutputMode.TEMPLATE_FILL or step.output_config is None:
+        return ()
+    bindings_value = cast(object, step.output_config.get("bindings"))
+    if not isinstance(bindings_value, dict):
+        return ()
+    bindings = cast("dict[object, object]", bindings_value)
+    return tuple(value for value in bindings.values() if isinstance(value, str))
 
 
 def is_document_body_writer(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
@@ -1145,10 +1180,25 @@ def _composer_question_distinct_prior_structured_step_count(
     question = effective_question_binding(composer.input_bindings)
     if question is None:
         return 0
+    return len(
+        _prior_structured_step_indexes_referenced_by_template(
+            spec=spec,
+            template=question,
+            before_index=composer_index,
+        )
+    )
+
+
+def _prior_structured_step_indexes_referenced_by_template(
+    *,
+    spec: FlowDraftSpecCore,
+    template: str,
+    before_index: int,
+) -> set[int]:
     step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
     form_field_names = {field.name for field in (spec.form_fields or [])}
     references = analyze_template(
-        question,
+        template,
         step_refs=step_refs,
         form_field_names=form_field_names,
     )
@@ -1158,12 +1208,12 @@ def _composer_question_distinct_prior_structured_step_count(
             continue
         if reference.path_error_code is not None:
             continue
-        if reference.step_order is None or reference.step_order >= composer_index:
+        if reference.step_order is None or reference.step_order >= before_index:
             continue
         if not _reference_targets_structured_output(reference):
             continue
         distinct.add(reference.step_order)
-    return len(distinct)
+    return distinct
 
 
 def _reference_targets_structured_output(reference: TemplateReference) -> bool:
@@ -1368,13 +1418,40 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     ]
     if not priors:
         return False
-    json_priors = [
-        step
-        for step in priors
-        if step.output_type == OutputType.JSON and step.output_contract is not None
-    ]
-    if len(json_priors) < 2:
+    json_prior_indexes = {
+        index
+        for index, step in enumerate(spec.steps[:composer_index])
+        if not _is_renderer_step(step)
+        and step.output_type == OutputType.JSON
+        and step.output_contract is not None
+    }
+    if len(json_prior_indexes) < 2:
         return False
+    terminal = spec.steps[-1]
+    if terminal.output_mode == OutputMode.TEMPLATE_FILL:
+        consumed_indexes: set[int] = set()
+        question = effective_question_binding(composer.input_bindings)
+        if question is not None:
+            consumed_indexes.update(
+                _prior_structured_step_indexes_referenced_by_template(
+                    spec=spec,
+                    template=question,
+                    before_index=composer_index,
+                )
+            )
+        immediate_previous_index = composer_index - 1
+        if immediate_previous_index in json_prior_indexes:
+            consumed_indexes.add(immediate_previous_index)
+        terminal_bindings = "\n".join(_template_fill_binding_templates(terminal))
+        if terminal_bindings:
+            consumed_indexes.update(
+                _prior_structured_step_indexes_referenced_by_template(
+                    spec=spec,
+                    template=terminal_bindings,
+                    before_index=len(spec.steps) - 1,
+                )
+            )
+        return len(json_prior_indexes & consumed_indexes) < 2
     if (
         _composer_question_distinct_prior_structured_step_count(
             spec=spec, composer_index=composer_index
