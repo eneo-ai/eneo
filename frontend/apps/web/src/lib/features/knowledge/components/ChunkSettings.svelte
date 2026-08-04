@@ -112,9 +112,8 @@
   // Tokens are what the API and the index actually use. Floor, and never above the
   // backend's own integer ceiling — rounding up would offer a pair the API refuses.
   //
-  // While the overlap is defaulted the request carries null, which the backend resolves
-  // to the platform's token default regardless of the size chosen here. Deriving the
-  // preview from the slider instead would show one number and index another.
+  // A defaulted overlap reports the platform's token default rather than a share of the
+  // size chosen here, so the number shown is the number submitted and indexed.
   $: overlapTokens = overlapIsDefault
     ? policy.default_chunk_overlap
     : Math.min(
@@ -136,9 +135,17 @@
   $: displayPercent =
     sizeValue > 0 ? Math.round((overlapTokens / sizeValue) * 100) : overlapPercent;
 
-  // Derive the nullable props: null when off (use defaults), the value when on.
-  $: chunkSize = customize && !sizeIsDefault ? sizeValue : null;
-  $: chunkOverlap = customize && !overlapIsDefault ? overlapTokens : null;
+  // Customisation is pair-level, matching the API: (null, null) is the only delegating
+  // state, and touching either field submits both. Sending one side as null would store
+  // a pair whose meaning depends on defaults that can change under it — a size stored
+  // beside a null overlap silently became a 50% overlap when a deployment raised
+  // CHUNK_OVERLAP, re-chunking existing knowledge at twice the fan-out.
+  //
+  // Leaving the disclosure open without touching anything therefore still delegates,
+  // which is how a source keeps following the deployment.
+  $: isCustomized = customize && (!sizeIsDefault || !overlapIsDefault);
+  $: chunkSize = isCustomized ? sizeValue : null;
+  $: chunkOverlap = isCustomized ? overlapTokens : null;
 </script>
 
 <Input.Switch bind:value={customize} class="border-default hover:bg-hover-dimmer p-4 px-6">

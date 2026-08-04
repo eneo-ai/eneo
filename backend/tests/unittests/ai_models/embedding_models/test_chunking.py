@@ -288,14 +288,61 @@ class TestSourceChunkConfig:
         self, platform_defaults: ChunkSettings
     ):
         # With no size of its own the source will split at the platform size, so the
-        # overlap has to fit that, not some size the caller never mentioned.
+        # overlap has to fit that, not some size the caller never mentioned — and that
+        # size is stored alongside it, because an explicit side customises the pair.
         assert resolve_source_chunk_config(
             chunk_size=None, chunk_overlap=50, max_input=None
-        ) == (None, 50)
+        ) == (platform_defaults.chunk_size, 50)
         with pytest.raises(BadRequestException, match="chunk_overlap must not exceed"):
             resolve_source_chunk_config(
                 chunk_size=None, chunk_overlap=60, max_input=None
             )
+
+    def test_a_stored_pair_survives_a_change_of_platform_defaults(
+        self, platform_defaults: ChunkSettings, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A size-only edit must not leave a pair that later defaults invalidate.
+
+        This is the whole reason customisation is pair-level. While the null side meant
+        "keep following the platform", storing (200, None) under 200/40 was valid, but
+        an operator moving the deployment to 500/100 then made the same row resolve to
+        200/100 — a 50% overlap the API refuses, which ingestion would nonetheless use
+        to re-chunk existing material at twice the fan-out.
+        """
+        stored = resolve_source_chunk_config(
+            chunk_size=200, chunk_overlap=None, max_input=None
+        )
+        assert stored == (200, 40)
+
+        monkeypatch.setattr(
+            chunking, "settings", ChunkSettings(chunk_size=500, chunk_overlap=100)
+        )
+        stored_size, stored_overlap = stored
+
+        # What ingestion will really split with is unchanged by the new defaults.
+        assert resolve_chunk_config(stored_size, stored_overlap) == (200, 40)
+        # And the row is still saveable, so the source stays editable.
+        assert (
+            resolve_source_chunk_config(
+                chunk_size=stored_size,
+                chunk_overlap=stored_overlap,
+                max_input=None,
+            )
+            == stored
+        )
+
+    def test_delegation_still_tracks_a_change_of_platform_defaults(
+        self, platform_defaults: ChunkSettings, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Full delegation is what a source uses to follow the deployment."""
+        assert resolve_source_chunk_config(
+            chunk_size=None, chunk_overlap=None, max_input=None
+        ) == (None, None)
+
+        monkeypatch.setattr(
+            chunking, "settings", ChunkSettings(chunk_size=500, chunk_overlap=100)
+        )
+        assert resolve_chunk_config(None, None) == (500, 100)
 
     def test_a_model_with_a_one_token_limit_refuses_every_explicit_size(self):
         # int(1 * 0.6) is 0. Treating that ceiling as "unknown" let this model accept a
@@ -392,12 +439,12 @@ class TestBoundsAndDefaultedOverlap:
 
         assert resolve_source_chunk_config(
             chunk_size=smallest, chunk_overlap=None, max_input=None
-        ) == (smallest, None)
+        ) == (smallest, platform_defaults.chunk_overlap)
 
-    def test_the_maximum_is_accepted(self):
+    def test_the_maximum_is_accepted(self, platform_defaults: ChunkSettings):
         assert resolve_source_chunk_config(
             chunk_size=MAX_CHUNK_SIZE, chunk_overlap=None, max_input=None
-        ) == (MAX_CHUNK_SIZE, None)
+        ) == (MAX_CHUNK_SIZE, platform_defaults.chunk_overlap)
 
     @pytest.mark.parametrize("chunk_size", [MAX_CHUNK_SIZE + 1, 2147483648])
     def test_above_the_maximum_is_refused_before_the_database_sees_it(

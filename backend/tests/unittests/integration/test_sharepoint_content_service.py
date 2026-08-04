@@ -1254,6 +1254,11 @@ class TestDeltaChangesProcessing:
         mock_pull.assert_called_once()
         assert mock_integration_knowledge.delta_token is None
         assert result == "Imported 5 files"
+        # The SyncLog this full sync writes has to say what really happened; taking
+        # pull_content's defaults would record it as a manual sync with no cause.
+        kwargs = mock_pull.call_args.kwargs
+        assert kwargs["sync_trigger"] == "webhook"
+        assert kwargs["recovery"] == "chunking_changed"
 
     async def test_changed_items_force_full_sync_when_chunking_drifted(
         self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge

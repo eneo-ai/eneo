@@ -582,7 +582,14 @@ class SharePointContentService:
                         integration_knowledge_id=resolved_integration_knowledge_id,
                         site_id=resolved_site_id,
                         drive_id=resolved_drive_id,
-                        resource_type=resource_type,
+                        resource_type=resource_type
+                        or integration_knowledge.resource_type
+                        or "site",
+                        # Carry the trigger and reason like the sibling recovery
+                        # branches: this full sync is automatic, and a SyncLog saying
+                        # "manual" with no cause would hide why the enumeration ran.
+                        sync_trigger=sync_trigger,
+                        recovery="chunking_changed",
                     )
 
                 if len(changes) == 0:

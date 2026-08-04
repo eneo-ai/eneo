@@ -3,6 +3,7 @@ import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import ChunkSettings from "./ChunkSettings.svelte";
+import ChunkSettingsFixture from "./ChunkSettingsFixture.svelte";
 
 // The component reads the platform chunking policy from the backend-provided app
 // context. These are the shipped defaults, so the assertions below describe what a
@@ -29,6 +30,30 @@ const overlapSlider = () =>
   page.getByRole("slider", { name: m.chunk_overlap_label(), includeHidden: true });
 
 describe("ChunkSettings", () => {
+  it("submits the chunk pair whole once either field is customized", async () => {
+    // Delegating source: the disclosure starts closed and both sides stay null.
+    render(ChunkSettingsFixture, { chunkSize: null, chunkOverlap: null });
+    const submitted = page.getByTestId("submitted");
+    await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
+
+    // Opening the disclosure alone is not a customization, so the source keeps
+    // following the deployment.
+    await page.getByText(m.chunk_settings_customize()).click();
+    await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
+
+    // Touching one field commits both. A size stored beside a null overlap changed
+    // meaning whenever an operator retuned CHUNK_OVERLAP, which could hand ingestion
+    // an overlap the API itself refuses.
+    const slider = overlapSlider().element() as HTMLElement;
+    slider.focus();
+    slider.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
+    );
+    // One 5% step from the default 20% lands on the 25% ceiling: 50 of 200 tokens.
+    // The size comes along even though nobody touched it — that is the contract.
+    await expect.element(submitted).toHaveTextContent("size=200, overlap=50");
+  });
+
   it("gives the overlap slider a localized accessible name", async () => {
     // An explicit override starts the disclosure expanded.
     render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });

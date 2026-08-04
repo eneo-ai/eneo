@@ -86,15 +86,26 @@ def resolve_source_chunk_config(
     own chunks did not follow.
 
     The model's size ceiling is applied first, so an overlap is judged against the
-    size that will really be used. Anything that cannot be honoured raises instead of
-    being adjusted later, and ``None`` is preserved as "use the platform default".
+    size that will really be used, and anything that cannot be honoured raises instead
+    of being adjusted later.
 
-    A fully defaulted source is exempt: it delegates the whole pair to the deployment,
-    and the env-configured defaults were never subject to the per-source ceiling —
-    the splitter has always accepted any overlap up to the size. Judging them here
-    made a deployment with CHUNK_OVERLAP above 25% of CHUNK_SIZE unable to create
-    websites or save a default-configured source at all, while its ingestion kept
-    using that very pair.
+    Customisation is pair-level: ``(None, None)`` is the only delegating state, and any
+    explicit side stores the whole resolved pair. Keeping the other side ``None`` used
+    to mean "keep following the platform", which made the stored pair depend on values
+    that can change under it. Storing ``(200, None)`` was valid under 200/40 defaults,
+    but moving the deployment to 500/100 then fed 200/100 to ingestion — a 50% overlap
+    the API itself refuses, re-chunking existing material at twice the fan-out nobody
+    asked for, and leaving the source unable to change its size without also naming an
+    overlap. Freezing the pair costs a source the ability to track a future default,
+    which full delegation still provides, and buys a stored configuration that means
+    exactly one thing for as long as it is stored.
+
+    A fully defaulted source stays exempt from the overlap ceiling: it delegates the
+    whole pair to the deployment, and the env-configured defaults were never subject to
+    the per-source ceiling — the splitter has always accepted any overlap up to the
+    size. Judging them here made a deployment with CHUNK_OVERLAP above 25% of
+    CHUNK_SIZE unable to create websites or save a default-configured source at all,
+    while its ingestion kept using that very pair.
     """
     if chunk_size is None and chunk_overlap is None:
         return None, None
@@ -109,23 +120,25 @@ def resolve_source_chunk_config(
             raise BadRequestException(
                 f"chunk_size must not exceed {MAX_CHUNK_SIZE} tokens"
             )
-        chunk_size = clamp_chunk_size(chunk_size, max_input)
-        if chunk_size < MIN_CHUNK_SIZE:
-            # The model's input limit forces every explicit size below the public
-            # floor. Persisting the clamped value would store a configuration the
-            # API contract itself refuses on the next save; delegation to platform
-            # defaults remains available for such models.
-            raise BadRequestException(
-                f"this embedding model caps chunks at {chunk_size} tokens, below the "
-                f"minimum of {MIN_CHUNK_SIZE}; leave the chunk settings on the "
-                "platform defaults for this model"
-            )
-
-    # Judge the pair the splitter will really use, including a defaulted side. A size
-    # small enough that the platform's default overlap breaks the ceiling has to be
-    # refused here: leaving it stored would index an overlap that neither the settings
-    # response nor the editor represents.
+    # Resolve both sides before validating, because both sides are about to be stored.
+    # The clamp then applies to a defaulted size too: an overlap-only request would
+    # otherwise persist a size this model cannot embed.
     effective_size, effective_overlap = resolve_chunk_config(chunk_size, chunk_overlap)
+    effective_size = clamp_chunk_size(effective_size, max_input)
+    if effective_size < MIN_CHUNK_SIZE:
+        # The model's input limit forces the size below the public floor. Persisting
+        # the clamped value would store a configuration the API contract itself
+        # refuses on the next save; delegation to platform defaults remains available
+        # for such models.
+        raise BadRequestException(
+            f"this embedding model caps chunks at {effective_size} tokens, below the "
+            f"minimum of {MIN_CHUNK_SIZE}; leave the chunk settings on the "
+            "platform defaults for this model"
+        )
+
+    # A size small enough that the platform's default overlap breaks the ceiling is
+    # refused rather than stored: it would index an overlap that neither the settings
+    # response nor the editor represents.
     try:
         validate_overlap_within_policy(effective_size, effective_overlap)
     except ValueError as error:
@@ -141,7 +154,9 @@ def resolve_source_chunk_config(
             ) from error
         raise BadRequestException(str(error)) from error
 
-    return chunk_size, chunk_overlap
+    # Both sides, resolved and clamped. Storing the pair whole is what makes the
+    # stamp comparison, the settings response and the editor agree on one number.
+    return effective_size, effective_overlap
 
 
 def clamp_chunk_size(chunk_size: int, max_input: int | None) -> int:
