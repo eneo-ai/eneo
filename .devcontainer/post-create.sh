@@ -50,6 +50,10 @@ pre-commit install --overwrite --install-hooks \
     --hook-type commit-msg \
     --hook-type pre-push
 
+# Install go-task (Taskfile.yml runner: task test, task check, ...)
+mkdir -p "$HOME/.local/bin"
+curl -fsSL https://taskfile.dev/install.sh | sh -s -- -d -b "$HOME/.local/bin"
+
 # Install Bun
 curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
 
