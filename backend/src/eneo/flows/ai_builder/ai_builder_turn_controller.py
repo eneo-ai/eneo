@@ -486,11 +486,29 @@ def _checkpoint_decision(
             "The report text can be edited before the flow continues."
         ),
     }
+    cleared_sv: dict[CheckpointProducerKind, str] = {
+        "transcript": ("Granskningen av transkriberingen är borttagen på din begäran."),
+        "structured_result": (
+            "Granskningen av det strukturerade resultatet är borttagen på din begäran."
+        ),
+        "report_text": "Granskningen av rapporttexten är borttagen på din begäran.",
+    }
+    cleared_en: dict[CheckpointProducerKind, str] = {
+        "transcript": "The transcript review is removed at your request.",
+        "structured_result": (
+            "The structured-result review is removed at your request."
+        ),
+        "report_text": "The report-text review is removed at your request.",
+    }
+    if intent.mode is None:
+        decision = (cleared_sv if locale == "sv" else cleared_en)[intent.producer_kind]
+    else:
+        decision = (decisions_sv if locale == "sv" else decisions_en)[
+            (intent.producer_kind, intent.mode)
+        ]
     return KeyDecisionPayload(
         topic=(topics_sv if locale == "sv" else topics_en)[intent.producer_kind],
-        decision=(decisions_sv if locale == "sv" else decisions_en)[
-            (intent.producer_kind, intent.mode)
-        ],
+        decision=decision,
     )
 
 

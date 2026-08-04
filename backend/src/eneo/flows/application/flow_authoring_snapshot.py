@@ -33,7 +33,7 @@ def current_flow_authoring_spec(
     assistant_snapshot_projector: AssistantSnapshotProjector | None = None,
     form_fields: list[FormFieldSpec] | None = None,
 ) -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
+    spec = FlowDraftSpecCore(
         flow_name=normalize_flow_name(flow_name or "Unnamed Flow"),
         flow_description=flow_description or "",
         steps=[
@@ -47,6 +47,27 @@ def current_flow_authoring_spec(
         ],
         form_fields=form_fields,
     )
+    return _with_document_body_writer_identity(spec)
+
+
+def _with_document_body_writer_identity(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
+    """Reconstruct persisted body-writer identity for every snapshot consumer.
+
+    Persisted Flows do not store ``document_body_writer_step_refs``; the
+    compose-then-render adjacency is the durable identity. Reconstructing it
+    here keeps edit compilation and checkpoint-baseline resolution on one
+    owner.
+    """
+
+    body_writer_refs = tuple(
+        step.plan_step_ref
+        for step, next_step in zip(spec.steps, spec.steps[1:], strict=False)
+        if step.output_mode == OutputMode.COMPOSE_TEXT
+        and next_step.output_mode == OutputMode.RENDER_VERBATIM
+    )
+    if not body_writer_refs:
+        return spec
+    return spec.model_copy(update={"document_body_writer_step_refs": body_writer_refs})
 
 
 def flow_step_to_authoring_spec(

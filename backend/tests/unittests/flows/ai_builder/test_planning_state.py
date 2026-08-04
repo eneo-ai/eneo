@@ -46,8 +46,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_fourteen(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 14
+    def test_builder_schema_version_is_fifteen(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 15
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
@@ -535,6 +535,7 @@ class TestFileRoleEvidenceValidation:
     def test_checkpoint_intent_round_trips_with_closed_producer_and_mode(self) -> None:
         intent = CheckpointIntent(
             producer_kind="transcript",
+            operation="set",
             mode="edit",
             confidence="high",
             evidence=["quote:user_message:user-1:edit the transcript before analysis"],
@@ -547,9 +548,45 @@ class TestFileRoleEvidenceValidation:
         assert restored.checkpoint_intents == [intent]
         assert restored.checkpoint_intents[0].mode.value == "edit"
 
+    def test_checkpoint_set_requires_mode_and_clear_forbids_it(self) -> None:
+        with pytest.raises(ValidationError, match="requires a review mode"):
+            CheckpointIntent(
+                producer_kind="transcript",
+                operation="set",
+                mode=None,
+                confidence="high",
+                evidence=["quote:user_message:user-1:edit the transcript"],
+            )
+        with pytest.raises(ValidationError, match="must not carry a review mode"):
+            CheckpointIntent(
+                producer_kind="transcript",
+                operation="clear",
+                mode="edit",
+                confidence="high",
+                evidence=["quote:user_message:user-1:remove the review"],
+            )
+
+    def test_checkpoint_clear_tombstone_round_trips(self) -> None:
+        intent = CheckpointIntent(
+            producer_kind="structured_result",
+            operation="clear",
+            mode=None,
+            confidence="high",
+            evidence=["quote:user_message:user-1:remove the JSON approval"],
+        )
+        state = PlanningState.empty()
+        state.checkpoint_intents = [intent]
+
+        restored = PlanningState.model_validate_json(state.model_dump_json())
+
+        assert restored.checkpoint_intents == [intent]
+        assert restored.checkpoint_intents[0].operation == "clear"
+        assert restored.checkpoint_intents[0].mode is None
+
     def test_planning_state_rejects_duplicate_checkpoint_producer(self) -> None:
         intent = CheckpointIntent(
             producer_kind="report_text",
+            operation="set",
             mode="view",
             confidence="medium",
             evidence=["quote:user_message:user-1:approve the report"],

@@ -1045,6 +1045,7 @@ class TestGetSessionEndpoint:
                         }
                     ],
                     "file_roles": [],
+                    "checkpoint_updates": [],
                     "secondary_obligations": [],
                     "form_intake": None,
                     "output_schema_fields": None,

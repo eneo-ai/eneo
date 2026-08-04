@@ -32,7 +32,11 @@ from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecyc
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
-from eneo.flows.ai_builder.planning_state import FileRoleEvidence, PlanningState
+from eneo.flows.ai_builder.planning_state import (
+    CheckpointIntent,
+    FileRoleEvidence,
+    PlanningState,
+)
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
@@ -62,6 +66,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.flow_template_asset_service import (
     AttachedTemplateFileUnavailableError,
 )
@@ -93,6 +98,7 @@ async def _noop_savepoint() -> AsyncIterator[None]:
 
 def _make_repo_mock() -> AsyncMock:
     repo = AsyncMock()
+    repo.load_planning_state.return_value = PlanningState.empty()
     repo.savepoint = _noop_savepoint
     return repo
 
@@ -555,7 +561,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         flow_id = uuid4()
 
@@ -611,7 +617,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         session = _make_session(
             tenant_id=user.tenant_id,
@@ -660,7 +666,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         spec = _make_repeated_all_previous_spec()
         session = _make_session(
@@ -696,11 +702,200 @@ class TestAIBuilderPlanLifecycle:
         assert command.spec == spec
 
     @pytest.mark.anyio
+    async def test_apply_plan_rejects_checkpoint_intent_drift_without_repair(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        session.planning_state_version = 1
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=_make_spec(),
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        planning_state = PlanningState.empty()
+        planning_state.checkpoint_intents = [
+            CheckpointIntent(
+                producer_kind="report_text",
+                operation="set",
+                mode=FlowStepReviewMode.EDIT,
+                confidence="high",
+                evidence=["quote:user_message:1:Edit the report before delivery."],
+            )
+        ]
+        repo.load_planning_state.return_value = planning_state
+        authoring_service = _make_authoring_service(steps_created=1, steps_updated=0)
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "architecture_materialization_failed"
+        assert exc_info.value.context == {
+            "reason": "checkpoint_intent_mismatch",
+            "mismatch_count": 1,
+        }
+        authoring_service.prepare.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_apply_plan_passes_checkpoint_parity_with_current_state(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        session.planning_state_version = 1
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=_make_spec(),
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        repo.load_planning_state.return_value = PlanningState.empty()
+        authoring_service = _make_authoring_service(steps_created=1, steps_updated=0)
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+
+        await lifecycle.apply_plan(plan_id=plan.id)
+
+        repo.load_planning_state.assert_awaited_once_with(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        authoring_service.prepare.assert_awaited()
+
+    @pytest.mark.anyio
+    async def test_apply_plan_without_planning_state_is_corruption(self) -> None:
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=_make_spec(),
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        repo.load_planning_state.return_value = None
+        authoring_service = _make_authoring_service(steps_created=1, steps_updated=0)
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+
+        with pytest.raises(RuntimeError):
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        authoring_service.prepare.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_apply_plan_rejects_drift_to_a_clear_tombstone(self) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        spec = _make_spec()
+        spec = spec.model_copy(
+            update={
+                "steps": [
+                    spec.steps[0].model_copy(
+                        update={
+                            "review_policy": FlowStepReviewPolicy(
+                                mode=FlowStepReviewMode.EDIT
+                            )
+                        }
+                    )
+                ]
+            }
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        planning_state = PlanningState.empty()
+        planning_state.checkpoint_intents = [
+            CheckpointIntent(
+                producer_kind="report_text",
+                operation="clear",
+                mode=None,
+                confidence="high",
+                evidence=["quote:user_message:2:Remove the report review."],
+            )
+        ]
+        repo.load_planning_state.return_value = planning_state
+        authoring_service = _make_authoring_service(steps_created=1, steps_updated=0)
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "architecture_materialization_failed"
+        authoring_service.prepare.assert_not_awaited()
+
+    @pytest.mark.anyio
     async def test_apply_plan_carries_one_current_template_attachment_intent(
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         template_file_id = uuid4()
         reference_file_id = uuid4()
@@ -769,7 +964,7 @@ class TestAIBuilderPlanLifecycle:
         has_membership: bool,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         template_file_id = uuid4()
         spec = _make_template_fill_spec()
         session = _make_session(
@@ -820,7 +1015,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         template_file_id = uuid4()
         spec = _make_template_fill_spec()
         session = _make_session(
@@ -869,7 +1064,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         template_file_ids = (uuid4(), uuid4())
         spec = _make_template_fill_spec()
         session = _make_session(
@@ -916,7 +1111,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         flow_id = uuid4()
         spec = FlowDraftSpecCore(
@@ -972,7 +1167,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         spec = FlowDraftSpecCore(
             flow_name="Flow",
@@ -1027,7 +1222,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         flow_id = uuid4()
         spec = FlowDraftSpecCore(
@@ -1086,11 +1281,84 @@ class TestAIBuilderPlanLifecycle:
         repo.update_plan_status.assert_not_awaited()
 
     @pytest.mark.anyio
+    async def test_edit_apply_rejects_drift_to_a_clear_tombstone(self) -> None:
+        user = _make_user()
+        repo = _make_repo_mock()
+        flow_service = AsyncMock()
+        flow_id = uuid4()
+        spec = FlowDraftSpecCore(
+            flow_name="Flow",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="Step A",
+                    assistant_spec=AssistantSpec(instructions="Write the report."),
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.TEXT,
+                    review_policy=FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT),
+                )
+            ],
+        )
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+            edit=_make_plan_edit_approval(spec),
+        )
+        flow_service.get_flow.return_value = _make_flow_for_edit(
+            flow_id=flow_id,
+            space_id=session.space_id,
+            draft_revision=1,
+            step_count=1,
+        )
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session.return_value = session
+        repo.get_session_for_update.return_value = session
+        session.latest_plan_id = plan.id
+        planning_state = PlanningState.empty()
+        planning_state.checkpoint_intents = [
+            CheckpointIntent(
+                producer_kind="report_text",
+                operation="clear",
+                mode=None,
+                confidence="high",
+                evidence=["quote:user_message:3:Remove the report review."],
+            )
+        ]
+        repo.load_planning_state.return_value = planning_state
+        authoring_service = _make_authoring_service(steps_created=0, steps_updated=1)
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        assert exc_info.value.code == "architecture_materialization_failed"
+        assert exc_info.value.context == {
+            "reason": "checkpoint_intent_mismatch",
+            "mismatch_count": 1,
+        }
+        authoring_service.prepare.assert_not_awaited()
+
+    @pytest.mark.anyio
     async def test_apply_plan_rejects_edit_plan_without_edit_approval(
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         flow_id = uuid4()
         session = _make_session(
@@ -1132,7 +1400,7 @@ class TestAIBuilderPlanLifecycle:
     @pytest.mark.anyio
     async def test_apply_plan_rejects_edit_flow_space_mismatch(self):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         flow_id = uuid4()
 
@@ -1176,7 +1444,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         space_service = AsyncMock()
 
@@ -1217,7 +1485,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ):
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
 
         session = _make_session(
@@ -1258,7 +1526,7 @@ class TestAIBuilderPlanLifecycle:
         mock_log_apply_failed,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         flow_id = uuid4()
         session = _make_session(
@@ -1317,7 +1585,7 @@ class TestAIBuilderPlanLifecycle:
         mock_log_apply_failed,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         session = _make_session(
             tenant_id=user.tenant_id,
@@ -1365,7 +1633,7 @@ class TestAIBuilderPlanLifecycle:
         mock_log_apply_failed,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         flow_id = uuid4()
         session = _make_session(
@@ -1470,7 +1738,7 @@ class TestAIBuilderPlanLifecycle:
         mock_log_apply_failed,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         flow_id = uuid4()
         session = _make_session(
@@ -1530,7 +1798,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         space_service = AsyncMock()
 
@@ -1615,7 +1883,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         space_service = AsyncMock()
         session = _make_session(
@@ -1656,7 +1924,7 @@ class TestAIBuilderPlanLifecycle:
         self,
     ) -> None:
         user = _make_user()
-        repo = AsyncMock()
+        repo = _make_repo_mock()
         flow_service = AsyncMock()
         space_service = AsyncMock()
         missing_model_id = uuid4()

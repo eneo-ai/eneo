@@ -224,6 +224,7 @@ def _mock_response(slots: list[dict[str, object]]) -> MagicMock:
         {
             "slots": slots,
             "file_roles": [],
+            "checkpoint_updates": [],
             "form_intake": None,
             "output_schema_fields": None,
             "example_output_constraints": None,

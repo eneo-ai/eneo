@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    CheckpointIntent,
     PlanningSignal,
     PlanningState,
 )
@@ -43,6 +44,8 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_critic_invariants import CriticContext
@@ -54,6 +57,7 @@ if TYPE_CHECKING:
 
 
 EXPECTED_CRITIC_INVARIANT_KINDS = {
+    "checkpoint_intent_mismatch": "architecture",
     "runtime_metadata_requires_form_fields": "semantic",
     "sectioned_form_intake_requires_form_fields": "semantic",
     "rich_workflow_requires_form_fields": "semantic",
@@ -84,6 +88,155 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "mixed_audio_doc_rejects_pseudo_transcription": "architecture",
     "mixed_audio_doc_requires_real_transcription_step": "architecture",
 }
+
+
+def test_critic_requires_typed_checkpoint_on_the_actual_report_producer() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="report_text",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Edit the report before delivery."],
+        )
+    ]
+    draft_step = _step("step_a", "Draft report", "Draft the report.")
+    final_step = _step(
+        "step_b",
+        "Finalize report",
+        "Finalize the report.",
+        input_source=InputSource.PREVIOUS_STEP,
+    )
+    wrong_target = FlowDraftSpecCore(
+        flow_name="Reviewed report",
+        steps=[
+            draft_step.model_copy(
+                update={
+                    "review_policy": FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT)
+                }
+            ),
+            final_step,
+        ],
+        document_body_writer_step_refs=("step_b",),
+    )
+    matching = wrong_target.model_copy(
+        update={
+            "steps": [
+                draft_step,
+                final_step.model_copy(
+                    update={
+                        "review_policy": FlowStepReviewPolicy(
+                            mode=FlowStepReviewMode.EDIT
+                        )
+                    }
+                ),
+            ]
+        }
+    )
+
+    wrong_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [],
+            wrong_target,
+            planning_state=planning_state,
+        )
+    )
+    matching_issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [],
+            matching,
+            planning_state=planning_state,
+        )
+    )
+
+    assert any(issue.id == "checkpoint_intent_mismatch" for issue in wrong_issues)
+    assert not any(
+        issue.id == "checkpoint_intent_mismatch" for issue in matching_issues
+    )
+
+
+def _edit_flow_with_reviewed_step() -> "Flow":
+    flow = _edit_flow()
+    flow.steps[0].review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+    return flow
+
+
+def _existing_report_step(*, reviewed: bool) -> StepSpec:
+    step = _step("step_a", "Draft report", "Draft the report.").model_copy(
+        update={"existing_step_ref": existing_step_ref_for_order(1)}
+    )
+    if reviewed:
+        return step.model_copy(
+            update={"review_policy": FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)}
+        )
+    return step
+
+
+def _edit_checkpoint_issues(
+    spec: FlowDraftSpecCore,
+    planning_state: PlanningState,
+    flow: "Flow",
+) -> list[str]:
+    return [
+        issue.id
+        for issue in evaluate_critic_invariants(
+            build_conversation_critic_context(
+                [],
+                spec,
+                flow=flow,
+                planning_state=planning_state,
+            )
+        )
+        if issue.id == "checkpoint_intent_mismatch"
+    ]
+
+
+def test_edit_critic_preserves_unchanged_existing_checkpoint() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Existing reviewed flow",
+        steps=[_existing_report_step(reviewed=True)],
+    )
+
+    assert not _edit_checkpoint_issues(
+        spec, PlanningState.empty(), _edit_flow_with_reviewed_step()
+    )
+
+
+def test_edit_critic_rejects_unsolicited_checkpoint_removal() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Existing reviewed flow",
+        steps=[_existing_report_step(reviewed=False)],
+    )
+
+    assert _edit_checkpoint_issues(
+        spec, PlanningState.empty(), _edit_flow_with_reviewed_step()
+    )
+
+
+def test_edit_critic_enforces_requested_checkpoint_clear() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="report_text",
+            operation="clear",
+            mode=None,
+            confidence="high",
+            evidence=["quote:user_message:1:Remove the report review."],
+        )
+    ]
+    kept_review = FlowDraftSpecCore(
+        flow_name="Existing reviewed flow",
+        steps=[_existing_report_step(reviewed=True)],
+    )
+    removed_review = FlowDraftSpecCore(
+        flow_name="Existing reviewed flow",
+        steps=[_existing_report_step(reviewed=False)],
+    )
+    flow = _edit_flow_with_reviewed_step()
+
+    assert _edit_checkpoint_issues(kept_review, planning_state, flow)
+    assert not _edit_checkpoint_issues(removed_review, planning_state, flow)
 
 
 def _step(
@@ -3945,6 +4098,7 @@ class TestCriticInvariantRegistry:
         )
 
         assert [inv.id for inv in CRITIC_INVARIANTS] == [
+            "checkpoint_intent_mismatch",
             "runtime_metadata_requires_form_fields",
             "sectioned_form_intake_requires_form_fields",
             "rich_workflow_requires_form_fields",

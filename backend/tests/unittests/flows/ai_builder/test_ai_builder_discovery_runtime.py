@@ -1483,6 +1483,7 @@ async def test_resolved_session_classifies_current_checkpoint_change(
     state.checkpoint_intents = [
         CheckpointIntent(
             producer_kind="report_text",
+            operation="set",
             mode=FlowStepReviewMode.VIEW,
             confidence="high",
             evidence=["quote:user_message:prior:Approve the report."],
@@ -1522,12 +1523,15 @@ async def test_resolved_session_classifies_current_checkpoint_change(
 
     litellm_client.acompletion.assert_awaited_once()
     if expected_mode is None:
-        assert context.planning_state.checkpoint_intents == []
+        assert [
+            (intent.producer_kind, intent.operation, intent.mode)
+            for intent in context.planning_state.checkpoint_intents
+        ] == [("report_text", "clear", None)]
     else:
         assert [
-            (intent.producer_kind, intent.mode)
+            (intent.producer_kind, intent.operation, intent.mode)
             for intent in context.planning_state.checkpoint_intents
-        ] == [("report_text", expected_mode)]
+        ] == [("report_text", "set", expected_mode)]
 
 
 @pytest.mark.asyncio

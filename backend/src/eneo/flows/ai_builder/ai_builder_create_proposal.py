@@ -56,6 +56,7 @@ PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
 )
 _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
     {
+        "checkpoint_transcript_producer_missing",
         "assembly_unsupported_architecture_hints",
         "assembly_document_report_compose_topology_missing",
         "assembly_document_report_citations_unsupported",

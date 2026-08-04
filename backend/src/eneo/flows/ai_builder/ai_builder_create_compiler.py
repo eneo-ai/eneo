@@ -16,6 +16,10 @@ from eneo.flows.ai_builder.ai_builder_assembly import (
     try_compile_create_intent_with_assembly,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    checkpoint_intent_mismatches,
+    project_checkpoint_intents,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import FlowInputFieldProvenance
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
@@ -45,6 +49,7 @@ from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommit,
+    CheckpointIntent,
     PlanningState,
     ReportDisposition,
 )
@@ -95,6 +100,7 @@ class CreateCompileContext:
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
     result_contract_output_fields: tuple[StructuredFieldDraft, ...] = ()
     report_disposition: ReportDisposition | None = None
+    checkpoint_intents: tuple[CheckpointIntent, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.runtime_input_type is InputType.ANY:
@@ -201,6 +207,12 @@ def compile_create_intent_to_spec(
         intent,
         field_names=dropped_form_field_ref_names,
     )
+    if context is not None and context.checkpoint_intents is not None:
+        # Typed checkpoint intents are the only checkpoint owner on create:
+        # model-authored review modes must not reach assembly or lowering.
+        intent_with_admitted_form_refs = _intent_without_review_modes(
+            intent_with_admitted_form_refs
+        )
     known_field_order = [field.name for field in form_fields]
     _raise_for_unplaced_create_form_fields(
         intent_with_admitted_form_refs,
@@ -291,13 +303,60 @@ def compile_create_intent_to_spec(
             field_names=dropped_primary_input_field_names,
             runtime_input_type=runtime_input_type,
         )
-        if context is None or context.selected_template_count is None:
-            return assembly_spec
-        return apply_template_attachment_contract(
-            assembly_spec,
-            selected_template_count=context.selected_template_count,
-            placeholders=context.selected_template_placeholders,
+        compiled_spec = assembly_spec
+        if context is not None and context.selected_template_count is not None:
+            compiled_spec = apply_template_attachment_contract(
+                compiled_spec,
+                selected_template_count=context.selected_template_count,
+                placeholders=context.selected_template_placeholders,
+            )
+        if context is None or context.checkpoint_intents is None:
+            return compiled_spec
+        compiled_spec = project_checkpoint_intents(
+            compiled_spec,
+            context.checkpoint_intents,
         )
+        mismatches = checkpoint_intent_mismatches(
+            compiled_spec,
+            context.checkpoint_intents,
+        )
+        if mismatches:
+            # The transcription step is backend-inserted; the proposal model
+            # cannot add one, so a transcript checkpoint without its producer
+            # is a planning/architecture contradiction, not a repairable plan.
+            transcript_producer_missing = any(
+                mismatch.kind == "producer_missing"
+                and mismatch.producer_kind == "transcript"
+                for mismatch in mismatches
+            )
+            if transcript_producer_missing:
+                raise AIBuilderArchitectureError(
+                    public_code="architecture_materialization_failed",
+                    detail=(
+                        "A transcript review checkpoint was requested, but the "
+                        "committed architecture compiles no transcription step "
+                        "to attach it to."
+                    ),
+                    log_context={
+                        "failure_code": "checkpoint_transcript_producer_missing",
+                        "reason": "checkpoint_transcript_producer_missing",
+                        "mismatch_count": len(mismatches),
+                    },
+                )
+            raise AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                detail=(
+                    "The compiled Flow cannot place every requested review checkpoint "
+                    "on its typed output producer. Add the missing semantic result "
+                    "producer and try again."
+                ),
+                log_context={
+                    "failure_code": "checkpoint_intent_mismatch",
+                    "reason": "checkpoint_intent_mismatch",
+                    "mismatch_count": len(mismatches),
+                },
+            )
+        return compiled_spec
 
 
 def _apply_flow_input_schema(
@@ -406,6 +465,21 @@ def _raise_for_unplaced_create_form_fields(
             "reason": "unplaced_form_fields",
             "field_names": ",".join(unplaced_field_names),
         },
+    )
+
+
+def _intent_without_review_modes(intent: CreateFlowIntent) -> CreateFlowIntent:
+    if all(step.review_mode is None for step in intent.steps):
+        return intent
+    return intent.model_copy(
+        update={
+            "steps": [
+                step.model_copy(update={"review_mode": None})
+                if step.review_mode is not None
+                else step
+                for step in intent.steps
+            ]
+        }
     )
 
 
@@ -522,6 +596,7 @@ def create_compile_context_from_planning_state(
         report_disposition=(
             architecture.report_disposition if architecture is not None else None
         ),
+        checkpoint_intents=tuple(planning_state.checkpoint_intents),
     )
 
 

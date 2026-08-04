@@ -26,6 +26,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    baseline_spec_from_flow_steps,
+    checkpoint_intent_mismatches,
+)
 from eneo.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
     step_references_form_field,
@@ -50,7 +54,10 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
-from eneo.flows.ai_builder.planning_state import AggregationIntent
+from eneo.flows.ai_builder.planning_state import (
+    AggregationIntent,
+    CheckpointIntent,
+)
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
@@ -99,6 +106,7 @@ class CriticContext:
     primary_runtime_input: PrimaryRuntimeInput = "unknown"
     aggregation_intent: AggregationIntent = "linear"
     source_reader_required_field_names: frozenset[str] = frozenset()
+    checkpoint_intents: tuple[CheckpointIntent, ...] | None = None
     resource_catalog: "AIBuilderResourceCatalog | None" = None
 
 
@@ -136,6 +144,41 @@ class CriticInvariant:
 
 def _is_create_context(context: CriticContext) -> bool:
     return context.flow is None
+
+
+def _checkpoint_intent_mismatch_evidence(context: CriticContext) -> bool:
+    if context.checkpoint_intents is None:
+        return False
+    # Edit specs are compared against the existing Flow's checkpoints as the
+    # preserved baseline; create specs against the intent snapshot alone.
+    baseline = (
+        baseline_spec_from_flow_steps(context.flow.steps)
+        if context.flow is not None
+        else None
+    )
+    return bool(
+        checkpoint_intent_mismatches(
+            context.spec,
+            context.checkpoint_intents,
+            baseline_spec=baseline,
+        )
+    )
+
+
+_CHECKPOINT_INTENT_MISMATCH = CriticInvariant(
+    id="checkpoint_intent_mismatch",
+    kind="architecture",
+    description=(
+        "Typed checkpoint intent must match the compiled output producer and mode."
+    ),
+    evidence=_checkpoint_intent_mismatch_evidence,
+    remediation=(
+        "Place each requested review checkpoint on the actual transcript, structured "
+        "result, or report-text producer with the requested review mode, apply "
+        "requested checkpoint removals, and do not add, move, or remove review "
+        "checkpoints the user did not ask to change."
+    ),
+)
 
 
 _SOURCE_SURFACING_INPUT_TYPES = frozenset(
@@ -1548,6 +1591,7 @@ _MIXED_AUDIO_DOC_REQUIRES_REAL_TRANSCRIPTION_STEP = CriticInvariant(
 
 
 CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
+    _CHECKPOINT_INTENT_MISMATCH,
     _RUNTIME_METADATA_REQUIRES_FORM_FIELDS,
     _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS,
     _RICH_WORKFLOW_REQUIRES_FORM_FIELDS,
