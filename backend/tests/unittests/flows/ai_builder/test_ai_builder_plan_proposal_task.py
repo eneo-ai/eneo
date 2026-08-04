@@ -917,6 +917,8 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     assert "committed audio input" in prompt
     assert "backend inserts the first transcription/upload step" in prompt
     assert "after transcription" in prompt
-    assert "include the leading transcription step with review_mode" in prompt
-    assert "set that step's review_mode" in prompt
+    assert "Transcript review is compiler-owned" in prompt
+    assert "include the leading transcription step with review_mode" not in prompt
+    assert "Human review checkpoints are compiler-owned in create mode" in prompt
+    assert "Do not set review_mode" in prompt
     assert "separate AI step" in prompt

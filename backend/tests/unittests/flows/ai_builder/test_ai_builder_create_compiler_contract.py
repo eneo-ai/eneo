@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.pattern_registry import (
 )
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
+    CheckpointIntent,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
@@ -61,6 +62,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.json_types import JsonObject
 
@@ -2331,6 +2333,253 @@ def test_compiler_uses_assembly_path_for_pure_audio_transcription() -> None:
     assert validate_spec(compiled).valid
 
 
+def test_compiler_projects_typed_checkpoint_intents_onto_actual_producers() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "audio"),
+        "terminal_output": _slot("terminal_output", "docx_document"),
+    }
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Edit the transcript."],
+        ),
+        CheckpointIntent(
+            producer_kind="structured_result",
+            operation="set",
+            mode=FlowStepReviewMode.VIEW,
+            confidence="high",
+            evidence=["quote:user_message:1:Approve the extracted facts."],
+        ),
+        CheckpointIntent(
+            producer_kind="report_text",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Edit the report before rendering."],
+        ),
+    ]
+    _commit_architecture(state)
+
+    context = create_compile_context_from_planning_state(state, ui_language="en")
+
+    assert context is not None
+    assert context.checkpoint_intents == tuple(state.checkpoint_intents)
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Reviewed meeting report",
+            "plan_rationale": "Extract facts and write the reviewed report.",
+            "steps": [
+                {
+                    "name": "Extract meeting facts",
+                    "instructions": "Extract the decisions and owners from the transcript.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "decisions",
+                            "field_type": "array",
+                            "description": "Decisions made during the meeting.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write meeting report",
+                    "instructions": "Write the final report from the extracted facts.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    transcription, structured_result, report_text, renderer = compiled.steps
+    assert transcription.output_mode is OutputMode.TRANSCRIBE_ONLY
+    assert transcription.review_policy is not None
+    assert transcription.review_policy.mode is FlowStepReviewMode.EDIT
+    assert structured_result.output_type is OutputType.JSON
+    assert structured_result.review_policy is not None
+    assert structured_result.review_policy.mode is FlowStepReviewMode.VIEW
+    assert report_text.plan_step_ref in (compiled.document_body_writer_step_refs or ())
+    assert report_text.review_policy is not None
+    assert report_text.review_policy.mode is FlowStepReviewMode.EDIT
+    assert renderer.output_mode is OutputMode.RENDER_VERBATIM
+    assert renderer.review_policy is None
+
+
+def test_structured_checkpoint_lands_on_terminal_json_producer_only() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "audio"),
+        "terminal_output": _slot("terminal_output", "docx_document"),
+    }
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="structured_result",
+            operation="set",
+            mode=FlowStepReviewMode.VIEW,
+            confidence="high",
+            evidence=["quote:user_message:1:Approve the final extracted data."],
+        )
+    ]
+    _commit_architecture(state)
+    context = create_compile_context_from_planning_state(state, ui_language="en")
+    assert context is not None
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Two-stage extraction report",
+            "plan_rationale": "Extract, refine, then write the report.",
+            "steps": [
+                {
+                    "name": "Extract raw facts",
+                    "instructions": "Extract raw decisions from the transcript.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "raw_decisions",
+                            "field_type": "array",
+                            "description": "Raw decision candidates.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Refine decisions",
+                    "instructions": "Deduplicate and refine the decisions.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "decisions",
+                            "field_type": "array",
+                            "description": "Final decisions.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the report from the final decisions.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    json_steps = [
+        step for step in compiled.steps if step.output_type is OutputType.JSON
+    ]
+    assert len(json_steps) == 2
+    first_json, terminal_json = json_steps
+    assert first_json.review_policy is None
+    assert terminal_json.review_policy is not None
+    assert terminal_json.review_policy.mode is FlowStepReviewMode.VIEW
+    reviewed_refs = [
+        step.plan_step_ref for step in compiled.steps if step.review_policy is not None
+    ]
+    assert reviewed_refs == [terminal_json.plan_step_ref]
+
+
+def test_model_review_modes_are_stripped_before_assembly_lowering() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "audio"),
+        "terminal_output": _slot("terminal_output", "docx_document"),
+    }
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="report_text",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Edit the report before rendering."],
+        )
+    ]
+    _commit_architecture(state)
+    context = create_compile_context_from_planning_state(state, ui_language="en")
+    assert context is not None
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Reviewed meeting report",
+            "plan_rationale": "Extract facts and write the reviewed report.",
+            "steps": [
+                {
+                    "name": "Extract meeting facts",
+                    "instructions": "Extract the decisions from the transcript.",
+                    "output_type": "json",
+                    "review_mode": "view",
+                    "output_fields": [
+                        {
+                            "name": "decisions",
+                            "field_type": "array",
+                            "description": "Decisions made during the meeting.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write meeting report",
+                    "instructions": "Write the final report from the facts.",
+                    "output_type": "text",
+                    "review_mode": "view",
+                },
+            ],
+        }
+    )
+
+    # Conflicting model-authored review modes must not reach lowering (which
+    # would reject them) or survive projection; the typed intent wins.
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    reviewed = [step for step in compiled.steps if step.review_policy is not None]
+    assert len(reviewed) == 1
+    assert reviewed[0].plan_step_ref in (compiled.document_body_writer_step_refs or ())
+    assert reviewed[0].review_policy is not None
+    assert reviewed[0].review_policy.mode is FlowStepReviewMode.EDIT
+
+
+def test_transcript_checkpoint_without_transcription_step_is_a_contradiction() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "text"),
+        "terminal_output": _slot("terminal_output", "structured_text"),
+    }
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Edit the transcript."],
+        )
+    ]
+    _commit_architecture(state)
+    context = create_compile_context_from_planning_state(state, ui_language="en")
+    assert context is not None
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Text summary",
+            "plan_rationale": "Summarize the text.",
+            "steps": [
+                {
+                    "name": "Summarize",
+                    "instructions": "Summarize the submitted text.",
+                    "output_type": "text",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(intent, context=context)
+
+    assert (
+        exc_info.value.log_context["failure_code"]
+        == "checkpoint_transcript_producer_missing"
+    )
+
+
 @pytest.mark.parametrize(
     ("ui_language", "actual_input_prefix"),
     [
@@ -2452,6 +2701,15 @@ def test_compiler_accepts_audio_artifact_with_runtime_form_field_overlay() -> No
             label="handläggare",
             provenance="user_confirmed",
         ),
+    ]
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="structured_result",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Edit the extracted facts."],
+        )
     ]
     architecture = derive_architecture_commit_draft(state)
 
@@ -2698,6 +2956,15 @@ def test_compiler_accepts_docx_template_with_runtime_form_field_overlay() -> Non
             variable_name="arendenummer",
             label="ärendenummer",
             provenance="user_confirmed",
+        )
+    ]
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="report_text",
+            operation="set",
+            mode=FlowStepReviewMode.VIEW,
+            confidence="high",
+            evidence=["quote:user_message:1:Review the document content."],
         )
     ]
     _commit_architecture(state)

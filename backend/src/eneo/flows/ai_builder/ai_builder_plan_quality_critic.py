@@ -153,6 +153,11 @@ def build_conversation_critic_context(
                 else set()
             )
         ),
+        checkpoint_intents=(
+            tuple(planning_state.checkpoint_intents)
+            if planning_state is not None
+            else None
+        ),
         resource_catalog=resource_catalog,
         requested_output_sections=requested_output_sections,
     )

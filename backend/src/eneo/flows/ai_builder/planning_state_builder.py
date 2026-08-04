@@ -665,12 +665,21 @@ def _merge_model_checkpoint_updates(
         if update.operation == "clear":
             if update.mode is not None:
                 raise ValueError("checkpoint clear must not carry a review mode")
-            intents_by_producer.pop(update.producer_kind, None)
+            # A requested removal is a typed tombstone, not absence: absence
+            # means "unchanged", which the edit lane must distinguish.
+            intents_by_producer[update.producer_kind] = CheckpointIntent(
+                producer_kind=update.producer_kind,
+                operation="clear",
+                mode=None,
+                confidence=update.confidence,
+                evidence=[item.planning_reference() for item in update.evidence],
+            )
             continue
         if update.mode is None:
             raise ValueError("checkpoint update requires a review mode")
         intents_by_producer[update.producer_kind] = CheckpointIntent(
             producer_kind=update.producer_kind,
+            operation="set",
             mode=update.mode,
             confidence=update.confidence,
             evidence=[item.planning_reference() for item in update.evidence],

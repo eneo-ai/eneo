@@ -47,6 +47,7 @@ plan against current source, not carried over blind).
 
 | When | What |
 |---|---|
+| 2026-08-04 | **Canonical checkpoint parity (B4(b))**: one shared requested-versus-compiled checkpoint predicate (`ai_builder_checkpoint_contract.py`) now powers create compilation, the critic registry, and apply-time drift re-checks. Checkpoint intents are tri-state — `set` carries a mode, `clear` is a typed tombstone, absence means unchanged (`BUILDER_SCHEMA_VERSION` 15). Create compilation strips model-authored review modes before assembly and projects intents onto their terminal producers (transcript review onto the backend-inserted transcription step); the proposal prompt no longer asks for `review_mode` in create mode and the duplicate leading-transcription instruction is deleted. The edit lane compares against the existing Flow's canonical authoring snapshot as the preserved baseline — body-writer identity reconstruction moved into `current_flow_authoring_spec` so edit compilation and checkpoint comparison share one owner — and a `set`/`clear` intent releases its producer kind's baseline checkpoint on both sides, so requested changes survive retyped or relocated producers while unsolicited additions and removals are rejected. The never-shipped `planning_state_version == 0` apply bypass is deleted; a transcript checkpoint without a transcription producer is a non-model-repairable contradiction; confirmation renders requested clears bilingually; four stale `checkpoint_updates` fixtures repaired, restoring the green Builder fence (`3c2a1faf1`; Codex gate green 8/10 after six iterations, 3,123 Builder + 6,204 flows unit tests passed, Pyright 0) |
 | 2026-08-03 | **Classifier attempts remain observable without weakening failure ownership**: the existing classifier metadata now records a closed resolved, no-content, parse-failed, or skipped-no-resolvable-slots outcome; only resolved attempts carry or replay semantic facts, provider failures remain in the typed provider-turn lifecycle, invalid internal input fails before provider work, and validated metadata is admitted before live planning state changes. Route and source identities are preserved without unrelated local caps, malformed non-string responses remain measurable even when provider usage is absent, and the strict response parser shares its envelope owner with the emitted schema (`3afe6e947`; Codex gate green 8/10, 3,054 Builder tests passed) |
 | 2026-08-03 | **Complete source-capture requirements**: compiler guidance now renders every already-admitted typed field in deterministic order, preserves complete descriptions, and no longer suppresses requirements through 8-field, 96-character, 900-character, or substring heuristics. The selected Flow-step model's existing save-time prompt admission and typed runtime context-window failure remain the fit owners; no replacement cap or admin setting was added (`aa411ec1c`; Codex gate green 9/10, 6 focused tests plus reused admission/overflow checks passed) |
 | 2026-08-03 | **Related document packages remain linear**: several related files in one run no longer imply cross-step Flow fan-in; only explicit commit-grade same-run comparison selects non-linear dataflow, so document-package journeys can compile their declared JSON terminal contract instead of failing after proposal. The separate compare-to-JSON product decision remains fail-closed and unchanged (`85516be94`; Codex gate green 8/10, 3,045 Builder tests passed) |
@@ -572,15 +573,14 @@ plan above controls all other ordering.
   remain askable; the only default is surfaced at confirmation and persisted.
   The seven registered quality ids and seven policy keys are pinned equal; the
   earlier claim of a current unknown-candidate crash was disproven. *(M)*
-- **B4** (two ordered slices): (a) the existing understanding pass records typed,
-  cited checkpoint intents and confirmation exposes them; (b) compile/apply and
-  the critic share one canonical requested-versus-compiled checkpoint predicate.
-  For audio, project transcript review through `CreateCompileContext` onto the
-  existing fixed transcription step, keep downstream analysis/report review on
-  its requested producer, and delete the proposal instruction that asks the
-  model to author a duplicate transcription step. Keep legitimate downstream
-  transcript-input guidance. No parallel HITL classifier, phrase detector, or
-  duplicate matching rule. *(M)*
+- **B4** (two ordered slices): (a) **LANDED `b70a91dc1`** — the understanding
+  pass records typed, cited checkpoint intents and confirmation exposes them.
+  (b) **LANDED `3c2a1faf1`** — compile/apply and the critic share one canonical
+  requested-versus-compiled checkpoint predicate with tri-state set/clear
+  intents; transcript review projects onto the fixed transcription step; the
+  duplicate-transcription proposal instruction is deleted; the edit lane
+  enforces the existing-Flow baseline with intent-scoped releases. No parallel
+  HITL classifier, phrase detector, or duplicate matching rule was added. *(M)*
 - **B5a** (= item 2d): **LANDED** `4b0796152`. *(S)*
 - **B5b** (= item 4b): **LANDED** `5509eef84..fb6934b5a`. Factual execution
   shape, shared mapped-execution ownership, heuristic-lint deletion, and
@@ -704,12 +704,26 @@ plan above controls all other ordering.
   save-time prompt admission and typed runtime context-window refusal remain the
   fit owners. More than eight fields, a complete long description, and a short
   name already occurring inside authored instructions are covered without a
-  duplicate test matrix or admin setting. (e) make
-  document-report lowering total for each supported committed report disposition
-  so per-source readers, overview/body composition, and deterministic rendering
-  cannot enter a futile model-repair loop; keep the low-level assembly invariant
-  for corrupt or impossible internal plans rather than duplicating the rule in
-  the turn controller. *(M)*
+  duplicate test matrix or admin setting. (e) PARTIAL —
+  deterministic report lowering and its assembly owner landed (`f2848f110`,
+  `70e30ac28`): per-disposition lowering is exhaustively typed (assert_never
+  over per_source_sections/synthesized_overview/both) and the low-level
+  assembly invariant stays fail-closed and non-model-repairable without
+  turn-controller duplication. A 2026-08-04 read-only source audit names the
+  remaining completion scope before (e) can close: (e-r1) multi-step committed
+  report plans still depend on the model naming a documents-family array for
+  the per-source reader (only single-step plans are rewritten;
+  `report_disposition` never reaches the proposal prompt), otherwise assembly
+  fail-closes; (e-r2) a committed disposition with `runtime_max_files`
+  unset or 1 never gets a per-source reader and dead-ends in
+  `assembly_document_report_compose_topology_missing` instead of being lowered
+  or blocked upstream; (e-r3) the lowered compose topology can trip semantic
+  critic invariants (`final_text_step_must_reference_relevant_structured_outputs`,
+  `requested_output_sections_require_section_writers`) whose remediation the
+  model cannot satisfy because lowering folds its changes back — exempt
+  compiler-owned compose topology or bind it so the rules are structurally
+  satisfied, and add a finalization-level no-critic-issues proof per
+  disposition. *(M)*
 - **B11** (exact-template workflow topology): after B4's checkpoint-intent owner
   is available, allow justified analysis/validation/review stages before the
   existing deterministic TEMPLATE_FILL terminal step. Preserve the exact selected

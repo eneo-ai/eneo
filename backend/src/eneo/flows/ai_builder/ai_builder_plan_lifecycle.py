@@ -10,6 +10,9 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyResultResponse,
 )
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    checkpoint_intent_mismatches,
+)
 from eneo.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
     serialize_space_models,
@@ -443,6 +446,10 @@ class AIBuilderPlanLifecycle:
             plan=plan,
             requested_expected_revision=expected_revision,
         )
+        await self._require_checkpoint_intent_parity_for_apply(
+            session=session,
+            spec=plan.spec,
+        )
         default_transcription_model_id = (
             await self._resolve_default_transcription_model_id(session.space_id)
         )
@@ -558,6 +565,39 @@ class AIBuilderPlanLifecycle:
             steps_created=authoring_result.steps_created,
             steps_updated=authoring_result.steps_updated,
             steps_removed=authoring_result.steps_removed,
+        )
+
+    async def _require_checkpoint_intent_parity_for_apply(
+        self,
+        *,
+        session: BuilderSession,
+        spec: FlowDraftSpecCore,
+    ) -> None:
+        # An approved plan only exists after a proposal turn committed planning
+        # state, so a missing planning state here is corruption, not a legacy
+        # session shape.
+        planning_state = await self.repo.load_planning_state(
+            session_id=session.id,
+            tenant_id=self.user.tenant_id,
+        )
+        if planning_state is None:
+            raise RuntimeError(
+                "AI Builder session has an approved plan without planning state."
+            )
+        mismatches = checkpoint_intent_mismatches(
+            spec,
+            planning_state.checkpoint_intents,
+            enforce_unrequested_reviews=(session.target_kind == TargetKind.CREATE),
+        )
+        if not mismatches:
+            return
+        raise AIBuilderBadRequestException(
+            "The approved plan no longer matches the confirmed review checkpoints. Generate a new proposal and try again.",
+            code=AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED,
+            context={
+                "reason": "checkpoint_intent_mismatch",
+                "mismatch_count": len(mismatches),
+            },
         )
 
     def _build_authoring_command(

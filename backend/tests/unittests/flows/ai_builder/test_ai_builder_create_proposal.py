@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
+    CheckpointIntent,
     MappedFileLimit,
     PlanningState,
     ResolvedSlot,
@@ -49,6 +50,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.authoring_command_assertions import (
     assert_create_spec_prepares_through_authoring_command_async,
 )
@@ -474,6 +476,15 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
             label="Handläggare",
             provenance="user_confirmed",
         ),
+    ]
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="structured_result",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Edit the extracted facts."],
+        )
     ]
 
     result = await process_create_intent_arguments(

@@ -1957,11 +1957,26 @@ class TestSlotClassificationMetadataReplay:
         )
 
         assert [
-            (intent.producer_kind, intent.mode.value, intent.evidence)
+            (
+                intent.producer_kind,
+                intent.operation,
+                intent.mode.value if intent.mode is not None else None,
+                intent.evidence,
+            )
             for intent in state.checkpoint_intents
         ] == [
             (
+                "structured_result",
+                "clear",
+                None,
+                [
+                    "quote:user_message:test-source:"
+                    "Do not pause for structured result approval."
+                ],
+            ),
+            (
                 "transcript",
+                "set",
                 "edit",
                 ["quote:user_message:test-source:Edit the transcript before analysis."],
             ),

@@ -996,6 +996,7 @@ def test_confirmation_exposes_committed_checkpoint_intent(
     state.checkpoint_intents = [
         CheckpointIntent(
             producer_kind="transcript",
+            operation="set",
             mode="edit",
             confidence="high",
             evidence=["quote:user_message:user-1:edit the transcript"],
@@ -1010,11 +1011,42 @@ def test_confirmation_exposes_committed_checkpoint_intent(
     assert decisions[topic] == decision_text
 
 
+@pytest.mark.parametrize(
+    ("ui_language", "decision_text"),
+    [
+        ("en", "The transcript review is removed at your request."),
+        ("sv", "Granskningen av transkriberingen är borttagen på din begäran."),
+    ],
+)
+def test_confirmation_exposes_requested_checkpoint_clear(
+    ui_language: str,
+    decision_text: str,
+) -> None:
+    state = _state(primary_runtime_input="audio", terminal_output="structured_text")
+    state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="clear",
+            mode=None,
+            confidence="high",
+            evidence=["quote:user_message:user-1:remove the transcript review"],
+        )
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language=ui_language)
+
+    assert isinstance(decision, ConfirmRequirements)
+    decisions = {item.topic: item.decision for item in decision.payload.key_decisions}
+    assert decision_text in decisions.values()
+
+
 def test_checkpoint_intent_change_requires_fresh_confirmation() -> None:
     state = _state(primary_runtime_input="audio", terminal_output="structured_text")
     state.checkpoint_intents = [
         CheckpointIntent(
             producer_kind="transcript",
+            operation="set",
             mode="view",
             confidence="high",
             evidence=["quote:user_message:user-1:approve the transcript"],
@@ -1032,6 +1064,7 @@ def test_checkpoint_intent_change_requires_fresh_confirmation() -> None:
     state.checkpoint_intents = [
         CheckpointIntent(
             producer_kind="transcript",
+            operation="set",
             mode="edit",
             confidence="high",
             evidence=["quote:user_message:user-1:edit the transcript"],

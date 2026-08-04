@@ -55,7 +55,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 14
+BUILDER_SCHEMA_VERSION: int = 15
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -255,14 +255,29 @@ class ResolvedSlot(_PlanningModel):
         return assert_never(self.source)
 
 
+CheckpointIntentOperation = Literal["set", "clear"]
+
+
 class CheckpointIntent(_PlanningModel):
+    """One requested checkpoint change per producer kind.
+
+    ``set`` requests a review with ``mode`` on the producer; ``clear`` is a
+    typed tombstone for an explicitly requested removal. Absence of an intent
+    means the user requested no change for that producer.
+    """
+
     producer_kind: CheckpointProducerKind
-    mode: FlowStepReviewMode
+    operation: CheckpointIntentOperation
+    mode: FlowStepReviewMode | None
     confidence: SlotConfidence
     evidence: list[str] = Field(min_length=1, max_length=3)
 
     @model_validator(mode="after")
     def require_commit_grade_evidence(self) -> CheckpointIntent:
+        if self.operation == "set" and self.mode is None:
+            raise ValueError("checkpoint set intent requires a review mode")
+        if self.operation == "clear" and self.mode is not None:
+            raise ValueError("checkpoint clear intent must not carry a review mode")
         if self.confidence == "low":
             raise ValueError("checkpoint intent requires supported confidence")
         if any(not item.startswith("quote:") for item in self.evidence):

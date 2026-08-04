@@ -617,8 +617,16 @@ def test_compaction_retains_checkpoint_revocation_for_rebuild() -> None:
         tail_messages=3,
     )
 
-    assert build_planning_state_from_conversation(conversation).checkpoint_intents == []
-    assert build_planning_state_from_conversation(compacted).checkpoint_intents == []
+    full_intents = build_planning_state_from_conversation(
+        conversation
+    ).checkpoint_intents
+    compacted_intents = build_planning_state_from_conversation(
+        compacted
+    ).checkpoint_intents
+    assert [
+        (intent.producer_kind, intent.operation, intent.mode) for intent in full_intents
+    ] == [("report_text", "clear", None)]
+    assert compacted_intents == full_intents
 
 
 def test_compaction_preserves_latest_complete_json_field_snapshot() -> None:

@@ -72,10 +72,13 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
+    CheckpointIntent,
     PlanningState,
     PlanningStatePayloadTooLargeError,
     StepTriple,
 )
+from eneo.flows.flow_authoring_spec import OutputMode
+from eneo.flows.flow_review_policy import FlowStepReviewMode
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _compiled_edit_proposal,
     _compiled_outline_proposal,
@@ -180,15 +183,6 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
             "plan_rationale": "Ground, draft, review, and finalize one report.",
             "steps": [
                 {
-                    "name": "Transcribe and review recording",
-                    "instructions": (
-                        "Transcribe the audio recording and let the case owner "
-                        "correct the transcript before analysis."
-                    ),
-                    "output_type": "text",
-                    "review_mode": "edit",
-                },
-                {
                     "name": "Analyze stable decision evidence",
                     "instructions": (
                         "Extract grounded facts, risks, and recommended actions "
@@ -217,10 +211,9 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                     "name": "Write and review decision report",
                     "instructions": (
                         "Write the complete final decision report from the extracted "
-                        "facts, risks, and actions, then let the case owner edit it."
+                        "facts, risks, and actions."
                     ),
                     "output_type": "text",
-                    "review_mode": "edit",
                 },
             ],
         },
@@ -249,6 +242,22 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
             required_capabilities=["input_audio", "output_mode_pass_through"],
         )
     )
+    planning_state.checkpoint_intents = [
+        CheckpointIntent(
+            producer_kind="transcript",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Correct the transcript."],
+        ),
+        CheckpointIntent(
+            producer_kind="report_text",
+            operation="set",
+            mode=FlowStepReviewMode.EDIT,
+            confidence="high",
+            evidence=["quote:user_message:1:Edit the decision report."],
+        ),
+    ]
     resource_catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
@@ -315,11 +324,22 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
     compiled = captured_compiled[0]
     step_names = [step.name for step in compiled.content.spec.steps]
     assert len(step_names) == len({name.casefold() for name in step_names})
-    review_steps = [
-        step for step in compiled.content.spec.steps if step.review_policy is not None
+    compiled_steps = compiled.content.spec.steps
+    transcription_steps = [
+        step
+        for step in compiled_steps
+        if step.output_mode is OutputMode.TRANSCRIBE_ONLY
     ]
+    assert len(transcription_steps) == 1
+    assert compiled_steps[0] is transcription_steps[0]
+    assert transcription_steps[0].review_policy is not None
+    assert transcription_steps[0].review_policy.mode is FlowStepReviewMode.EDIT
+    review_steps = [step for step in compiled_steps if step.review_policy is not None]
     assert len(review_steps) == 2
-    assert all(step.output_type.value in {"json", "text"} for step in review_steps)
+    body_writer_refs = compiled.content.spec.document_body_writer_step_refs or ()
+    assert review_steps[1].plan_step_ref in body_writer_refs
+    assert review_steps[1].review_policy is not None
+    assert review_steps[1].review_policy.mode is FlowStepReviewMode.EDIT
     planner_telemetry = captured_telemetry[0]
     assert planner_telemetry["llm_calls_made"] == 1
     assert planner_telemetry["repair_attempts"] == 0
