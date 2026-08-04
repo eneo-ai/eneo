@@ -371,6 +371,30 @@ external release gate (item 10); BM0.2 is external (item 10).
     directional. Cohort note: `smoke_v3` overlaps but is not identical to the
     earlier manual 12-case list, so cross-receipt deltas are directional
     only.
+    The full identity-verified 120-case diagnostic then ran once on
+    2026-08-04 against the served `6ccb6f631` build (clean client checkout,
+    server `GIT_COMMIT`-stamped, locked Luna route). 116 live journeys (4
+    fixture skips): 46 first-pass plans, 19 repaired plans, 15 intended
+    clarification stops, 10 stalls, 25 Builder errors, 1 interaction-limit
+    stop, 0 provider-unknown outcomes, 99 questions; 92/116 journeys failed
+    at least one configured check (sentinel verdict: fail, 2 required-case
+    expectation failures). Versus the `0ee738f41` baseline this is roughly
+    flat in aggregate (64→65 plans; 49→46 first-pass; 23→25 Builder errors;
+    116→99 questions) — expected, because B4(b) targeted checkpoint
+    ownership, not the dominant failure owners. Decisive ranking signal: the
+    25 Builder errors decompose into
+    `assembly_document_report_compose_topology_missing` ×10 (the recorded
+    B10(e) residuals), `self_correction_quality_failure` ×5 +
+    `self_correction_invalid_plan` ×4 (repair exhaustion),
+    `assembly_document_report_citations_unsupported` ×4 (newly measured
+    report+citations gap, needs a support-or-refuse-before-proposal
+    disposition), and `architecture_critic_invariant_failed` ×2. No
+    checkpoint-related failure code appears anywhere — B4(b) shows no
+    regression at scale. Next-slice ranking from this evidence: (1) complete
+    B10(e) residuals; (2) checkpoint-classifier precision (smoke finding);
+    (3) B7(h) purpose-first deletion (product decision recorded 2026-08-04:
+    purpose-first); (4) the report-citations disposition. Single repetition:
+    directional, no variance claims.
     A 2026-08-03 source-verified Fable review ranks the product work without
     creating another roadmap. First preserve the classifier's validated
     explicit evidence level through `ResolvedSlot`, action admission, replay,
