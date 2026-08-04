@@ -178,6 +178,7 @@
       <p class="text-sm">{m.chunk_overlap_label()}</p>
       <div class="flex items-center gap-3 pt-3">
         <Input.Slider
+          label={m.chunk_overlap_label()}
           value={overlapIsDefault ? defaultPercentOnStep : overlapPercent}
           min={0}
           max={maxOverlapPercent}

@@ -1215,6 +1215,10 @@ class TestDeltaChangesProcessing:
         no item, the chunk-aware comparison in _process_info_blob never sees these
         blobs — so the drift has to be caught here or the source keeps obsolete
         boundaries until Graph happens to report each document.
+
+        See test_changed_items_force_full_sync_when_chunking_drifted for the same
+        rule under a non-empty delta, which is the case that actually generalises:
+        a delta result enumerates only changed items either way.
         """
         mock_integration_knowledge.delta_token = "existing-delta-token-123"
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
@@ -1250,6 +1254,100 @@ class TestDeltaChangesProcessing:
         mock_pull.assert_called_once()
         assert mock_integration_knowledge.delta_token is None
         assert result == "Imported 5 files"
+
+    async def test_changed_items_force_full_sync_when_chunking_drifted(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """A non-empty delta must not advance the token past drifted blobs.
+
+        This is the case a zero-item-only check misses. Graph reports one changed
+        document, the loop republishes that one with current chunking, and the token
+        advances — leaving every untouched blob on its old stamp. Nothing enumerates
+        them afterwards, and a webhook-driven source may never be invoked again, so
+        the source stays indexed at two different granularities indefinitely.
+
+        The drift is therefore judged before the item count, and a difference
+        discards the delta result rather than processing it.
+        """
+        mock_integration_knowledge.delta_token = "existing-delta-token-123"
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.any_active_chunking_differs_for_integration_knowledge = AsyncMock(
+            return_value=True
+        )
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(service, "pull_content", new_callable=AsyncMock) as mock_pull,
+            patch.object(
+                service, "_process_info_blob", new_callable=AsyncMock
+            ) as mock_process,
+        ):
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_default_drive_id.return_value = "drive-123"
+            mock_client.get_delta_changes.return_value = (
+                [{"id": "item-1", "name": "changed.docx", "cTag": "ctag-1"}],
+                "new-delta-token",
+            )
+            mock_client_class.return_value = mock_client
+            mock_pull.return_value = "Imported 5 files"
+
+            result = await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                site_id="site-123",
+            )
+
+        mock_pull.assert_called_once()
+        assert mock_integration_knowledge.delta_token is None
+        assert result == "Imported 5 files"
+        # The delta result is discarded rather than half-applied: processing the one
+        # changed item and then falling back would embed it twice.
+        mock_process.assert_not_called()
+
+    async def test_changed_items_stay_incremental_when_chunking_matches(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """A matching source keeps the incremental path — no full re-sync."""
+        mock_integration_knowledge.delta_token = "existing-delta-token-123"
+        mock_integration_knowledge.drive_id = "drive-123"
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(service, "pull_content", new_callable=AsyncMock) as mock_pull,
+        ):
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_default_drive_id.return_value = "drive-123"
+            mock_client.get_delta_changes.return_value = (
+                [{"id": "item-1", "name": "changed.docx", "cTag": "ctag-1"}],
+                "new-delta-token",
+            )
+            mock_client_class.return_value = mock_client
+
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                site_id="site-123",
+            )
+
+        mock_pull.assert_not_called()
+        assert mock_integration_knowledge.delta_token == "new-delta-token"
 
     async def test_zero_changes_stays_a_no_op_when_chunking_matches(
         self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge

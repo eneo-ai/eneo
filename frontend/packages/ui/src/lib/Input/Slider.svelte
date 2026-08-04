@@ -9,6 +9,13 @@
   export let max: number;
   export let step: number;
   export let onInput: ((value: number) => void) | undefined = undefined;
+  /**
+   * Accessible name for the thumb, which is the element carrying role="slider".
+   * A visible paragraph next to the track is not programmatically associated with
+   * it, so without this the control is announced with no name at all. Optional so
+   * existing consumers are unchanged: Svelte omits an undefined attribute.
+   */
+  export let label: string | undefined = undefined;
 
   const {
     elements: { root, range, thumbs },
@@ -45,6 +52,7 @@
   <span
     {...$thumbs[0]}
     use:thumbs
+    aria-label={label}
     class="border-strongest bg-primary focus:ring-default h-5 w-5 rounded-full border shadow-md focus:ring-4"
   ></span>
 </div>

@@ -546,41 +546,46 @@ class SharePointContentService:
                         )
                         folder_scope_path_unresolved = True
 
-                if len(changes) == 0:
-                    # "No changes" is only true of the content. The chunking in force
-                    # can have moved since these blobs were stamped, and a delta no-op
-                    # never enumerates an item, so the chunk-aware comparison in
-                    # _process_info_blob would never see them. Recover the same way an
-                    # expired token does, rather than leaving the source on obsolete
-                    # boundaries until Graph happens to report each document.
-                    effective_size, effective_overlap = resolve_chunk_config(
-                        integration_knowledge.chunk_size,
-                        integration_knowledge.chunk_overlap,
-                    )
-                    if await self.info_blob_service.repo.any_active_chunking_differs_for_integration_knowledge(
+                # A delta result enumerates only what Graph considers changed, so
+                # every other active blob is skipped by construction — whether the
+                # result holds no items or many. The chunk-aware comparison in
+                # _process_info_blob therefore never sees them, and advancing the
+                # token would leave them on obsolete boundaries until Graph happens
+                # to report each document again. For a webhook-driven source that may
+                # be never. So this is judged before the item count, not inside the
+                # no-op branch: a stamp drift discards the delta result entirely and
+                # recovers the same way an expired token does.
+                effective_size, effective_overlap = resolve_chunk_config(
+                    integration_knowledge.chunk_size,
+                    integration_knowledge.chunk_overlap,
+                )
+                if await self.info_blob_service.repo.any_active_chunking_differs_for_integration_knowledge(
+                    resolved_integration_knowledge_id,
+                    effective_chunk_size=effective_size,
+                    effective_chunk_overlap=effective_overlap,
+                ):
+                    logger.warning(
+                        "Chunking changed since integration knowledge %s was "
+                        "indexed; discarding the delta result, clearing the delta "
+                        "token and falling back to full sync so every stored chunk "
+                        "is rebuilt (delta reported %d changed item(s))",
                         resolved_integration_knowledge_id,
-                        effective_chunk_size=effective_size,
-                        effective_chunk_overlap=effective_overlap,
-                    ):
-                        logger.warning(
-                            "Chunking changed since integration knowledge %s was "
-                            "indexed; clearing the delta token and falling back to "
-                            "full sync so stored chunks are rebuilt",
-                            resolved_integration_knowledge_id,
-                        )
-                        integration_knowledge.delta_token = None
-                        await self.integration_knowledge_repo.update(
-                            obj=integration_knowledge
-                        )
-                        return await self.pull_content(
-                            token_id=token_id,
-                            tenant_app_id=tenant_app_id,
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            site_id=resolved_site_id,
-                            drive_id=resolved_drive_id,
-                            resource_type=resource_type,
-                        )
+                        len(changes),
+                    )
+                    integration_knowledge.delta_token = None
+                    await self.integration_knowledge_repo.update(
+                        obj=integration_knowledge
+                    )
+                    return await self.pull_content(
+                        token_id=token_id,
+                        tenant_app_id=tenant_app_id,
+                        integration_knowledge_id=resolved_integration_knowledge_id,
+                        site_id=resolved_site_id,
+                        drive_id=resolved_drive_id,
+                        resource_type=resource_type,
+                    )
 
+                if len(changes) == 0:
                     logger.info(
                         f"Delta query returned 0 changes for integration knowledge {integration_knowledge_id}. "
                         "No updates needed - SharePoint is in sync with database."
