@@ -390,11 +390,34 @@ external release gate (item 10); BM0.2 is external (item 10).
     report+citations gap, needs a support-or-refuse-before-proposal
     disposition), and `architecture_critic_invariant_failed` ×2. No
     checkpoint-related failure code appears anywhere — B4(b) shows no
-    regression at scale. Next-slice ranking from this evidence: (1) complete
-    B10(e) residuals; (2) checkpoint-classifier precision (smoke finding);
-    (3) B7(h) purpose-first deletion (product decision recorded 2026-08-04:
-    purpose-first); (4) the report-citations disposition. Single repetition:
-    directional, no variance claims.
+    regression at scale. A same-day causal cross-tab over the receipt
+    (unique journeys → earliest causal blocker, peer-review-mandated)
+    supersedes the first same-day ranking. Unique-journey mass:
+    first-question relevance 22 (the purpose-first B7(h) domain; product
+    decision recorded 2026-08-04: purpose-first), prose-leaf/schema retention
+    20 pure + 9 mixed, report topology (B10(e) residuals) 10 hard terminal
+    errors, corpus answer-closure stalls 10, repair exhaustion 9, citations
+    4, checkpoint-involved 3. Repair-exhaustion attribution: 5 of 9 trace to
+    the phrase-scanning blocking critic rules
+    (`explicit_json_contract_request_without_step`,
+    `rich_workflow_requires_json_contract_step`) — owned by the
+    typed-evidence critic migration, not a new pre-proposal slice; 2 of 9 are
+    the parked B9(e2) compare-to-JSON family (two more live evidence cases);
+    2 misc. Adopted order after landing B7(j)+B11: (1) B7(h) purpose-first
+    question policy plus blocking-critic typed-evidence migration (~27
+    unique journeys); (2) prose-leaf recall in the existing `SchemaEvidence`
+    owner (~27); (3) B10(e) completion with EXPLICIT separate dispositions
+    for policy-unset `None`, unaccepted `None`, and accepted `1` mapped
+    limits (10; after B11 lands — shared critic file); (4)
+    checkpoint-classifier precision with a refusal/negation prompt
+    invariant, deterministic parsing tests, and a locked sv/en
+    add/refuse/clear/correct matrix (after B7(j) — shared owner); (5) corpus
+    answer-closure and attachment/template fixture configuration (harness);
+    (6) a small frozen executed cohort, three repetitions, measured per-step
+    tokens/duplicate material, transparent 1000-run extrapolation. The
+    report-citations support-or-refuse choice stays a separate product
+    decision; the typed refusal stands and detection may move earlier.
+    Single repetition: directional, no variance claims.
     A 2026-08-03 source-verified Fable review ranks the product work without
     creating another roadmap. First preserve the classifier's validated
     explicit evidence level through `ResolvedSlot`, action admission, replay,
