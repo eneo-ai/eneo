@@ -6,6 +6,11 @@ what lets a re-crawl tell whether existing material is stale. NULL on an info bl
 means "chunked before this column existed" and deliberately never counts as a
 mismatch, so upgrading cannot trigger a mass re-index.
 
+A partial index makes the SharePoint delta's drift check source-scoped. That check
+runs on every webhook delta, and ``info_blobs.integration_knowledge_id`` carries only
+a foreign key, so without this the common no-drift case has to prove the absence of a
+differing row across all active blobs.
+
 Revision ID: 202607311121
 Revises: 202607311000
 Create Date: 2026-07-31 11:21:00.000000
@@ -35,8 +40,29 @@ def upgrade() -> None:
     op.add_column("info_blobs", sa.Column("chunk_size", sa.Integer(), nullable=True))
     op.add_column("info_blobs", sa.Column("chunk_overlap", sa.Integer(), nullable=True))
 
+    # CONCURRENTLY cannot run inside a transaction, so this uses Alembic's autocommit
+    # block like the other production indexes in this directory. The predicates mirror
+    # the drift query exactly, and the stamp pair is carried so the comparison is
+    # answered from the index rather than from heap rows.
+    with op.get_context().autocommit_block():
+        op.execute("""
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS
+                ix_info_blobs_integration_knowledge_chunking
+            ON info_blobs (integration_knowledge_id, chunk_size, chunk_overlap)
+            WHERE version_state = 'active'
+              AND integration_knowledge_id IS NOT NULL
+              AND chunk_size IS NOT NULL
+              AND chunk_overlap IS NOT NULL;
+        """)
+
 
 def downgrade() -> None:
+    with op.get_context().autocommit_block():
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS "
+            "ix_info_blobs_integration_knowledge_chunking;"
+        )
+
     op.drop_column("info_blobs", "chunk_overlap")
     op.drop_column("info_blobs", "chunk_size")
 

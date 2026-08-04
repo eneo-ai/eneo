@@ -33,6 +33,23 @@ class InfoBlobs(BasePublic):
             postgresql_where=text("version_state = 'active'"),
         ),
         Index("ix_info_blobs_source_id", "source_id"),
+        # Scopes the SharePoint delta's chunk-drift check to one source. That check runs
+        # on every webhook delta, and integration_knowledge_id carries only a foreign
+        # key, so the common no-drift answer would otherwise be proved by scanning all
+        # active blobs. Partial and stamp-covering so the comparison stays in the index;
+        # created CONCURRENTLY by the migration.
+        Index(
+            "ix_info_blobs_integration_knowledge_chunking",
+            "integration_knowledge_id",
+            "chunk_size",
+            "chunk_overlap",
+            postgresql_where=text(
+                "version_state = 'active' "
+                "AND integration_knowledge_id IS NOT NULL "
+                "AND chunk_size IS NOT NULL "
+                "AND chunk_overlap IS NOT NULL"
+            ),
+        ),
     )
 
     text: Mapped[str] = mapped_column()

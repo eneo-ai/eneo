@@ -88,7 +88,13 @@
   // that limit is unknown the backend accepts any size, so this must not invent a cap
   // of its own — doing so would rewrite a stored value the administrator never edited.
   $: ceiling = maxInput ? Math.floor(maxInput * policy.max_chunk_fraction) : null;
-  $: if (!sizeIsDefault && ceiling !== null && sizeValue > ceiling) sizeValue = ceiling;
+  // Gated on the pair being explicit, not on the size input having been touched: an
+  // overlap-only edit submits the size too, and an unclamped 200 next to a 180-token
+  // model ceiling would be stored as 180 — a source whose real boundaries differ from
+  // the ones the editor showed. The flags are read directly rather than through
+  // isCustomized so this cannot form a reactive cycle with the reset below.
+  $: if ((!sizeIsDefault || !overlapIsDefault) && ceiling !== null && sizeValue > ceiling)
+    sizeValue = ceiling;
   $: sizeMax = ceiling !== null ? Math.min(ceiling, policy.max_chunk_size) : policy.max_chunk_size;
 
   // While the overlap is defaulted, the smallest usable size is the one where that
@@ -100,11 +106,10 @@
       )
     : policy.min_chunk_size;
 
-  // A model switch can shrink the valid range to nothing while an explicit size is
-  // held. The template then hides the input and promises platform defaults, so the
-  // export has to keep that promise — clearing the size back to delegation instead
-  // of submitting a hidden value the backend refuses.
-  $: if (!sizeIsDefault && sizeMax < sizeMin) {
+  // A model switch can shrink the valid range to nothing. The template then hides the
+  // size input and promises platform defaults, so the export has to keep that promise.
+  $: rangeCollapsed = sizeMax < sizeMin;
+  $: if (!sizeIsDefault && rangeCollapsed) {
     sizeIsDefault = true;
     sizeValue = policy.default_chunk_size;
   }
@@ -143,7 +148,10 @@
   //
   // Leaving the disclosure open without touching anything therefore still delegates,
   // which is how a source keeps following the deployment.
-  $: isCustomized = customize && (!sizeIsDefault || !overlapIsDefault);
+  // A collapsed range cannot carry an explicit pair at all, and clearing overlapIsDefault
+  // here instead would make sizeMin depend on a value derived from it. Falling back to
+  // full delegation keeps the promise the template makes without that cycle.
+  $: isCustomized = customize && !rangeCollapsed && (!sizeIsDefault || !overlapIsDefault);
   $: chunkSize = isCustomized ? sizeValue : null;
   $: chunkOverlap = isCustomized ? overlapTokens : null;
 </script>

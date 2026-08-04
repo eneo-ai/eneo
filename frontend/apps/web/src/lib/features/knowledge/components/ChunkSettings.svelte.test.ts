@@ -54,6 +54,28 @@ describe("ChunkSettings", () => {
     await expect.element(submitted).toHaveTextContent("size=200, overlap=50");
   });
 
+  it("respects the model ceiling when only the overlap is customized", async () => {
+    // max_input 300 puts the ceiling at floor(300 * 0.6) = 180, below the 200 default.
+    render(ChunkSettingsFixture, { chunkSize: null, chunkOverlap: null, maxInput: 300 });
+    const submitted = page.getByTestId("submitted");
+
+    await page.getByText(m.chunk_settings_customize()).click();
+    await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
+
+    // Touching only the overlap still submits a size, so the ceiling has to apply to
+    // it. Submitting an unclamped 200 would be stored as 180, leaving the source with
+    // boundaries the editor never showed.
+    const slider = overlapSlider().element() as HTMLElement;
+    slider.focus();
+    slider.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
+    );
+
+    await expect.element(submitted).toHaveTextContent("size=180, overlap=45");
+    // And the size the editor displays is the size it submits.
+    await expect.element(page.getByRole("spinbutton")).toHaveValue(180);
+  });
+
   it("gives the overlap slider a localized accessible name", async () => {
     // An explicit override starts the disclosure expanded.
     render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });
