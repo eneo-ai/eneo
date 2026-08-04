@@ -698,10 +698,17 @@ plan above controls all other ordering.
   phrase family and its behavior-locking tests. (i) **LANDED `3afe6e947`** —
   persist typed classifier attempt outcomes in the existing metadata owner, with
   resolved as the only fact-carrying/replayed outcome and provider failure owned
-  separately. (j) only then join aggregate classifier transcript admission
-  to the existing model-aware/admin budget owner while source-count and
-  structured-value bounds remain named parser-shape invariants pending item 10.
-  No classifier expansion for intentionally structured-only lanes. *(L)*
+  separately. (j) **LANDED `961c8c63f`** — one
+  classifier-owned admission predicate measures the complete request (fixed
+  prompt, response schema, attachment sources in classifier rendering,
+  transcript sources) against the selected model's window minus output/safety
+  reserves; the admin conversation reserve is transcript capacity attachments
+  must yield to, attachment context refits under the same predicate, budgets
+  are required integers, and local rejection persists as the closed
+  `skipped_context_budget` no-call outcome. The fixed 12,000-character
+  aggregate cap is deleted; source-count and structured-value bounds remain
+  named parser-shape invariants pending item 10 (three-iteration Codex gate,
+  final green 8/10). *(L)*
 - **B9** (directional JSON contracts, ordered owner slices): (a) **LANDED
   `0b7a450df`** — schema presence no longer changes terminal output before
   output direction is owned; a runtime-input schema plus requested generated
