@@ -68,6 +68,8 @@ def get_container(
     ) -> Container:
         if request.method == "OPTIONS":
             return container
+        if with_upload_admission:
+            await object_content_runtime.refresh_object_store_configuration()
 
         async def authenticate_and_prepare_container() -> UserInDB:
             user = await container.user_service().authenticate(
@@ -133,7 +135,6 @@ def get_container(
 async def load_container_upload_admission(
     container: Container,
 ) -> UploadAdmissionSnapshot:
-    await object_content_runtime.refresh_object_store_configuration()
     session = cast(AsyncSession, container.session())
     snapshot = await load_upload_admission_snapshot(
         session,
