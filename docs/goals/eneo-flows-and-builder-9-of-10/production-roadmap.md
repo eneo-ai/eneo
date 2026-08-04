@@ -351,6 +351,26 @@ external release gate (item 10); BM0.2 is external (item 10).
     variance baseline or license for post-hoc thresholds. Manually adjudicate
     rubric mismatches, correct clarification stops, and representative journeys
     before promoting a failure to product policy.
+    The tracked 12-case `smoke_v3` cohort ran once on 2026-08-04 against the
+    served build at `6ccb6f631` (B4(b) included) with the locked Luna route:
+    9 live journeys (3 attachment-fixture skips), 5 first-pass plans, 1
+    intended clarification stop, 3 Builder errors, 3 questions total, 0
+    repairs. No failure is attributable to B4(b): checkpoint projection
+    placed exactly the intents planning state held in both review cases. The
+    run surfaced (1) checkpoint-classifier over-emission — an explicit user
+    refusal of report review was emitted as a `report_text` update, and an
+    unrequested `structured_result` review appeared in the complex case; the
+    typed owner now makes this precision defect visible, and its fix belongs
+    in the classifier prompt/frozen fixtures (B4-family follow-up), not the
+    compiler; (2) two `assembly_document_report_compose_topology_missing`
+    errors matching the recorded B10(e) residuals; (3) one
+    `self_correction_invalid_plan`; (4) persisting duplicate-transcription
+    semantics — the typed transcript-text proposal boundary remains the open
+    B4 tail. Receipt provenance carries `tracked_clean: false` because the
+    served worktree had unrelated user-dirty files; treat totals as
+    directional. Cohort note: `smoke_v3` overlaps but is not identical to the
+    earlier manual 12-case list, so cross-receipt deltas are directional
+    only.
     A 2026-08-03 source-verified Fable review ranks the product work without
     creating another roadmap. First preserve the classifier's validated
     explicit evidence level through `ResolvedSlot`, action admission, replay,
