@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import cast
 
+from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
+    bind_document_report_compose_inputs,
+)
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
     PlannedStep,
@@ -26,17 +27,9 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     StepSpec,
 )
-from eneo.flows.flow_variable_definitions import form_field_reference_expression
-from eneo.flows.input_binding_contract_rules import SourceRefBinding
 from eneo.flows.source_identity import without_runtime_source_identity_draft_fields
 
 logger = logging.getLogger(__name__)
-
-COMPOSE_SECTION_TITLE_KEY = "section_title"
-COMPOSE_SECTION_BODY_KEY = "section_body"
-COMPOSE_SOURCE_LABEL_KEY = "source_label"
-COMPOSE_REPORT_TITLE_KEY = "report_title"
-COMPOSE_OVERALL_OVERVIEW_KEY = "overall_overview"
 
 
 def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
@@ -87,7 +80,7 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
         if planned_step.output_mode != compiled_step.output_mode:
             raise ValueError("Planned step output_mode diverged during lowering.")
         if planned_step.output_mode == OutputMode.COMPOSE_TEXT:
-            compiled_step = _with_compose_source_refs(
+            compiled_step = bind_document_report_compose_inputs(
                 step=compiled_step,
                 prior_steps=compiled_steps,
                 form_field_refs=planned_step.form_field_refs,
@@ -110,209 +103,6 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
         form_fields=form_fields or None,
         document_body_writer_step_refs=document_body_writer_step_refs or None,
     )
-
-
-def _with_compose_source_refs(
-    *,
-    step: StepSpec,
-    prior_steps: list[StepSpec],
-    form_field_refs: tuple[str, ...],
-    ui_language: str | None,
-) -> StepSpec:
-    section_step, section_array = _find_compose_section_source(prior_steps)
-    overview_step = _find_compose_overview_source(prior_steps)
-    if (section_step is None or section_array is None) and overview_step is None:
-        return step
-
-    source_refs: list[dict[str, object]] = []
-    if section_step is not None and section_array is not None:
-        section_schema = _schema_properties(section_step.output_contract).get(
-            section_array
-        )
-        source_refs.append(
-            SourceRefBinding(
-                step_ref=section_step.plan_step_ref,
-                output="structured",
-                field_path=(section_array,),
-                item_template=_compose_section_item_template(
-                    ui_language,
-                    item_properties=_array_item_properties(section_schema),
-                ),
-            ).binding_payload()
-        )
-    question_parts = [
-        _compose_report_title_question(
-            overview_step=overview_step,
-            ui_language=ui_language,
-        )
-    ]
-    if form_field_refs:
-        question_parts.append(
-            "\n".join(
-                f"{field_name}: {form_field_reference_expression(field_name)}"
-                for field_name in form_field_refs
-            )
-        )
-    if overview_step is not None:
-        source_refs.append(
-            SourceRefBinding(
-                step_ref=overview_step.plan_step_ref,
-                output="structured",
-                field_path=(COMPOSE_OVERALL_OVERVIEW_KEY,),
-                label=_compose_overview_label(ui_language),
-            ).binding_payload()
-        )
-        for field_name, field_schema in _schema_properties(
-            overview_step.output_contract
-        ).items():
-            if field_name in {
-                COMPOSE_REPORT_TITLE_KEY,
-                COMPOSE_OVERALL_OVERVIEW_KEY,
-            }:
-                continue
-            source_refs.append(
-                _compose_additional_field_ref(
-                    step_ref=overview_step.plan_step_ref,
-                    field_name=field_name,
-                    field_schema=field_schema,
-                ).binding_payload()
-            )
-    return step.model_copy(
-        update={
-            "input_bindings": {
-                "question": "\n\n".join(question_parts),
-                "source_refs": source_refs,
-            },
-            "input_contract": None,
-        }
-    )
-
-
-def _find_compose_section_source(
-    prior_steps: list[StepSpec],
-) -> tuple[StepSpec | None, str | None]:
-    for prior_step in reversed(prior_steps):
-        properties = _schema_properties(prior_step.output_contract)
-        for field_name, schema in properties.items():
-            item_properties = _array_item_properties(schema)
-            if {
-                COMPOSE_SECTION_TITLE_KEY,
-                COMPOSE_SECTION_BODY_KEY,
-                COMPOSE_SOURCE_LABEL_KEY,
-            }.issubset(item_properties):
-                return prior_step, field_name
-    return None, None
-
-
-def _find_compose_overview_source(prior_steps: list[StepSpec]) -> StepSpec | None:
-    for prior_step in reversed(prior_steps):
-        properties = _schema_properties(prior_step.output_contract)
-        if {COMPOSE_REPORT_TITLE_KEY, COMPOSE_OVERALL_OVERVIEW_KEY}.issubset(
-            properties
-        ):
-            return prior_step
-    return None
-
-
-def _schema_properties(schema: object) -> dict[str, object]:
-    if not isinstance(schema, Mapping):
-        return {}
-    typed_schema = cast(Mapping[str, object], schema)
-    raw_properties = typed_schema.get("properties")
-    if not isinstance(raw_properties, Mapping):
-        return {}
-    properties = cast(Mapping[object, object], raw_properties)
-    return {
-        key: value
-        for key, value in properties.items()
-        if isinstance(key, str) and isinstance(value, Mapping)
-    }
-
-
-def _array_item_properties(schema: object) -> dict[str, object]:
-    if not isinstance(schema, Mapping):
-        return {}
-    typed_schema = cast(Mapping[str, object], schema)
-    raw_type = typed_schema.get("type")
-    if raw_type != "array":
-        return {}
-    return _schema_properties(typed_schema.get("items"))
-
-
-def _compose_report_title_question(
-    *,
-    overview_step: StepSpec | None,
-    ui_language: str | None,
-) -> str:
-    if overview_step is not None:
-        return f"# {{{{ {overview_step.plan_step_ref}.output.structured.{COMPOSE_REPORT_TITLE_KEY} }}}}"
-    return "# Source report" if ui_language == "en" else "# Rapport per källa"
-
-
-def _compose_section_item_template(
-    ui_language: str | None,
-    *,
-    item_properties: Mapping[str, object],
-) -> str:
-    source_label = "Source" if ui_language == "en" else "Källa"
-    template = (
-        f"## {{{COMPOSE_SECTION_TITLE_KEY}}}\n\n"
-        f"{{{COMPOSE_SECTION_BODY_KEY}}}\n\n"
-        f"{source_label}: {{{COMPOSE_SOURCE_LABEL_KEY}}}"
-    )
-    reserved_fields = {
-        COMPOSE_SECTION_TITLE_KEY,
-        COMPOSE_SECTION_BODY_KEY,
-        COMPOSE_SOURCE_LABEL_KEY,
-        "source_file_id",
-    }
-    additional_fields = [
-        f"{_humanized_field_name(field_name)}: {{{field_name}}}"
-        for field_name in item_properties
-        if field_name not in reserved_fields
-    ]
-    if not additional_fields:
-        return template
-    return f"{template}\n\n" + "\n\n".join(additional_fields)
-
-
-def _compose_overview_label(ui_language: str | None) -> str:
-    return "Overall overview" if ui_language == "en" else "Samlad översikt"
-
-
-def _compose_field_label(field_name: str) -> str:
-    return _humanized_field_name(field_name)
-
-
-def _compose_additional_field_ref(
-    *,
-    step_ref: str,
-    field_name: str,
-    field_schema: object,
-) -> SourceRefBinding:
-    item_properties = _array_item_properties(field_schema)
-    return SourceRefBinding(
-        step_ref=step_ref,
-        output="structured",
-        field_path=(field_name,),
-        label=_compose_field_label(field_name),
-        item_template=(
-            _compose_object_item_template(item_properties) if item_properties else None
-        ),
-    )
-
-
-def _compose_object_item_template(
-    item_properties: Mapping[str, object],
-) -> str:
-    return "\n".join(
-        f"{_humanized_field_name(field_name)}: {{{field_name}}}"
-        for field_name in item_properties
-    )
-
-
-def _humanized_field_name(field_name: str) -> str:
-    return field_name.replace("_", " ").strip().capitalize()
 
 
 def _new_step_draft_from_planned_step(
