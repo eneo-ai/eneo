@@ -815,12 +815,20 @@ plan above controls all other ordering.
   compiler-owned compose topology or bind it so the rules are structurally
   satisfied, and add a finalization-level no-critic-issues proof per
   disposition. *(M)*
-- **B11** (exact-template workflow topology): after B4's checkpoint-intent owner
-  is available, allow justified analysis/validation/review stages before the
-  existing deterministic TEMPLATE_FILL terminal step. Preserve the exact selected
-  attachment, placeholder completeness, atomic asset binding, zero-token fill,
-  and typed rejection behavior. Prove “analyze, validate, then fill this exact
-  template” without permitting model-authored render mechanics. *(M)*
+- **B11** (exact-template workflow topology): **LANDED `37777fab1`** —
+  template flows admit model-authored analysis/validation stages between the
+  fixed backend reader and the fixed TEMPLATE_FILL terminal (product
+  decisions 2026-08-04: bounded model discretion, reader stays fixed; product
+  default: at most five preparation stages, one shared predicate on create
+  and edit with the model-repairable
+  `template_preparation_stage_limit_exceeded` rejection). Critic guards are
+  binding-aware, not mode-exempt; a review policy can never sit on the fill
+  step (`template_fill_review_forbidden`, all lanes);
+  `template_attachment_unreadable` is non-model-repairable. Placeholder
+  completeness, atomic asset binding, exact layout, and zero-token fill are
+  unchanged and runtime-proven (four-iteration Codex gate, final green 8/10;
+  edit lane verified behaviorally compatible). Live template-cohort proof
+  awaits the fixture configuration recorded in the corpus directive. *(M)*
 - **B12** (large-corpus capability gate, deferred): item 7b first bounds the
   current per-source/per-item leaves and existing overview/reducer before any leaf
   call is paid, while authoring surfaces only factual policy/model shape and
