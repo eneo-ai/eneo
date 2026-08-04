@@ -12,8 +12,12 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
+    PERMISSION_LEVEL_ORDER,
     ApiKeyOwnership,
+    ApiKeyPermission,
+    ApiKeyType,
     ApiKeyV2InDB,
     JWTPayload,
 )
@@ -95,15 +99,53 @@ class ModuleAuthBroker:
         self,
         redis_client: aioredis.Redis,
         module_repo: ModuleRepository,
+        api_key_repo: ApiKeysV2Repository,
         user_repo: UsersRepository,
         auth_service: AuthService,
         audit_service: AuditService,
     ) -> None:
         self.redis_client = redis_client
         self.module_repo = module_repo
+        self.api_key_repo = api_key_repo
         self.user_repo = user_repo
         self.auth_service = auth_service
         self.audit_service = audit_service
+
+    @staticmethod
+    def _service_key_registration_error(api_key: ApiKeyV2InDB) -> str | None:
+        if api_key.ownership != ApiKeyOwnership.SERVICE:
+            return "the API key must be service-owned"
+        if api_key.key_type != ApiKeyType.SK:
+            return "the API key must use the sk_ key type"
+
+        granted = PERMISSION_LEVEL_ORDER.get(api_key.permission.value, 0)
+        required = PERMISSION_LEVEL_ORDER[ApiKeyPermission.WRITE.value]
+        if granted < required:
+            return "the API key must have write or admin permission"
+        return None
+
+    async def validate_client_config_service_key(
+        self, *, tenant_id: UUID, service_key_id: UUID
+    ) -> None:
+        """Validate the durable invariants for a module exchange key.
+
+        Runtime state such as suspension, expiry, IP allowlists, and rate limits
+        remains owned by normal API-key authentication. This registration check
+        rejects configurations that can never authenticate successfully.
+        """
+        api_key = await self.api_key_repo.get(
+            key_id=service_key_id, tenant_id=tenant_id
+        )
+        if api_key is None:
+            raise BadRequestException(
+                "service_key_id must reference an API key in the target tenant."
+            )
+
+        registration_error = self._service_key_registration_error(api_key)
+        if registration_error is not None:
+            raise BadRequestException(
+                f"Invalid module service key: {registration_error}."
+            )
 
     async def issue_ticket(
         self, user: UserInDB, module_id: UUID, redirect_uri: str
@@ -169,9 +211,11 @@ class ModuleAuthBroker:
     ) -> ModuleTokenResponse:
         settings = get_settings()
 
-        if api_key.ownership != ApiKeyOwnership.SERVICE:
+        registration_error = self._service_key_registration_error(api_key)
+        if registration_error is not None:
             raise UnauthorizedException(
-                "Module ticket exchange requires a service (sk_) key."
+                "Module ticket exchange requires a service-owned sk_ key "
+                "with write or admin permission."
             )
 
         ticket_key = _ticket_redis_key(ticket)

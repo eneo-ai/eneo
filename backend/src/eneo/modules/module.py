@@ -42,6 +42,20 @@ class ModuleClientConfig(BaseModel):
                 normalized.append(redirect_uri)
         return normalized
 
+    def update_values(self) -> dict[str, object]:
+        """Return only fields explicitly supplied by the PATCH caller.
+
+        An explicit ``null`` remains an update while an omitted field is left
+        untouched. Keeping this distinction on the request model prevents
+        persistence adapters from accidentally turning PATCH into PUT.
+        """
+        values: dict[str, object] = {}
+        if "redirect_uris" in self.model_fields_set:
+            values["redirect_uris"] = self.redirect_uris
+        if "service_key_id" in self.model_fields_set:
+            values["service_key_id"] = self.service_key_id
+        return values
+
 
 class ModuleTenantClientConfig(ModuleClientConfig):
     tenant_id: UUID

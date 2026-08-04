@@ -966,6 +966,7 @@ class Container(containers.DeclarativeContainer):
         ModuleAuthBroker,
         redis_client=redis_client,
         module_repo=module_repo,
+        api_key_repo=api_key_v2_repo,
         user_repo=user_repo,
         auth_service=auth_service,
         audit_service=audit_service,

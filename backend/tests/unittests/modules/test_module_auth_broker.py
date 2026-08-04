@@ -4,7 +4,11 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from eneo.authentication.auth_models import ApiKeyOwnership
+from eneo.authentication.auth_models import (
+    ApiKeyOwnership,
+    ApiKeyPermission,
+    ApiKeyType,
+)
 from eneo.authentication.auth_service import AuthService
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
@@ -81,6 +85,8 @@ def make_api_key(**overrides):
     key.id = SERVICE_KEY_ID
     key.tenant_id = TENANT_ID
     key.ownership = ApiKeyOwnership.SERVICE
+    key.key_type = ApiKeyType.SK
+    key.permission = ApiKeyPermission.WRITE
     key.rotated_from_key_id = None
     for k, v in overrides.items():
         setattr(key, k, v)
@@ -102,11 +108,14 @@ def make_broker(module=None, config=None, user=None, redis=None):
     )
 
     audit_service = AsyncMock()
-    auth_service = AuthService(api_key_repo=MagicMock(), api_key_v2_repo=MagicMock())
+    api_key_repo = AsyncMock()
+    api_key_repo.get.return_value = make_api_key()
+    auth_service = AuthService()
 
     broker = ModuleAuthBroker(
         redis_client=redis if redis is not None else FakeRedis(),
         module_repo=module_repo,
+        api_key_repo=api_key_repo,
         user_repo=user_repo,
         auth_service=auth_service,
         audit_service=audit_service,
@@ -222,6 +231,24 @@ class TestExchangeTicket:
                 api_key=make_api_key(ownership=ApiKeyOwnership.USER), ticket=ticket
             )
 
+    @pytest.mark.parametrize(
+        "key_overrides",
+        [
+            {"key_type": ApiKeyType.PK},
+            {"permission": ApiKeyPermission.READ},
+        ],
+    )
+    async def test_key_that_cannot_authenticate_exchange_is_rejected(
+        self, key_overrides
+    ):
+        broker = make_broker()
+        ticket = (await issue(broker)).ticket
+
+        with pytest.raises(UnauthorizedException):
+            await broker.exchange_ticket(
+                api_key=make_api_key(**key_overrides), ticket=ticket
+            )
+
     async def test_key_not_registered_for_module_rejected(self):
         broker = make_broker()
         ticket = (await issue(broker)).ticket
@@ -286,4 +313,56 @@ class TestModuleClientConfig:
         with pytest.raises(ValidationError):
             ModuleClientConfig(
                 redirect_uris=["https://ttt.example.com/auth/callback?ticket=x"]
+            )
+
+    def test_update_values_preserve_omitted_fields(self):
+        config = ModuleClientConfig(redirect_uris=[REDIRECT_URI])
+
+        assert config.update_values() == {"redirect_uris": [REDIRECT_URI]}
+
+    def test_update_values_keep_explicit_null(self):
+        config = ModuleClientConfig(service_key_id=None)
+
+        assert config.update_values() == {"service_key_id": None}
+
+    def test_empty_update_has_no_values(self):
+        assert ModuleClientConfig().update_values() == {}
+
+
+class TestModuleServiceKeyRegistration:
+    async def test_accepts_same_tenant_service_sk_with_write_permission(self):
+        broker = make_broker()
+
+        await broker.validate_client_config_service_key(
+            tenant_id=TENANT_ID, service_key_id=SERVICE_KEY_ID
+        )
+
+        broker.api_key_repo.get.assert_awaited_once_with(
+            key_id=SERVICE_KEY_ID, tenant_id=TENANT_ID
+        )
+
+    async def test_rejects_unknown_or_wrong_tenant_key(self):
+        broker = make_broker()
+        broker.api_key_repo.get.return_value = None
+
+        with pytest.raises(BadRequestException, match="target tenant"):
+            await broker.validate_client_config_service_key(
+                tenant_id=TENANT_ID, service_key_id=SERVICE_KEY_ID
+            )
+
+    @pytest.mark.parametrize(
+        ("key_overrides", "message"),
+        [
+            ({"ownership": ApiKeyOwnership.USER}, "service-owned"),
+            ({"key_type": ApiKeyType.PK}, "sk_ key type"),
+            ({"permission": ApiKeyPermission.READ}, "write or admin"),
+        ],
+    )
+    async def test_rejects_key_that_can_never_exchange(self, key_overrides, message):
+        broker = make_broker()
+        broker.api_key_repo.get.return_value = make_api_key(**key_overrides)
+
+        with pytest.raises(BadRequestException, match=message):
+            await broker.validate_client_config_service_key(
+                tenant_id=TENANT_ID, service_key_id=SERVICE_KEY_ID
             )

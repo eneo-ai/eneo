@@ -9,7 +9,7 @@ from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication import auth
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import ModelId, PaginatedResponse
 from eneo.modules.module import (
     ModuleBase,
@@ -64,7 +64,7 @@ async def add_module(module: ModuleBase, container: _Container) -> ModuleInDB:
         "redirect URI allowlist and the sk_ service key allowed to exchange "
         "that tenant's login tickets."
     ),
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def update_module_client_config(
     tenant_id: UUID,
@@ -72,6 +72,12 @@ async def update_module_client_config(
     config: ModuleClientConfig,
     container: _Container,
 ) -> ModuleTenantClientConfig:
+    updates = config.update_values()
+    if not updates:
+        raise BadRequestException(
+            "Module client config PATCH requires at least one field."
+        )
+
     module_repo = container.module_repo()
     module = await module_repo.get_module(module_id)
     if module is None:
@@ -82,6 +88,12 @@ async def update_module_client_config(
     )
     if previous is None:
         raise NotFoundException("Module is not enabled for this tenant.")
+
+    if "service_key_id" in updates and config.service_key_id is not None:
+        await container.module_auth_broker().validate_client_config_service_key(
+            tenant_id=tenant_id,
+            service_key_id=config.service_key_id,
+        )
 
     updated = await module_repo.update_client_config(
         tenant_id=tenant_id, module_id=module_id, config=config

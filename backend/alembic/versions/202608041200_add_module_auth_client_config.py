@@ -1,22 +1,22 @@
 """add module auth client config
 
-Revision ID: 202607021400
-Revises: 202606281200
-Create Date: 2026-07-02 14:00:00.000000
+Revision ID: 202608041200
+Revises: 202607311000
+Create Date: 2026-08-04 12:00:00.000000
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 from alembic import op
 
-revision: str = "202607021400"
-down_revision: Union[str, None] = "202606281200"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "202608041200"
+down_revision: str | None = "202607311000"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

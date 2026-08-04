@@ -49,13 +49,17 @@ class ModuleRepository:
     async def update_client_config(
         self, tenant_id: UUID, module_id: UUID, config: ModuleClientConfig
     ) -> Optional[ModuleTenantClientConfig]:
+        updates = config.update_values()
+        if not updates:
+            raise ValueError("Module client config PATCH requires at least one field.")
+
         stmt = (
             sa.update(tenants_modules_table)
             .where(
                 tenants_modules_table.c.tenant_id == tenant_id,
                 tenants_modules_table.c.module_id == module_id,
             )
-            .values(**config.model_dump())
+            .values(**updates)
             .returning(
                 tenants_modules_table.c.tenant_id,
                 tenants_modules_table.c.module_id,
@@ -90,12 +94,3 @@ class ModuleRepository:
             return None
 
         return ModuleTenantClientConfig.model_validate(dict(row))
-
-    async def is_module_in_tenant(self, module_id: UUID, tenant_id: UUID) -> bool:
-        stmt = sa.select(
-            sa.exists().where(
-                tenants_modules_table.c.tenant_id == tenant_id,
-                tenants_modules_table.c.module_id == module_id,
-            )
-        )
-        return bool(await self.session.scalar(stmt))
