@@ -22,7 +22,13 @@ Leg 2, at the MCP server's authorization server token endpoint::
 
     grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer
     assertion=<ID-JAG>
-    client_id=<federation client>
+    client_id=<client registered at the resource AS>
+    (+ client_secret when the AS requires client authentication)
+
+The client identity at the resource AS is a separate registration from
+the federation client at the IdP (per-server ``as_client_id`` /
+``as_client_secret``); when not configured, the federation client_id is
+sent unauthenticated, which public-client ASes accept.
 
 The AS validates the assertion against the IdP's JWKS and mints its own
 access token, audience-restricted to the MCP resource. That token (plus
@@ -94,6 +100,8 @@ class IdJagStrategy(TokenExchangeStrategy):
         subject_id_token: Optional[str] = None,
         as_issuer: Optional[str] = None,
         as_token_endpoint: Optional[str] = None,
+        as_client_id: Optional[str] = None,
+        as_client_secret: Optional[str] = None,
         scope: Optional[str] = None,
     ) -> ExchangedToken:
         """Run both legs and return the AS-minted access token.
@@ -128,7 +136,9 @@ class IdJagStrategy(TokenExchangeStrategy):
             as_token_endpoint=as_token_endpoint,
             as_issuer=as_issuer,
             target=target,
-            client_id=client_id,
+            client_id=as_client_id or client_id,
+            client_secret=as_client_secret,
+            scope=scope,
         )
 
     async def _request_id_jag(
@@ -203,12 +213,18 @@ class IdJagStrategy(TokenExchangeStrategy):
         as_issuer: str,
         target: TokenExchangeTarget,
         client_id: str,
+        client_secret: Optional[str] = None,
+        scope: Optional[str] = None,
     ) -> ExchangedToken:
         form = {
             "grant_type": JWT_BEARER_GRANT,
             "assertion": id_jag,
             "client_id": client_id,
         }
+        if client_secret:
+            form["client_secret"] = client_secret
+        if scope:
+            form["scope"] = scope
         now = datetime.now(timezone.utc)
         status_code, payload = await post_form(
             token_endpoint=as_token_endpoint, form=form

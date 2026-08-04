@@ -240,7 +240,12 @@ class MCPServerToolRepoImpl(
 
     @override
     async def upsert_by_server_and_name(self, obj: MCPServerTool) -> MCPServerTool:
-        """Upsert a tool (update if exists by server+name, insert otherwise)."""
+        """Upsert a tool (update if exists by server+name, insert otherwise).
+
+        The entity is the full definition: on conflict, pending and approval
+        state are overwritten too, so re-declaring a tool that had staged
+        (unapproved) drift resolves it to the caller's definition.
+        """
         db_dict = self.mapper.to_db_dict(obj)
 
         # PostgreSQL INSERT ... ON CONFLICT DO UPDATE
@@ -254,6 +259,10 @@ class MCPServerToolRepoImpl(
                     "description": db_dict["description"],
                     "input_schema": db_dict["input_schema"],
                     "is_enabled_by_default": db_dict["is_enabled_by_default"],
+                    "pending_description": db_dict["pending_description"],
+                    "pending_input_schema": db_dict["pending_input_schema"],
+                    "requires_approval": db_dict["requires_approval"],
+                    "removed_from_remote": db_dict["removed_from_remote"],
                 },
             )
             .returning(self._db_model)

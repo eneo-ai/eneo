@@ -445,6 +445,14 @@ class MCPAuthenticationError(MCPClientError):
     pass
 
 
+class MCPUserActionRequiredError(MCPAuthenticationError):
+    """Upstream MCP authentication failed in a way the end user can fix,
+    e.g. by reconnecting their SSO session. Callers should surface a
+    "reconnect and retry" remedy instead of a generic failure."""
+
+    pass
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999

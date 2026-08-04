@@ -35,6 +35,7 @@ from eneo.authentication.oidc_token_store import (
 )
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.mcp_exchanged_tokens_table import MCPExchangedTokens
+from eneo.main.exceptions import MCPUserActionRequiredError
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.application.token_exchange import (
     ConcreteExchangeProtocol,
@@ -107,9 +108,11 @@ class MCPRequiresUserIdentityError(Exception):
     no human subject to delegate from."""
 
 
-class MCPNotAuthenticatedError(Exception):
+class MCPNotAuthenticatedError(MCPUserActionRequiredError):
     """The caller has no persisted IdP refresh token. They logged in via a
-    non-OIDC method (local password) or their session was revoked."""
+    non-OIDC method (local password) or their session was revoked. The
+    user can fix this themselves by (re)connecting via SSO, hence the
+    ``MCPUserActionRequiredError`` base."""
 
 
 class MCPBrokerConfigurationError(Exception):
@@ -139,6 +142,8 @@ class _ExchangePlan:
     client_secret: Optional[str]
     as_issuer: Optional[str] = None
     as_token_endpoint: Optional[str] = None
+    as_client_id: Optional[str] = None
+    as_client_secret: Optional[str] = None
     scope: Optional[str] = None
 
     @property
@@ -151,6 +156,24 @@ class _ExchangePlan:
         if self.protocol == "id_jag" and self.as_token_endpoint:
             return self.as_token_endpoint
         return self.idp_token_endpoint
+
+    @property
+    def refresh_client_id(self) -> str:
+        """Client identity accompanying refresh grants at ``refresh_endpoint``.
+
+        ID-JAG refresh happens at the MCP server's AS, where the client is
+        the per-server AS registration when configured; same-IdP refresh
+        uses the federation client.
+        """
+        if self.protocol == "id_jag" and self.as_client_id:
+            return self.as_client_id
+        return self.client_id
+
+    @property
+    def refresh_client_secret(self) -> Optional[str]:
+        if self.protocol == "id_jag" and self.as_client_id:
+            return self.as_client_secret
+        return self.client_secret
 
     @property
     def validation_issuer(self) -> str:
@@ -274,8 +297,8 @@ class MCPTokenBroker:
                 exchanged = await self._refresh_exchanged_token(
                     refresh_token=cached_refresh,
                     token_endpoint=plan.refresh_endpoint,
-                    client_id=plan.client_id,
-                    client_secret=plan.client_secret,
+                    client_id=plan.refresh_client_id,
+                    client_secret=plan.refresh_client_secret,
                     target=target,
                     idp_issuer=plan.validation_issuer,
                 )
@@ -344,8 +367,8 @@ class MCPTokenBroker:
                 exchanged = await self._refresh_exchanged_token(
                     refresh_token=exchanged.refresh_token,
                     token_endpoint=plan.refresh_endpoint,
-                    client_id=plan.client_id,
-                    client_secret=plan.client_secret,
+                    client_id=plan.refresh_client_id,
+                    client_secret=plan.refresh_client_secret,
                     target=target,
                     idp_issuer=plan.validation_issuer,
                 )
@@ -545,6 +568,39 @@ class MCPTokenBroker:
             idp_issuer=expected,
             tenant_federation_config=tenant_federation_config,
         )
+        # Per-server client registered at the resource AS for the ID-JAG
+        # leg-2 redemption. Stored as a Fernet envelope like the federation
+        # client_secret. The credentials are pinned to an admin-configured
+        # issuer: the leg-2 AS is chosen from the MCP server's own PRM, so
+        # without the pin a hostile server could steer redemption (and the
+        # reusable client secret) to an attacker-controlled AS.
+        as_client_id = mcp_server.as_client_id
+        as_client_secret = mcp_server.as_client_secret
+        if protocol != "id_jag":
+            # Only the ID-JAG leg-2 redemption uses per-server AS
+            # credentials; never attach them to a same-IdP exchange.
+            as_client_id = None
+            as_client_secret = None
+        elif as_client_id or as_client_secret:
+            pinned = mcp_server.as_issuer
+            if not pinned:
+                raise MCPBrokerConfigurationError(
+                    "as_client credentials are configured without a pinned "
+                    "as_issuer; refusing to send them to a discovery-derived "
+                    "authorization server"
+                )
+            if as_issuer is None or as_issuer.rstrip("/") != pinned.rstrip("/"):
+                raise MCPBrokerConfigurationError(
+                    f"authorization server resolved to {as_issuer!r} but "
+                    f"as_client credentials are pinned to {pinned!r}; "
+                    "refusing to send client credentials"
+                )
+        if (
+            isinstance(as_client_secret, str)
+            and self._encryption.is_active()
+            and self._encryption.is_encrypted(as_client_secret)
+        ):
+            as_client_secret = self._encryption.decrypt(as_client_secret)
         return _ExchangePlan(
             protocol=protocol,
             idp_issuer=expected,
@@ -553,7 +609,10 @@ class MCPTokenBroker:
             client_secret=client_secret,
             as_issuer=as_issuer,
             as_token_endpoint=as_token_endpoint,
-            scope=" ".join(prm.scopes_supported) if prm.scopes_supported else None,
+            as_client_id=as_client_id,
+            as_client_secret=as_client_secret,
+            scope=mcp_server.requested_scope
+            or (" ".join(prm.scopes_supported) if prm.scopes_supported else None),
         )
 
     @staticmethod
@@ -654,9 +713,8 @@ class MCPTokenBroker:
         )
         if stored is None:
             raise MCPNotAuthenticatedError(
-                "No active IdP refresh token stored for this user; the "
-                "user must log in via SSO before per_user MCP servers can "
-                "be reached"
+                "No active IdP tokens stored for this user; the user must "
+                "log in via SSO before per_user MCP servers can be reached"
             )
 
         if plan.protocol == "id_jag":
@@ -724,6 +782,8 @@ class MCPTokenBroker:
                 subject_id_token=stored.id_token,
                 as_issuer=plan.as_issuer,
                 as_token_endpoint=plan.as_token_endpoint,
+                as_client_id=plan.as_client_id,
+                as_client_secret=plan.as_client_secret,
                 scope=plan.scope,
             )
         except TokenExchangeUserActionRequired:
@@ -740,6 +800,8 @@ class MCPTokenBroker:
                 subject_id_token=refreshed.id_token,
                 as_issuer=plan.as_issuer,
                 as_token_endpoint=plan.as_token_endpoint,
+                as_client_id=plan.as_client_id,
+                as_client_secret=plan.as_client_secret,
                 scope=plan.scope,
             )
 

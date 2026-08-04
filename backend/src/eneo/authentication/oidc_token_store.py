@@ -111,16 +111,21 @@ class OidcTokenStore:
     ) -> Optional[UUID]:
         """Encrypt and persist IdP tokens for this user / issuer.
 
-        No-ops (and returns ``None``) when ``refresh_token`` is absent:
-        a row without a refresh token cannot drive the broker, so we
-        keep the DB clean instead of writing useless rows.
+        No-ops (and returns ``None``) when the response carries neither a
+        ``refresh_token`` nor an ``id_token``: such a row could drive
+        neither the RFC 8693 nor the ID-JAG exchange, so we keep the DB
+        clean instead of writing useless rows. A row without a refresh
+        token is still stored when an ID token is present — some IdPs
+        never issue refresh tokens, and the ID token alone carries the
+        ID-JAG flow until it expires (after which the user re-logs-in).
 
         ``id_token=None`` keeps any previously stored ID token (refresh
         responses often omit it); pass an empty string to clear.
         """
-        if not refresh_token:
+        if not refresh_token and not id_token:
             logger.debug(
-                "OidcTokenStore.upsert skipped: no refresh_token in IdP response",
+                "OidcTokenStore.upsert skipped: neither refresh_token nor "
+                "id_token in IdP response",
                 extra={
                     "user_id": str(user.id),
                     "idp_issuer": idp_issuer,
@@ -129,7 +134,9 @@ class OidcTokenStore:
             )
             return None
 
-        refresh_ciphertext = self._encryption.encrypt(refresh_token)
+        refresh_ciphertext = (
+            self._encryption.encrypt(refresh_token) if refresh_token else None
+        )
         access_ciphertext = (
             self._encryption.encrypt(access_token) if access_token else None
         )

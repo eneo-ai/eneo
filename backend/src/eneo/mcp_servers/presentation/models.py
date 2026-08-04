@@ -45,6 +45,10 @@ class MCPServerPublic(BaseModel):
     expected_idp_issuer: Optional[str] = None
     target_resource_or_scope: Optional[str] = None
     exchange_protocol: MCPExchangeProtocolLiteral = "auto"
+    as_issuer: Optional[str] = None
+    as_client_id: Optional[str] = None
+    has_as_client_secret: bool = False
+    requested_scope: Optional[str] = None
     forward_identity: bool = False
     tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
     tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
@@ -59,6 +63,22 @@ class MCPServerList(BaseListModel[MCPServerPublic]):
     pass
 
 
+class MCPServerToolDefinition(BaseModel):
+    """A tool definition supplied by the registering caller at create time.
+
+    Lets headless provisioners register the catalog together with the
+    server: SSO-scoped servers cannot be probed without a user session,
+    so discovery has nothing to populate the catalog from. Supplied
+    definitions are validated against the same catalog bounds as live
+    discovery and saved as approved, on the registering admin's authority.
+    """
+
+    name: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    input_schema: Optional[dict[str, Any]] = None
+
+
 class MCPServerCreate(BaseModel):
     """DTO for creating an MCP server (admin only, uses Streamable HTTP transport)."""
 
@@ -71,6 +91,13 @@ class MCPServerCreate(BaseModel):
     expected_idp_issuer: Optional[str] = None
     target_resource_or_scope: Optional[str] = None
     exchange_protocol: MCPExchangeProtocolLiteral = "auto"
+    # Pins the AS issuer that as_client_id / as_client_secret may be sent
+    # to; required whenever those credentials are set, so a hostile server
+    # cannot steer leg-2 redemption (and the secret) to an attacker AS.
+    as_issuer: Optional[str] = None
+    as_client_id: Optional[str] = None
+    as_client_secret: Optional[str] = None
+    requested_scope: Optional[str] = None
     forward_identity: bool = False
     tool_catalog_max_count: int = Field(
         default=MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
@@ -93,6 +120,7 @@ class MCPServerCreate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Optional[ModelId] = None
+    tools: Optional[list[MCPServerToolDefinition]] = None
 
 
 class MCPServerUpdate(BaseModel):
@@ -107,6 +135,10 @@ class MCPServerUpdate(BaseModel):
     expected_idp_issuer: Union[str, None, NotProvided] = NOT_PROVIDED
     target_resource_or_scope: Union[str, None, NotProvided] = NOT_PROVIDED
     exchange_protocol: Optional[MCPExchangeProtocolLiteral] = None
+    as_issuer: Union[str, None, NotProvided] = NOT_PROVIDED
+    as_client_id: Union[str, None, NotProvided] = NOT_PROVIDED
+    as_client_secret: Union[str, None, NotProvided] = NOT_PROVIDED
+    requested_scope: Union[str, None, NotProvided] = NOT_PROVIDED
     forward_identity: Optional[bool] = None
     tool_catalog_max_count: Optional[int] = Field(
         default=None,
@@ -129,6 +161,9 @@ class MCPServerUpdate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Union[ModelId, None, NotProvided] = NOT_PROVIDED
+    # Declaratively replaces the tool catalog when given (same semantics as
+    # on create); omit or send null to leave the catalog untouched.
+    tools: Optional[list[MCPServerToolDefinition]] = None
 
 
 class MCPServerSettingsPublic(MCPServerPublic):
@@ -211,11 +246,17 @@ class MCPServerToolUpdate(BaseModel):
 
 
 class MCPConnectionStatus(BaseModel):
-    """Status of MCP server connection attempt."""
+    """Status of MCP server connection attempt.
+
+    ``probe_skipped`` is true for SSO-scoped servers (per_user / per_tenant),
+    where no admin-time credentials exist to probe with: ``success`` then
+    means "saved without a probe", not "connection verified".
+    """
 
     success: bool
     tools_discovered: int = 0
     error_message: Optional[str] = None
+    probe_skipped: bool = False
 
 
 class MCPServerCreateResponse(BaseModel):

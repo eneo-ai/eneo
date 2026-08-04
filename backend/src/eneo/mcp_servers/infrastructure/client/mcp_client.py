@@ -699,9 +699,17 @@ class MCPClient:
 
         token: Optional[str] = None
         if self._dynamic_token_provider is not None:
-            # Broker-backed server: mint/reuse an audience-bound token. The
-            # broker raises typed errors; the connect path surfaces them.
-            token = await self._dynamic_token_provider()
+            # Broker-backed server: mint/reuse an audience-bound token.
+            # Failures here are authentication failures (no or stale SSO
+            # session, exchange rejected), not transport failures — typed
+            # so callers can tell the user to (re)connect instead of
+            # showing "service unavailable".
+            try:
+                token = await self._dynamic_token_provider()
+            except (MCPClientError, KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as e:
+                raise MCPAuthenticationError(str(e)) from e
         elif self.mcp_server.http_auth_type == "bearer":
             token = self.auth_credentials.get("token")
 

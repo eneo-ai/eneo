@@ -23,7 +23,7 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
-from eneo.database.tables.mcp_server_table import MCPServers
+from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
 
 
 @pytest.fixture
@@ -147,3 +147,196 @@ async def test_static_bearer_round_trip_includes_expected_idp_issuer(
     row = next(item for item in response.json()["items"] if item["id"] == mcp_id)
     assert row["auth_scope"] == "static_bearer"
     assert row["expected_idp_issuer"] == issuer
+
+
+@pytest.mark.parametrize("scope", ["per_user", "per_tenant"])
+async def test_create_sso_scope_saves_without_connection_probe(
+    client, default_user_token, scope, monkeypatch
+):
+    """POST /mcp-servers/ with an SSO scope persists the server without
+    probing the remote: the broker mints tokens per user at call time, so
+    there are no admin-time credentials to probe with. The unreachable URL
+    proves no probe ran (a probe would 400 the request). Tools arrive later
+    via tools/sync, so the catalog starts empty."""
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "mcp_oauth_enabled", True)
+    headers = {"Authorization": f"Bearer {default_user_token}"}
+
+    response = await client.post(
+        "/api/v1/mcp-servers/",
+        json={
+            "name": f"sso-{scope}-{uuid4().hex[:8]}",
+            "http_url": "https://example.invalid/mcp",
+            "http_auth_type": "bearer",
+            "auth_scope": scope,
+            "exchange_protocol": "id_jag",
+            "expected_idp_issuer": "https://idp.example/oauth2/default",
+            "target_resource_or_scope": "https://example.invalid/mcp",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["connection"]["success"] is True
+    assert body["connection"]["probe_skipped"] is True
+    assert body["connection"]["tools_discovered"] == 0
+    assert body["server"]["auth_scope"] == scope
+
+    server_id = body["server"]["id"]
+    tools = await client.get(f"/api/v1/mcp-servers/{server_id}/tools/", headers=headers)
+    assert tools.status_code == 200, tools.text
+    assert tools.json()["items"] == []
+
+
+async def test_create_sso_scope_with_declared_tool_catalog(
+    client, default_user_token, monkeypatch
+):
+    """A headless provisioner registers a per_user server together with its
+    tool catalog: SSO servers cannot be probed without a user session, so
+    the declared ``tools`` become the initial catalog, saved as approved on
+    the registering admin's authority. The runtime proxy still intersects
+    this catalog with the live per-user tools/list before exposure."""
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "mcp_oauth_enabled", True)
+    headers = {"Authorization": f"Bearer {default_user_token}"}
+
+    response = await client.post(
+        "/api/v1/mcp-servers/",
+        json={
+            "name": f"sso-tools-{uuid4().hex[:8]}",
+            "http_url": "https://example.invalid/mcp",
+            "http_auth_type": "bearer",
+            "auth_scope": "per_user",
+            "exchange_protocol": "id_jag",
+            "expected_idp_issuer": "https://idp.example/oauth2/default",
+            "target_resource_or_scope": "https://example.invalid/mcp",
+            "tools": [
+                {
+                    "name": "search_knowledge",
+                    "title": "Search knowledge",
+                    "description": "Search the connected knowledge base.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                },
+                {"name": "get_document"},
+            ],
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["connection"]["probe_skipped"] is True
+    assert body["connection"]["tools_discovered"] == 2
+
+    server_id = body["server"]["id"]
+    tools = await client.get(f"/api/v1/mcp-servers/{server_id}/tools/", headers=headers)
+    assert tools.status_code == 200, tools.text
+    by_name = {item["name"]: item for item in tools.json()["items"]}
+    assert set(by_name) == {"search_knowledge", "get_document"}
+    search = by_name["search_knowledge"]
+    assert search["description"] == "Search the connected knowledge base."
+    assert search["input_schema"]["required"] == ["query"]
+    # Declared tools are active immediately: approved (nothing pending) and
+    # enabled, so the runtime can expose them without a human review step.
+    assert search["requires_approval"] is False
+    assert search["pending_description"] is None
+    assert search["is_enabled_by_default"] is True
+
+
+async def test_update_replaces_declared_tool_catalog(
+    client, db_container, default_user_token, monkeypatch
+):
+    """Re-declaring the catalog on update makes the stored set match exactly:
+    kept tools take the new definition (name-stable, so assistant selections
+    survive), absent tools are deleted, new tools appear, and staged
+    unapproved drift on a re-declared tool resolves to the declaration."""
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "mcp_oauth_enabled", True)
+    headers = {"Authorization": f"Bearer {default_user_token}"}
+
+    created = await client.post(
+        "/api/v1/mcp-servers/",
+        json={
+            "name": f"sso-redeclare-{uuid4().hex[:8]}",
+            "http_url": "https://example.invalid/mcp",
+            "http_auth_type": "bearer",
+            "auth_scope": "per_user",
+            "expected_idp_issuer": "https://idp.example/oauth2/default",
+            "tools": [
+                {"name": "search_knowledge", "description": "Old description."},
+                {"name": "get_document"},
+            ],
+        },
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    server_id = created.json()["server"]["id"]
+
+    # Simulate drift staged by an earlier sync: pending values awaiting review
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(MCPServerTools)
+            .where(
+                MCPServerTools.mcp_server_id == server_id,
+                MCPServerTools.name == "search_knowledge",
+            )
+            .values(pending_description="Drifted remote text", requires_approval=True)
+        )
+        await session.commit()
+
+    updated = await client.post(
+        f"/api/v1/mcp-servers/{server_id}/",
+        json={
+            "tools": [
+                {"name": "search_knowledge", "description": "New description."},
+                {"name": "list_sources"},
+            ]
+        },
+        headers=headers,
+    )
+    assert updated.status_code == 200, updated.text
+
+    tools = await client.get(f"/api/v1/mcp-servers/{server_id}/tools/", headers=headers)
+    by_name = {item["name"]: item for item in tools.json()["items"]}
+    assert set(by_name) == {"search_knowledge", "list_sources"}
+    search = by_name["search_knowledge"]
+    assert search["description"] == "New description."
+    assert search["requires_approval"] is False
+    assert search["pending_description"] is None
+
+
+async def test_create_rejects_invalid_declared_tool_catalog(
+    client, default_user_token, monkeypatch
+):
+    """The declared catalog passes the same validation as live discovery;
+    duplicate tool names are rejected before anything is persisted."""
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "mcp_oauth_enabled", True)
+    name = f"sso-dup-{uuid4().hex[:8]}"
+    response = await client.post(
+        "/api/v1/mcp-servers/",
+        json={
+            "name": name,
+            "http_url": "https://example.invalid/mcp",
+            "http_auth_type": "bearer",
+            "auth_scope": "per_user",
+            "expected_idp_issuer": "https://idp.example/oauth2/default",
+            "tools": [{"name": "dup"}, {"name": "dup"}],
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 400, response.text
+
+    listing = await client.get(
+        "/api/v1/mcp-servers/",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert all(item["name"] != name for item in listing.json()["items"])

@@ -151,6 +151,8 @@ class Rfc8693Strategy(TokenExchangeStrategy):
         subject_id_token: Optional[str] = None,
         as_issuer: Optional[str] = None,
         as_token_endpoint: Optional[str] = None,
+        as_client_id: Optional[str] = None,
+        as_client_secret: Optional[str] = None,
         scope: Optional[str] = None,
     ) -> ExchangedToken:
         # An override (per-server or tenant default) drives both the audience

@@ -71,6 +71,19 @@ class MCPServers(BasePublic):
     # Strategy-target hint: the RFC 8707 ``resource`` / RFC 8693 ``audience``
     # value for the exchange.
     target_resource_or_scope: Mapped[Optional[str]] = mapped_column(Text)
+    # Client registered at the MCP server's authorization server, used for
+    # the ID-JAG leg-2 jwt-bearer redemption when that AS requires client
+    # authentication. Distinct from the federation client at the IdP.
+    # ``as_client_secret`` holds a Fernet envelope (enc:fernet:v1:...).
+    # Pins the authorization-server issuer that ``as_client_id`` /
+    # ``as_client_secret`` may be sent to during leg-2 redemption.
+    as_issuer: Mapped[Optional[str]] = mapped_column(Text)
+    as_client_id: Mapped[Optional[str]] = mapped_column(Text)
+    as_client_secret: Mapped[Optional[str]] = mapped_column(Text)
+    # Space-separated OAuth scopes requested during token exchange. Overrides
+    # the PRM ``scopes_supported`` derivation; needed when the resource does
+    # not advertise scopes but its API enforces them.
+    requested_scope: Mapped[Optional[str]] = mapped_column(Text)
     # Token-exchange strategy. ``auto`` picks id_jag when the server's
     # authorization server advertises the id-jag grant profile, else falls
     # back to the same-IdP rfc8693 exchange. Explicit values pin a strategy

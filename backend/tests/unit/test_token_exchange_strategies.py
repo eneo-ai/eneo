@@ -278,3 +278,64 @@ async def test_strategy_maps_invalid_target_to_token_exchange_error(patch_post):
             client_id="c",
             client_secret=None,
         )
+
+
+def test_classify_error_treats_dead_subject_token_as_user_action():
+    """Some IdPs report a stale subject token (rotated signing keys,
+    expired assertion) as ``invalid_request`` instead of ``invalid_grant``.
+    Both must classify as user-action-required so the broker's one-shot
+    refresh retry fires and the user is told to reconnect."""
+    from eneo.mcp_servers.application.token_exchange import classify_error
+
+    exc = classify_error(
+        400,
+        {
+            "error": "invalid_request",
+            "error_description": "Subject token signature verification failed",
+        },
+    )
+    assert isinstance(exc, TokenExchangeUserActionRequired)
+
+    exc = classify_error(
+        400,
+        {
+            "error": "invalid_request",
+            "error_description": "Subject token is expired",
+        },
+    )
+    assert isinstance(exc, TokenExchangeUserActionRequired)
+
+
+def test_classify_error_keeps_other_invalid_request_as_exchange_error():
+    """``invalid_request`` without a subject-token cause stays a plain
+    exchange error: it signals broken configuration, not a stale login."""
+    from eneo.mcp_servers.application.token_exchange import classify_error
+
+    exc = classify_error(
+        400,
+        {
+            "error": "invalid_request",
+            "error_description": "missing required parameter: resource",
+        },
+    )
+    assert isinstance(exc, TokenExchangeError)
+    assert not isinstance(exc, TokenExchangeUserActionRequired)
+
+
+def test_user_action_errors_are_typed_for_transport_consumers():
+    """The proxy distinguishes "user can fix by reconnecting SSO" from
+    other auth failures via the MCPUserActionRequiredError base; the
+    broker's user-facing errors must stay in that hierarchy."""
+    from eneo.main.exceptions import (
+        MCPAuthenticationError,
+        MCPClientError,
+        MCPUserActionRequiredError,
+    )
+    from eneo.mcp_servers.application.mcp_token_broker import (
+        MCPNotAuthenticatedError,
+    )
+
+    for exc_type in (TokenExchangeUserActionRequired, MCPNotAuthenticatedError):
+        assert issubclass(exc_type, MCPUserActionRequiredError)
+        assert issubclass(exc_type, MCPAuthenticationError)
+        assert issubclass(exc_type, MCPClientError)

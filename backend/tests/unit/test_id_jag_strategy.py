@@ -145,6 +145,40 @@ async def test_two_legs_carry_the_normative_parameters(patch_post):
     assert result.access_token.startswith("ey") or "." in result.access_token
 
 
+async def test_leg2_uses_as_client_credentials_when_configured(patch_post):
+    """The resource AS may require its own client registration for the
+    jwt-bearer redemption; leg 1 keeps the federation client while leg 2
+    switches to the AS-side client and authenticates with its secret."""
+    assertion = _id_jag()
+    patch_post["responses"] = {
+        IDP_TOKEN_ENDPOINT: (
+            200,
+            {
+                "access_token": assertion,
+                "issued_token_type": "urn:ietf:params:oauth:token-type:id-jag",
+            },
+        ),
+        AS_TOKEN_ENDPOINT: (
+            200,
+            {"access_token": _as_access_token(), "expires_in": 600},
+        ),
+    }
+
+    await _run(
+        IdJagStrategy(),
+        as_client_id="eneo-at-mcp-as",
+        as_client_secret="as-s3cret",
+    )
+
+    leg1, leg2 = patch_post["calls"]
+    assert leg1["form"]["client_id"] == "eneo-client"
+    assert leg1["form"]["client_secret"] == "s3cret"
+    form2 = leg2["form"]
+    assert form2["client_id"] == "eneo-at-mcp-as"
+    assert form2["client_secret"] == "as-s3cret"
+    assert form2["scope"] == "knowledge:read"
+
+
 @pytest.mark.asyncio
 async def test_assertion_without_id_jag_typ_is_refused(patch_post):
     patch_post["responses"] = {

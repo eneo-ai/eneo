@@ -112,6 +112,10 @@ class MCPServer(Entity):
         tool_discovery_principal: str = "anonymous",
         target_resource_or_scope: Optional[str] = None,
         exchange_protocol: MCPExchangeProtocol = "auto",
+        as_issuer: Optional[str] = None,
+        as_client_id: Optional[str] = None,
+        as_client_secret: Optional[str] = None,
+        requested_scope: Optional[str] = None,
         is_enabled: bool = True,
         forward_identity: bool = False,
         identity_policy_generation: int = 0,
@@ -140,6 +144,10 @@ class MCPServer(Entity):
         self.tool_discovery_principal = tool_discovery_principal
         self.target_resource_or_scope = target_resource_or_scope
         self.exchange_protocol: MCPExchangeProtocol = exchange_protocol
+        self.as_issuer = as_issuer
+        self.as_client_id = as_client_id
+        self.as_client_secret = as_client_secret
+        self.requested_scope = requested_scope
         self.is_enabled = is_enabled
         self.forward_identity = forward_identity
         self.identity_policy_generation = identity_policy_generation

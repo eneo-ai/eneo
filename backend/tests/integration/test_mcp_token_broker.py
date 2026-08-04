@@ -39,6 +39,7 @@ from eneo.database.tables.mcp_exchanged_tokens_table import MCPExchangedTokens
 from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.mcp_servers.application import mcp_token_broker as broker_mod
 from eneo.mcp_servers.application.mcp_token_broker import (
+    MCPBrokerConfigurationError,
     MCPNotAuthenticatedError,
     MCPRequiresUserIdentityError,
     MCPSameIdpMismatchError,
@@ -108,6 +109,7 @@ async def _insert_per_user_mcp_server(
     tenant_id,
     expected_idp_issuer: str,
     audience_url: str = "https://mcp.example/srv",
+    **extra_columns,
 ) -> str:
     async with db_container() as container:
         session = container.session()
@@ -121,6 +123,7 @@ async def _insert_per_user_mcp_server(
                 is_enabled=True,
                 auth_scope="per_user",
                 expected_idp_issuer=expected_idp_issuer,
+                **extra_columns,
             )
             .returning(MCPServers.id)
         )
@@ -530,6 +533,169 @@ async def test_auto_uses_id_jag_when_as_advertises_grant_profile(
     leg2_form = patch_two_leg_post["calls"][1]["form"]
     assert leg2_form["grant_type"] == "urn:ietf:params:oauth:grant-type:jwt-bearer"
     assert leg2_form["assertion"] == assertion
+
+
+@pytest.mark.integration
+async def test_id_jag_uses_per_server_scope_and_as_client_credentials(
+    db_container, default_user, patch_prm, patch_as_metadata, patch_two_leg_post
+):
+    """requested_scope drives the leg-1 scope even when the PRM advertises
+    none, and the AS-side client registration authenticates leg 2."""
+    issuer = "https://idp.example/realms/eneo"
+    idp_token_endpoint = f"{issuer}/protocol/openid-connect/token"
+    mcp_id = await _insert_per_user_mcp_server(
+        db_container,
+        tenant_id=default_user.tenant_id,
+        expected_idp_issuer=issuer,
+        requested_scope="todos.read mcp.access",
+        as_issuer=AS_ISSUER,
+        as_client_id="eneo-at-resource-as",
+        as_client_secret="as-plain-secret",
+    )
+    server = await _load_mcp_server_entity(db_container, mcp_id)
+
+    patch_prm["doc"] = ProtectedResourceMetadata(
+        resource=server.http_url,
+        authorization_servers=(AS_ISSUER,),
+    )
+    patch_as_metadata["metadata"] = AuthorizationServerMetadata(
+        issuer=AS_ISSUER,
+        token_endpoint=AS_TOKEN_ENDPOINT,
+        grant_profiles_supported=(ID_JAG_PROFILE,),
+    )
+
+    assertion = _jwt(
+        {"iss": issuer, "aud": AS_ISSUER, "exp": int(time.time()) + 300},
+        typ="oauth-id-jag+jwt",
+    )
+    as_token = _jwt(
+        {"iss": AS_ISSUER, "aud": server.http_url, "exp": int(time.time()) + 600}
+    )
+    patch_two_leg_post["responses"] = {
+        idp_token_endpoint: (200, {"access_token": assertion}),
+        AS_TOKEN_ENDPOINT: (200, {"access_token": as_token, "expires_in": 600}),
+    }
+
+    async with db_container() as container:
+        await container.oidc_token_store().upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject="user-1",
+            refresh_token="rt",
+            access_token="at",
+            id_token="the-id-token",
+            access_token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            scopes_granted=["openid"],
+        )
+
+    async with db_container() as container:
+        broker = container.mcp_token_broker()
+        token = await broker.get_token(
+            mcp_server=server,
+            tenant_federation_config={
+                "issuer": issuer,
+                "token_endpoint": idp_token_endpoint,
+                "client_id": "eneo-broker",
+                "client_secret": "s3cret",
+            },
+            principal=UserPrincipal(user=default_user),
+        )
+
+    assert token == as_token
+    leg1_form = patch_two_leg_post["calls"][0]["form"]
+    assert leg1_form["scope"] == "todos.read mcp.access"
+    assert leg1_form["client_id"] == "eneo-broker"
+    leg2_form = patch_two_leg_post["calls"][1]["form"]
+    assert leg2_form["client_id"] == "eneo-at-resource-as"
+    assert leg2_form["client_secret"] == "as-plain-secret"
+
+
+async def test_as_client_credentials_refused_when_prm_steers_to_other_as(
+    db_container, default_user, patch_prm, patch_as_metadata, patch_two_leg_post
+):
+    """The leg-2 AS comes from the MCP server's own PRM, so a hostile server
+    can point it anywhere. Pinned as_client credentials must never be sent
+    to an AS other than the pinned issuer: the broker refuses before any
+    token endpoint is contacted."""
+    issuer = "https://idp.example/realms/eneo"
+    attacker_as = "https://attacker.example"
+    mcp_id = await _insert_per_user_mcp_server(
+        db_container,
+        tenant_id=default_user.tenant_id,
+        expected_idp_issuer=issuer,
+        as_issuer=AS_ISSUER,
+        as_client_id="eneo-at-resource-as",
+        as_client_secret="as-plain-secret",
+    )
+    server = await _load_mcp_server_entity(db_container, mcp_id)
+
+    patch_prm["doc"] = ProtectedResourceMetadata(
+        resource=server.http_url,
+        authorization_servers=(attacker_as,),
+    )
+    patch_as_metadata["metadata"] = AuthorizationServerMetadata(
+        issuer=attacker_as,
+        token_endpoint=f"{attacker_as}/token",
+        grant_profiles_supported=(ID_JAG_PROFILE,),
+    )
+
+    async with db_container() as container:
+        broker = container.mcp_token_broker()
+        with pytest.raises(MCPBrokerConfigurationError, match="pinned"):
+            await broker.get_token(
+                mcp_server=server,
+                tenant_federation_config={
+                    "issuer": issuer,
+                    "token_endpoint": f"{issuer}/token",
+                    "client_id": "eneo-broker",
+                    "client_secret": "s3cret",
+                },
+                principal=UserPrincipal(user=default_user),
+            )
+
+    assert patch_two_leg_post["calls"] == []
+
+
+async def test_as_client_credentials_require_pinned_issuer(
+    db_container, default_user, patch_prm, patch_as_metadata, patch_two_leg_post
+):
+    """as_client credentials without an as_issuer pin are refused outright;
+    a discovery-derived AS must never receive them."""
+    issuer = "https://idp.example/realms/eneo"
+    mcp_id = await _insert_per_user_mcp_server(
+        db_container,
+        tenant_id=default_user.tenant_id,
+        expected_idp_issuer=issuer,
+        as_client_id="eneo-at-resource-as",
+        as_client_secret="as-plain-secret",
+    )
+    server = await _load_mcp_server_entity(db_container, mcp_id)
+
+    patch_prm["doc"] = ProtectedResourceMetadata(
+        resource=server.http_url,
+        authorization_servers=(AS_ISSUER,),
+    )
+    patch_as_metadata["metadata"] = AuthorizationServerMetadata(
+        issuer=AS_ISSUER,
+        token_endpoint=AS_TOKEN_ENDPOINT,
+        grant_profiles_supported=(ID_JAG_PROFILE,),
+    )
+
+    async with db_container() as container:
+        broker = container.mcp_token_broker()
+        with pytest.raises(MCPBrokerConfigurationError, match="as_issuer"):
+            await broker.get_token(
+                mcp_server=server,
+                tenant_federation_config={
+                    "issuer": issuer,
+                    "token_endpoint": f"{issuer}/token",
+                    "client_id": "eneo-broker",
+                    "client_secret": "s3cret",
+                },
+                principal=UserPrincipal(user=default_user),
+            )
+
+    assert patch_two_leg_post["calls"] == []
 
 
 @pytest.mark.integration

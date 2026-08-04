@@ -30,6 +30,8 @@ from typing import Any, Literal, Optional
 
 import aiohttp
 
+from eneo.main.exceptions import MCPUserActionRequiredError
+
 # Configured value on the MCP server row. ``auto`` is resolved by the
 # broker to one of the concrete protocols before strategy lookup.
 ExchangeProtocol = Literal["auto", "id_jag", "rfc8693"]
@@ -68,9 +70,11 @@ class TokenExchangeError(Exception):
     misconfiguration. The broker surfaces this as 502 to the caller."""
 
 
-class TokenExchangeUserActionRequired(Exception):
+class TokenExchangeUserActionRequired(MCPUserActionRequiredError):
     """The IdP rejected the subject token (e.g. invalid_grant). The caller
-    must re-authenticate; the broker maps this to 401 with a clear remedy."""
+    must re-authenticate; the broker maps this to 401 with a clear remedy.
+    Subclasses ``MCPUserActionRequiredError`` so transport-level consumers
+    (the proxy) can tell the user to reconnect instead of failing opaquely."""
 
 
 class TokenExchangeStrategy(ABC):
@@ -91,6 +95,8 @@ class TokenExchangeStrategy(ABC):
         subject_id_token: Optional[str] = None,
         as_issuer: Optional[str] = None,
         as_token_endpoint: Optional[str] = None,
+        as_client_id: Optional[str] = None,
+        as_client_secret: Optional[str] = None,
         scope: Optional[str] = None,
     ) -> ExchangedToken:
         """Perform the strategy-specific grant.
@@ -99,7 +105,10 @@ class TokenExchangeStrategy(ABC):
         service-account access token for ``per_tenant`` flows). The ID-JAG
         strategy instead consumes ``subject_id_token`` plus the MCP server's
         authorization-server coordinates (``as_issuer`` /
-        ``as_token_endpoint``); the same-IdP strategy ignores those.
+        ``as_token_endpoint``) and, when the resource AS requires client
+        authentication, the client registered *at that AS*
+        (``as_client_id`` / ``as_client_secret``); the same-IdP strategy
+        ignores those.
         """
         ...
 
@@ -145,7 +154,18 @@ def classify_error(status_code: int, payload: dict[str, Any]) -> Exception:
     """Translate IdP error responses into the broker's error vocabulary."""
     error_code = str(payload.get("error", "unknown_error"))
     description = str(payload.get("error_description", ""))
-    if error_code in {"invalid_grant", "interaction_required", "login_required"}:
+    description_lower = description.lower()
+    # Some IdPs report an unusable subject token (stale signature after key
+    # rotation, expired assertion) as ``invalid_request`` rather than
+    # ``invalid_grant``. Both mean the same thing for us: the stored subject
+    # token is dead, and a refresh or re-login can revive it.
+    subject_token_unusable = "subject token" in description_lower and (
+        "signature" in description_lower or "expire" in description_lower
+    )
+    if (
+        error_code in {"invalid_grant", "interaction_required", "login_required"}
+        or subject_token_unusable
+    ):
         return TokenExchangeUserActionRequired(
             f"IdP requires re-authentication ({error_code}): {description}"
         )

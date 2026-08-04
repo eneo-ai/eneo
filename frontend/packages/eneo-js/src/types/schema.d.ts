@@ -13213,6 +13213,10 @@ export interface components {
     /**
      * MCPConnectionStatus
      * @description Status of MCP server connection attempt.
+     *
+     *     ``probe_skipped`` is true for SSO-scoped servers (per_user / per_tenant),
+     *     where no admin-time credentials exist to probe with: ``success`` then
+     *     means "saved without a probe", not "connection verified".
      */
     MCPConnectionStatus: {
       /** Success */
@@ -13224,6 +13228,11 @@ export interface components {
       tools_discovered?: number;
       /** Error Message */
       error_message?: string | null;
+      /**
+       * Probe Skipped
+       * @default false
+       */
+      probe_skipped?: boolean;
     };
     /** MCPConnectionStatusList */
     MCPConnectionStatusList: {
@@ -13291,6 +13300,14 @@ export interface components {
        * @enum {string}
        */
       exchange_protocol?: "auto" | "id_jag" | "rfc8693";
+      /** As Issuer */
+      as_issuer?: string | null;
+      /** As Client Id */
+      as_client_id?: string | null;
+      /** As Client Secret */
+      as_client_secret?: string | null;
+      /** Requested Scope */
+      requested_scope?: string | null;
       /**
        * Forward Identity
        * @default false
@@ -13318,6 +13335,8 @@ export interface components {
       /** Documentation Url */
       documentation_url?: string | null;
       security_classification?: components["schemas"]["ModelId"] | null;
+      /** Tools */
+      tools?: components["schemas"]["MCPServerToolDefinition"][] | null;
     };
     /**
      * MCPServerCreateResponse
@@ -13365,6 +13384,17 @@ export interface components {
        * @enum {string}
        */
       exchange_protocol?: "auto" | "id_jag" | "rfc8693";
+      /** As Issuer */
+      as_issuer?: string | null;
+      /** As Client Id */
+      as_client_id?: string | null;
+      /**
+       * Has As Client Secret
+       * @default false
+       */
+      has_as_client_secret?: boolean;
+      /** Requested Scope */
+      requested_scope?: string | null;
       /**
        * Forward Identity
        * @default false
@@ -13466,6 +13496,17 @@ export interface components {
        * @enum {string}
        */
       exchange_protocol?: "auto" | "id_jag" | "rfc8693";
+      /** As Issuer */
+      as_issuer?: string | null;
+      /** As Client Id */
+      as_client_id?: string | null;
+      /**
+       * Has As Client Secret
+       * @default false
+       */
+      has_as_client_secret?: boolean;
+      /** Requested Scope */
+      requested_scope?: string | null;
       /**
        * Forward Identity
        * @default false
@@ -13525,6 +13566,28 @@ export interface components {
       is_org_enabled?: boolean | null;
       /** Env Vars */
       env_vars?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * MCPServerToolDefinition
+     * @description A tool definition supplied by the registering caller at create time.
+     *
+     *     Lets headless provisioners register the catalog together with the
+     *     server: SSO-scoped servers cannot be probed without a user session,
+     *     so discovery has nothing to populate the catalog from. Supplied
+     *     definitions are validated against the same catalog bounds as live
+     *     discovery and saved as approved, on the registering admin's authority.
+     */
+    MCPServerToolDefinition: {
+      /** Name */
+      name: string;
+      /** Title */
+      title?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Input Schema */
+      input_schema?: {
         [key: string]: unknown;
       } | null;
     };
@@ -13641,6 +13704,14 @@ export interface components {
       target_resource_or_scope?: string | null;
       /** Exchange Protocol */
       exchange_protocol?: ("auto" | "id_jag" | "rfc8693") | null;
+      /** As Issuer */
+      as_issuer?: string | null;
+      /** As Client Id */
+      as_client_id?: string | null;
+      /** As Client Secret */
+      as_client_secret?: string | null;
+      /** Requested Scope */
+      requested_scope?: string | null;
       /** Forward Identity */
       forward_identity?: boolean | null;
       /** Tool Catalog Max Count */
@@ -13657,6 +13728,8 @@ export interface components {
       documentation_url?: string | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /** Tools */
+      tools?: components["schemas"]["MCPServerToolDefinition"][] | null;
     };
     /**
      * MCPServiceAccountPublic

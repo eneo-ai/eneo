@@ -2,6 +2,7 @@
 
 import base64
 import contextlib
+import hashlib
 import json
 import secrets
 import time
@@ -87,6 +88,9 @@ class OIDCStateCache(TypedDict):
     redirect_uri: str
     config_version: str | None
     iat: int
+    # PKCE verifier (RFC 7636). Server-side only: the challenge goes through
+    # the front channel, the verifier never does.
+    code_verifier: NotRequired[str]
 
 
 class AccessTokenResponse(TypedDict):
@@ -452,7 +456,7 @@ class CallbackRequest(BaseModel):
 
     code: str
     state: str
-    code_verifier: Optional[str] = None  # For PKCE (future use)
+    code_verifier: Optional[str] = None  # PKCE verifier for frontend-run PKCE
 
     model_config = {
         "json_schema_extra": {
@@ -862,12 +866,25 @@ async def initiate_auth(
         cast(dict[str, Any], state_payload), settings.jwt_secret, algorithm="HS256"
     )
 
+    # PKCE (RFC 7636, S256). Sent opportunistically: OAuth 2.1-style IdPs
+    # require it, older IdPs ignore the extra authorize parameters. The
+    # verifier lives only in the server-side state cache, so the challenge
+    # is attached to the authorize URL only when caching succeeded.
+    pkce_verifier = secrets.token_urlsafe(64)
+    pkce_challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(pkce_verifier.encode()).digest())
+        .rstrip(b"=")
+        .decode()
+    )
+    pkce_active = False
+
     state_cache_payload: OIDCStateCache = {
         "tenant_id": str(tenant_obj.id),
         "tenant_slug": tenant_obj.slug or tenant_obj.name,
         "redirect_uri": redirect_uri,
         "config_version": tenant_config_version,
         "iat": state_payload["iat"],
+        "code_verifier": pkce_verifier,
     }
     state_cache_key = f"oidc:state:{state_payload['nonce']}"
 
@@ -884,6 +901,7 @@ async def initiate_auth(
                 settings.oidc_state_ttl_seconds,
                 json.dumps(state_cache_payload, separators=(",", ":")),
             )
+            pkce_active = True
             await _log_oidc_debug(
                 redis_client=redis_client,
                 correlation_id=correlation_id,
@@ -962,6 +980,9 @@ async def initiate_auth(
         ),
         "state": signed_state,
     }
+    if pkce_active:
+        params["code_challenge"] = pkce_challenge
+        params["code_challenge_method"] = "S256"
     authorization_url = f"{authorization_endpoint}?{urlencode(params)}"
 
     await _log_oidc_debug(
@@ -1552,6 +1573,13 @@ async def auth_callback(
                     "client_secret": federation_config["client_secret"],
                 },
             )
+            # PKCE: the verifier cached at initiate wins; a client-supplied
+            # one is accepted for flows that ran PKCE in the frontend.
+            pkce_verifier = (
+                cached_state.get("code_verifier") if cached_state else None
+            ) or callback.code_verifier
+            if pkce_verifier:
+                token_data["code_verifier"] = pkce_verifier
             headers: dict[str, str] = {}
 
             if token_auth_method == "client_secret_basic":

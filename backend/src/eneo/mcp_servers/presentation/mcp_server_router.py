@@ -592,6 +592,10 @@ async def create_mcp_server(
     """Create a new MCP server in global catalog (admin only).
 
     Validates connection before saving. Returns 400 if connection fails.
+    SSO scopes (per_user / per_tenant) are saved without a probe; the
+    response carries ``probe_skipped=true``. An explicit ``tools`` list
+    defines the initial catalog (saved as approved) instead of probe
+    discovery — the path headless provisioners use for SSO-scoped servers.
     """
     _require_oauth_enabled_for(data.auth_scope)
 
@@ -626,6 +630,15 @@ async def create_mcp_server(
         expected_idp_issuer=data.expected_idp_issuer,
         target_resource_or_scope=data.target_resource_or_scope,
         exchange_protocol=data.exchange_protocol,
+        as_issuer=data.as_issuer,
+        as_client_id=data.as_client_id,
+        as_client_secret=data.as_client_secret,
+        requested_scope=data.requested_scope,
+        provided_tools=(
+            [tool.model_dump() for tool in data.tools]
+            if data.tools is not None
+            else None
+        ),
     )
 
     # If connection failed, return 400 error with message
@@ -653,6 +666,7 @@ async def create_mcp_server(
             success=result.connection.success,
             tools_discovered=result.connection.tools_discovered,
             error_message=result.connection.error_message,
+            probe_skipped=result.connection.probe_skipped,
         ),
     )
 
@@ -668,7 +682,12 @@ async def update_mcp_server(
     data: MCPServerUpdate,
     container: Container = _WITH_USER,
 ):
-    """Update an MCP server in global catalog (admin only)."""
+    """Update an MCP server in global catalog (admin only).
+
+    An explicit ``tools`` list declaratively replaces the tool catalog
+    (declared tools saved as approved, absent ones deleted); omitting it
+    leaves the catalog untouched.
+    """
     _require_oauth_enabled_for(data.auth_scope)
 
     service = container.mcp_server_service()
@@ -710,6 +729,15 @@ async def update_mcp_server(
         expected_idp_issuer=data.expected_idp_issuer,
         target_resource_or_scope=data.target_resource_or_scope,
         exchange_protocol=data.exchange_protocol,
+        as_issuer=data.as_issuer,
+        as_client_id=data.as_client_id,
+        as_client_secret=data.as_client_secret,
+        requested_scope=data.requested_scope,
+        provided_tools=(
+            [tool.model_dump() for tool in data.tools]
+            if data.tools is not None
+            else None
+        ),
     )
 
     # If connection validation failed, return 400 error with message
@@ -775,6 +803,8 @@ async def update_mcp_server(
         }
     if data.http_auth_config_schema is not None:
         changes["credentials_updated"] = True
+    if data.tools is not None:
+        changes["tool_catalog"] = {"declared": sorted(t.name for t in data.tools)}
 
     # Audit logging
     user = container.user()

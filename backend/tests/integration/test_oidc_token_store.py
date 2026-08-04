@@ -201,8 +201,9 @@ async def test_upsert_without_id_token_keeps_stored_id_token(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_upsert_skips_when_refresh_token_missing(db_container, default_user):
-    """No refresh_token means the row is useless for the broker; skip it."""
+async def test_upsert_skips_when_no_broker_usable_token(db_container, default_user):
+    """A row with neither refresh_token nor id_token can drive neither the
+    RFC 8693 nor the ID-JAG exchange; skip it."""
     issuer = "https://idp.example/v2.0"
 
     async with db_container() as container:
@@ -231,6 +232,34 @@ async def test_upsert_skips_when_refresh_token_missing(db_container, default_use
             .all()
         )
     assert rows == []
+
+
+@pytest.mark.integration
+async def test_upsert_stores_id_token_without_refresh_token(db_container, default_user):
+    """IdPs that issue no refresh token still yield a usable row: the ID
+    token alone carries the ID-JAG flow until it expires."""
+    issuer = "https://idp.no-refresh.example"
+
+    async with db_container() as container:
+        store = container.oidc_token_store()
+        result = await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject="sub-1",
+            refresh_token=None,
+            access_token="at-1",
+            id_token="idt-1",
+            access_token_expires_at=None,
+            scopes_granted=["openid", "email"],
+        )
+        assert result is not None
+
+        tokens = await store.get_decrypted(user_id=default_user.id, idp_issuer=issuer)
+
+    assert tokens is not None
+    assert tokens.refresh_token is None
+    assert tokens.access_token == "at-1"
+    assert tokens.id_token == "idt-1"
 
 
 @pytest.mark.integration
