@@ -25,7 +25,12 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionDatabaseUnavailable,
+    ObjectStoreConnectionInput,
+    ObjectStoreConnectionService,
+    ObjectStoreCredentialRotation,
+    StoredObjectStoreConnection,
 )
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
@@ -181,6 +186,46 @@ def test_runtime_exposes_the_configured_portable_object_store_ceiling() -> None:
     runtime.start(settings=settings, store=cast(S3ObjectStore, _ReadinessStore()))
 
     assert runtime.object_store_maximum_bytes == settings.maximum_multipart_bytes
+
+
+@pytest.mark.asyncio
+async def test_committed_connection_mutations_survive_local_publication_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = ObjectContentRuntime()
+    stored = MagicMock(spec=StoredObjectStoreConnection)
+    stored.revision = 2
+    connection_service = MagicMock(spec=ObjectStoreConnectionService)
+    connection_service.create = AsyncMock(return_value=stored)
+    connection_service.rotate_credentials = AsyncMock(return_value=stored)
+    provider = MagicMock(spec=ObjectStoreProvider)
+    provider.publish = AsyncMock(side_effect=RuntimeError("test publication failure"))
+    monkeypatch.setattr(runtime, "_connection_service", connection_service)
+    monkeypatch.setattr(runtime, "_object_store_provider", provider)
+
+    created = await runtime.create_object_store_connection(
+        ObjectStoreConnectionInput(
+            endpoint_url="https://objects.example.test",
+            region="se-1",
+            bucket="eneo-content",
+            access_key_id="access-key",
+            secret_access_key="secret-key",
+        ),
+        actor_user_id=UUID("aac28240-56fa-431f-9c15-1d187de6515a"),
+    )
+    rotated = await runtime.rotate_object_store_credentials(
+        ObjectStoreCredentialRotation(
+            expected_revision=1,
+            access_key_id="replacement-access-key",
+            secret_access_key="replacement-secret-key",
+        ),
+        actor_user_id=UUID("aac28240-56fa-431f-9c15-1d187de6515a"),
+    )
+
+    assert created is stored
+    assert rotated is stored
+    assert runtime._readiness_cache is None
+    assert provider.publish.await_count == 2
 
 
 @pytest.mark.asyncio

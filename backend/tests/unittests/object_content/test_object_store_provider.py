@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
@@ -45,6 +46,41 @@ class _ConnectionService:
         stored: StoredObjectStoreConnection,
     ) -> ObjectContentSettings:
         return _settings(stored.revision)
+
+
+class _BlockingConnectionService(_ConnectionService):
+    def __init__(self, stored: StoredObjectStoreConnection) -> None:
+        super().__init__(stored)
+        self.block_reads = False
+        self.get_started = asyncio.Event()
+        self.get_finished = asyncio.Event()
+        self.release_get = asyncio.Event()
+        self.get_calls = 0
+
+    async def get(self) -> StoredObjectStoreConnection | None:
+        self.get_calls += 1
+        if self.block_reads:
+            self.get_started.set()
+            await self.release_get.wait()
+        self.get_finished.set()
+        return self.stored
+
+
+class _BlockingAdoptionConnectionService(_ConnectionService):
+    def __init__(self) -> None:
+        super().__init__(None)
+        self.adopt_started = asyncio.Event()
+        self.release_adoption = asyncio.Event()
+
+    async def adopt_legacy(
+        self,
+        _settings: ObjectContentSettings,
+    ) -> StoredObjectStoreConnection:
+        self.adopt_calls += 1
+        self.adopt_started.set()
+        await self.release_adoption.wait()
+        self.stored = self.adopted
+        return self.adopted
 
 
 def _stored(revision: int) -> StoredObjectStoreConnection:
@@ -107,6 +143,126 @@ async def test_remote_acquisition_observes_rotation_and_drains_the_old_client() 
 
     await provider.close()
     assert stores[1].closed is True
+
+
+@pytest.mark.asyncio
+async def test_concurrent_acquisitions_share_one_connection_refresh() -> None:
+    service = _BlockingConnectionService(_stored(1))
+    stores: list[_Store] = []
+
+    def store_factory(settings: ObjectContentSettings) -> S3ObjectStore:
+        revision = int(settings.access_key_id.get_secret_value().rsplit("-", 1)[1])
+        store = _Store(revision)
+        stores.append(store)
+        return cast(S3ObjectStore, store)
+
+    provider = ObjectStoreProvider(
+        connection_service=cast(ObjectStoreConnectionService, service),
+        store_factory=store_factory,
+    )
+    await provider.initialize()
+    service.block_reads = True
+
+    async def acquire_revision() -> int:
+        async with provider.acquire() as lease:
+            return cast(_Store, lease.store).revision
+
+    acquisitions = [asyncio.create_task(acquire_revision()) for _ in range(5)]
+    await asyncio.wait_for(service.get_started.wait(), timeout=1)
+    await asyncio.sleep(0)
+
+    assert service.get_calls == 2
+
+    service.release_get.set()
+
+    assert await asyncio.gather(*acquisitions) == [1, 1, 1, 1, 1]
+    assert service.get_calls == 2
+
+    service.block_reads = False
+    service.stored = _stored(2)
+    async with provider.acquire() as lease:
+        assert cast(_Store, lease.store).revision == 2
+
+    assert service.get_calls == 3
+    assert stores[0].closed is True
+
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiter_does_not_reuse_a_completed_refresh() -> None:
+    service = _BlockingConnectionService(_stored(1))
+    stores: list[_Store] = []
+
+    def store_factory(settings: ObjectContentSettings) -> S3ObjectStore:
+        revision = int(settings.access_key_id.get_secret_value().rsplit("-", 1)[1])
+        store = _Store(revision)
+        stores.append(store)
+        return cast(S3ObjectStore, store)
+
+    provider = ObjectStoreProvider(
+        connection_service=cast(ObjectStoreConnectionService, service),
+        store_factory=store_factory,
+    )
+    await provider.initialize()
+    service.block_reads = True
+    service.get_started.clear()
+    service.get_finished.clear()
+
+    async def acquire_revision() -> int:
+        async with provider.acquire() as lease:
+            return cast(_Store, lease.store).revision
+
+    cancelled_acquisition = asyncio.create_task(acquire_revision())
+    await asyncio.wait_for(service.get_started.wait(), timeout=1)
+    cancelled_acquisition.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled_acquisition
+
+    service.release_get.set()
+    await asyncio.wait_for(service.get_finished.wait(), timeout=1)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    service.block_reads = False
+    service.stored = _stored(2)
+    assert await acquire_revision() == 2
+    assert service.get_calls == 3
+    assert stores[0].closed is True
+
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_adoption_cannot_replace_a_newer_published_revision() -> None:
+    service = _BlockingAdoptionConnectionService()
+    stores: list[_Store] = []
+
+    def store_factory(settings: ObjectContentSettings) -> S3ObjectStore:
+        revision = int(settings.access_key_id.get_secret_value().rsplit("-", 1)[1])
+        store = _Store(revision)
+        stores.append(store)
+        return cast(S3ObjectStore, store)
+
+    provider = ObjectStoreProvider(
+        connection_service=cast(ObjectStoreConnectionService, service),
+        legacy_settings=_settings(0),
+        store_factory=store_factory,
+    )
+    await provider.initialize()
+
+    adoption = asyncio.create_task(provider.adopt_validated_legacy())
+    await asyncio.wait_for(service.adopt_started.wait(), timeout=1)
+    await provider.publish(_stored(2))
+    service.release_adoption.set()
+    await adoption
+
+    assert provider.stored_connection is not None
+    assert provider.stored_connection.revision == 2
+    assert [store.revision for store in stores] == [0, 2]
+    assert stores[0].closed is True
+
+    await provider.close()
 
 
 @pytest.mark.asyncio

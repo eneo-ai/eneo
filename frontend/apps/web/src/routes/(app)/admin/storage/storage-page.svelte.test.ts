@@ -484,6 +484,88 @@ describe("admin storage settings page", () => {
     });
   });
 
+  test("reloads the connection revision after a concurrent credential rotation", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    let rejectConnectionReload!: (reason: unknown) => void;
+    getObjectStoreConnection
+      .mockResolvedValueOnce(connection)
+      .mockImplementationOnce(
+        () =>
+          new Promise<never>((_resolve, reject) => {
+            rejectConnectionReload = reject;
+          })
+      )
+      .mockResolvedValueOnce({ ...connection, revision: 4 });
+    rotateObjectStoreCredentials
+      .mockRejectedValueOnce(
+        new EneoError(
+          "The connection changed while it was being tested",
+          "RESPONSE",
+          409,
+          0,
+          { code: "object_store_connection_revision_conflict" },
+          { endpoint: "PUT@/admin/object-store-connection/credentials" }
+        )
+      )
+      .mockResolvedValueOnce({ ...connection, revision: 5 });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await page.getByLabelText("storage_connection_access_key").fill("stale-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("stale-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_rotate_title" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+    await expect
+      .element(page.getByText("storage_connection_error_conflict_title"))
+      .not.toBeInTheDocument();
+
+    rejectConnectionReload(new Error("connection reload failed"));
+
+    await expect.element(page.getByText("storage_connection_load_error_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_connection_error_conflict_title"))
+      .not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: "retry" }).click();
+
+    await expect.element(page.getByText("storage_connection_error_conflict_title")).toBeVisible();
+    await expect
+      .element(page.getByText('storage_connection_revision {"revision":4}'))
+      .toBeVisible();
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await expect.element(page.getByLabelText("storage_connection_access_key")).toHaveValue("");
+    await expect.element(page.getByLabelText("storage_connection_secret_key")).toHaveValue("");
+    await page.getByLabelText("storage_connection_access_key").fill("current-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("current-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    expect(rotateObjectStoreCredentials).toHaveBeenNthCalledWith(2, {
+      expected_revision: 4,
+      access_key_id: "current-access-key",
+      secret_access_key: "current-secret-key"
+    });
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(3);
+    expect(getPolicy).toHaveBeenCalledTimes(3);
+  });
+
   test("finishes connection and policy recovery when an uncertain save needs a retry", async () => {
     testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(policy());

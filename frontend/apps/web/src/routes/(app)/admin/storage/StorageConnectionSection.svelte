@@ -60,6 +60,7 @@
   let submissionUnknown = $state(false);
   let mutationOutcomeUnknown = $state(false);
   let connectionAlreadyConfigured = $state(false);
+  let connectionRevisionConflict = $state(false);
   let success = $state<DialogMode | null>(null);
   let alertRef = $state<HTMLElement | null>(null);
 
@@ -121,7 +122,10 @@
   }
 
   async function recoverConnection(): Promise<void> {
-    if ((await loadConnection()) && (mutationOutcomeUnknown || connectionAlreadyConfigured)) {
+    if (
+      (await loadConnection()) &&
+      (mutationOutcomeUnknown || connectionAlreadyConfigured || connectionRevisionConflict)
+    ) {
       await onConnectionChanged?.();
     }
   }
@@ -141,6 +145,7 @@
     resetSubmissionState();
     mutationOutcomeUnknown = false;
     connectionAlreadyConfigured = false;
+    connectionRevisionConflict = false;
     advancedOpen = false;
     dialogOpen = true;
   }
@@ -156,6 +161,7 @@
     resetSubmissionState();
     mutationOutcomeUnknown = false;
     connectionAlreadyConfigured = false;
+    connectionRevisionConflict = false;
     advancedOpen = false;
     dialogOpen = true;
   }
@@ -202,6 +208,7 @@
       success = completedMode;
       mutationOutcomeUnknown = false;
       connectionAlreadyConfigured = false;
+      connectionRevisionConflict = false;
       await onConnectionChanged?.();
     } catch (error: unknown) {
       if (hasStatus(error, 403)) {
@@ -223,6 +230,12 @@
           dialogOpen = false;
           success = null;
           connectionAlreadyConfigured = true;
+          await recoverConnection();
+        } else if (reasonCode === "object_store_connection_revision_conflict") {
+          resetSecrets();
+          dialogOpen = false;
+          success = null;
+          connectionRevisionConflict = true;
           await recoverConnection();
         } else {
           submissionCode = reasonCode;
@@ -324,6 +337,14 @@
       <Alert.Description>
         {m.storage_connection_already_configured_description()}
       </Alert.Description>
+    </Alert.Root>
+  {/if}
+
+  {#if connectionRevisionConflict && loadStatus === "idle"}
+    <Alert.Root aria-live="polite">
+      <AlertCircle />
+      <Alert.Title>{m.storage_connection_error_conflict_title()}</Alert.Title>
+      <Alert.Description>{m.storage_connection_error_conflict_description()}</Alert.Description>
     </Alert.Root>
   {/if}
 

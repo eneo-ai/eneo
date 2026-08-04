@@ -4302,7 +4302,7 @@
   "storage_connection_error_encryption_title": "Inloggningsuppgifterna kan inte krypteras",
   "storage_connection_error_encryption_description": "Driften behöver konfigurera Eneos grundnyckel för kryptering och starta om backend innan uppgifter kan sparas.",
   "storage_connection_error_conflict_title": "Anslutningen ändrades medan den testades",
-  "storage_connection_error_conflict_description": "Stäng dialogrutan, läs in den senaste anslutningen och försök igen.",
+  "storage_connection_error_conflict_description": "Den senaste anslutningen har lästs in. Kontrollera den innan du försöker igen.",
   "storage_connection_mutation_outcome_unknown_title": "Det gick inte att bekräfta om ändringen sparades",
   "storage_connection_mutation_outcome_unknown_description": "Ändringen kan ha sparats. Kontrollera aktuell destination och versionsnummer innan du försöker igen.",
   "storage_connection_error_unknown_title": "Resultatet kunde inte bekräftas",

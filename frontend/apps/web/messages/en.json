@@ -4302,7 +4302,7 @@
   "storage_connection_error_encryption_title": "Credentials cannot be encrypted",
   "storage_connection_error_encryption_description": "Operations must configure Eneo's root encryption key and restart the backend before credentials can be saved.",
   "storage_connection_error_conflict_title": "The connection changed while it was being tested",
-  "storage_connection_error_conflict_description": "Close this dialog, load the latest connection, and try again.",
+  "storage_connection_error_conflict_description": "The latest connection has been loaded. Review it before trying again.",
   "storage_connection_mutation_outcome_unknown_title": "The save result could not be confirmed",
   "storage_connection_mutation_outcome_unknown_description": "The change may have been saved. Review the current destination and version before trying again.",
   "storage_connection_error_unknown_title": "The result could not be confirmed",

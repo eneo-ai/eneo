@@ -17,6 +17,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContentOrphanCandidates,
     ObjectContents,
 )
+from eneo.main.logging import get_logger
 from eneo.object_content.configuration import (
     ObjectContentCoreSettings,
     ObjectContentSettings,
@@ -59,6 +60,8 @@ _ACTIVE_CONTENT_STATES = tuple(
 # Bound dependency amplification without hiding an outage or recovery for more
 # than one second. This is an internal probe-safety invariant, not product policy.
 _READINESS_CACHE_SECONDS = 1.0
+
+logger = get_logger(__name__)
 
 
 class ObjectContentReadinessCode(StrEnum):
@@ -279,7 +282,7 @@ class ObjectContentRuntime:
             candidate,
             actor_user_id=actor_user_id,
         )
-        self._readiness_cache = None
+        await self._publish_saved_object_store_connection(stored)
         return stored
 
     async def rotate_object_store_credentials(
@@ -297,8 +300,28 @@ class ObjectContentRuntime:
             replacement,
             actor_user_id=actor_user_id,
         )
-        self._readiness_cache = None
+        await self._publish_saved_object_store_connection(stored)
         return stored
+
+    async def _publish_saved_object_store_connection(
+        self,
+        stored: StoredObjectStoreConnection,
+    ) -> None:
+        self._readiness_cache = None
+        provider = self._object_store_provider
+        if provider is None:
+            logger.warning(
+                "object_store.connection_publication_skipped",
+                extra={"revision": stored.revision},
+            )
+            return
+        try:
+            await provider.publish(stored)
+        except Exception:
+            logger.exception(
+                "object_store.connection_publication_failed",
+                extra={"revision": stored.revision},
+            )
 
     async def readiness(self) -> ObjectContentReadiness:
         if self._state is ObjectContentRuntimeState.NOT_STARTED:

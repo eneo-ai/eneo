@@ -53,6 +53,7 @@ class ObjectStoreProvider:
         self._current: _ObjectStoreSnapshot | None = None
         self._superseded: set[_ObjectStoreSnapshot] = set()
         self._refresh_lock = asyncio.Lock()
+        self._refresh_task: asyncio.Task[None] | None = None
         self._closed = False
 
     @classmethod
@@ -112,6 +113,26 @@ class ObjectStoreProvider:
         stored = await service.adopt_legacy(legacy)
         if stored is None:
             return
+        await self.publish(stored)
+
+    async def refresh(self) -> None:
+        service = self._connection_service
+        if service is None:
+            return
+        task = self._refresh_task
+        if task is None or task.done():
+            task = asyncio.create_task(self._refresh_once(service))
+            self._refresh_task = task
+            task.add_done_callback(self._finish_refresh)
+        await asyncio.shield(task)
+
+    def _finish_refresh(self, task: asyncio.Task[None]) -> None:
+        if self._refresh_task is task:
+            self._refresh_task = None
+        if not task.cancelled():
+            task.exception()
+
+    async def publish(self, stored: StoredObjectStoreConnection) -> None:
         async with self._refresh_lock:
             if self._closed:
                 raise ObjectContentConfigurationError(
@@ -121,15 +142,12 @@ class ObjectStoreProvider:
             if (
                 current is not None
                 and current.source is ObjectStoreConnectionSource.ADMIN
-                and current.revision == stored.revision
+                and current.revision >= stored.revision
             ):
                 return
             await self._publish(stored)
 
-    async def refresh(self) -> None:
-        service = self._connection_service
-        if service is None:
-            return
+    async def _refresh_once(self, service: ObjectStoreConnectionService) -> None:
         async with self._refresh_lock:
             if self._closed:
                 raise ObjectContentConfigurationError(
@@ -141,7 +159,7 @@ class ObjectStoreProvider:
                 if (
                     current is not None
                     and current.source is ObjectStoreConnectionSource.ADMIN
-                    and current.revision == stored.revision
+                    and current.revision >= stored.revision
                 ):
                     return
             elif self._legacy_settings is not None:
