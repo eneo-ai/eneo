@@ -1,4 +1,4 @@
-from typing import Annotated, Awaitable, Callable, NoReturn, cast
+from typing import Annotated, Awaitable, Callable, Literal, NoReturn, cast
 from uuid import UUID
 
 from dependency_injector import providers
@@ -42,18 +42,31 @@ def get_container(
     with_user_from_assistant_api_key: bool = False,
     with_transaction: bool = True,
     with_upload_admission: bool = False,
+    transaction_scope: Literal["function", "request"] = "request",
 ) -> Callable[..., Awaitable[Container]]:
+    """Build a request container around one database session.
+
+    Function-scoped transactions close before the response is sent and are intended
+    for mutations whose result must be immediately observable. Request scope remains
+    the default because streaming responses may keep using their session while the
+    body is produced.
+    """
     if sum([with_user, with_user_from_assistant_api_key]) > 1:
         raise ValueError(
             "Only one of with_user, with_user_from_assistant_api_key can be set to True"
         )
     if with_upload_admission and not with_user:
         raise ValueError("Upload admission requires an authenticated user container")
+    if not with_transaction and transaction_scope != "request":
+        raise ValueError("transaction_scope requires with_transaction=True")
 
     async def _get_container(
         session: Annotated[
             AsyncSession,
-            Depends(get_session_with_transaction if with_transaction else get_session),
+            Depends(
+                get_session_with_transaction if with_transaction else get_session,
+                scope=transaction_scope,
+            ),
         ],
     ) -> Container:
         return Container(

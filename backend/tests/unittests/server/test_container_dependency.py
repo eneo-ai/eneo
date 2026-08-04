@@ -1,13 +1,35 @@
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
+from typing import Annotated
 from unittest.mock import AsyncMock
 
 import pytest
 from dependency_injector import providers
+from fastapi import Depends, FastAPI
+from httpx import ASGITransport, AsyncClient
+from starlette.responses import StreamingResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from eneo.main.container.container import Container
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.server.dependencies import container as container_dependency
+
+
+def _record_response_start(app: ASGIApp, events: list[str]) -> ASGIApp:
+    async def _recording_app(
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        async def _recording_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                events.append("response_start")
+            await send(message)
+
+        await app(scope, receive, _recording_send)
+
+    return _recording_app
 
 
 class _Session:
@@ -154,3 +176,94 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
         inline_maximum_bytes=99,
         object_store_maximum_bytes=199,
     )
+
+
+async def test_function_scoped_transaction_closes_before_response_starts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    async def _session() -> AsyncIterator[object]:
+        events.append("session_open")
+        try:
+            yield object()
+        finally:
+            events.append("session_closed")
+
+    monkeypatch.setattr(
+        container_dependency,
+        "get_session_with_transaction",
+        _session,
+    )
+    dependency = container_dependency.get_container(transaction_scope="function")
+    app = FastAPI()
+
+    @app.get("/")
+    async def _route(
+        container: Annotated[Container, Depends(dependency)],
+    ) -> dict[str, bool]:
+        del container
+        events.append("handler")
+        return {"ok": True}
+
+    transport = ASGITransport(app=_record_response_start(app, events))
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/")
+
+    assert response.status_code == 200
+    assert events == ["session_open", "handler", "session_closed", "response_start"]
+
+
+async def test_default_transaction_scope_stays_open_through_streaming_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    async def _session() -> AsyncIterator[object]:
+        events.append("session_open")
+        try:
+            yield object()
+        finally:
+            events.append("session_closed")
+
+    monkeypatch.setattr(
+        container_dependency,
+        "get_session_with_transaction",
+        _session,
+    )
+    dependency = container_dependency.get_container()
+    app = FastAPI()
+
+    async def _stream() -> AsyncIterator[bytes]:
+        events.append("stream")
+        yield b"ok"
+
+    @app.get("/")
+    async def _route(
+        container: Annotated[Container, Depends(dependency)],
+    ) -> StreamingResponse:
+        del container
+        events.append("handler")
+        return StreamingResponse(_stream())
+
+    transport = ASGITransport(app=_record_response_start(app, events))
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/")
+
+    assert response.status_code == 200
+    assert response.content == b"ok"
+    assert events == [
+        "session_open",
+        "handler",
+        "response_start",
+        "stream",
+        "session_closed",
+    ]
+
+
+def test_function_transaction_scope_requires_transaction() -> None:
+    with pytest.raises(ValueError, match="transaction_scope requires"):
+        container_dependency.get_container(
+            with_transaction=False,
+            transaction_scope="function",
+        )
