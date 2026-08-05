@@ -1,6 +1,6 @@
 {
   "version": 4,
-  "description": "A 120-case Flow AI Builder benchmark for Swedish municipal work. It preserves the original 40 release and architecture cases and adds 80 curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue. The added cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, and a small applied human-review cohort. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
+  "description": "A Flow AI Builder benchmark for Swedish municipal work. It combines release and architecture coverage with curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue and a plan-authoring tjänsteskrivelse family. The cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, and applied human-review journeys. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
   "synthetic_user_profiles": {
     "audio_source": {
       "description": "Audio is uploaded as the primary runtime source and no extra metadata fields are entered.",
@@ -6061,6 +6061,344 @@
         "json",
         "pdf",
         "technical_contract"
+      ]
+    },
+    {
+      "id": "interview_open_tjansteskrivelse",
+      "complexity": "medium",
+      "domain": "municipality_tjansteskrivelse",
+      "prompt": "Vi tar fram många tjänsteskrivelser från olika underlag och vill ha ett flöde som hjälper handläggaren att få fram ett bra utkast i kommunens mall.",
+      "expected": {
+        "forbidden_question_event_ids": [
+          "pdf_generation_mode",
+          "comparison_scope",
+          "report_disposition",
+          "runtime_metadata_fields",
+          "mapped_file_limit"
+        ],
+        "preferred_question_event_ids": [
+          "post_processing_goal"
+        ],
+        "allowed_question_event_ids": [
+          "primary_runtime_input",
+          "document_material_scope",
+          "terminal_output",
+          "docx_output_mode"
+        ],
+        "max_question_event_count": 4,
+        "max_reopened_question_count": 0,
+        "min_question_event_count": 1
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "persona_beginner",
+        "prompt_vague",
+        "tjansteskrivelse_v1",
+        "vague"
+      ],
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "document_material_scope": {
+          "selected_option_id": "multiple_documents_case"
+        },
+        "post_processing_goal": {
+          "selected_option_id": "structure_key_information"
+        },
+        "terminal_output": {
+          "selected_option_id": "docx_document"
+        },
+        "docx_output_mode": {
+          "selected_option_id": "template_fill_docx"
+        }
+      }
+    },
+    {
+      "id": "advanced_sundsvall_tjansteskrivelse_runtime_sources_docx",
+      "complexity": "hard",
+      "domain": "municipality_tjansteskrivelse",
+      "apply_plan": true,
+      "prompt": "Bygg ett flöde för Sundsvalls kommuns tjänsteskrivelser. Den bifogade DOCX-filen är den enda mallen och ska kopplas vid byggtid. Vid körning laddar handläggaren upp ärendets källdokument och fyller i diarienummer, handläggare, förvaltning, nämnd och beslutsdatum. Källdokumenten är primärmaterial; skapa inga formulärfält för deras innehåll. Planera en uttömmande extraktion till sources[] med source_file_id, source_label, document_type, document_date, relevant_facts[], prior_decisions[] och uncertainties[]. Planera därefter typad JSON med sections där ärendet, bakgrund, bedömning, konsekvenser och förslag_till_beslut var och en innehåller text och source_references[], samt conflicts[] och missing_information[]. Saknade eller motstridiga uppgifter ska vara synliga och får aldrig lösas genom antaganden. Handläggaren ska få redigera detta icke-terminala JSON-resultat. Efter granskningen ska exakt ett terminalt deterministiskt steg fylla den bifogade DOCX-mallen; skapa inget separat skriv- eller städsteg och använd endast riktade källreferenser, aldrig all_previous_steps.",
+      "file_id_envs": [
+        "ENEO_AI_BUILDER_TJANSTESKRIVELSE_TEMPLATE_FILE_ID"
+      ],
+      "attachment_evidence_sha256_envs": [
+        "ENEO_AI_BUILDER_TJANSTESKRIVELSE_TEMPLATE_EVIDENCE_SHA256"
+      ],
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 4,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "template_fill",
+        "min_json_steps": 2,
+        "min_source_ref_steps": 2,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 0,
+        "forbid_input_sources": [
+          "all_previous_steps"
+        ],
+        "forbid_primary_material_form_fields": true,
+        "expected_primary_input_type": "document",
+        "min_form_field_count": 5,
+        "expected_form_field_groups": [
+          [
+            "diarienummer",
+            "case_number"
+          ],
+          [
+            "handlaggare",
+            "case_worker"
+          ],
+          [
+            "forvaltning",
+            "administration"
+          ],
+          [
+            "namnd",
+            "committee"
+          ],
+          [
+            "beslutsdatum",
+            "decision_date"
+          ]
+        ],
+        "expected_classifier_slots": [
+          {
+            "slot_name": "terminal_output",
+            "value": "docx_document",
+            "confidence": "high",
+            "evidence_level": "explicit",
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "fylla den bifogade DOCX-mallen"
+            ]
+          }
+        ],
+        "expected_file_roles": [
+          {
+            "file_index": 0,
+            "role": "template",
+            "confidence_in": [
+              "high",
+              "medium"
+            ],
+            "evidence_level": "explicit",
+            "coverage_in": [
+              "fully_seen",
+              "excerpt_truncated"
+            ],
+            "required_source_kinds": [
+              "user_message"
+            ],
+            "evidence_contains": [
+              "bifogade DOCX-filen är den enda mallen"
+            ]
+          }
+        ],
+        "expected_review_policy": {
+          "mode": "edit",
+          "target_output_type": "json",
+          "target_field_groups": [
+            [
+              "source_references"
+            ],
+            [
+              "conflicts"
+            ],
+            [
+              "missing_information"
+            ]
+          ],
+          "target_must_be_non_terminal": true
+        },
+        "expected_output_contract_schema": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source_file_id": {
+                    "type": "string"
+                  },
+                  "source_label": {
+                    "type": "string"
+                  },
+                  "document_type": {
+                    "type": "string"
+                  },
+                  "document_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "relevant_facts": {
+                    "type": "array"
+                  },
+                  "prior_decisions": {
+                    "type": "array"
+                  },
+                  "uncertainties": {
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "source_file_id",
+                  "source_label",
+                  "document_type",
+                  "document_date",
+                  "relevant_facts",
+                  "prior_decisions",
+                  "uncertainties"
+                ]
+              }
+            },
+            "sections": {
+              "type": "object",
+              "properties": {
+                "ärendet": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "source_references": {
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "source_references"
+                  ]
+                },
+                "bakgrund": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "source_references": {
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "source_references"
+                  ]
+                },
+                "bedömning": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "source_references": {
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "source_references"
+                  ]
+                },
+                "konsekvenser": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "source_references": {
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "source_references"
+                  ]
+                },
+                "förslag_till_beslut": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "source_references": {
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "source_references"
+                  ]
+                }
+              },
+              "required": [
+                "ärendet",
+                "bakgrund",
+                "bedömning",
+                "konsekvenser",
+                "förslag_till_beslut"
+              ]
+            },
+            "conflicts": {
+              "type": "array"
+            },
+            "missing_information": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "sources",
+            "sections",
+            "conflicts",
+            "missing_information"
+          ]
+        },
+        "expected_leaf_output_field_groups": [
+          [
+            "source_file_id"
+          ],
+          [
+            "source_label"
+          ],
+          [
+            "document_type"
+          ],
+          [
+            "document_date"
+          ],
+          [
+            "relevant_facts"
+          ],
+          [
+            "prior_decisions"
+          ],
+          [
+            "uncertainties"
+          ],
+          [
+            "source_references"
+          ],
+          [
+            "conflicts"
+          ],
+          [
+            "missing_information"
+          ]
+        ]
+      },
+      "cohorts": [
+        "attachment_or_template",
+        "form_fields",
+        "human_review",
+        "json",
+        "persona_technical",
+        "prompt_contract",
+        "technical_contract",
+        "tjansteskrivelse_v1"
       ]
     }
   ]

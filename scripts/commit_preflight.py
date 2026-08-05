@@ -41,9 +41,12 @@ def repo_root_from(path_arg: str | None) -> Path:
 
 
 def run_git(repo_root: Path, *args: str) -> str:
+    # errors="replace": staged diffs may contain binary content (PDF/DOCX
+    # fixtures) that is not valid UTF-8.
     result = subprocess.run(
         ["git", "-C", str(repo_root), *args],
         text=True,
+        errors="replace",
         capture_output=True,
         check=False,
     )

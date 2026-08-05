@@ -601,6 +601,7 @@ _EXPECTATION_KEYS = frozenset(
         "expected_leaf_output_field_groups",
         "expected_output_contract_schema",
         "expected_output_modes",
+        "expected_primary_input_type",
         "expected_question_event_count",
         "expected_question_event_ids",
         "preferred_question_event_ids",
@@ -758,6 +759,13 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             raise ValueError(
                 f"{path} case {case_id}.runtime_file_sha256_envs must have one "
                 "entry per runtime_file_path_envs entry."
+            )
+        if raw_case.get("execute_flow") is not True and (
+            runtime_file_path_envs or runtime_file_sha256_envs
+        ):
+            raise ValueError(
+                f"{path} case {case_id} cannot declare runtime file bindings "
+                "without execute_flow=true."
             )
         release_dimensions = raw_case.get("release_dimensions")
         if release_dimensions is None:
@@ -1017,6 +1025,15 @@ def _validate_release_expectations(
         raise ValueError(
             f"{path} case {case_id}.expected has unknown expectation keys: "
             + ", ".join(sorted(str(key) for key in unknown_keys))
+        )
+    expected_primary_input_type = expected.get("expected_primary_input_type")
+    if expected_primary_input_type is not None and (
+        not isinstance(expected_primary_input_type, str)
+        or not expected_primary_input_type.strip()
+    ):
+        raise ValueError(
+            f"{path} case {case_id}.expected_primary_input_type must be a "
+            "non-empty string."
         )
     relevance_sets: dict[str, set[str]] = {}
     for key in (
@@ -6172,6 +6189,39 @@ def _quality_report(
     if plan is None:
         return {"checks": checks, "warnings": warnings}
 
+    if expected_primary_input_type := _optional_string(
+        expected,
+        "expected_primary_input_type",
+    ):
+        input_type_summaries = [("expected_primary_input_type", summary)]
+        if applied_flow is not None:
+            input_type_summaries.append(
+                (
+                    "applied_expected_primary_input_type",
+                    _summarize_applied_flow(applied_flow),
+                )
+            )
+        for check_name, input_type_summary in input_type_summaries:
+            primary_flow_input_step = next(
+                (
+                    step
+                    for step in _step_summaries(input_type_summary)
+                    if step.get("input_source") == "flow_input"
+                ),
+                None,
+            )
+            actual_primary_input_type = (
+                primary_flow_input_step.get("input_type")
+                if primary_flow_input_step is not None
+                else None
+            )
+            add_check(
+                check_name,
+                actual_primary_input_type == expected_primary_input_type,
+                actual_primary_input_type,
+                expected_primary_input_type,
+            )
+
     step_count = _int_value(summary.get("step_count"))
     if (minimum := _int_value(expected.get("min_steps"))) is not None:
         add_check(
@@ -6485,6 +6535,8 @@ def _summarize_applied_flow(flow: Mapping[str, object] | None) -> JsonObject:
                 "order": _int_value(raw_step.get("step_order")) or index,
                 "plan_step_ref": raw_step.get("plan_step_ref"),
                 "name": raw_step.get("user_description") or raw_step.get("name"),
+                "input_source": raw_step.get("input_source"),
+                "input_type": raw_step.get("input_type"),
                 "output_type": raw_step.get("output_type"),
                 "output_mode": raw_step.get("output_mode"),
                 "review_policy": (
