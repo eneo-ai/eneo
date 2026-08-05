@@ -106,8 +106,27 @@
       )
     : policy.min_chunk_size;
 
-  // A model switch can shrink the valid range to nothing. The template then hides the
-  // size input and promises platform defaults, so the export has to keep that promise.
+  // A model whose ceiling falls below the absolute floor cannot carry any explicit size,
+  // so the whole customization goes back to delegation — not just the size. Leaving the
+  // overlap explicit kept the pair alive with a size the clamp had lowered below the
+  // floor, and reselecting a roomier model then submitted that hidden value: valid
+  // sequence of model choices, request the API refuses.
+  //
+  // Derived from the ceiling alone, deliberately. Reading sizeMin here would make this
+  // depend on overlapIsDefault while assigning it, which svelte-check reports as a
+  // reactive cycle.
+  $: ceilingBelowFloor = ceiling !== null && ceiling < policy.min_chunk_size;
+  $: if (ceilingBelowFloor && (!sizeIsDefault || !overlapIsDefault)) {
+    sizeIsDefault = true;
+    overlapIsDefault = true;
+    sizeValue = policy.default_chunk_size;
+    overlapPercent = toPercent(policy.default_chunk_overlap, policy.default_chunk_size);
+    exactOverlapTokens = null;
+  }
+
+  // The softer collapse: the range is empty only because a defaulted overlap needs a
+  // larger size than this model allows. The template then hides the size input and
+  // promises platform defaults, so the export has to keep that promise.
   $: rangeCollapsed = sizeMax < sizeMin;
   $: if (!sizeIsDefault && rangeCollapsed) {
     sizeIsDefault = true;

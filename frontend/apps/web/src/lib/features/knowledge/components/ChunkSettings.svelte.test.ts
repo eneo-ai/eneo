@@ -97,6 +97,34 @@ describe("ChunkSettings", () => {
       .toHaveAttribute("aria-valuetext", m.chunk_overlap_value({ percent: 15, tokens: 60 }));
   });
 
+  it("does not smuggle a below-minimum size back from a low-limit model", async () => {
+    const { rerender } = render(ChunkSettingsFixture, {
+      chunkSize: null,
+      chunkOverlap: null,
+      maxInput: 1000
+    });
+    const submitted = page.getByTestId("submitted");
+    await page.getByText(m.chunk_settings_customize()).click();
+
+    // Customize only the overlap. The size comes along at the platform default.
+    const thumb = () => overlapSlider().element() as HTMLElement;
+    thumb().focus();
+    thumb().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
+    );
+    await expect.element(submitted).toHaveTextContent("size=200, overlap=50");
+
+    // A model that caps chunks at floor(64 * 0.6) = 38, below the API's floor of 50.
+    // Nothing explicit can be honoured, so the pair returns to delegation.
+    await rerender({ maxInput: 64 });
+    await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
+
+    // Back to a roomy model. The clamped 38 must not reappear: the API refuses any
+    // explicit size below 50, so this sequence used to end in a rejected save.
+    await rerender({ maxInput: 1000 });
+    await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
+  });
+
   it("gives the overlap slider a localized accessible name", async () => {
     // An explicit override starts the disclosure expanded.
     render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });
