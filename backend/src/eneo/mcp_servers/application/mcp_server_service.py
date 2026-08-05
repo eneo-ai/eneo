@@ -1,27 +1,36 @@
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
-from eneo.main.exceptions import NameCollisionException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    UnauthorizedException,
+)
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import (
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+    MCPAuthScope,
+    MCPExchangeProtocol,
     MCPServer,
     MCPServerTool,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
+    validate_tool_catalog,
 )
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
+    from eneo.mcp_servers.application.mcp_token_broker import MCPTokenBroker
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -47,6 +56,7 @@ class ConnectionResult:
     success: bool
     tools_discovered: int = 0
     error_message: str | None = None
+    probe_skipped: bool = False
 
 
 @dataclass
@@ -102,6 +112,7 @@ class MCPServerService:
         user: "UserInDB",
         mcp_state_repo: "ChatSessionMcpStateRepo",
         encryption_service: "EncryptionService | None" = None,
+        mcp_token_broker: "MCPTokenBroker | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
@@ -109,6 +120,7 @@ class MCPServerService:
         self.user = user
         self.mcp_state_repo = mcp_state_repo
         self.encryption_service = encryption_service
+        self.mcp_token_broker = mcp_token_broker
 
     # Keys in http_auth_config_schema that contain secrets
     _SECRET_KEYS = ("token",)
@@ -119,6 +131,16 @@ class MCPServerService:
         if server.tenant_id != self.user.tenant_id:
             raise UnauthorizedException("MCP server not accessible")
         return server
+
+    def _encrypt_secret(self, value: str | None) -> str | None:
+        """Fernet-wrap a single secret value when encryption is active."""
+        if (
+            not value
+            or not self.encryption_service
+            or not self.encryption_service.is_active()
+        ):
+            return value
+        return self.encryption_service.encrypt(value)
 
     def _encrypt_auth_config(
         self, config: dict[str, Any] | None
@@ -184,16 +206,49 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | None" = None,
+        auth_scope: MCPAuthScope = "static_bearer",
+        expected_idp_issuer: str | None = None,
+        target_resource_or_scope: str | None = None,
+        exchange_protocol: MCPExchangeProtocol = "auto",
+        as_issuer: str | None = None,
+        as_client_id: str | None = None,
+        as_client_secret: str | None = None,
+        requested_scope: str | None = None,
+        provided_tools: list[dict[str, Any]] | None = None,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
-        Validates connection BEFORE saving to database to avoid orphaned entries.
+        Validates connection BEFORE saving to database to avoid orphaned
+        entries. SSO scopes (per_user / per_tenant) are saved without a
+        probe: tokens are brokered per user at call time, so there is
+        nothing to authenticate the probe with.
+
+        ``provided_tools``, when given, defines the initial catalog on the
+        registering admin's authority instead of probe discovery. This is
+        how headless provisioners populate SSO-scoped servers, whose
+        catalog cannot be discovered without a user session. The runtime
+        proxy still only exposes the intersection of this catalog and the
+        live per-user tools/list, so an over-declared catalog degrades to
+        fewer tools, never fabricated ones.
         """
         http_url = str(http_url)
         if icon_url is not None:
             icon_url = str(icon_url)
         if documentation_url is not None:
             documentation_url = str(documentation_url)
+
+        # A caller-supplied catalog passes the same bounds as live discovery;
+        # the create endpoint must not be a bypass around catalog ceilings.
+        if provided_tools is not None:
+            try:
+                validate_tool_catalog(
+                    provided_tools,
+                    max_count=tool_catalog_max_count,
+                    max_catalog_bytes=tool_catalog_max_bytes,
+                    max_definition_bytes=tool_definition_max_bytes,
+                )
+            except MCPClientError as e:
+                raise BadRequestException(str(e)) from e
 
         # Create domain object (not saved yet)
         mcp_server = MCPServer(
@@ -211,28 +266,54 @@ class MCPServerService:
             icon_url=icon_url,
             documentation_url=documentation_url,
             security_classification=security_classification,
+            auth_scope=auth_scope,
+            expected_idp_issuer=expected_idp_issuer,
+            target_resource_or_scope=target_resource_or_scope,
+            exchange_protocol=exchange_protocol,
+            as_issuer=as_issuer,
+            as_client_id=as_client_id,
+            as_client_secret=self._encrypt_secret(as_client_secret),
+            requested_scope=requested_scope,
         )
 
-        # Test connection FIRST with plaintext credentials before saving to database
-        auth_credentials = http_auth_config_schema if http_auth_config_schema else None
-        tools, connection_result = await self._test_connection_and_discover_tools(
-            mcp_server, auth_credentials
-        )
-
-        # Only save to database if connection succeeded
-        if not connection_result.success:
-            # Return error without saving - let user fix the URL
-            return MCPServerCreateResult(
-                server=mcp_server, connection=connection_result
-            )
-
-        # Encrypt credentials before saving to database (skip if auth type is "none")
-        if http_auth_type != "none" and http_auth_config_schema:
-            mcp_server.http_auth_config_schema = self._encrypt_auth_config(
-                http_auth_config_schema
-            )
-        else:
+        if auth_scope in ("per_user", "per_tenant"):
+            # SSO scopes skip the probe: the broker exchanges a fresh token
+            # per user at call time, so there are no admin-time credentials
+            # to test with. The catalog is whatever the caller declared;
+            # otherwise tools arrive via tools/sync once a user token can
+            # be brokered. Static bearers are dead weight under SSO, so
+            # nothing is stored.
+            tools: list[dict[str, Any]] = provided_tools or []
+            connection_result = ConnectionResult(success=True, probe_skipped=True)
             mcp_server.http_auth_config_schema = None
+        else:
+            # Test connection FIRST with plaintext credentials before saving
+            auth_credentials = (
+                http_auth_config_schema if http_auth_config_schema else None
+            )
+            tools, connection_result = await self._test_connection_and_discover_tools(
+                mcp_server, auth_credentials
+            )
+
+            # Only save to database if connection succeeded
+            if not connection_result.success:
+                # Return error without saving - let user fix the URL
+                return MCPServerCreateResult(
+                    server=mcp_server, connection=connection_result
+                )
+
+            # A declared catalog wins over discovery: the probe validated
+            # connectivity, the caller owns the initial tool set.
+            if provided_tools is not None:
+                tools = provided_tools
+
+            # Encrypt credentials before saving (skip if auth type is "none")
+            if http_auth_type != "none" and http_auth_config_schema:
+                mcp_server.http_auth_config_schema = self._encrypt_auth_config(
+                    http_auth_config_schema
+                )
+            else:
+                mcp_server.http_auth_config_schema = None
 
         # Connection succeeded - save to database
         try:
@@ -242,20 +323,37 @@ class MCPServerService:
                 "An MCP server with this name already exists."
             ) from e
 
-        # Save discovered tools
-        for tool_def in tools:
-            tool = MCPServerTool(
-                mcp_server_id=mcp_server.id,
-                name=tool_def["name"],
-                title=tool_def.get("title"),
-                description=tool_def.get("description"),
-                input_schema=tool_def.get("input_schema"),
-                is_enabled_by_default=True,
-            )
-            await self.tool_repo.upsert_by_server_and_name(tool)
+        # Save the initial catalog (discovered or declared)
+        await self._apply_declared_tool_catalog(mcp_server.id, tools)
 
         connection_result.tools_discovered = len(tools)
         return MCPServerCreateResult(server=mcp_server, connection=connection_result)
+
+    async def _apply_declared_tool_catalog(
+        self, mcp_server_id: UUID, tool_defs: list[dict[str, Any]]
+    ) -> None:
+        """Make the stored catalog match ``tool_defs`` exactly.
+
+        Tools are upserted as approved and enabled. The write is name-stable
+        (upsert on server+name), so assistant selections referencing existing
+        tool rows survive a re-declaration; tools absent from the declaration
+        are deleted.
+        """
+        declared_names = {tool_def["name"] for tool_def in tool_defs}
+        for existing in await self.tool_repo.by_server(mcp_server_id):
+            if existing.name not in declared_names:
+                await self.tool_repo.delete(id=existing.id)
+        for tool_def in tool_defs:
+            await self.tool_repo.upsert_by_server_and_name(
+                MCPServerTool(
+                    mcp_server_id=mcp_server_id,
+                    name=tool_def["name"],
+                    title=tool_def.get("title"),
+                    description=tool_def.get("description"),
+                    input_schema=tool_def.get("input_schema"),
+                    is_enabled_by_default=True,
+                )
+            )
 
     @validate_permissions(Permission.ADMIN)
     async def update_mcp_server(
@@ -274,12 +372,26 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | NotProvided | None" = NOT_PROVIDED,
+        auth_scope: MCPAuthScope | None = None,
+        expected_idp_issuer: "str | NotProvided | None" = NOT_PROVIDED,
+        target_resource_or_scope: "str | NotProvided | None" = NOT_PROVIDED,
+        exchange_protocol: MCPExchangeProtocol | None = None,
+        as_issuer: "str | NotProvided | None" = NOT_PROVIDED,
+        as_client_id: "str | NotProvided | None" = NOT_PROVIDED,
+        as_client_secret: "str | NotProvided | None" = NOT_PROVIDED,
+        requested_scope: "str | NotProvided | None" = NOT_PROVIDED,
+        provided_tools: list[dict[str, Any]] | None = None,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
         Validates connection before saving when connection-affecting fields
         (URL, authentication, credentials, identity forwarding) change.
         Returns MCPServerUpdateResult with connection info when validation occurs.
+
+        ``provided_tools``, when given, declaratively replaces the tool
+        catalog on the registering admin's authority (same semantics as on
+        create): declared tools are saved as approved, absent ones deleted.
+        ``None`` leaves the catalog untouched.
         """
         mcp_server = await self._get_server_for_tenant(mcp_server_id)
         # Track whether connection-affecting fields are actually changing
@@ -291,6 +403,28 @@ class MCPServerService:
         identity_mode_changed = (
             forward_identity is not None
             and forward_identity != mcp_server.forward_identity
+        )
+        # Cached exchanged tokens are keyed on audience + issuer; any change
+        # to these fields invalidates them.
+        cache_affecting_changed = (
+            url_changed
+            or (auth_scope is not None and auth_scope != mcp_server.auth_scope)
+            or (
+                not isinstance(expected_idp_issuer, NotProvided)
+                and expected_idp_issuer != mcp_server.expected_idp_issuer
+            )
+            or (
+                not isinstance(target_resource_or_scope, NotProvided)
+                and target_resource_or_scope != mcp_server.target_resource_or_scope
+            )
+            or (
+                exchange_protocol is not None
+                and exchange_protocol != mcp_server.exchange_protocol
+            )
+            or (
+                not isinstance(requested_scope, NotProvided)
+                and requested_scope != mcp_server.requested_scope
+            )
         )
 
         # Apply changes to domain object
@@ -321,9 +455,51 @@ class MCPServerService:
             mcp_server.documentation_url = str(documentation_url)
         if not isinstance(security_classification, NotProvided):
             mcp_server.security_classification = security_classification
+        if auth_scope is not None:
+            previous_scope = mcp_server.auth_scope
+            mcp_server.auth_scope = auth_scope
+            # SSO scopes (per_user / per_tenant) authenticate via token-exchange
+            # at call time; any previously stored static bearer is dead weight
+            # and a stale-secret risk. Clear it on transition into SSO.
+            if (
+                auth_scope in ("per_user", "per_tenant")
+                and previous_scope == "static_bearer"
+            ):
+                mcp_server.http_auth_config_schema = None
+        if not isinstance(expected_idp_issuer, NotProvided):
+            mcp_server.expected_idp_issuer = expected_idp_issuer
+        if not isinstance(target_resource_or_scope, NotProvided):
+            mcp_server.target_resource_or_scope = target_resource_or_scope
+        if exchange_protocol is not None:
+            mcp_server.exchange_protocol = exchange_protocol
+        if not isinstance(as_issuer, NotProvided):
+            mcp_server.as_issuer = as_issuer
+        if not isinstance(as_client_id, NotProvided):
+            mcp_server.as_client_id = as_client_id
+        if not isinstance(as_client_secret, NotProvided):
+            mcp_server.as_client_secret = self._encrypt_secret(as_client_secret)
+        if not isinstance(requested_scope, NotProvided):
+            mcp_server.requested_scope = requested_scope
 
-        # Validate connection before saving when connection config changes
-        if (
+        # A declared catalog passes the same bounds as live discovery,
+        # evaluated against the caps as they stand after this update.
+        if provided_tools is not None:
+            try:
+                validate_tool_catalog(
+                    provided_tools,
+                    max_count=mcp_server.tool_catalog_max_count,
+                    max_catalog_bytes=mcp_server.tool_catalog_max_bytes,
+                    max_definition_bytes=mcp_server.tool_definition_max_bytes,
+                )
+            except MCPClientError as e:
+                raise BadRequestException(str(e)) from e
+
+        # Validate connection before saving when connection config changes.
+        # SSO scopes are excluded: the broker exchanges a fresh token per user
+        # at call time, so there are no admin-time credentials to test with.
+        if mcp_server.auth_scope in ("per_user", "per_tenant"):
+            pass
+        elif (
             url_changed
             or auth_type_changed
             or credentials_changed
@@ -386,6 +562,10 @@ class MCPServerService:
             raise NameCollisionException(
                 "An MCP server with this name already exists."
             ) from e
+        if provided_tools is not None:
+            await self._apply_declared_tool_catalog(mcp_server.id, provided_tools)
+        if cache_affecting_changed and self.mcp_token_broker is not None:
+            await self.mcp_token_broker.purge_cache_for_server(mcp_server.id)
         return MCPServerUpdateResult(server=mcp_server)
 
     @validate_permissions(Permission.ADMIN)
@@ -454,6 +634,38 @@ class MCPServerService:
                 success=False, error_message=f"Connection failed: {e}"
             )
 
+    def _broker_token_provider(
+        self, mcp_server: MCPServer
+    ) -> Callable[[], Awaitable[str]] | None:
+        """Async bearer resolver for SSO-scoped servers (per_user / per_tenant).
+
+        Mints an audience-bound token for the acting admin via the token
+        broker, the same auth the runtime proxy uses. Returns ``None`` for
+        static_bearer servers or when no broker is wired; callers then fall
+        back to static credentials.
+        """
+        if mcp_server.auth_scope not in ("per_user", "per_tenant"):
+            return None
+        if self.mcp_token_broker is None:
+            return None
+
+        from eneo.mcp_servers.application.mcp_token_broker import UserPrincipal
+
+        broker = self.mcp_token_broker
+        federation_config = dict(
+            getattr(self.user.tenant, "federation_config", {}) or {}
+        )
+        principal = UserPrincipal(user=self.user)
+
+        async def _provider() -> str:
+            return await broker.get_token(
+                mcp_server=mcp_server,
+                tenant_federation_config=federation_config,
+                principal=principal,
+            )
+
+        return _provider
+
     async def discover_and_sync_tools(
         self, mcp_server: MCPServer, auth_credentials: dict[str, str] | None = None
     ) -> ToolSyncResult:
@@ -474,10 +686,13 @@ class MCPServerService:
             # validation, discovery carries the acting admin's identity so an
             # opted-in server exposes the same tool set it will serve at
             # runtime; the client drops the headers unless the server opted in.
+            # SSO-scoped servers authenticate with a broker-minted token for
+            # the acting admin, exactly as runtime tool calls do.
             async with MCPClient(
                 mcp_server,
                 auth_credentials,
                 identity_headers=build_identity_headers(self.user, None),
+                dynamic_token_provider=self._broker_token_provider(mcp_server),
             ) as client:
                 tool_defs = await client.list_tools()
 

@@ -1,10 +1,15 @@
-from typing import TYPE_CHECKING, Any, Dict, List, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Sequence, cast
 
 from sqlalchemy import inspect
 from sqlalchemy.orm.base import NEVER_SET
 
 from eneo.database.tables.mcp_server_table import MCPServers as MCPServersTable
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPAuthScope,
+    MCPExchangeProtocol,
+    MCPServer,
+    MCPServerTool,
+)
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -92,6 +97,15 @@ class MCPServerMapper:
             http_url=db_model.http_url,
             http_auth_type=db_model.http_auth_type,
             http_auth_config_schema=db_model.http_auth_config_schema,
+            auth_scope=cast("MCPAuthScope", db_model.auth_scope),
+            expected_idp_issuer=db_model.expected_idp_issuer,
+            tool_discovery_principal=db_model.tool_discovery_principal,
+            target_resource_or_scope=db_model.target_resource_or_scope,
+            exchange_protocol=cast("MCPExchangeProtocol", db_model.exchange_protocol),
+            as_issuer=db_model.as_issuer,
+            as_client_id=db_model.as_client_id,
+            as_client_secret=db_model.as_client_secret,
+            requested_scope=db_model.requested_scope,
             is_enabled=db_model.is_enabled,
             forward_identity=db_model.forward_identity,
             identity_policy_generation=db_model.identity_policy_generation,
@@ -122,6 +136,15 @@ class MCPServerMapper:
             "http_url": entity.http_url,
             "http_auth_type": entity.http_auth_type,
             "http_auth_config_schema": entity.http_auth_config_schema,
+            "auth_scope": entity.auth_scope,
+            "expected_idp_issuer": entity.expected_idp_issuer,
+            "tool_discovery_principal": entity.tool_discovery_principal,
+            "target_resource_or_scope": entity.target_resource_or_scope,
+            "exchange_protocol": entity.exchange_protocol,
+            "as_issuer": entity.as_issuer,
+            "as_client_id": entity.as_client_id,
+            "as_client_secret": entity.as_client_secret,
+            "requested_scope": entity.requested_scope,
             "is_enabled": entity.is_enabled,
             "forward_identity": entity.forward_identity,
             "identity_policy_generation": entity.identity_policy_generation,

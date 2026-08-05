@@ -3,6 +3,7 @@
 import pytest
 
 from eneo.audit.application.audit_config_service import AuditConfigService
+from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
 from eneo.audit.infrastructure.audit_config_repository import (
     AuditConfigRepositoryImpl,
 )
@@ -191,10 +192,19 @@ class TestAuditConfigService:
                 assert len(category_config.example_actions) > 0
                 assert len(category_config.example_actions) <= 3
 
-    async def test_get_config_admin_actions_has_42_actions(
+    async def test_get_config_reports_the_mapped_admin_action_count(
         self, db_session, seeded_tenant
     ):
-        """Verify admin_actions category has correct action count."""
+        """The count surfaced through the repository matches the mapping.
+
+        Derived rather than pinned to a literal: the exact totals are asserted
+        in tests/unit/test_audit_config_service.py, and duplicating them here
+        only means every new action type breaks two tests instead of one.
+        """
+        expected = sum(
+            1 for category in CATEGORY_MAPPINGS.values() if category == "admin_actions"
+        )
+
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             service = AuditConfigService(repository=repo)
@@ -203,7 +213,7 @@ class TestAuditConfigService:
             admin_config = next(
                 c for c in response.categories if c.category == "admin_actions"
             )
-            assert admin_config.action_count == 46
+            assert admin_config.action_count == expected
 
     async def test_update_config_single_category(self, db_session, seeded_tenant):
         """Test updating a single category."""

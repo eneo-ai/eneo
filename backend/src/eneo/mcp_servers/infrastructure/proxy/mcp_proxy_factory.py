@@ -1,6 +1,7 @@
 """Factory for creating MCPProxySession instances with proper auth."""
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -62,6 +63,7 @@ class MCPProxySessionFactory:
         db_session: "AsyncSession | None" = None,
         identity_headers: dict[str, str] | None = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
+        token_provider_map: "dict[UUID, Callable[[], Awaitable[str]]] | None" = None,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
@@ -77,6 +79,9 @@ class MCPProxySessionFactory:
             db_session: Active SQLAlchemy session used to read/write
                 ``chat_session_mcp_state``. Required only when
                 ``chat_session_id`` is set.
+            token_provider_map: Per-server async bearer resolvers for
+                broker-backed servers (``auth_scope != static_bearer``).
+                Servers absent from the map use the legacy static path.
 
         Returns:
             Configured MCPProxySession instance
@@ -104,6 +109,7 @@ class MCPProxySessionFactory:
             db_session=db_session,
             identity_headers=identity_headers,
             mcp_server_tool_repo=mcp_server_tool_repo,
+            token_provider_map=token_provider_map,
         )
 
     async def terminate(

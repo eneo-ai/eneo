@@ -217,6 +217,45 @@ class TestServiceEncryptionHelpers:
 # =============================================================================
 
 
+def _make_assembler_server(**overrides):
+    """A domain-server stub carrying every attribute the assemblers read.
+
+    The assemblers project the full MCPServer surface onto their DTOs, so a
+    stub missing any single attribute yields a MagicMock child that fails
+    Pydantic validation. Keeping the attribute set in one place means a new
+    projected field is added here once rather than in each test.
+    """
+    server = MagicMock()
+    server.id = uuid4()
+    server.name = "test"
+    server.description = None
+    server.http_url = "http://localhost"
+    server.http_auth_type = "none"
+    server.http_auth_config_schema = None
+    server.auth_scope = "static_bearer"
+    server.expected_idp_issuer = None
+    server.target_resource_or_scope = None
+    server.exchange_protocol = "auto"
+    server.as_issuer = None
+    server.as_client_id = None
+    server.as_client_secret = None
+    server.requested_scope = None
+    server.forward_identity = False
+    server.tool_catalog_max_count = 256
+    server.tool_catalog_max_bytes = 16 * 1024 * 1024
+    server.tool_definition_max_bytes = 64 * 1024
+    server.tags = None
+    server.icon_url = None
+    server.documentation_url = None
+    server.security_classification = None
+    server.is_enabled = False
+    server.tools = []
+
+    for attr, value in overrides.items():
+        setattr(server, attr, value)
+    return server
+
+
 class TestAssemblerHasCredentials:
     """Test assemblers compute has_credentials from http_auth_config_schema."""
 
@@ -225,17 +264,10 @@ class TestAssemblerHasCredentials:
             MCPServerAssembler,
         )
 
-        server = MagicMock()
-        server.id = uuid4()
-        server.name = "test"
-        server.description = None
-        server.http_url = "http://localhost"
-        server.http_auth_type = "bearer"
-        server.http_auth_config_schema = {"token": "enc:fernet:v1:xxx"}
-        server.tags = None
-        server.icon_url = None
-        server.documentation_url = None
-        server.security_classification = None
+        server = _make_assembler_server(
+            http_auth_type="bearer",
+            http_auth_config_schema={"token": "enc:fernet:v1:xxx"},
+        )
 
         assembler = MCPServerAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -246,17 +278,7 @@ class TestAssemblerHasCredentials:
             MCPServerAssembler,
         )
 
-        server = MagicMock()
-        server.id = uuid4()
-        server.name = "test"
-        server.description = None
-        server.http_url = "http://localhost"
-        server.http_auth_type = "none"
-        server.http_auth_config_schema = None
-        server.tags = None
-        server.icon_url = None
-        server.documentation_url = None
-        server.security_classification = None
+        server = _make_assembler_server()
 
         assembler = MCPServerAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -268,23 +290,15 @@ class TestAssemblerHasCredentials:
             MCPServerSettingsAssembler,
         )
 
-        server = MagicMock()
-        server.id = uuid4()
-        server.name = "test"
-        server.description = None
-        server.http_url = "http://localhost"
-        server.http_auth_type = "bearer"
-        server.http_auth_config_schema = {"token": "enc:fernet:v1:xxx"}
-        server.tags = None
-        server.icon_url = None
-        server.documentation_url = None
-        server.security_classification = None
-        server.is_enabled = True
-        server.tools = []
-        server.forward_identity = True
-        server.tool_catalog_max_count = 73
-        server.tool_catalog_max_bytes = 7 * 1024 * 1024
-        server.tool_definition_max_bytes = 96 * 1024
+        server = _make_assembler_server(
+            http_auth_type="bearer",
+            http_auth_config_schema={"token": "enc:fernet:v1:xxx"},
+            is_enabled=True,
+            forward_identity=True,
+            tool_catalog_max_count=73,
+            tool_catalog_max_bytes=7 * 1024 * 1024,
+            tool_definition_max_bytes=96 * 1024,
+        )
 
         assembler = MCPServerSettingsAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -311,23 +325,7 @@ class TestAssemblerHasCredentials:
             MCPServerSettingsAssembler,
         )
 
-        server = MagicMock()
-        server.id = uuid4()
-        server.name = "test"
-        server.description = None
-        server.http_url = "http://localhost"
-        server.http_auth_type = "none"
-        server.http_auth_config_schema = None
-        server.tags = None
-        server.icon_url = None
-        server.documentation_url = None
-        server.security_classification = None
-        server.is_enabled = False
-        server.tools = []
-        server.forward_identity = False
-        server.tool_catalog_max_count = 256
-        server.tool_catalog_max_bytes = 16 * 1024 * 1024
-        server.tool_definition_max_bytes = 64 * 1024
+        server = _make_assembler_server()
 
         assembler = MCPServerSettingsAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -343,17 +341,10 @@ class TestAssemblerHasCredentials:
         enc = _make_encryption_service()
         encrypted_token = enc.encrypt("my-secret-bearer-token-12345")
 
-        server = MagicMock()
-        server.id = uuid4()
-        server.name = "test"
-        server.description = None
-        server.http_url = "http://localhost"
-        server.http_auth_type = "bearer"
-        server.http_auth_config_schema = {"token": encrypted_token}
-        server.tags = None
-        server.icon_url = None
-        server.documentation_url = None
-        server.security_classification = None
+        server = _make_assembler_server(
+            http_auth_type="bearer",
+            http_auth_config_schema={"token": encrypted_token},
+        )
 
         assembler = MCPServerAssembler(encryption_service=enc)
         dto = assembler.from_domain_to_model(server)
@@ -370,17 +361,10 @@ class TestAssemblerHasCredentials:
             MCPServerAssembler,
         )
 
-        server = MagicMock()
-        server.id = uuid4()
-        server.name = "test"
-        server.description = None
-        server.http_url = "http://localhost"
-        server.http_auth_type = "bearer"
-        server.http_auth_config_schema = {"token": "plaintext-token-5678"}
-        server.tags = None
-        server.icon_url = None
-        server.documentation_url = None
-        server.security_classification = None
+        server = _make_assembler_server(
+            http_auth_type="bearer",
+            http_auth_config_schema={"token": "plaintext-token-5678"},
+        )
 
         assembler = MCPServerAssembler(encryption_service=None)
         dto = assembler.from_domain_to_model(server)

@@ -512,6 +512,42 @@ const ACTION_MESSAGES = {
   help_assistant_uninstalled: {
     name: m.audit_action_help_assistant_uninstalled,
     description: m.audit_action_help_assistant_uninstalled_description
+  },
+  oidc_token_stored: {
+    name: m.audit_action_oidc_token_stored,
+    description: m.audit_action_oidc_token_stored_description
+  },
+  oidc_token_refreshed: {
+    name: m.audit_action_oidc_token_refreshed,
+    description: m.audit_action_oidc_token_refreshed_description
+  },
+  oidc_token_revoked: {
+    name: m.audit_action_oidc_token_revoked,
+    description: m.audit_action_oidc_token_revoked_description
+  },
+  mcp_token_exchanged: {
+    name: m.audit_action_mcp_token_exchanged,
+    description: m.audit_action_mcp_token_exchanged_description
+  },
+  mcp_token_exchange_denied: {
+    name: m.audit_action_mcp_token_exchange_denied,
+    description: m.audit_action_mcp_token_exchange_denied_description
+  },
+  mcp_service_account_set: {
+    name: m.audit_action_mcp_service_account_set,
+    description: m.audit_action_mcp_service_account_set_description
+  },
+  mcp_service_account_cleared: {
+    name: m.audit_action_mcp_service_account_cleared,
+    description: m.audit_action_mcp_service_account_cleared_description
+  },
+  mcp_sso_default_target_set: {
+    name: m.audit_action_mcp_sso_default_target_set,
+    description: m.audit_action_mcp_sso_default_target_set_description
+  },
+  mcp_sso_default_target_cleared: {
+    name: m.audit_action_mcp_sso_default_target_cleared,
+    description: m.audit_action_mcp_sso_default_target_cleared_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

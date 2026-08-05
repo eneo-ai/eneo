@@ -53,8 +53,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert len(admin_actions) == 46, (
-            f"Expected 46 admin actions, got {len(admin_actions)}"
+        assert len(admin_actions) == 50, (
+            f"Expected 50 admin actions, got {len(admin_actions)}"
         )
 
     def test_admin_actions_mapping(self):
@@ -145,8 +145,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "integration_events"
         ]
-        assert len(integration_actions) == 19, (
-            f"Expected 19 integration events, got {len(integration_actions)}"
+        assert len(integration_actions) == 21, (
+            f"Expected 21 integration events, got {len(integration_actions)}"
         )
 
     def test_mcp_events_mapping(self):
@@ -254,11 +254,11 @@ class TestCategoryDistribution:
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
         expected_counts = {
-            "admin_actions": 46,
+            "admin_actions": 50,
             "user_actions": 45,
-            "security_events": 6,
+            "security_events": 9,
             "file_operations": 3,
-            "integration_events": 19,
+            "integration_events": 21,
             "system_actions": 3,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
         }

@@ -1,0 +1,360 @@
+"""IdP token persistence invariants for the MCP OAuth broker.
+
+The federation callback captures the IdP refresh/access/ID tokens,
+encrypts them via the existing ``EncryptionService``, and exposes a
+revoke path used by the frontend logout flow. The broker reads these
+rows, so the contract this file pins is:
+
+1. ``upsert`` encrypts every token at rest. Ciphertext must carry the
+   ``enc:fernet:v1:`` prefix; plaintext is never visible after the call
+   returns.
+2. ``upsert`` is idempotent on ``(user_id, idp_issuer)``: re-login
+   replaces the prior row in place and clears ``revoked_at``.
+3. ``upsert`` no-ops when the IdP did not return a refresh_token (some
+   IdPs only issue refresh tokens with the ``offline_access`` scope).
+4. ``upsert`` with ``id_token=None`` keeps a previously stored ID token,
+   so refresh responses that omit it do not erase the identity assertion.
+5. ``revoke`` zeroes ciphertext + stamps ``revoked_at`` AND emits an
+   audit entry. Subsequent ``get_decrypted`` returns ``None``.
+6. ``POST /api/v1/auth/oidc/logout`` revokes every row for the caller.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import pytest
+import sqlalchemy as sa
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.database.tables.idp_user_tokens_table import IdpUserTokens
+
+
+@pytest.fixture
+def audit_spy(monkeypatch):
+    """Record every audit event emitted via ``log_async``.
+
+    ``log_async`` enqueues to the ARQ worker, which does not run in the
+    integration environment, so tests assert emission, not persistence
+    (the worker's own suite covers the write path).
+    """
+    from eneo.audit.application.audit_service import AuditService
+
+    calls: list[dict] = []
+    original = AuditService.log_async
+
+    async def spy(self, **kwargs):
+        calls.append(kwargs)
+        return await original(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", spy)
+    return calls
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_upsert_encrypts_at_rest_and_get_decrypted_round_trips(
+    db_container, default_user
+):
+    issuer = "https://idp.example/realms/eneo"
+    refresh = "rt-secret-abcdef"
+    access = "at-secret-123456"
+    id_token = "idt-secret-789xyz"
+    expires = datetime.now(timezone.utc)
+
+    async with db_container() as container:
+        store = container.oidc_token_store()
+        row_id = await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject="user-1",
+            refresh_token=refresh,
+            access_token=access,
+            id_token=id_token,
+            access_token_expires_at=expires,
+            scopes_granted=["openid", "offline_access"],
+        )
+        assert row_id is not None
+
+        session = container.session()
+        row = (
+            await session.execute(
+                sa.select(IdpUserTokens).where(IdpUserTokens.id == row_id)
+            )
+        ).scalar_one()
+
+        # Plaintext must not be stored. Every ciphertext must use the
+        # versioned Fernet prefix the existing EncryptionService writes.
+        assert row.refresh_token_ciphertext != refresh
+        assert row.access_token_ciphertext != access
+        assert row.id_token_ciphertext != id_token
+        assert row.refresh_token_ciphertext.startswith("enc:fernet:v1:")
+        assert row.access_token_ciphertext.startswith("enc:fernet:v1:")
+        assert row.id_token_ciphertext.startswith("enc:fernet:v1:")
+        assert row.revoked_at is None
+        assert row.scopes_granted == ["openid", "offline_access"]
+
+        # And the read path decrypts back to the original values.
+        tokens = await store.get_decrypted(user_id=default_user.id, idp_issuer=issuer)
+
+    assert tokens is not None
+    assert tokens.refresh_token == refresh
+    assert tokens.access_token == access
+    assert tokens.id_token == id_token
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_upsert_is_idempotent_on_user_and_issuer(db_container, default_user):
+    """Re-login MUST replace the existing row, not insert a second one."""
+    issuer = "https://idp.example/realms/eneo"
+
+    async with db_container() as container:
+        store = container.oidc_token_store()
+        first_id = await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject=None,
+            refresh_token="rt-first",
+            access_token=None,
+            access_token_expires_at=None,
+            scopes_granted=None,
+        )
+        second_id = await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject=None,
+            refresh_token="rt-second",
+            access_token=None,
+            access_token_expires_at=None,
+            scopes_granted=None,
+        )
+
+        session = container.session()
+        rows = (
+            (
+                await session.execute(
+                    sa.select(IdpUserTokens).where(
+                        IdpUserTokens.user_id == default_user.id,
+                        IdpUserTokens.idp_issuer == issuer,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        tokens = await store.get_decrypted(user_id=default_user.id, idp_issuer=issuer)
+
+    assert first_id == second_id  # PK preserved across upsert
+    assert len(rows) == 1
+    assert tokens is not None
+    assert tokens.refresh_token == "rt-second"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_upsert_without_id_token_keeps_stored_id_token(
+    db_container, default_user
+):
+    """Refresh responses often omit the ID token; None must not erase it."""
+    issuer = "https://idp.example/realms/eneo"
+
+    async with db_container() as container:
+        store = container.oidc_token_store()
+        await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject=None,
+            refresh_token="rt-login",
+            access_token=None,
+            id_token="idt-from-login",
+            access_token_expires_at=None,
+            scopes_granted=None,
+        )
+        await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject=None,
+            refresh_token="rt-refreshed",
+            access_token=None,
+            id_token=None,
+            access_token_expires_at=None,
+            scopes_granted=None,
+        )
+        tokens = await store.get_decrypted(user_id=default_user.id, idp_issuer=issuer)
+
+    assert tokens is not None
+    assert tokens.refresh_token == "rt-refreshed"
+    assert tokens.id_token == "idt-from-login"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_upsert_skips_when_no_broker_usable_token(db_container, default_user):
+    """A row with neither refresh_token nor id_token can drive neither the
+    RFC 8693 nor the ID-JAG exchange; skip it."""
+    issuer = "https://idp.example/v2.0"
+
+    async with db_container() as container:
+        store = container.oidc_token_store()
+        result = await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject=None,
+            refresh_token=None,
+            access_token="at-only",
+            access_token_expires_at=None,
+            scopes_granted=None,
+        )
+        assert result is None
+
+        session = container.session()
+        rows = (
+            (
+                await session.execute(
+                    sa.select(IdpUserTokens).where(
+                        IdpUserTokens.user_id == default_user.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert rows == []
+
+
+@pytest.mark.integration
+async def test_upsert_stores_id_token_without_refresh_token(db_container, default_user):
+    """IdPs that issue no refresh token still yield a usable row: the ID
+    token alone carries the ID-JAG flow until it expires."""
+    issuer = "https://idp.no-refresh.example"
+
+    async with db_container() as container:
+        store = container.oidc_token_store()
+        result = await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject="sub-1",
+            refresh_token=None,
+            access_token="at-1",
+            id_token="idt-1",
+            access_token_expires_at=None,
+            scopes_granted=["openid", "email"],
+        )
+        assert result is not None
+
+        tokens = await store.get_decrypted(user_id=default_user.id, idp_issuer=issuer)
+
+    assert tokens is not None
+    assert tokens.refresh_token is None
+    assert tokens.access_token == "at-1"
+    assert tokens.id_token == "idt-1"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_revoke_zeros_ciphertext_and_stamps_revoked_at(
+    db_container, default_user, audit_spy
+):
+    issuer = "https://idp.example/realms/eneo"
+
+    async with db_container() as container:
+        store = container.oidc_token_store()
+        await store.upsert(
+            user=default_user,
+            idp_issuer=issuer,
+            idp_subject=None,
+            refresh_token="rt-secret",
+            access_token="at-secret",
+            id_token="idt-secret",
+            access_token_expires_at=datetime.now(timezone.utc),
+            scopes_granted=None,
+        )
+
+        revoked_count = await store.revoke(user=default_user)
+        assert revoked_count == 1
+
+        session = container.session()
+        row = (
+            await session.execute(
+                sa.select(IdpUserTokens).where(IdpUserTokens.user_id == default_user.id)
+            )
+        ).scalar_one()
+        assert row.refresh_token_ciphertext is None
+        assert row.access_token_ciphertext is None
+        assert row.id_token_ciphertext is None
+        assert row.access_token_expires_at is None
+        assert row.revoked_at is not None
+        row_id = row.id
+
+        # get_decrypted hides revoked rows
+        assert (
+            await store.get_decrypted(user_id=default_user.id, idp_issuer=issuer)
+        ) is None
+
+    # Revocation emits one audit event per revoked issuer.
+    revoked_events = [
+        call
+        for call in audit_spy
+        if call.get("action") == ActionType.OIDC_TOKEN_REVOKED
+    ]
+    assert len(revoked_events) == 1
+    assert revoked_events[0]["entity_id"] == row_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_logout_endpoint_revokes_all_user_tokens(
+    client, db_container, default_user, default_user_token
+):
+    """``POST /api/v1/auth/oidc/logout`` revokes every active row for the user."""
+    issuer_a = "https://idp.example/realms/eneo"
+    issuer_b = "https://idp.example/v2.0"
+
+    async with db_container() as container:
+        store = container.oidc_token_store()
+        await store.upsert(
+            user=default_user,
+            idp_issuer=issuer_a,
+            idp_subject=None,
+            refresh_token="rt-a",
+            access_token=None,
+            access_token_expires_at=None,
+            scopes_granted=None,
+        )
+        await store.upsert(
+            user=default_user,
+            idp_issuer=issuer_b,
+            idp_subject=None,
+            refresh_token="rt-b",
+            access_token=None,
+            access_token_expires_at=None,
+            scopes_granted=None,
+        )
+
+    response = await client.post(
+        "/api/v1/auth/oidc/logout",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 204, response.text
+
+    async with db_container() as container:
+        session = container.session()
+        rows = (
+            (
+                await session.execute(
+                    sa.select(IdpUserTokens).where(
+                        IdpUserTokens.user_id == default_user.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        assert len(rows) == 2
+        for row in rows:
+            assert row.refresh_token_ciphertext is None
+            assert row.access_token_ciphertext is None
+            assert row.revoked_at is not None

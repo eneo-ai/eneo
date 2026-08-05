@@ -51,6 +51,7 @@ from eneo.authentication.api_key_resolver import ApiKeyAuthResolver
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.oidc_token_store import OidcTokenStore
 from eneo.collections.application.collection_crud_service import CollectionCRUDService
 from eneo.completion_models.application import CompletionModelCRUDService
 from eneo.completion_models.application.completion_model_migration_history_service import (
@@ -255,6 +256,7 @@ from eneo.limits.limit_service import LimitService
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.application.mcp_connection_service import MCPConnectionService
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
@@ -262,15 +264,20 @@ from eneo.mcp_servers.application.mcp_server_settings_service import (
 from eneo.mcp_servers.application.mcp_session_lifecycle_service import (
     McpSessionLifecycleService,
 )
+from eneo.mcp_servers.application.mcp_token_broker import MCPTokenBroker
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerMapper,
     MCPServerToolMapper,
 )
+from eneo.mcp_servers.infrastructure.oauth_discovery import OAuthDiscoveryService
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
 )
 from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
     ChatSessionMcpStateRepo,
+)
+from eneo.mcp_servers.infrastructure.repo_impl.mcp_connection_repo_impl import (
+    MCPConnectionRepositoryImpl,
 )
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
@@ -857,17 +864,8 @@ class Container(containers.DeclarativeContainer):
 
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
-    completion_service = providers.Factory(
-        CompletionService,
-        context_builder=context_builder,
-        tenant=tenant,
-        user=user,
-        config=config,
-        encryption_service=encryption_service,
-        session=session,
-        redis_client=redis_client,
-        mcp_server_tool_repo=mcp_server_tool_repo,
-    )
+    # completion_service is defined after the audit/token-broker providers
+    # below; nothing references it until the session-service block.
 
     # Datastore
     create_embeddings_service = providers.Factory(
@@ -960,6 +958,33 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    oidc_token_store = providers.Factory(
+        OidcTokenStore,
+        session=session,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+    )
+    oauth_discovery_service = providers.Factory(OAuthDiscoveryService)
+    mcp_token_broker = providers.Factory(
+        MCPTokenBroker,
+        session=session,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+        oidc_token_store=oidc_token_store,
+        discovery=oauth_discovery_service,
+    )
+    completion_service = providers.Factory(
+        CompletionService,
+        context_builder=context_builder,
+        tenant=tenant,
+        user=user,
+        config=config,
+        encryption_service=encryption_service,
+        session=session,
+        redis_client=redis_client,
+        mcp_server_tool_repo=mcp_server_tool_repo,
+        mcp_token_broker=mcp_token_broker,
     )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,
@@ -1230,6 +1255,16 @@ class Container(containers.DeclarativeContainer):
         user=user,
         encryption_service=encryption_service,
     )
+    mcp_connection_repo = providers.Factory(
+        MCPConnectionRepositoryImpl,
+        session=session,
+    )
+    mcp_connection_service = providers.Factory(
+        MCPConnectionService,
+        connection_repo=mcp_connection_repo,
+        mcp_server_settings_service=mcp_server_settings_service,
+        user=user,
+    )
     governance_policy_service = providers.Factory(
         GovernancePolicyService,
         user=user,
@@ -1388,6 +1423,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         mcp_state_repo=chat_session_mcp_state_repo,
         encryption_service=encryption_service,
+        mcp_token_broker=mcp_token_broker,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

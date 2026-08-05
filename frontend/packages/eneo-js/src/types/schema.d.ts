@@ -5647,6 +5647,58 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/service-account/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Mcp Service Account
+     * @description Read the tenant MCP service-account credentials (masked).
+     */
+    get: operations["get_mcp_service_account_api_v1_mcp_servers_service_account__get"];
+    /**
+     * Set Mcp Service Account
+     * @description Set or rotate the tenant MCP service-account credentials.
+     */
+    put: operations["set_mcp_service_account_api_v1_mcp_servers_service_account__put"];
+    post?: never;
+    /**
+     * Clear Mcp Service Account
+     * @description Clear the tenant MCP service-account credentials.
+     */
+    delete: operations["clear_mcp_service_account_api_v1_mcp_servers_service_account__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/sso-defaults/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set Mcp Sso Default Target
+     * @description Set the tenant-wide default audience/scope for SSO MCP servers.
+     */
+    put: operations["set_mcp_sso_default_target_api_v1_mcp_servers_sso_defaults__put"];
+    post?: never;
+    /**
+     * Clear Mcp Sso Default Target
+     * @description Clear the tenant-wide default audience/scope.
+     */
+    delete: operations["clear_mcp_sso_default_target_api_v1_mcp_servers_sso_defaults__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-servers/{id}/": {
     parameters: {
       query?: never;
@@ -5788,6 +5840,26 @@ export interface paths {
      * @description Update global default enabled status for a tool (admin only).
      */
     put: operations["update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/me/mcp-connections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get My Mcp Connections
+     * @description Per-user MCP server connection state.
+     */
+    get: operations["get_my_mcp_connections_api_v1_me_mcp_connections_get"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -7661,6 +7733,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/oidc/logout": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revoke the caller's persisted IdP tokens
+     * @description Called by the frontend logout flow before the local session cookies are cleared. Zeroes the user's refresh + access + ID token ciphertext, stamps revoked_at, and audit-logs the event. Safe to call repeatedly; rows already revoked are skipped.
+     */
+    post: operations["revoke_oidc_tokens_api_v1_auth_oidc_logout_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/api-docs": {
     parameters: {
       query?: never;
@@ -8176,6 +8268,15 @@ export interface components {
       | "scim_group_deleted"
       | "scim_token_created"
       | "scim_token_revoked"
+      | "oidc_token_stored"
+      | "oidc_token_refreshed"
+      | "oidc_token_revoked"
+      | "mcp_token_exchanged"
+      | "mcp_token_exchange_denied"
+      | "mcp_service_account_set"
+      | "mcp_service_account_cleared"
+      | "mcp_sso_default_target_set"
+      | "mcp_sso_default_target_cleared"
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance"
@@ -12013,6 +12114,7 @@ export interface components {
       | "session"
       | "mcp_server"
       | "mcp_server_tool"
+      | "idp_user_token"
       | "user_group";
     /**
      * ErrorCodes
@@ -13161,6 +13263,10 @@ export interface components {
     /**
      * MCPConnectionStatus
      * @description Status of MCP server connection attempt.
+     *
+     *     ``probe_skipped`` is true for SSO-scoped servers (per_user / per_tenant),
+     *     where no admin-time credentials exist to probe with: ``success`` then
+     *     means "saved without a probe", not "connection verified".
      */
     MCPConnectionStatus: {
       /** Success */
@@ -13172,6 +13278,37 @@ export interface components {
       tools_discovered?: number;
       /** Error Message */
       error_message?: string | null;
+      /**
+       * Probe Skipped
+       * @default false
+       */
+      probe_skipped?: boolean;
+    };
+    /** MCPConnectionStatusList */
+    MCPConnectionStatusList: {
+      /** Items */
+      items: components["schemas"]["MCPConnectionStatusPublic"][];
+    };
+    /** MCPConnectionStatusPublic */
+    MCPConnectionStatusPublic: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Name */
+      name: string;
+      /** Auth Scope */
+      auth_scope: string;
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "connected" | "expired" | "not_authenticated" | "idp_mismatch" | "not_applicable";
+      /** Expires At */
+      expires_at?: string | null;
     };
     /**
      * MCPServerCreate
@@ -13197,6 +13334,30 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Auth Scope
+       * @default static_bearer
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "per_tenant" | "static_bearer";
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /** Target Resource Or Scope */
+      target_resource_or_scope?: string | null;
+      /**
+       * Exchange Protocol
+       * @default auto
+       * @enum {string}
+       */
+      exchange_protocol?: "auto" | "id_jag" | "rfc8693";
+      /** As Issuer */
+      as_issuer?: string | null;
+      /** As Client Id */
+      as_client_id?: string | null;
+      /** As Client Secret */
+      as_client_secret?: string | null;
+      /** Requested Scope */
+      requested_scope?: string | null;
       /**
        * Forward Identity
        * @default false
@@ -13224,6 +13385,8 @@ export interface components {
       /** Documentation Url */
       documentation_url?: string | null;
       security_classification?: components["schemas"]["ModelId"] | null;
+      /** Tools */
+      tools?: components["schemas"]["MCPServerToolDefinition"][] | null;
     };
     /**
      * MCPServerCreateResponse
@@ -13255,6 +13418,33 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
+      /**
+       * Auth Scope
+       * @default static_bearer
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "per_tenant" | "static_bearer";
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /** Target Resource Or Scope */
+      target_resource_or_scope?: string | null;
+      /**
+       * Exchange Protocol
+       * @default auto
+       * @enum {string}
+       */
+      exchange_protocol?: "auto" | "id_jag" | "rfc8693";
+      /** As Issuer */
+      as_issuer?: string | null;
+      /** As Client Id */
+      as_client_id?: string | null;
+      /**
+       * Has As Client Secret
+       * @default false
+       */
+      has_as_client_secret?: boolean;
+      /** Requested Scope */
+      requested_scope?: string | null;
       /**
        * Forward Identity
        * @default false
@@ -13341,6 +13531,33 @@ export interface components {
       /** Credential Preview */
       credential_preview?: string | null;
       /**
+       * Auth Scope
+       * @default static_bearer
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "per_tenant" | "static_bearer";
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /** Target Resource Or Scope */
+      target_resource_or_scope?: string | null;
+      /**
+       * Exchange Protocol
+       * @default auto
+       * @enum {string}
+       */
+      exchange_protocol?: "auto" | "id_jag" | "rfc8693";
+      /** As Issuer */
+      as_issuer?: string | null;
+      /** As Client Id */
+      as_client_id?: string | null;
+      /**
+       * Has As Client Secret
+       * @default false
+       */
+      has_as_client_secret?: boolean;
+      /** Requested Scope */
+      requested_scope?: string | null;
+      /**
        * Forward Identity
        * @default false
        */
@@ -13399,6 +13616,28 @@ export interface components {
       is_org_enabled?: boolean | null;
       /** Env Vars */
       env_vars?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * MCPServerToolDefinition
+     * @description A tool definition supplied by the registering caller at create time.
+     *
+     *     Lets headless provisioners register the catalog together with the
+     *     server: SSO-scoped servers cannot be probed without a user session,
+     *     so discovery has nothing to populate the catalog from. Supplied
+     *     definitions are validated against the same catalog bounds as live
+     *     discovery and saved as approved, on the registering admin's authority.
+     */
+    MCPServerToolDefinition: {
+      /** Name */
+      name: string;
+      /** Title */
+      title?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Input Schema */
+      input_schema?: {
         [key: string]: unknown;
       } | null;
     };
@@ -13507,6 +13746,22 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Auth Scope */
+      auth_scope?: ("per_user" | "per_tenant" | "static_bearer") | null;
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /** Target Resource Or Scope */
+      target_resource_or_scope?: string | null;
+      /** Exchange Protocol */
+      exchange_protocol?: ("auto" | "id_jag" | "rfc8693") | null;
+      /** As Issuer */
+      as_issuer?: string | null;
+      /** As Client Id */
+      as_client_id?: string | null;
+      /** As Client Secret */
+      as_client_secret?: string | null;
+      /** Requested Scope */
+      requested_scope?: string | null;
       /** Forward Identity */
       forward_identity?: boolean | null;
       /** Tool Catalog Max Count */
@@ -13523,6 +13778,47 @@ export interface components {
       documentation_url?: string | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /** Tools */
+      tools?: components["schemas"]["MCPServerToolDefinition"][] | null;
+    };
+    /**
+     * MCPServiceAccountPublic
+     * @description DTO for the tenant MCP service-account read-out (masked).
+     *
+     *     Also surfaces the tenant-wide default audience/scope so the panel
+     *     can render both knobs from a single GET; they are written via
+     *     separate PUT endpoints because the concerns are independent.
+     */
+    MCPServiceAccountPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Client Id */
+      client_id?: string | null;
+      /** Client Secret Preview */
+      client_secret_preview?: string | null;
+      /** Default Target */
+      default_target?: string | null;
+    };
+    /**
+     * MCPServiceAccountUpdate
+     * @description DTO for setting / rotating the tenant MCP service-account credentials.
+     */
+    MCPServiceAccountUpdate: {
+      /** Client Id */
+      client_id: string;
+      /** Client Secret */
+      client_secret: string;
+    };
+    /**
+     * MCPSsoDefaultTargetUpdate
+     * @description DTO for setting the tenant-wide default audience/scope.
+     *
+     *     Used as the fallback ``target.resource_or_scope`` in the broker for
+     *     every SSO MCP server that does not carry its own override.
+     */
+    MCPSsoDefaultTargetUpdate: {
+      /** Default Target */
+      default_target: string;
     };
     /**
      * MCPToolSetting
@@ -39570,6 +39866,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
@@ -39825,6 +40130,236 @@ export interface operations {
       };
     };
   };
+  get_mcp_service_account_api_v1_mcp_servers_service_account__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServiceAccountPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  set_mcp_service_account_api_v1_mcp_servers_service_account__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServiceAccountUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServiceAccountPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clear_mcp_service_account_api_v1_mcp_servers_service_account__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  set_mcp_sso_default_target_api_v1_mcp_servers_sso_defaults__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPSsoDefaultTargetUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServiceAccountPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clear_mcp_sso_default_target_api_v1_mcp_servers_sso_defaults__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_mcp_server_api_v1_mcp_servers__id___get: {
     parameters: {
       query?: never;
@@ -39932,6 +40467,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -40313,6 +40857,35 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_my_mcp_connections_api_v1_me_mcp_connections_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPConnectionStatusList"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -46689,6 +47262,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  revoke_oidc_tokens_api_v1_auth_oidc_logout_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

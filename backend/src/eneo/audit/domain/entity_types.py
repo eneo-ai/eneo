@@ -33,4 +33,5 @@ class EntityType(str, Enum):
     SESSION = "session"
     MCP_SERVER = "mcp_server"
     MCP_SERVER_TOOL = "mcp_server_tool"
+    IDP_USER_TOKEN = "idp_user_token"
     USER_GROUP = "user_group"

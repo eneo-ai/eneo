@@ -27,6 +27,10 @@ class BaseListModel(BaseModel, Generic[T]):
         return len(self.items)
 
 
+MCPAuthScopeLiteral = Literal["per_user", "per_tenant", "static_bearer"]
+MCPExchangeProtocolLiteral = Literal["auto", "id_jag", "rfc8693"]
+
+
 class MCPServerPublic(BaseModel):
     """Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport)."""
 
@@ -37,6 +41,14 @@ class MCPServerPublic(BaseModel):
     http_auth_type: str  # "none", "bearer"
     has_credentials: bool
     credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
+    auth_scope: MCPAuthScopeLiteral = "static_bearer"
+    expected_idp_issuer: Optional[str] = None
+    target_resource_or_scope: Optional[str] = None
+    exchange_protocol: MCPExchangeProtocolLiteral = "auto"
+    as_issuer: Optional[str] = None
+    as_client_id: Optional[str] = None
+    has_as_client_secret: bool = False
+    requested_scope: Optional[str] = None
     forward_identity: bool = False
     tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
     tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
@@ -51,6 +63,22 @@ class MCPServerList(BaseListModel[MCPServerPublic]):
     pass
 
 
+class MCPServerToolDefinition(BaseModel):
+    """A tool definition supplied by the registering caller at create time.
+
+    Lets headless provisioners register the catalog together with the
+    server: SSO-scoped servers cannot be probed without a user session,
+    so discovery has nothing to populate the catalog from. Supplied
+    definitions are validated against the same catalog bounds as live
+    discovery and saved as approved, on the registering admin's authority.
+    """
+
+    name: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    input_schema: Optional[dict[str, Any]] = None
+
+
 class MCPServerCreate(BaseModel):
     """DTO for creating an MCP server (admin only, uses Streamable HTTP transport)."""
 
@@ -59,6 +87,17 @@ class MCPServerCreate(BaseModel):
     http_auth_type: Literal["none", "bearer"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    auth_scope: MCPAuthScopeLiteral = "static_bearer"
+    expected_idp_issuer: Optional[str] = None
+    target_resource_or_scope: Optional[str] = None
+    exchange_protocol: MCPExchangeProtocolLiteral = "auto"
+    # Pins the AS issuer that as_client_id / as_client_secret may be sent
+    # to; required whenever those credentials are set, so a hostile server
+    # cannot steer leg-2 redemption (and the secret) to an attacker AS.
+    as_issuer: Optional[str] = None
+    as_client_id: Optional[str] = None
+    as_client_secret: Optional[str] = None
+    requested_scope: Optional[str] = None
     forward_identity: bool = False
     tool_catalog_max_count: int = Field(
         default=MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
@@ -81,6 +120,7 @@ class MCPServerCreate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Optional[ModelId] = None
+    tools: Optional[list[MCPServerToolDefinition]] = None
 
 
 class MCPServerUpdate(BaseModel):
@@ -91,6 +131,14 @@ class MCPServerUpdate(BaseModel):
     http_auth_type: Optional[Literal["none", "bearer"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    auth_scope: Optional[MCPAuthScopeLiteral] = None
+    expected_idp_issuer: Union[str, None, NotProvided] = NOT_PROVIDED
+    target_resource_or_scope: Union[str, None, NotProvided] = NOT_PROVIDED
+    exchange_protocol: Optional[MCPExchangeProtocolLiteral] = None
+    as_issuer: Union[str, None, NotProvided] = NOT_PROVIDED
+    as_client_id: Union[str, None, NotProvided] = NOT_PROVIDED
+    as_client_secret: Union[str, None, NotProvided] = NOT_PROVIDED
+    requested_scope: Union[str, None, NotProvided] = NOT_PROVIDED
     forward_identity: Optional[bool] = None
     tool_catalog_max_count: Optional[int] = Field(
         default=None,
@@ -113,6 +161,9 @@ class MCPServerUpdate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Union[ModelId, None, NotProvided] = NOT_PROVIDED
+    # Declaratively replaces the tool catalog when given (same semantics as
+    # on create); omit or send null to leave the catalog untouched.
+    tools: Optional[list[MCPServerToolDefinition]] = None
 
 
 class MCPServerSettingsPublic(MCPServerPublic):
@@ -195,11 +246,17 @@ class MCPServerToolUpdate(BaseModel):
 
 
 class MCPConnectionStatus(BaseModel):
-    """Status of MCP server connection attempt."""
+    """Status of MCP server connection attempt.
+
+    ``probe_skipped`` is true for SSO-scoped servers (per_user / per_tenant),
+    where no admin-time credentials exist to probe with: ``success`` then
+    means "saved without a probe", not "connection verified".
+    """
 
     success: bool
     tools_discovered: int = 0
     error_message: Optional[str] = None
+    probe_skipped: bool = False
 
 
 class MCPServerCreateResponse(BaseModel):
@@ -246,3 +303,34 @@ class ToolReviewResponse(BaseModel):
     approved_tools: list[MCPServerToolPublic] = []
     rejected_tools: list[MCPServerToolPublic] = []
     deleted_count: int = 0
+
+
+class MCPServiceAccountPublic(BaseModel):
+    """DTO for the tenant MCP service-account read-out (masked).
+
+    Also surfaces the tenant-wide default audience/scope so the panel
+    can render both knobs from a single GET; they are written via
+    separate PUT endpoints because the concerns are independent.
+    """
+
+    configured: bool
+    client_id: Optional[str] = None
+    client_secret_preview: Optional[str] = None  # e.g. "********4f3c"
+    default_target: Optional[str] = None
+
+
+class MCPServiceAccountUpdate(BaseModel):
+    """DTO for setting / rotating the tenant MCP service-account credentials."""
+
+    client_id: str
+    client_secret: str
+
+
+class MCPSsoDefaultTargetUpdate(BaseModel):
+    """DTO for setting the tenant-wide default audience/scope.
+
+    Used as the fallback ``target.resource_or_scope`` in the broker for
+    every SSO MCP server that does not carry its own override.
+    """
+
+    default_target: str

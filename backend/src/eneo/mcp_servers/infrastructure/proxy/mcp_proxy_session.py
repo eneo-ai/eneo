@@ -12,14 +12,17 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.main.config import get_settings
+from eneo.main.exceptions import MCPUserActionRequiredError
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPAuthenticationError,
     MCPClient,
     MCPClientError,
     validate_tool_catalog,
@@ -66,6 +69,7 @@ class MCPProxySession:
         db_session: "AsyncSession | None" = None,
         identity_headers: dict[str, str] | None = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
+        token_provider_map: "dict[UUID, Callable[[], Awaitable[str]]] | None" = None,
     ):
         """
         Initialize proxy session.
@@ -84,10 +88,14 @@ class MCPProxySession:
             db_session: Active SQLAlchemy session backing the
                 ``chat_session_mcp_state`` lookups/upserts. Only consulted when
                 ``chat_session_id`` is non-None.
+            token_provider_map: Map of server_id -> async bearer resolver for
+                broker-backed servers. Servers absent from the map use the
+                static credentials in ``auth_credentials_map``.
         """
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
+        self.token_provider_map = token_provider_map or {}
         self.identity_headers = identity_headers or {}
         self.chat_session_id = chat_session_id
         self._durable_session_requested = chat_session_id is not None
@@ -114,6 +122,10 @@ class MCPProxySession:
         # streamablehttp_client whose anyio cancel scope can only be exited from
         # its owner task.
         self._failed_server_ids: set[UUID] = set()
+        # User-facing reason for a failed server, when the failure is one the
+        # user can act on (e.g. SSO reconnect). Falls back to the generic
+        # "temporarily unavailable" text when absent.
+        self._failed_server_messages: dict[UUID, str] = {}
 
         # The asyncio.Task that opened the first MCP connection. All subsequent
         # connect/disconnect calls must run on this task — the MCP SDK's
@@ -363,6 +375,7 @@ class MCPProxySession:
                 auth_credentials,
                 resume_mcp_session_id=next_resume_id,
                 identity_headers=self.identity_headers,
+                dynamic_token_provider=self.token_provider_map.get(server.id),
             )
             session_is_durable = False
             candidate_terminated = False
@@ -656,15 +669,33 @@ class MCPProxySession:
         async with _CIRCUIT_BREAKER_LOCK:
             _CIRCUIT_BREAKER_STATE.pop(server_id, None)
 
-    def _mark_server_failed(self, server_id: UUID) -> None:
+    def _mark_server_failed(
+        self, server_id: UUID, user_message: str | None = None
+    ) -> None:
         """Mark a server unusable for the rest of this session.
 
         We do NOT drop the client from the cache — that would orphan the
         streamablehttp_client's anyio TaskGroup (its read/write loops keep
         running until __aexit__ is called on the streams context). close()
         will disconnect every cached client at session end, on the owner task.
+
+        ``user_message`` replaces the generic "temporarily unavailable" text
+        in tool results for failures the user can act on themselves.
         """
         self._failed_server_ids.add(server_id)
+        if user_message is not None:
+            self._failed_server_messages[server_id] = user_message
+
+    def _unavailable_result(self, server_id: UUID) -> dict[str, Any]:
+        """Tool result for a server that cannot be used this session."""
+        text = self._failed_server_messages.get(
+            server_id,
+            "External tool service temporarily unavailable. Please retry later.",
+        )
+        return {
+            "content": [{"type": "text", "text": text}],
+            "is_error": True,
+        }
 
     def _truncate_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
         max_chars = _settings.mcp_tool_output_max_chars
@@ -797,6 +828,7 @@ class MCPProxySession:
                         sid
                     ),
                     identity_headers=self.identity_headers,
+                    dynamic_token_provider=self.token_provider_map.get(server_id),
                 )
 
                 logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
@@ -888,15 +920,7 @@ class MCPProxySession:
             }
 
         if server.id in self._failed_server_ids:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(server.id)
 
         # Use cached client only. Connecting here is unsafe: this method runs
         # under asyncio.gather (see call_tools_parallel), which dispatches each
@@ -911,15 +935,7 @@ class MCPProxySession:
                 server.name,
             )
             self._mark_server_failed(server.id)
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "External tool service temporarily unavailable. Please retry later.",
-                    }
-                ],
-                "is_error": True,
-            }
+            return self._unavailable_result(server.id)
 
         try:
             # Execute tool with timing
@@ -987,6 +1003,38 @@ class MCPProxySession:
                 continue
             try:
                 await self._get_or_create_client(server)
+            except MCPUserActionRequiredError as exc:
+                # The user's SSO session for this server is missing, expired,
+                # or was rejected. Unlike an outage, the user can fix this —
+                # say so instead of "temporarily unavailable".
+                logger.warning(
+                    f"[MCPProxy] User not authenticated for '{server.name}': {exc}"
+                )
+                self._mark_server_failed(
+                    server.id,
+                    user_message=(
+                        f"Not connected to '{server.name}': the user's single "
+                        "sign-on session for this tool is missing or no longer "
+                        f"valid ({exc}). Ask the user to sign out of the "
+                        "platform and sign in again with their organization "
+                        "account, then retry."
+                    ),
+                )
+            except MCPAuthenticationError as exc:
+                # Authentication failed for a reason the user cannot fix
+                # (IdP/AS configuration, rejected exchange). Name the cause
+                # so the failure is not mistaken for an outage.
+                logger.warning(
+                    f"[MCPProxy] Authentication failed for '{server.name}': {exc}"
+                )
+                self._mark_server_failed(
+                    server.id,
+                    user_message=(
+                        f"'{server.name}' rejected the connection: "
+                        f"authentication failed ({exc}). This needs to be "
+                        "fixed by an administrator; retrying will not help."
+                    ),
+                )
             except Exception as exc:
                 logger.warning(
                     f"[MCPProxy] Failed to pre-connect to '{server.name}': {exc}"

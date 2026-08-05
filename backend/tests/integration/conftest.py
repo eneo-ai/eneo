@@ -1371,3 +1371,23 @@ async def debug_auth_config(test_settings):
     print(f"API_KEY_HEADER name: {API_KEY_HEADER.model.name}")
     print(f"Settings object IDs match: {id(test_settings) == id(runtime_settings)}")
     print("=================\n")
+
+
+@pytest.fixture
+async def default_user(db_container):
+    """The seeded test@example.com user (admin on the default tenant).
+
+    Shared across integration files; file-local fixtures of the same name
+    override this one where a test needs a different principal.
+    """
+    async with db_container() as container:
+        user_repo = container.user_repo()
+        return await user_repo.get_user_by_email("test@example.com")
+
+
+@pytest.fixture
+async def default_user_token(db_container, patch_auth_service_jwt, default_user):
+    """Bearer access token for ``default_user``."""
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        return auth_service.create_access_token_for_user(default_user)
