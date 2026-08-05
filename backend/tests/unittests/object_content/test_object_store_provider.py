@@ -67,6 +67,19 @@ class _BlockingConnectionService(_ConnectionService):
         return self.stored
 
 
+class _CapturedBlockingConnectionService(_ConnectionService):
+    def __init__(self, stored: StoredObjectStoreConnection) -> None:
+        super().__init__(stored)
+        self.get_started = asyncio.Event()
+        self.release_get = asyncio.Event()
+
+    async def get(self) -> StoredObjectStoreConnection | None:
+        captured = self.stored
+        self.get_started.set()
+        await self.release_get.wait()
+        return captured
+
+
 class _BlockingAdoptionConnectionService(_ConnectionService):
     def __init__(self) -> None:
         super().__init__(None)
@@ -144,6 +157,31 @@ async def test_remote_acquisition_observes_rotation_and_drains_the_old_client() 
 
     await provider.close()
     assert stores[1].closed is True
+
+
+@pytest.mark.asyncio
+async def test_initialization_cannot_replace_a_newer_published_revision() -> None:
+    service = _CapturedBlockingConnectionService(_stored(1))
+    provider = ObjectStoreProvider(
+        connection_service=cast(ObjectStoreConnectionService, service),
+        store_factory=lambda settings: cast(
+            S3ObjectStore,
+            _Store(int(settings.access_key_id.get_secret_value().rsplit("-", 1)[1])),
+        ),
+    )
+
+    initialization = asyncio.create_task(provider.initialize())
+    await asyncio.wait_for(service.get_started.wait(), timeout=1)
+    publication = asyncio.create_task(provider.publish(_stored(2)))
+    await asyncio.sleep(0)
+    service.release_get.set()
+    await asyncio.gather(initialization, publication)
+
+    async with provider.acquire(refresh=False) as lease:
+        assert cast(_Store, lease.store).revision == 2
+    assert provider.configuration_revision == 2
+
+    await provider.close()
 
 
 @pytest.mark.asyncio

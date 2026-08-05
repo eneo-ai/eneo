@@ -100,11 +100,7 @@ class ObjectStoreProvider:
         return len(self._superseded)
 
     async def initialize(self) -> None:
-        service = self._connection_service
-        if service is None:
-            return
-        stored = await service.get()
-        await self._publish(stored)
+        await self.refresh()
 
     async def adopt_validated_legacy(self) -> None:
         service = self._connection_service
