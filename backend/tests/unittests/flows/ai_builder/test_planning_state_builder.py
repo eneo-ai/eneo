@@ -567,6 +567,27 @@ class TestMappedFileLimitPreservation:
             diagnostic="confirmation_required",
         )
 
+    def test_drops_accepted_value_when_policy_now_blocks_mapped_authoring(
+        self,
+    ) -> None:
+        """An explicit organization opt-out (or invalid policy) rebuilds with no
+        proposal; a previously accepted limit must not survive and re-enable
+        publication."""
+        rebuilt = _state()
+        rebuilt.mapped_file_limit = MappedFileLimit(diagnostic="policy_unset")
+        persisted = _state()
+        persisted.mapped_file_limit = MappedFileLimit(
+            proposed_value=8,
+            accepted_value=4,
+            provenance="authored",
+        )
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
+
+        assert rebuilt.mapped_file_limit == MappedFileLimit(diagnostic="policy_unset")
+
 
 class TestFileRoleEvidencePreservation:
     def test_carries_forward_persisted_file_roles(self) -> None:
@@ -4002,6 +4023,33 @@ def _mapped_file_limit_conversation(
     ]
 
 
+def test_deployment_default_reaches_the_mapped_proposal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Config default -> resolver -> Builder proposal: an organization that
+    never configured a ceiling proposes the derived item bound (default - 1
+    reserved fallback call) instead of blocking authoring."""
+    from types import SimpleNamespace
+
+    from eneo.flows.domain.mapped_execution_policy import (
+        resolve_flow_mapped_execution_policy,
+    )
+
+    monkeypatch.setattr(
+        "eneo.flows.domain.mapped_execution_policy.get_settings",
+        lambda: SimpleNamespace(flow_mapped_step_max_provider_calls_default=100),
+    )
+    policy = resolve_flow_mapped_execution_policy(None)
+
+    state = build_planning_state_from_conversation(
+        _mapped_file_limit_conversation(),
+        mapped_execution_policy=policy,
+    )
+
+    assert state.mapped_file_limit.proposed_value == 99
+    assert state.mapped_file_limit.diagnostic == "confirmation_required"
+
+
 def test_mapped_file_limit_requires_explicit_policy_confirmation() -> None:
     state = build_planning_state_from_conversation(
         _mapped_file_limit_conversation(),
@@ -4010,8 +4058,10 @@ def test_mapped_file_limit_requires_explicit_policy_confirmation() -> None:
         ),
     )
 
+    # Policy ceiling 8 proposes 7 items: one call stays reserved for the
+    # runtime native-JSON fallback attempt.
     assert state.mapped_file_limit.accepted_value is None
-    assert state.mapped_file_limit.proposed_value == 8
+    assert state.mapped_file_limit.proposed_value == 7
     assert state.mapped_file_limit.diagnostic == "confirmation_required"
 
 
@@ -4023,7 +4073,7 @@ def test_mapped_file_limit_accepts_organization_limit_with_provenance() -> None:
         ),
     )
 
-    assert state.mapped_file_limit.accepted_value == 8
+    assert state.mapped_file_limit.accepted_value == 7
     assert state.mapped_file_limit.provenance == "policy_default"
     assert state.mapped_file_limit.diagnostic is None
 
@@ -4058,8 +4108,10 @@ def test_mapped_file_limit_free_text_response_stays_unresolved() -> None:
         ),
     )
 
+    # Policy ceiling 8 proposes 7 items: one call stays reserved for the
+    # runtime native-JSON fallback attempt.
     assert state.mapped_file_limit.accepted_value is None
-    assert state.mapped_file_limit.proposed_value == 8
+    assert state.mapped_file_limit.proposed_value == 7
     assert state.mapped_file_limit.diagnostic == "confirmation_required"
 
 

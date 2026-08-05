@@ -107,7 +107,10 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import Flow
-from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    max_mapped_items_per_step,
+)
 from eneo.json_types import JsonObject
 
 
@@ -188,8 +191,10 @@ def _mapped_file_limit(
     *,
     mapped_execution_policy: FlowMappedExecutionPolicy | None,
 ) -> MappedFileLimit:
+    # Propose the item ceiling the call ceiling can actually admit: runtime
+    # admission reserves one native-JSON fallback call on top of per-item calls.
     proposed = (
-        mapped_execution_policy.max_provider_calls_per_mapped_step
+        max_mapped_items_per_step(mapped_execution_policy)
         if mapped_execution_policy is not None
         else None
     )
@@ -355,9 +360,13 @@ def carry_forward_persisted_planner_state(
         return
     if rebuilt.mapped_file_limit.accepted_value is None:
         prior_limit = persisted.mapped_file_limit
-        if prior_limit.accepted_value is not None and (
-            rebuilt.mapped_file_limit.proposed_value is None
-            or prior_limit.accepted_value <= rebuilt.mapped_file_limit.proposed_value
+        # A missing proposal means the current policy blocks new mapped
+        # authoring (explicit opt-out or invalid policy); a previously accepted
+        # limit must not survive that transition and re-enable publication.
+        if (
+            prior_limit.accepted_value is not None
+            and rebuilt.mapped_file_limit.proposed_value is not None
+            and prior_limit.accepted_value <= rebuilt.mapped_file_limit.proposed_value
         ):
             rebuilt.mapped_file_limit = MappedFileLimit(
                 proposed_value=rebuilt.mapped_file_limit.proposed_value,

@@ -2709,11 +2709,10 @@ async def test_per_source_reader_reserves_one_json_fallback_before_provider_disp
     with pytest.raises(TypedIOValidationException) as exc_info:
         await executor._execute_step(step=step, run=run, attempt_no=1)
 
-    assert (
-        exc_info.value.code
-        == FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED.value
-    )
-    assert assistant.preview_response_context.await_count == 2
+    # The call ceiling of 2 admits only 1 item (one call is reserved for the
+    # native-JSON fallback), so two files are rejected as too many inputs
+    # before any provider work happens.
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
     assistant.get_response.assert_not_awaited()
 
 
@@ -2766,8 +2765,9 @@ async def test_per_source_reader_rejects_textless_file_before_provider_dispatch(
 @pytest.mark.asyncio
 async def test_per_source_reader_rejects_max_plus_one_before_assistant_prepare(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
+    # Ceiling 2 admits one item; two inputs are max-plus-one.
     executor.mapped_execution_policy = FlowMappedExecutionPolicy(
-        max_provider_calls_per_mapped_step=1
+        max_provider_calls_per_mapped_step=2
     )
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[uuid4(), uuid4()])
     executor._prepare_assistant_step = AsyncMock()
@@ -3191,19 +3191,19 @@ async def test_per_item_map_reserves_one_json_fallback_before_provider_dispatch(
     with pytest.raises(TypedIOValidationException) as exc_info:
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
-    assert (
-        exc_info.value.code
-        == FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED.value
-    )
-    assert assistant.preview_response_context.await_count == 2
+    # A call ceiling of 2 admits only 1 item (one call reserved for the
+    # native-JSON fallback), so two items are rejected as too many inputs
+    # before any provider work happens.
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
     assistant.get_response.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_per_item_map_uses_exact_call_count_when_json_mode_is_unsupported(user):
     executor, _, _, _ = _build_executor(user)
+    # Ceiling 3 admits 2 items (one call stays reserved for the fallback).
     executor.mapped_execution_policy = FlowMappedExecutionPolicy(
-        max_provider_calls_per_mapped_step=2
+        max_provider_calls_per_mapped_step=3
     )
     assistant = _mock_assistant_for_execute_step(
         response_text='{"sections":[{"heading":"Result","body":"Done"}]}'
@@ -3262,8 +3262,9 @@ async def test_per_item_map_uses_exact_call_count_when_json_mode_is_unsupported(
 @pytest.mark.asyncio
 async def test_per_item_map_rejects_over_window_package_before_provider_dispatch(user):
     executor, _, _, _ = _build_executor(user)
+    # Ceiling 2 admits the single item; this test targets the token window.
     executor.mapped_execution_policy = FlowMappedExecutionPolicy(
-        max_provider_calls_per_mapped_step=1,
+        max_provider_calls_per_mapped_step=2,
         max_estimated_input_tokens_per_mapped_step=100,
     )
     assistant = _mock_assistant_for_execute_step()
@@ -3318,8 +3319,9 @@ async def test_per_item_map_rejects_over_window_package_before_provider_dispatch
 @pytest.mark.asyncio
 async def test_per_item_map_rejects_max_plus_one_before_assistant_prepare(user):
     executor, _, _, _ = _build_executor(user)
+    # Ceiling 2 admits one item; two items are max-plus-one.
     executor.mapped_execution_policy = FlowMappedExecutionPolicy(
-        max_provider_calls_per_mapped_step=1
+        max_provider_calls_per_mapped_step=2
     )
     executor._prepare_assistant_step = AsyncMock()
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { cva } from "class-variance-authority";
+  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
   import { uid } from "uid";
   import { m } from "$lib/paraglide/messages";
 
@@ -46,10 +47,14 @@
         <span class={changeIndicator({ hasChanges })}></span>{title}<slot name="title"></slot>
         {#if revertFn}
           <button
-            class="border-default hover:bg-hover-dimmer ml-2 -translate-y-[1px] self-end rounded-lg border px-2 py-0.5 text-sm font-normal transition-all hover:shadow disabled:opacity-0"
+            class="border-default hover:bg-hover-dimmer ml-2 inline-flex -translate-y-[1px] items-center gap-1.5 self-end rounded-lg border px-2 py-0.5 text-sm font-normal transition-all hover:shadow disabled:opacity-0"
             disabled={!hasChanges}
-            on:click={revertFn}>{m.discard_changes()}</button
+            aria-label="{m.discard_changes()}: {title}"
+            on:click={revertFn}
           >
+            <RotateCcw class="size-3.5" aria-hidden="true" />
+            {m.discard_changes()}
+          </button>
         {/if}
       </h3>
       {#if description}

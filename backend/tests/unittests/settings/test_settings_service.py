@@ -22,6 +22,7 @@ from eneo.flows.flow_retention_policy import (
     FLOW_RETENTION_POLICY_STORAGE_VERSION,
     FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY,
 )
+from eneo.main.config import get_settings as get_app_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
@@ -33,6 +34,7 @@ from eneo.settings.settings import (
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
+    FlowMappedExecutionPolicyUpdate,
     FlowRetentionEffectiveStatePublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyUpdate,
@@ -477,6 +479,202 @@ async def test_get_mapped_execution_policy_resolved_returns_domain_policy():
         max_provider_calls_per_mapped_step=8,
         max_estimated_input_tokens_per_mapped_step=120_000,
     )
+
+
+def _mapped_policy_service(tenant_repo: MockTenantRepo) -> SettingService:
+    return SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+
+async def test_unset_mapped_policy_resolves_to_deployment_default():
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(update={"flow_settings": {}})
+    service = _mapped_policy_service(tenant_repo)
+
+    policy = await service.get_mapped_execution_policy_resolved()
+
+    assert policy.max_provider_calls_per_mapped_step == (
+        get_app_settings().flow_mapped_step_max_provider_calls_default
+    )
+
+
+async def test_update_mapped_policy_null_stores_explicit_disable():
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "mapped_execution": {
+                    "version": 1,
+                    "max_provider_calls_per_mapped_step": 8,
+                }
+            }
+        }
+    )
+    service = _mapped_policy_service(tenant_repo)
+
+    updated = await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(max_provider_calls_per_mapped_step=None)
+    )
+
+    assert updated.max_provider_calls_per_mapped_step is None
+    stored = tenant_repo.tenant.flow_settings["mapped_execution"]
+    assert stored["max_provider_calls_per_mapped_step"] is None
+    resolved = await service.get_mapped_execution_policy_resolved()
+    assert resolved.max_provider_calls_per_mapped_step is None
+
+
+async def test_restore_mapped_call_ceiling_default_returns_to_inheritance():
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "mapped_execution": {
+                    "version": 1,
+                    "max_provider_calls_per_mapped_step": 8,
+                }
+            }
+        }
+    )
+    service = _mapped_policy_service(tenant_repo)
+
+    updated = await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(restore_max_provider_calls_default=True)
+    )
+
+    assert updated.max_provider_calls_source == "deployment_default"
+    assert updated.max_provider_calls_per_mapped_step == (
+        get_app_settings().flow_mapped_step_max_provider_calls_default
+    )
+    assert "mapped_execution" not in (tenant_repo.tenant.flow_settings or {})
+
+
+async def test_restore_is_mutually_exclusive_with_setting_a_ceiling():
+    service = _mapped_policy_service(MockTenantRepo())
+
+    with pytest.raises(BadRequestException):
+        await service.update_mapped_execution_policy(
+            FlowMappedExecutionPolicyUpdate(
+                restore_max_provider_calls_default=True,
+                max_provider_calls_per_mapped_step=10,
+            )
+        )
+
+
+async def test_mapped_policy_get_reports_source_for_each_state():
+    tenant_repo = MockTenantRepo()
+    service = _mapped_policy_service(tenant_repo)
+    inherited = await service.get_mapped_execution_policy()
+    assert inherited.max_provider_calls_source == "deployment_default"
+
+    await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(max_provider_calls_per_mapped_step=8)
+    )
+    configured = await service.get_mapped_execution_policy()
+    assert configured.max_provider_calls_source == "organization"
+
+    await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(max_provider_calls_per_mapped_step=None)
+    )
+    disabled = await service.get_mapped_execution_policy()
+    assert disabled.max_provider_calls_source == "organization_disabled"
+    assert disabled.max_provider_calls_per_mapped_step is None
+
+
+async def test_upload_ceiling_is_clamped_to_the_flow_input_hard_cap():
+    """An object-storage deployment may admit >2 GiB, but flow input limits
+    are hard-capped: the exposed writable ceiling must combine both."""
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(
+            file_maximum_bytes=3 * 1024**3,
+            audio_maximum_bytes=4 * 1024**3,
+        ),
+    )
+
+    limits = await service.get_flow_input_limits()
+
+    assert limits.file_max_size_ceiling_bytes == 2 * 1024**3
+    assert limits.audio_max_size_ceiling_bytes == 2 * 1024**3
+
+
+async def test_restore_audits_the_actual_policy_transition():
+    captured: list[dict] = []
+
+    class RecordingAuditService(MockAuditService):
+        async def log_async(self, *args, **kwargs):
+            captured.append(kwargs.get("metadata") or {})
+
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "mapped_execution": {
+                    "version": 1,
+                    "max_provider_calls_per_mapped_step": 8,
+                }
+            }
+        }
+    )
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=RecordingAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(restore_max_provider_calls_default=True)
+    )
+
+    assert captured, "restore must be audited"
+    metadata = captured[-1]
+    assert metadata["restored_call_ceiling_default"] is True
+    changes = metadata["changes"]
+    assert changes["max_provider_calls_per_mapped_step"]["old"] == 8
+    assert changes["max_provider_calls_per_mapped_step"]["new"] == (
+        get_app_settings().flow_mapped_step_max_provider_calls_default
+    )
+    assert changes["max_provider_calls_source"] == {
+        "old": "organization",
+        "new": "deployment_default",
+    }
+
+
+async def test_mapped_policy_get_reports_invalid_source_for_corrupt_storage():
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={"flow_settings": {"mapped_execution": {"version": 99}}}
+    )
+    service = _mapped_policy_service(tenant_repo)
+
+    policy = await service.get_mapped_execution_policy()
+
+    assert policy.max_provider_calls_source == "invalid"
+    assert policy.max_provider_calls_per_mapped_step is None
 
 
 async def test_update_flow_input_limits_persists_and_audits():

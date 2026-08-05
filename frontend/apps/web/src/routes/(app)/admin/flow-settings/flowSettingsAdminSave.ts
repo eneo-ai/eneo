@@ -3,7 +3,8 @@ import type {
   Eneo,
   FlowInputLimitsUpdate,
   FlowMappedExecutionPolicyUpdate,
-  FlowRuntimePolicyUpdate
+  FlowRuntimePolicyUpdate,
+  FlowRagEvidencePolicyUpdate
 } from "@eneo/eneo-js";
 
 type SettingsWriter = Pick<
@@ -12,6 +13,7 @@ type SettingsWriter = Pick<
   | "updateFlowRuntimePolicy"
   | "updateMappedExecutionPolicy"
   | "updateAIBuilderBudgetSettings"
+  | "updateRagEvidencePolicy"
 >;
 
 export type FlowAdminSettingsUpdates = {
@@ -19,6 +21,7 @@ export type FlowAdminSettingsUpdates = {
   runtimePolicy: FlowRuntimePolicyUpdate | null;
   mappedExecution: FlowMappedExecutionPolicyUpdate | null;
   builderBudget: AIBuilderBudgetSettingsUpdate | null;
+  ragEvidence: FlowRagEvidencePolicyUpdate | null;
 };
 
 /**
@@ -40,11 +43,15 @@ export async function saveFlowAdminSettings(
   const builderBudget = updates.builderBudget
     ? await settings.updateAIBuilderBudgetSettings(updates.builderBudget)
     : null;
+  const ragEvidence = updates.ragEvidence
+    ? await settings.updateRagEvidencePolicy(updates.ragEvidence)
+    : null;
 
   return {
     inputLimits,
     runtimePolicy,
     mappedExecution,
-    builderBudget
+    builderBudget,
+    ragEvidence
   };
 }

@@ -208,6 +208,19 @@ def resolve_flow_runtime_policy(
                 extra={"value": overrides.get(FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY)},
             )
 
+    # The resolved policy must always satisfy default <= max, even when a
+    # stored maximum undercuts the deployment default (e.g. the tenant default
+    # was cleared while a lower maximum stayed configured).
+    if default_timeout > max_timeout:
+        logger.warning(
+            "Clamping flow runtime default timeout to the resolved maximum",
+            extra={
+                "default_step_timeout_seconds": default_timeout,
+                "max_step_timeout_seconds": max_timeout,
+            },
+        )
+        default_timeout = max_timeout
+
     return FlowRuntimePolicy(
         default_step_timeout_seconds=default_timeout,
         max_step_timeout_seconds=max_timeout,

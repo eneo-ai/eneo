@@ -44,6 +44,13 @@ class FlowInputLimitDefaults(Protocol):
     def session_audio_maximum_bytes(self) -> int: ...
 
 
+def effective_upload_ceiling_bytes(admission_ceiling_bytes: int) -> int:
+    """The actual writable bound for a tenant upload limit: the deployment
+    admission ceiling capped by the flow-input hard maximum, so the exposed
+    ceiling can never advertise values the update path rejects."""
+    return min(admission_ceiling_bytes, FLOW_INPUT_MAX_LIMIT_BYTES)
+
+
 async def resolve_flow_input_limits_from_source(
     source: FlowInputLimitsSource | None,
 ) -> FlowInputLimits:
@@ -55,9 +62,15 @@ async def resolve_flow_input_limits_from_source(
 def _default_limits(defaults: FlowInputLimitDefaults | None) -> FlowInputLimits:
     if defaults is None:
         raise RuntimeError("Flow input limit defaults are required")
+    # Admission may admit more than the flow-input hard cap; the resolved
+    # defaults must stay within the writable bound.
     return FlowInputLimits(
-        file_max_size_bytes=defaults.session_file_maximum_bytes,
-        audio_max_size_bytes=defaults.session_audio_maximum_bytes,
+        file_max_size_bytes=effective_upload_ceiling_bytes(
+            defaults.session_file_maximum_bytes
+        ),
+        audio_max_size_bytes=effective_upload_ceiling_bytes(
+            defaults.session_audio_maximum_bytes
+        ),
         max_files_per_run=None,
         audio_max_files_per_run=DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     )

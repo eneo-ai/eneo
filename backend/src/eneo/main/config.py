@@ -315,6 +315,10 @@ class Settings(BaseSettings):
     flow_http_request_timeout_seconds: int = 30
     flow_http_max_timeout_seconds: int = 120
     flow_http_allow_private_networks: bool = False
+    # Deployment fallback for the per-mapped-step model-call ceiling. Applies when
+    # an organization has never configured its own value; None disables mapped
+    # authoring platform-wide unless an organization opts in explicitly.
+    flow_mapped_step_max_provider_calls_default: int | None = 100
     ai_builder_conversation_safety_buffer_tokens: int = 2_000
     ai_builder_minimum_conversation_budget_tokens: int = 4_000
     ai_builder_send_lock_lease_seconds: int = 900
@@ -524,6 +528,16 @@ class Settings(BaseSettings):
             raise ValueError("sharepoint_max_download_bytes must be greater than 0")
         return v
 
+    @field_validator("flow_mapped_step_max_provider_calls_default", mode="before")
+    @classmethod
+    def parse_optional_mapped_calls_default(cls, v: object) -> object:
+        """Make the documented platform-wide opt-out reachable from the
+        environment: FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT set to an
+        empty string, "none", or "null" disables the deployment fallback."""
+        if isinstance(v, str) and v.strip().lower() in {"", "none", "null"}:
+            return None
+        return v
+
     @model_validator(mode="after")
     def resolve_deprecated_federation_flag(self):
         """Support FEDERATION_PER_TENANT_ENABLED as a deprecated fallback alias."""
@@ -660,6 +674,18 @@ class Settings(BaseSettings):
             logging.error(
                 "FLOW_RUNTIME_STEP_TIMEOUT_HARD_CEILING_SECONDS must be greater than zero. Current value: %s",
                 self.flow_runtime_step_timeout_hard_ceiling_seconds,
+            )
+            sys.exit(1)
+
+        if (
+            self.flow_mapped_step_max_provider_calls_default is not None
+            and self.flow_mapped_step_max_provider_calls_default < 2
+        ):
+            logging.error(
+                "FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT must be at least 2"
+                " (one call is reserved for the native-JSON fallback) or unset."
+                " Current value: %s",
+                self.flow_mapped_step_max_provider_calls_default,
             )
             sys.exit(1)
 

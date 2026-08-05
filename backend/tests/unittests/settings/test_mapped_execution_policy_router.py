@@ -34,6 +34,8 @@ async def test_get_mapped_execution_policy_delegates_to_service() -> None:
         version=1,
         max_provider_calls_per_mapped_step=8,
         max_estimated_input_tokens_per_mapped_step=None,
+        max_provider_calls_source="organization",
+        deployment_default_max_provider_calls=100,
     )
 
     response = await get_mapped_execution_policy(container=_container(service))
@@ -50,6 +52,8 @@ async def test_patch_mapped_execution_policy_preserves_null_clear_intent() -> No
             version=1,
             max_provider_calls_per_mapped_step=None,
             max_estimated_input_tokens_per_mapped_step=90_000,
+            max_provider_calls_source="organization_disabled",
+            deployment_default_max_provider_calls=100,
         )
     )
     payload = FlowMappedExecutionPolicyUpdate(max_provider_calls_per_mapped_step=None)
@@ -89,3 +93,31 @@ def test_mapped_execution_policy_openapi_is_complete_for_admin_clients() -> None
             "max_estimated_input_tokens_per_mapped_step",
         ):
             assert policy_schema["properties"][field_name]["description"]
+
+    # The tri-state call-ceiling contract must be documented, not implied:
+    # null disables mapped authoring, restore_max_provider_calls_default
+    # returns to inheritance, and the response reports source + deployment
+    # default as required fields.
+    update_schema = schemas["FlowMappedExecutionPolicyUpdate"]["properties"]
+    update_calls = update_schema["max_provider_calls_per_mapped_step"]
+    assert "disable new mapped authoring" in update_calls["description"]
+    assert "deployment default" in update_calls["description"]
+    assert update_calls["anyOf"][0]["minimum"] == 2
+    restore = update_schema["restore_max_provider_calls_default"]
+    assert "Mutually exclusive" in restore["description"]
+
+    public_schema = schemas["FlowMappedExecutionPolicyPublic"]
+    public_calls = public_schema["properties"]["max_provider_calls_per_mapped_step"]
+    assert "deployment" in public_calls["description"]
+    assert public_calls["anyOf"][0]["minimum"] == 2
+    assert set(public_schema["required"]) >= {
+        "max_provider_calls_source",
+        "deployment_default_max_provider_calls",
+    }
+    source_enum = public_schema["properties"]["max_provider_calls_source"]["enum"]
+    assert set(source_enum) == {
+        "deployment_default",
+        "organization",
+        "organization_disabled",
+        "invalid",
+    }

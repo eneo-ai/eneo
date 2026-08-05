@@ -365,4 +365,6 @@ def test_runtime_step_specs_clamp_per_source_to_published_policy_and_input_minim
         mapped_policy=FlowMappedExecutionPolicy(max_provider_calls_per_mapped_step=4),
     )
 
-    assert specs[step.step_id].max_files == 4
+    # Policy ceiling 4 clamps to 3 admitted files: one provider call stays
+    # reserved for the native-JSON fallback.
+    assert specs[step.step_id].max_files == 3

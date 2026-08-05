@@ -15633,7 +15633,9 @@ export interface components {
      * @example {
      *       "audio_max_files_per_run": 5,
      *       "audio_max_size_bytes": 104857600,
+     *       "audio_max_size_ceiling_bytes": 209715200,
      *       "file_max_size_bytes": 52428800,
+     *       "file_max_size_ceiling_bytes": 52428800,
      *       "max_files_per_run": 20
      *     }
      */
@@ -15652,6 +15654,16 @@ export interface components {
        * @description Null means no tenant-level audio file count ceiling.
        */
       audio_max_files_per_run: number | null;
+      /**
+       * File Max Size Ceiling Bytes
+       * @description Effective writable ceiling for file uploads: the deployment upload-admission limit capped by the flow-input hard maximum. Tenant values above it are rejected on write and clamped on read.
+       */
+      file_max_size_ceiling_bytes: number;
+      /**
+       * Audio Max Size Ceiling Bytes
+       * @description Effective writable ceiling for audio uploads: the deployment upload-admission limit capped by the flow-input hard maximum. Tenant values above it are rejected on write and clamped on read.
+       */
+      audio_max_size_ceiling_bytes: number;
     };
     /**
      * FlowInputLimitsUpdate
@@ -15695,8 +15707,10 @@ export interface components {
     /**
      * FlowMappedExecutionPolicyPublic
      * @example {
+     *       "deployment_default_max_provider_calls": 100,
      *       "max_estimated_input_tokens_per_mapped_step": 200000,
      *       "max_provider_calls_per_mapped_step": 20,
+     *       "max_provider_calls_source": "organization",
      *       "version": 1
      *     }
      */
@@ -15710,7 +15724,7 @@ export interface components {
       version?: 1;
       /**
        * Max Provider Calls Per Mapped Step
-       * @description Maximum provider calls allowed for one mapped step attempt, including one possible native-JSON fallback call. Null means no tenant ceiling is configured and new mapped Builder authoring is blocked.
+       * @description Resolved maximum provider calls for one mapped step attempt, including one reserved native-JSON fallback call (N calls admit at most N-1 mapped items). Reflects the organization ceiling when configured, otherwise the deployment default. Null means mapped authoring is disabled — by an explicit organization opt-out, an unset deployment default, or invalid stored state.
        */
       max_provider_calls_per_mapped_step?: number | null;
       /**
@@ -15718,6 +15732,18 @@ export interface components {
        * @description Maximum estimated packaged input tokens across one mapped step attempt. Null means no aggregate tenant token ceiling is configured.
        */
       max_estimated_input_tokens_per_mapped_step?: number | null;
+      /**
+       * Max Provider Calls Source
+       * @description Where the resolved call ceiling comes from: the deployment default (nothing configured), an organization-configured ceiling, an explicit organization opt-out, or invalid stored state that fails closed until an administrator saves a value or restores the default.
+       * @enum {string}
+       */
+      max_provider_calls_source:
+        "deployment_default" | "organization" | "organization_disabled" | "invalid";
+      /**
+       * Deployment Default Max Provider Calls
+       * @description The deployment-wide fallback call ceiling that applies while the organization has not configured its own value. Null when the deployment ships with mapped authoring disabled.
+       */
+      deployment_default_max_provider_calls: number | null;
     };
     /**
      * FlowMappedExecutionPolicyUpdate
@@ -15728,7 +15754,7 @@ export interface components {
     FlowMappedExecutionPolicyUpdate: {
       /**
        * Max Provider Calls Per Mapped Step
-       * @description Set a positive tenant provider-call ceiling, including one possible native-JSON fallback call, or send null to remove it.
+       * @description Set a tenant provider-call ceiling of at least 2 (one call is reserved for a possible native-JSON fallback), or send null to explicitly disable new mapped authoring for the organization. Omit the field to leave the stored policy unchanged. An organization that never configured a ceiling inherits the deployment default; use restore_max_provider_calls_default to return to that inherited state.
        */
       max_provider_calls_per_mapped_step?: number | null;
       /**
@@ -15736,6 +15762,12 @@ export interface components {
        * @description Set a positive aggregate estimated-input-token ceiling, or send null to remove it.
        */
       max_estimated_input_tokens_per_mapped_step?: number | null;
+      /**
+       * Restore Max Provider Calls Default
+       * @description Remove the organization's stored call ceiling (or opt-out) so the deployment default applies again. Mutually exclusive with max_provider_calls_per_mapped_step.
+       * @default false
+       */
+      restore_max_provider_calls_default?: boolean;
     };
     /**
      * FlowOutputDelivery

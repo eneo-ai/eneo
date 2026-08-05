@@ -232,6 +232,23 @@ def test_primary_federation_flag_works_without_deprecated_alias(
     assert "FEDERATION_PER_TENANT_ENABLED is deprecated" not in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("", None), ("none", None), ("NULL", None), ("50", 50)],
+)
+def test_flow_mapped_step_default_env_parses_platform_opt_out(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: int | None
+) -> None:
+    """The documented platform-wide mapped-authoring opt-out must be reachable
+    from the environment, not only from code."""
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT", raw)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.flow_mapped_step_max_provider_calls_default == expected
+
+
 def test_flow_celery_visibility_timeout_must_exceed_task_hard_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ):

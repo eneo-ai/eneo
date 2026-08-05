@@ -177,6 +177,18 @@ def test_quality_retry_codes_exclude_informational_policy_warnings() -> None:
     )
 
 
+@pytest.fixture
+def unset_mapped_deployment_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy turns below predate the deployment mapped-call default; the
+    fixture pins it off so they exercise their original paths instead of the
+    mapped-file-limit confirmation question. Only the affected tests request
+    it — every other service test runs with the real deployment default."""
+    monkeypatch.setattr(
+        "eneo.flows.domain.mapped_execution_policy.get_settings",
+        lambda: SimpleNamespace(flow_mapped_step_max_provider_calls_default=None),
+    )
+
+
 def _make_user(
     *,
     user_id: UUID | None = None,
@@ -1589,6 +1601,7 @@ class TestSendMessage:
     async def test_context_limit_after_slot_classification_commits_without_ack(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        unset_mapped_deployment_default: None,
     ) -> None:
         user = _make_user()
         repo = _make_repo_mock()
@@ -1951,7 +1964,9 @@ class TestSendMessageToolCall:
         repo.create_plan.assert_not_called()
 
     @pytest.mark.anyio
-    async def test_primary_planner_call_uses_lower_temperature(self):
+    async def test_primary_planner_call_uses_lower_temperature(
+        self, unset_mapped_deployment_default: None
+    ):
         user = _make_user()
         repo = _make_repo_mock()
         session = _make_session(
@@ -2007,6 +2022,7 @@ class TestSendMessageToolCall:
     @pytest.mark.anyio
     async def test_self_correction_bail_without_question_mark_emits_error_not_text(
         self,
+        unset_mapped_deployment_default: None,
     ):
         """Planner bail text (no question mark, no action intent) must not leak as a conversational text event."""
         user = _make_user()
@@ -2233,7 +2249,9 @@ class TestRevisePlan:
 
 class TestSendMessageStructuredQuestion:
     @pytest.mark.anyio
-    async def test_spent_budget_runtime_default_reaches_requirements_confirmation(self):
+    async def test_spent_budget_runtime_default_reaches_requirements_confirmation(
+        self, unset_mapped_deployment_default: None
+    ):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -2321,6 +2339,7 @@ class TestSendMessageStructuredQuestion:
     @pytest.mark.anyio
     async def test_duplicate_output_question_alias_is_suppressed_without_fallback(
         self,
+        unset_mapped_deployment_default: None,
     ):
         """A duplicate terminal-output question is suppressed.
 

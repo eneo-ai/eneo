@@ -1,9 +1,14 @@
 <script lang="ts">
   import type { FlowRetentionImpactPreview } from "@eneo/eneo-js";
   import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import CircleCheck from "lucide-svelte/icons/circle-check";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import { Label } from "$lib/components/ui/label/index.js";
   import { formatFlowRetentionBytes } from "../flowRetentionPolicy";
 
   let {
@@ -26,8 +31,30 @@
 
   function formatAnchor(value: string | null | undefined): string {
     if (!value) return m.flow_retention_preview_no_anchor();
-    return new Date(value).toLocaleString();
+    return new Date(value).toLocaleString(getLocale());
   }
+
+  function anchorFieldLabel(field: string): string {
+    switch (field) {
+      case "finished_at_or_created_at":
+        return m.flow_retention_anchor_finished_at_or_created_at();
+      case "created_at":
+        return m.flow_retention_anchor_created_at();
+      default:
+        return field;
+    }
+  }
+
+  const hasImpact = $derived.by(() => {
+    const sections = [preview.run_history, preview.runtime_uploads];
+    return sections.some(
+      (section) =>
+        section.current_eligible_count > 0 ||
+        section.proposed_eligible_count > 0 ||
+        section.newly_eligible_count > 0 ||
+        section.no_longer_eligible_count > 0
+    );
+  });
 </script>
 
 <Dialog.Root bind:open>
@@ -37,11 +64,20 @@
       <Dialog.Description>{m.flow_retention_preview_description()}</Dialog.Description>
     </Dialog.Header>
 
-    <div class="grid gap-3 sm:grid-cols-2">
+    {#if !hasImpact}
+      <Alert.Root>
+        <CircleCheck aria-hidden="true" />
+        <Alert.Description>{m.flow_retention_preview_no_impact()}</Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    <div class="grid gap-3 sm:grid-cols-2" class:hidden={!hasImpact}>
       <section class="border-default rounded-lg border p-4">
         <h3 class="text-primary font-semibold">{m.flow_retention_run_history_title()}</h3>
         <p class="text-secondary mt-1 text-xs">
-          {m.flow_retention_preview_anchor_field({ field: preview.run_history_anchor })}
+          {m.flow_retention_preview_anchor_field({
+            field: anchorFieldLabel(preview.run_history_anchor)
+          })}
         </p>
         <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
           <div>
@@ -101,7 +137,9 @@
       <section class="border-default rounded-lg border p-4">
         <h3 class="text-primary font-semibold">{m.flow_retention_upload_title()}</h3>
         <p class="text-secondary mt-1 text-xs">
-          {m.flow_retention_preview_anchor_field({ field: preview.runtime_upload_anchor })}
+          {m.flow_retention_preview_anchor_field({
+            field: anchorFieldLabel(preview.runtime_upload_anchor)
+          })}
         </p>
         <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
           <div>
@@ -159,7 +197,10 @@
       </section>
     </div>
 
-    <section class="bg-secondary border-default rounded-lg border p-4 text-sm">
+    <section
+      class="bg-secondary border-default rounded-lg border p-4 text-sm"
+      class:hidden={!hasImpact}
+    >
       <h3 class="text-primary font-semibold">{m.flow_retention_preview_blockers_title()}</h3>
       <ul class="text-secondary mt-2 grid gap-1 sm:grid-cols-3">
         <li>
@@ -210,10 +251,12 @@
       </div>
     </div>
 
-    <label class="text-primary flex cursor-pointer items-start gap-3 text-sm">
-      <input class="mt-0.5 size-4" type="checkbox" bind:checked={acknowledged} />
-      <span>{m.flow_retention_preview_acknowledgement()}</span>
-    </label>
+    <div class="flex items-start gap-3">
+      <Checkbox id="flow-retention-acknowledge" bind:checked={acknowledged} class="mt-0.5" />
+      <Label for="flow-retention-acknowledge" class="text-primary text-sm leading-snug font-normal">
+        {m.flow_retention_preview_acknowledgement()}
+      </Label>
+    </div>
 
     <Dialog.Footer>
       <Dialog.Close>

@@ -36,6 +36,18 @@ def test_resolve_runtime_policy_uses_deployment_defaults() -> None:
     assert policy.hard_ceiling_seconds == 2000 - STEP_TIMEOUT_TASK_BUFFER_SECONDS
 
 
+def test_resolve_clamps_deployment_default_to_a_lower_tenant_maximum() -> None:
+    """Clearing the tenant default while keeping a lower maximum must never
+    resolve to default > max; the deployment default clamps to the maximum."""
+    policy = resolve_flow_runtime_policy(
+        {"runtime_policy": {"version": 1, "max_step_timeout_seconds": 300}},
+        defaults=_settings(llm_timeout=600),
+    )
+
+    assert policy.max_step_timeout_seconds == 300
+    assert policy.default_step_timeout_seconds == 300
+
+
 def test_apply_patch_preserves_unrelated_flow_settings() -> None:
     updated = apply_flow_runtime_policy_patch(
         {

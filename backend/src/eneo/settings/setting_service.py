@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTE
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     apply_flow_mapped_execution_policy_patch,
+    mapped_call_ceiling_source,
     resolve_flow_mapped_execution_policy,
 )
 from eneo.flows.domain.rag_evidence_policy import (
@@ -54,6 +55,7 @@ from eneo.flows.flow_evidence_policy import (
 from eneo.flows.flow_input_limits import (
     FlowInputLimits,
     apply_flow_input_limits_patch,
+    effective_upload_ceiling_bytes,
     resolve_flow_input_limits,
 )
 from eneo.flows.flow_retention_policy import (
@@ -541,11 +543,20 @@ class SettingService:
     @validate_permissions(Permission.ADMIN)
     async def get_flow_input_limits(self) -> FlowInputLimitsPublic:
         limits = await self.get_flow_input_limits_resolved()
+        admission = self._require_upload_admission()
         return FlowInputLimitsPublic(
             file_max_size_bytes=limits.file_max_size_bytes,
             audio_max_size_bytes=limits.audio_max_size_bytes,
             max_files_per_run=limits.max_files_per_run,
             audio_max_files_per_run=limits.audio_max_files_per_run,
+            # The admission ceiling is the writable bound; exposing it lets the
+            # admin UI validate inline instead of surfacing a save-time error.
+            file_max_size_ceiling_bytes=effective_upload_ceiling_bytes(
+                admission.session_file_maximum_bytes
+            ),
+            audio_max_size_ceiling_bytes=effective_upload_ceiling_bytes(
+                admission.session_audio_maximum_bytes
+            ),
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -561,8 +572,12 @@ class SettingService:
             )
         admission = self._require_upload_admission()
         admission_ceilings = {
-            "file_max_size_bytes": admission.session_file_maximum_bytes,
-            "audio_max_size_bytes": admission.session_audio_maximum_bytes,
+            "file_max_size_bytes": effective_upload_ceiling_bytes(
+                admission.session_file_maximum_bytes
+            ),
+            "audio_max_size_bytes": effective_upload_ceiling_bytes(
+                admission.session_audio_maximum_bytes
+            ),
         }
         for field_name, ceiling in admission_ceilings.items():
             requested = patch.get(field_name)
@@ -711,13 +726,18 @@ class SettingService:
 
     async def get_mapped_execution_policy_resolved(self) -> FlowMappedExecutionPolicy:
         tenant = await self._get_tenant_for_flow_settings()
+        # The resolver owns the deployment-default fallback for every caller.
         return resolve_flow_mapped_execution_policy(
             getattr(tenant, "flow_settings", None)
         )
 
     @validate_permissions(Permission.ADMIN)
     async def get_mapped_execution_policy(self) -> FlowMappedExecutionPolicyPublic:
-        policy = await self.get_mapped_execution_policy_resolved()
+        tenant = await self._get_tenant_for_flow_settings()
+        tenant_flow_settings = cast(
+            dict[str, Any] | None, getattr(tenant, "flow_settings", None)
+        )
+        policy = resolve_flow_mapped_execution_policy(tenant_flow_settings)
         return FlowMappedExecutionPolicyPublic(
             version=policy.version,
             max_provider_calls_per_mapped_step=(
@@ -725,6 +745,10 @@ class SettingService:
             ),
             max_estimated_input_tokens_per_mapped_step=(
                 policy.max_estimated_input_tokens_per_mapped_step
+            ),
+            max_provider_calls_source=mapped_call_ceiling_source(tenant_flow_settings),
+            deployment_default_max_provider_calls=(
+                get_app_settings().flow_mapped_step_max_provider_calls_default
             ),
         )
 
@@ -734,16 +758,39 @@ class SettingService:
         payload: FlowMappedExecutionPolicyUpdate,
     ) -> FlowMappedExecutionPolicyPublic:
         patch = payload.model_dump(exclude_unset=True)
-        if not patch:
+        restore_calls_default = bool(
+            patch.pop("restore_max_provider_calls_default", False)
+        )
+        if not patch and not restore_calls_default:
             raise BadRequestException(
                 "At least one mapped execution policy field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
+        if restore_calls_default and "max_provider_calls_per_mapped_step" in patch:
+            raise BadRequestException(
+                "restore_max_provider_calls_default cannot be combined with "
+                "max_provider_calls_per_mapped_step.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+            )
         previous = await self.get_mapped_execution_policy()
         tenant = await self._get_tenant_for_flow_settings()
+        remove_keys = {
+            key
+            for key, value in patch.items()
+            if value is None and key != "max_provider_calls_per_mapped_step"
+        }
+        if restore_calls_default:
+            remove_keys.add("max_provider_calls_per_mapped_step")
         next_flow_settings = apply_flow_mapped_execution_policy_patch(
             cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            remove_keys={key for key, value in patch.items() if value is None},
+            # A null call ceiling is an explicit opt-out that must keep blocking
+            # mapped authoring beneath the deployment default; a null token
+            # ceiling falls back to its absent-key state; the restore action
+            # deletes the stored ceiling so the deployment default applies.
+            disable_max_provider_calls=(
+                patch.get("max_provider_calls_per_mapped_step", ...) is None
+            ),
+            remove_keys=remove_keys,
             **{key: value for key, value in patch.items() if value is not None},
         )
         await self._persist_flow_settings(next_flow_settings)
@@ -757,9 +804,22 @@ class SettingService:
             description="Updated mapped execution policy",
             metadata={
                 "setting": "mapped_execution_policy",
+                "restored_call_ceiling_default": restore_calls_default,
                 "changes": {
                     key: {"old": getattr(previous, key), "new": getattr(updated, key)}
-                    for key in patch
+                    for key in (
+                        *patch,
+                        # A restore is a governance action; record the actual
+                        # transition instead of only the flag.
+                        *(
+                            (
+                                "max_provider_calls_per_mapped_step",
+                                "max_provider_calls_source",
+                            )
+                            if restore_calls_default
+                            else ()
+                        ),
+                    )
                 },
             },
         )

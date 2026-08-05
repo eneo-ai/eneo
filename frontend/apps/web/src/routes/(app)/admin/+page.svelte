@@ -160,14 +160,14 @@
           </a>
         </Settings.Row>
         <Settings.Row
-          title={m.flow_input_limits_title()}
-          description={m.flow_input_limits_admin_description()}
+          title={m.flow_settings_title()}
+          description={m.flow_settings_hub_description()}
         >
           <a
-            href={resolve("/(app)/admin/flow-input-limits")}
+            href={resolve("/(app)/admin/flow-settings")}
             class="text-accent-default hover:text-accent-default/80 text-sm font-medium"
           >
-            {m.flow_input_limits_open()}
+            {m.flow_settings_open()}
           </a>
         </Settings.Row>
       </Settings.Group>

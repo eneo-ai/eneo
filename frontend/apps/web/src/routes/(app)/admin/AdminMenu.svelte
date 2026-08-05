@@ -11,7 +11,6 @@
   import ChartPie from "lucide-svelte/icons/chart-pie";
   import Cloud from "lucide-svelte/icons/cloud";
   import Cpu from "lucide-svelte/icons/cpu";
-  import Database from "lucide-svelte/icons/database";
   import Fingerprint from "lucide-svelte/icons/fingerprint";
   import HardDrive from "lucide-svelte/icons/hard-drive";
   import History from "lucide-svelte/icons/history";
@@ -22,10 +21,10 @@
   import MessageSquareText from "lucide-svelte/icons/message-square-text";
   import Plug from "lucide-svelte/icons/plug";
   import ShieldCheck from "lucide-svelte/icons/shield-check";
-  import SlidersHorizontal from "lucide-svelte/icons/sliders-horizontal";
   import Sparkles from "lucide-svelte/icons/sparkles";
   import UserRound from "lucide-svelte/icons/user-round";
   import UsersRound from "lucide-svelte/icons/users-round";
+  import Workflow from "lucide-svelte/icons/workflow";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -60,7 +59,7 @@
       items: [
         navItem("/admin/personal-assistant", MessageSquareText, m.governance_title()),
         navItem("/admin/prompt-library", BookText, m.governance_tab_prompts()),
-        navItem("/admin/flow-data-retention", Database, m.flow_retention_title()),
+        navItem("/admin/flow-settings", Workflow, m.flow_settings_title()),
         navItem("/admin/security-classifications", ShieldCheck, m.security_classifications())
       ]
     },
@@ -71,12 +70,6 @@
         ...(settings?.using_templates
           ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
           : []),
-        navItem("/admin/flow-input-limits", SlidersHorizontal, m.flow_input_limits_title()),
-        navItem(
-          "/admin/flow-knowledge-evidence",
-          SlidersHorizontal,
-          m.flow_knowledge_evidence_title()
-        ),
         navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
         navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
