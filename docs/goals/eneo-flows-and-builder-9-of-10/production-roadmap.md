@@ -872,6 +872,29 @@ plan above controls all other ordering.
   unchanged and runtime-proven (four-iteration Codex gate, final green 8/10;
   edit lane verified behaviorally compatible). Live template-cohort proof
   awaits the fixture configuration recorded in the corpus directive. *(M)*
+- **B13** (action-followup contract compilability, live-defect slice):
+  **LANDED `7d970f5ba`** — a real user session (2026-08-05, audio→PDF
+  meeting follow-up) died after four repairs on
+  `action_followup_requires_followup_fields`; the DB-recovered conversation
+  proved an unwinnable loop: no completion path covered document flows
+  without a JSON producer, terminal text fields were folded away before
+  completion looked, and role matching was exact-ASCII/leaf-only. Now the
+  compiler owns the outcome contract wherever the Builder owns the schema:
+  terminal/single-step JSON completion in place; a compiler-inserted
+  follow-up extraction step for text/document flows with required roles,
+  with the terminal writer explicitly bound to BOTH narrative and
+  extraction through typed `PlannedStep.previous_output_refs` (validated:
+  future/flow-input/fan-in refs reject); user-pinned exact schemas win
+  everywhere (assembly never appends; the critic applies the same
+  precedence); role recognition is a closed diacritic-folded vocabulary at
+  any schema depth; insertion is gated on
+  `ResultContract.required_output_field_roles` carried through
+  `CreateCompileContext` (name inference deleted); both assembly completion
+  paths share one role-aware merge (no Swedish/canonical duplicates);
+  empty field lists no longer log as dropped. Three-round Codex gate
+  (4→7→green 8/10, final round zero blockers, independent probes).
+  Follow-up owned by the strategy program: lossless-or-rejected
+  output_fields admission at the parser boundary (slice B). *(M)*
 - **B12** (large-corpus capability gate, deferred): item 7b first bounds the
   current per-source/per-item leaves and existing overview/reducer before any leaf
   call is paid, while authoring surfaces only factual policy/model shape and
