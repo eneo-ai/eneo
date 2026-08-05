@@ -921,6 +921,58 @@ plan above controls all other ordering.
   evidence gate, not an implementation commitment; only proven lift may create
   a later scoped roadmap item.
 
+## Adopted solo program (2026-08-05 final peer session, artifact
+`codex-peer-loop-122-case-diagnostic-strategy-review-20260805T193100Z`)
+
+Peer budget is paused for several days; the final diag122-strategy session
+(iteration 3, min 7, every correction accepted without dispute) is the
+governing spec. Commits land self-validated (full flows suite, pyright,
+ruff) and are recorded here as UNGATED for one batch peer review when quota
+returns. Execution order and binding decisions:
+
+1. **A-closeout** (action-followup prevention completion):
+   `render_result_contract_prompt_block` renders the five required roles +
+   the extraction-producer requirement for readable outcomes; a
+   no-provider runtime input-resolution test proves the terminal writer
+   receives BOTH narrative and extraction at runtime; the critic's
+   pinned-schema exemption narrows from any non-template evidence to
+   `source == "declared_schema"` only.
+2. **Loss-matrix checklist** (four rows: prose schema, proposal fields,
+   result obligations, file-role explicitness; transition ->
+   preserve/derive/reject -> owner -> failure code -> behavior test);
+   created before B, filled during slices, never a subsystem.
+3. **B strict admission**: accept None/empty/typed drafts/canonical
+   complete-object lists ONLY; reject strings, string lists, dict-of-name
+   maps, missing names/properties, unknown types, over-depth objects —
+   whole-proposal rejection via ProposalIntentArgumentError with
+   first-decisive-error feedback naming the exact path; no field_N
+   invention, no downgrades, no partial retention.
+4. **C prose-leaf**: FIRST capture the real raw classifier response at the
+   pre-parse boundary (attribution report §122); typed
+   ProseOutputFieldHint(name, container_kind) delta; one SchemaEvidence
+   with a semantic predicate over `source` (declared=exact, prose=name
+   hints, inferred=open hint, template=template); ONLY declared_schema
+   pins the terminal contract (compiler line ~890 narrows accordingly);
+   unrepresentable quoted literals refuse visibly.
+5. **E1 evaluator semantics v2** (before D so live measurements are
+   trustworthy): the 7-step first-question rule from the artifact;
+   cases-file v5 + question_relevance_semantics_version 2 in receipts; no
+   cross-version rate comparisons.
+6. **D compare->JSON**: narrow the nonlinear rejection to aggregate only;
+   supported topologies per artifact; the ALL_PREVIOUS_STEPS fallback must
+   be impossible for compare->JSON (typed rejection instead).
+7. **E2**: the four terminal-before-unresolved-purpose product defects.
+8. **F DOCX explicitness**: FileRoleEvidence.evidence_level (required for
+   model source, forbidden otherwise, schema version bump); auto-resolve
+   template fill only for explicit authored choice, structural
+   placeholders, or exactly-one explicit commit-grade user-owned template
+   role; corpus answer-closure separate.
+9. **G citations**: write ONLY the red end-to-end test
+   (test_document_report_citation_survives_compose_render_and_public_artifact
+   per the artifact's exact assertions); keep
+   assembly_document_report_citations_unsupported; no solo implementation.
+   This is the named riskiest-solo-failure guardrail.
+
 **Rejected as overengineering**: a second assumption ledger (the
 ResolvedSlot -> action-policy -> confirmation surface already exists); a
 provenance enum on explicit-answer metadata after inferred producers are
