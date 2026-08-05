@@ -81,6 +81,11 @@ class ObjectStoreProvider:
         return snapshot.lease.settings.maximum_multipart_bytes if snapshot else None
 
     @property
+    def configuration_revision(self) -> int | None:
+        snapshot = self._current
+        return snapshot.revision if snapshot is not None else None
+
+    @property
     def source(self) -> ObjectStoreConnectionSource:
         snapshot = self._current
         return snapshot.source if snapshot else ObjectStoreConnectionSource.UNCONFIGURED
@@ -177,6 +182,7 @@ class ObjectStoreProvider:
         self,
         *,
         refresh: bool = True,
+        expected_revision: int | None = None,
     ) -> AsyncGenerator[ObjectStoreLease]:
         if refresh:
             await self.refresh()
@@ -184,6 +190,10 @@ class ObjectStoreProvider:
         if snapshot is None:
             raise ObjectContentConfigurationError(
                 "Object-store content is not configured for this deployment"
+            )
+        if expected_revision is not None and snapshot.revision != expected_revision:
+            raise ObjectContentConfigurationError(
+                "Object-store configuration changed after upload admission"
             )
         snapshot.active_users += 1
         try:

@@ -214,6 +214,11 @@ class ObjectContentRuntime:
         return provider.maximum_bytes if provider is not None else None
 
     @property
+    def object_store_configuration_revision(self) -> int | None:
+        provider = self._object_store_provider
+        return provider.configuration_revision if provider is not None else None
+
+    @property
     def object_store_connection_source(self) -> ObjectStoreConnectionSource:
         provider = self._object_store_provider
         return (

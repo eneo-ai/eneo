@@ -42,7 +42,13 @@ _ICON_LIMIT_BYTES = 1024 * 1024
 
 
 class _ReadyObjectStoreContentService(ObjectContentService):
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del object_store_revision
         assert storage_kind is StorageKind.OBJECT_STORE
 
 
@@ -53,15 +59,25 @@ class _PausingStoreContentService(ObjectContentService):
         self.release_store = asyncio.Event()
         self.object_key: str | None = None
 
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
-        del storage_kind
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del storage_kind, object_store_revision
 
     @asynccontextmanager
     async def upload_for_publication(
         self,
         contents: Sequence[CapturedContent],
+        *,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[VerifiedObjectPublication]:
-        async with super().upload_for_publication(contents) as publication:
+        async with super().upload_for_publication(
+            contents,
+            object_store_revision=object_store_revision,
+        ) as publication:
             self.object_key = publication.uploads[0].object_key
             self.store_started.set()
             await self.release_store.wait()
@@ -73,15 +89,25 @@ class _FailingStoreContentService(ObjectContentService):
         super().__init__(*args, **kwargs)
         self.object_key: str | None = None
 
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
-        del storage_kind
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del storage_kind, object_store_revision
 
     @asynccontextmanager
     async def upload_for_publication(
         self,
         contents: Sequence[CapturedContent],
+        *,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[VerifiedObjectPublication]:
-        async with super().upload_for_publication(contents) as publication:
+        async with super().upload_for_publication(
+            contents,
+            object_store_revision=object_store_revision,
+        ) as publication:
             self.object_key = publication.uploads[0].object_key
             if publication.uploads:
                 raise ObjectContentUnavailableError("injected object-store outage")
@@ -89,8 +115,13 @@ class _FailingStoreContentService(ObjectContentService):
 
 
 class _CancelAfterPublicationContentService(ObjectContentService):
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
-        del storage_kind
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del storage_kind, object_store_revision
 
     @asynccontextmanager
     async def capture_for_target(
@@ -101,6 +132,7 @@ class _CancelAfterPublicationContentService(ObjectContentService):
         declared_media_type: str,
         verified_media_type: str,
         business_maximum_bytes: int,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[CapturedContent]:
         async with super().capture_for_target(
             source,
@@ -108,6 +140,7 @@ class _CancelAfterPublicationContentService(ObjectContentService):
             declared_media_type=declared_media_type,
             verified_media_type=verified_media_type,
             business_maximum_bytes=business_maximum_bytes,
+            object_store_revision=object_store_revision,
         ) as captured:
             yield captured
             raise asyncio.CancelledError

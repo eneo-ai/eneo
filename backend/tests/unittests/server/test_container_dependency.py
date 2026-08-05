@@ -146,6 +146,7 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
         session_audio_maximum_bytes=13,
         knowledge_file_maximum_bytes=14,
         knowledge_audio_maximum_bytes=15,
+        object_store_revision=7,
     )
     loader = AsyncMock(return_value=snapshot)
     monkeypatch.setattr(
@@ -159,6 +160,7 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
         SimpleNamespace(
             inline_maximum_bytes=99,
             object_store_maximum_bytes=199,
+            object_store_configuration_revision=7,
         ),
     )
     container = Container(session=providers.Object(session))
@@ -171,4 +173,5 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
         session,
         inline_maximum_bytes=99,
         object_store_maximum_bytes=199,
+        object_store_revision=7,
     )

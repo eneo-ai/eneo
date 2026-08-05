@@ -107,7 +107,10 @@ class IconService:
             raise RuntimeError(
                 "Object-store Icon creation requires a non-ambient transaction"
             )
-        await self.object_content.ensure_target_ready(storage_kind)
+        await self.object_content.ensure_target_ready(
+            storage_kind,
+            object_store_revision=self.upload_admission.object_store_revision,
+        )
 
         async with self.object_content.capture_for_target(
             _upload_chunks(upload_file),
@@ -115,6 +118,7 @@ class IconService:
             declared_media_type=media_type,
             verified_media_type=media_type,
             business_maximum_bytes=maximum_size_bytes,
+            object_store_revision=self.upload_admission.object_store_revision,
         ) as captured:
             if storage_kind is StorageKind.POSTGRES_INLINE:
                 async with self._write_transaction():
@@ -143,7 +147,8 @@ class IconService:
                 return metadata
 
             async with self.object_content.upload_for_publication(
-                (captured,)
+                (captured,),
+                object_store_revision=self.upload_admission.object_store_revision,
             ) as publication:
                 async with self._write_transaction():
                     metadata = await self.icon_repo.add_metadata(

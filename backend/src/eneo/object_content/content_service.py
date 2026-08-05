@@ -182,8 +182,12 @@ class ObjectContentService:
         provider = self._object_store_provider
         return provider is not None and provider.configured
 
-    async def check_object_store_ready(self) -> None:
-        async with self._object_store() as lease:
+    async def check_object_store_ready(
+        self,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        async with self._object_store(expected_revision=object_store_revision) as lease:
             await ensure_store_binding_ready(
                 self._database,
                 lease.settings,
@@ -199,6 +203,7 @@ class ObjectContentService:
         declared_media_type: str,
         verified_media_type: str,
         business_maximum_bytes: int | None = None,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[CapturedContent]:
         if business_maximum_bytes is not None and business_maximum_bytes < 1:
             raise ValueError("business_maximum_bytes must be positive")
@@ -217,7 +222,9 @@ class ObjectContentService:
             # Capture sizing is fixed operator configuration. Copy it from one
             # current snapshot without retaining a credential-bearing client
             # while an upload stream is still arriving.
-            async with self._object_store() as lease:
+            async with self._object_store(
+                expected_revision=object_store_revision
+            ) as lease:
                 maximum_size_bytes = (
                     lease.settings.maximum_multipart_bytes
                     if business_maximum_bytes is None
@@ -238,16 +245,25 @@ class ObjectContentService:
         ) as captured:
             yield captured
 
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
         if storage_kind is StorageKind.OBJECT_STORE:
-            await self.check_object_store_ready()
+            await self.check_object_store_ready(
+                object_store_revision=object_store_revision
+            )
 
     @asynccontextmanager
     async def upload_for_publication(
         self,
         contents: Sequence[CapturedContent],
+        *,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[VerifiedObjectPublication]:
-        async with self._object_store() as lease:
+        async with self._object_store(expected_revision=object_store_revision) as lease:
             async with self._upload_for_publication_with_store(
                 contents,
                 settings=lease.settings,
@@ -858,11 +874,18 @@ class ObjectContentService:
             )
 
     @asynccontextmanager
-    async def _object_store(self) -> AsyncGenerator[ObjectStoreLease]:
+    async def _object_store(
+        self,
+        *,
+        expected_revision: int | None = None,
+    ) -> AsyncGenerator[ObjectStoreLease]:
         provider = self._object_store_provider
         if provider is None:
             raise ObjectContentConfigurationError(
                 "Object-store content is not configured for this deployment"
             )
-        async with provider.acquire() as lease:
+        async with provider.acquire(
+            refresh=expected_revision is None,
+            expected_revision=expected_revision,
+        ) as lease:
             yield lease

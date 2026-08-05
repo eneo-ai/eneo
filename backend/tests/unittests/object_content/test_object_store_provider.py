@@ -6,6 +6,7 @@ from uuid import UUID
 import pytest
 
 from eneo.object_content.configuration import ObjectContentSettings
+from eneo.object_content.content import ObjectContentConfigurationError
 from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionActor,
     ObjectStoreConnectionService,
@@ -186,6 +187,34 @@ async def test_concurrent_acquisitions_share_one_connection_refresh() -> None:
     assert service.get_calls == 3
     assert stores[0].closed is True
 
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_admitted_revision_acquires_without_another_connection_read() -> None:
+    service = _BlockingConnectionService(_stored(1))
+    provider = ObjectStoreProvider(
+        connection_service=cast(ObjectStoreConnectionService, service),
+        store_factory=lambda settings: cast(S3ObjectStore, _Store(1)),
+    )
+    await provider.initialize()
+
+    revision = provider.configuration_revision
+    assert revision == 1
+    service.block_reads = True
+
+    async with provider.acquire(refresh=False, expected_revision=revision) as lease:
+        assert lease.settings == _settings(1)
+
+    assert service.get_calls == 1
+    await provider.publish(_stored(2))
+    with pytest.raises(
+        ObjectContentConfigurationError,
+        match="changed after upload admission",
+    ):
+        async with provider.acquire(refresh=False, expected_revision=revision):
+            pass
+    assert service.get_calls == 1
     await provider.close()
 
 

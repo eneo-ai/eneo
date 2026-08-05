@@ -39,7 +39,13 @@ def _opaque_png(*, width: int, height: int) -> bytes:
 
 
 class _ReadyObjectStoreContentService(ObjectContentService):
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del object_store_revision
         assert storage_kind is StorageKind.OBJECT_STORE
 
 

@@ -97,15 +97,26 @@ class _ControlledObjectContentService(ObjectContentService):
         self.object_keys: tuple[str, ...] = ()
         self.paused = asyncio.Event()
 
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del object_store_revision
         assert storage_kind is StorageKind.OBJECT_STORE
 
     @asynccontextmanager
     async def upload_for_publication(
         self,
         contents: Sequence[CapturedContent],
+        *,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[VerifiedObjectPublication]:
-        async with super().upload_for_publication(contents) as publication:
+        async with super().upload_for_publication(
+            contents,
+            object_store_revision=object_store_revision,
+        ) as publication:
             self.store_calls = len(publication.uploads)
             self.object_keys = tuple(
                 upload.object_key for upload in publication.uploads
