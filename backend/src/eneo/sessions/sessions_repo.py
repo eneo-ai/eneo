@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -28,6 +28,11 @@ from eneo.sessions.session import (
     SessionMetadataPublic,
     SessionUpdate,
 )
+
+
+class OwnedChatPartner(NamedTuple):
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 class SessionRepository:
@@ -164,6 +169,30 @@ class SessionRepository:
         )
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
+        )
+
+    async def get_owned_chat_partner(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> OwnedChatPartner | None:
+        """Read only the partner IDs required to authorize diagnostics."""
+        query = (
+            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Sessions.id == session_id)
+            .where(Sessions.user_id == user_id)
+            .where(Users.tenant_id == tenant_id)
+        )
+        query = self._exclude_helper_run_sessions(query)
+        row = (await self.session.execute(query)).one_or_none()
+        if row is None:
+            return None
+        return OwnedChatPartner(
+            assistant_id=row.assistant_id,
+            group_chat_id=row.group_chat_id,
         )
 
     async def get_for_helper_run(self, id: UUID, tenant_id: UUID) -> SessionInDB | None:

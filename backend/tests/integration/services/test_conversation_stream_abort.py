@@ -127,7 +127,10 @@ async def test_placeholder_persists_user_question_before_stream(
         chat_session = await session_service.create_session(
             name="abort-test", assistant_id=UUID(assistant_id)
         )
-        question_id = await session_service.create_question_placeholder(
+        (
+            question_id,
+            _question_created_at,
+        ) = await session_service.create_question_placeholder(
             question="What happens if I press ESC?",
             session=chat_session,
             files=None,
@@ -195,7 +198,10 @@ async def test_complete_question_with_answer_updates_existing_row(
         chat_session = await session_service.create_session(
             name="abort-test", assistant_id=UUID(assistant_id)
         )
-        question_id = await session_service.create_question_placeholder(
+        (
+            question_id,
+            _question_created_at,
+        ) = await session_service.create_question_placeholder(
             question="hi",
             session=chat_session,
             files=None,
@@ -249,7 +255,10 @@ async def test_persist_partial_question_answer_writes_via_fresh_session(
         chat_session = await session_service.create_session(
             name="abort-test", assistant_id=UUID(assistant_id)
         )
-        question_id = await session_service.create_question_placeholder(
+        (
+            question_id,
+            _question_created_at,
+        ) = await session_service.create_question_placeholder(
             question="why did it stop?",
             session=chat_session,
             files=None,
@@ -325,7 +334,10 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
             name="abort-evidence-test",
             assistant_id=UUID(assistant_id),
         )
-        question_id = await session_service.create_question_placeholder(
+        (
+            question_id,
+            _question_created_at,
+        ) = await session_service.create_question_placeholder(
             question="What happens if I stop this answer?",
             session=chat_session,
             files=None,
@@ -464,7 +476,10 @@ async def test_provider_failure_evidence_survives_request_transaction_rollback(
             name="provider-failure-evidence",
             assistant_id=UUID(assistant_id),
         )
-        question_id = await session_service.create_question_placeholder(
+        (
+            question_id,
+            _question_created_at,
+        ) = await session_service.create_question_placeholder(
             question="Use the payroll procedure",
             session=chat_session,
             files=None,
@@ -541,7 +556,10 @@ async def test_persist_partial_question_answer_refuses_cross_tenant_write(
         chat_session = await session_service.create_session(
             name="abort-test", assistant_id=UUID(assistant_id)
         )
-        question_id = await session_service.create_question_placeholder(
+        (
+            question_id,
+            _question_created_at,
+        ) = await session_service.create_question_placeholder(
             question="real tenant's question",
             session=chat_session,
             files=None,

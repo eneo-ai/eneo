@@ -83,18 +83,23 @@ must pass the same tested subset:
 - bucket-scoped paginated object and multipart listing;
 - single-part `PUT`, `HEAD`, streaming `GET`, and one byte range;
 - multipart create, ordered part upload, complete, abort, and list;
-- object deletion with observable not-found convergence;
-- SHA-256 part/composite semantics for multipart where requested.
+- object deletion with observable not-found convergence.
 
-Native range support is an endpoint conformance gate. Eneo's application read
-path still full-GETs and verifies the canonical digest before slicing a range
-from its local spool.
+Eneo does not require AWS additional-checksum extensions from an external
+endpoint. Some compatible services implement them fully, some omit them, and
+some accept only the core multipart fields.
+
+Native range support is an endpoint conformance gate. Eneo fetches and verifies
+only the persisted upload chunks covering the requested interval before sending
+response headers. Content migrated as one whole-object chunk retains its
+full-verification cost for range reads.
 
 Eneo computes the canonical full-byte SHA-256 incrementally over its own upload
-stream. S3 ETags, multipart composite checksums, CRCs, and user metadata never
-replace that digest. A bypassing upload, migration, restore, or ambiguous
-reconciliation must be fully streamed back and rehashed before it becomes
-available.
+stream and stores it in PostgreSQL. Every new remote write is streamed back and
+rehashed before it becomes available. S3 ETags, multipart composite checksums,
+CRCs, and user metadata never replace that digest. The same read-back contract
+also applies to a bypassing upload, migration, restore, or ambiguous
+reconciliation.
 
 For an external endpoint, set `OBJECT_CONTENT_ENDPOINT_URL`, TLS, addressing,
 signing region, bucket, credentials, and the stable deployment ID in `.env`,
@@ -382,6 +387,47 @@ registers and schedules it with ARQ; the lifecycle implementation does not
 import ARQ. Replacing ARQ with another worker implementation therefore changes
 the scheduling/registration adapter, not S3 or lifecycle logic.
 
+### Move existing content
+
+PostgreSQL inline remains a complete deployment without an object-store
+service or configuration. When compatible object storage is configured and
+ready, a platform administrator can use **Admin > Storage** to queue an explicit
+move in either direction. Selecting the default target for new writes never
+moves existing content.
+
+Each queue command inspects 1–100 eligible items in creation order and persists
+one resumable intent per content item. The worker processes at most one move per
+reconciliation run. **Pause moves** blocks new claims; an item that already
+holds a claim may finish its verified authority flip. The progress table groups
+item and byte counts by destination, state, and typed failure reason. Run
+another bounded command to queue the next page; Eneo does not run a scheduled
+or automatic fleet migration.
+
+For PostgreSQL-to-object moves, Eneo captures and hashes the inline source,
+uploads under the existing publication reservation, verifies the complete
+target, and then changes authority in one short database transaction that also
+deletes the inline payload. For object-to-PostgreSQL moves, Eneo fully reads and
+verifies the remote source before the transaction that inserts the inline
+payload and changes authority. At every committed point, exactly one placement
+is authoritative. A failure before the flip retries or stops without changing
+the source; recovery after the flip proceeds forward.
+
+An object-to-PostgreSQL flip registers the former remote key with the existing
+orphan lifecycle. Keep the endpoint configured and the worker running until the
+configured orphan grace has elapsed and two complete inventory observations
+have allowed bounded deletion. Object-store configuration remains required
+while any remote authority, staged move key, orphan candidate, or multipart
+cleanup record exists. To retire an endpoint, first move all eligible content
+inline, confirm **Admin > Storage** reports no active object-store content or
+nonterminal moves, then allow those cleanup observations to finish before
+removing configuration.
+
+The schema downgrade is available only before this feature has persisted a
+move intent or `storage_moved` audit event. Once either exists, downgrade stops
+without deleting the row, event, or feature schema. Restore the matching
+application version and proceed forward; do not erase audit evidence to force a
+downgrade.
+
 Every inventory page must provide a complete, advancing pagination cursor.
 Malformed or non-advancing pages fail that reconciliation run without
 completing the inventory cycle or marking unseen rows missing. A complete
@@ -400,10 +446,12 @@ bounded (1-32) and should be raised only after measuring PostgreSQL and endpoint
 capacity. Size the backend/worker temporary volume for concurrent in-flight
 upload and verified-read spools: memory use stops at the configured threshold,
 while the remainder uses temporary disk until each upload or verified response
-finishes. Full reads verify and spool the full object. Range reads fetch and
-verify only the persisted upload chunks covering the requested interval before
-response headers are sent. Their transfer and temporary-disk cost is the
-requested interval plus at most two chunk edges; existing rows migrated as one
+finishes. Account for one full remote read after each new remote write; this is
+the provider-neutral integrity check before publication. Full user reads verify
+and spool the full object. Range reads fetch and verify only the persisted upload
+chunks covering the requested interval before response headers are sent. Their
+transfer and temporary-disk cost is the requested interval plus at most two
+chunk edges; existing rows migrated as one
 whole-object chunk retain their previous full-verification cost. The chunk size
 is captured per object, so later multipart tuning cannot invalidate existing
 content. A range proves the chunks it covers; a full read still checks the

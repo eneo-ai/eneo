@@ -8,7 +8,6 @@ import pytest
 
 from eneo.main.exceptions import (
     BadRequestException,
-    NameCollisionException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -74,6 +73,12 @@ def _binding_intent(
         reference=_binding_reference(binding),
         activation_mode=activation_mode,
     )
+
+
+def _binding_intents(
+    references: list[SkillBindingReference],
+) -> list[SkillBindingIntent]:
+    return [SkillBindingIntent(reference=reference) for reference in references]
 
 
 def _revision(*, skill_id=None, revision_number: int = 1) -> SkillRevision:
@@ -165,7 +170,7 @@ async def test_skill_slug_collision_is_reported_without_leaking_persistence_deta
     repo.create.side_effect = SkillSlugConflictError
     service = _service(space=space, repo=repo)
 
-    with pytest.raises(NameCollisionException, match="slug 'payroll'"):
+    with pytest.raises(SkillSlugConflictError):
         await service.create_skill(
             space_id=space.id,
             slug="payroll",
@@ -718,7 +723,7 @@ async def test_blocked_organization_skill_cannot_receive_new_binding(owner: str)
             await service.replace_governance_bindings(
                 policy_id=uuid4(),
                 organization_space_id=space.id,
-                references=[_binding_reference(blocked)],
+                intents=[_binding_intent(blocked)],
             )
 
 
@@ -761,7 +766,7 @@ async def test_blocked_organization_skill_cannot_change_revision(owner: str):
             await service.replace_governance_bindings(
                 policy_id=uuid4(),
                 organization_space_id=space.id,
-                references=[_binding_reference(changed)],
+                intents=[_binding_intent(changed)],
             )
 
 
@@ -874,7 +879,7 @@ async def test_blocked_retained_bindings_can_be_reordered(owner: str):
         result = await service.replace_governance_bindings(
             policy_id=uuid4(),
             organization_space_id=space.id,
-            references=reversed_references,
+            intents=_binding_intents(reversed_references),
         )
 
     bindings = result.bindings if owner == "assistant" else result
@@ -1288,7 +1293,7 @@ async def test_api_key_cannot_replace_governance_skill_bindings():
         await service.replace_governance_bindings(
             policy_id=uuid4(),
             organization_space_id=space.id,
-            references=[],
+            intents=[],
         )
 
     repo.list_policy_bindings.assert_not_awaited()
@@ -1314,7 +1319,7 @@ async def test_governance_binding_accepts_only_exact_published_new_revision():
     result = await service.replace_governance_bindings(
         policy_id=uuid4(),
         organization_space_id=space.id,
-        references=[_binding_reference(published)],
+        intents=[_binding_intent(published)],
     )
 
     assert result == [published]
@@ -1344,7 +1349,7 @@ async def test_governance_binding_rejects_unpublished_or_unapproved_new_revision
         await service.replace_governance_bindings(
             policy_id=uuid4(),
             organization_space_id=space.id,
-            references=[_binding_reference(draft)],
+            intents=[_binding_intent(draft)],
         )
 
     repo.replace_policy_bindings.assert_not_awaited()
@@ -1365,7 +1370,7 @@ async def test_existing_unpublished_governance_binding_can_remain():
     result = await service.replace_governance_bindings(
         policy_id=uuid4(),
         organization_space_id=space.id,
-        references=[_binding_reference(existing)],
+        intents=[_binding_intent(existing)],
     )
 
     assert result == [existing]
@@ -1391,7 +1396,7 @@ async def test_tenant_admin_without_space_skill_use_can_replace_governance_bindi
     result = await service.replace_governance_bindings(
         policy_id=uuid4(),
         organization_space_id=space.id,
-        references=[],
+        intents=[],
     )
 
     assert result == []
@@ -1414,7 +1419,7 @@ async def test_skill_user_without_tenant_admin_cannot_replace_governance_binding
         await service.replace_governance_bindings(
             policy_id=uuid4(),
             organization_space_id=space.id,
-            references=[],
+            intents=[],
         )
 
     repo.list_policy_bindings.assert_not_awaited()
@@ -1458,7 +1463,7 @@ async def test_governance_bindings_require_organization_space_in_same_tenant():
         await service.replace_governance_bindings(
             policy_id=uuid4(),
             organization_space_id=space.id,
-            references=[],
+            intents=[],
         )
 
 
@@ -1501,7 +1506,7 @@ async def test_retained_governance_binding_keeps_activation_mode_on_resave():
     result = await service.replace_governance_bindings(
         policy_id=uuid4(),
         organization_space_id=space.id,
-        references=[_binding_reference(existing)],
+        intents=[_binding_intent(existing)],
     )
 
     assert result[0].activation_mode is SkillActivationMode.ON_DEMAND
@@ -1509,6 +1514,71 @@ async def test_retained_governance_binding_keeps_activation_mode_on_resave():
     assert [binding.activation_mode for binding in persisted] == [
         SkillActivationMode.ON_DEMAND
     ]
+
+
+async def test_retained_governance_binding_applies_explicit_activation_mode():
+    space = _space(organization=True)
+    existing = replace(_binding(), activation_mode=SkillActivationMode.ALWAYS)
+    repo = AsyncMock()
+    repo.list_policy_bindings.return_value = [existing]
+    repo.resolve_bound_references_for_binding_update.return_value = [existing]
+    service = _service(
+        space=space,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+
+    result = await service.replace_governance_bindings(
+        policy_id=uuid4(),
+        organization_space_id=space.id,
+        intents=[
+            _binding_intent(
+                existing,
+                activation_mode=SkillActivationMode.ON_DEMAND,
+            )
+        ],
+    )
+
+    assert result[0].activation_mode is SkillActivationMode.ON_DEMAND
+    persisted = repo.replace_policy_bindings.await_args.kwargs["bindings"]
+    assert [binding.activation_mode for binding in persisted] == [
+        SkillActivationMode.ON_DEMAND
+    ]
+
+
+async def test_blocked_governance_binding_rejects_activation_mode_change():
+    space = _space(organization=True)
+    blocked = replace(
+        _binding(),
+        source=SkillBindingSource.ORGANIZATION,
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    repo = AsyncMock()
+    repo.list_policy_bindings.return_value = [blocked]
+    repo.resolve_bound_references_for_binding_update.return_value = [blocked]
+    repo.list_active_execution_blocks.return_value = {blocked.skill_id: MagicMock()}
+    service = _service(
+        space=space,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Blocked organisation Skills cannot receive new or changed bindings",
+    ):
+        await service.replace_governance_bindings(
+            policy_id=uuid4(),
+            organization_space_id=space.id,
+            intents=[
+                _binding_intent(
+                    blocked,
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                )
+            ],
+        )
+
+    repo.replace_policy_bindings.assert_not_awaited()
 
 
 async def test_new_binding_defaults_to_always_activation_mode():
@@ -1724,7 +1794,7 @@ async def test_governance_revision_upgrade_keeps_activation_mode():
     result = await service.replace_governance_bindings(
         policy_id=uuid4(),
         organization_space_id=space.id,
-        references=[_binding_reference(upgraded)],
+        intents=[_binding_intent(upgraded)],
     )
 
     assert [binding.activation_mode for binding in result] == [

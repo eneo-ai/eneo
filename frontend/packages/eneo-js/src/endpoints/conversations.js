@@ -101,6 +101,22 @@ export function initConversations(client) {
     },
 
     /**
+     * Load body-free diagnostics for one persisted chat turn.
+     * @param {{ sessionId: string, messageId: string }} params
+     * @returns {Promise<import('../types/resources').ChatTurnDiagnostics>}
+     * @throws {EneoError}
+     */
+    getTurnDiagnostics: async ({ sessionId, messageId }) => {
+      return await client.fetch(
+        "/api/v1/conversations/{session_id}/messages/{message_id}/diagnostics/",
+        {
+          method: "get",
+          params: { path: { session_id: sessionId, message_id: messageId } }
+        }
+      );
+    },
+
+    /**
      * Delete a specific conversation.
      * @param  {{id: string} | Conversation} conversation conversation
      * @returns {Promise<true>} true on success, otherwise throws
@@ -132,7 +148,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
      * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning] Callback to run when a chunk of the model's reasoning/thinking text is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
-     * @param {(data: import("../types/resources").SSE.Eneo) => void} [params.callbacks.onEneoEvent] Callback to run when an eneo event is received
+     * @param {(data: import("../types/resources").SSE.Eneo | import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when an eneo or token-usage event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
      * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires

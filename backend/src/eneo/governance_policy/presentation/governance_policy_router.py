@@ -25,8 +25,8 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.skills.domain.skill import ResolvedSkillBinding
 from eneo.skills.presentation.skill_assembler import (
+    assistant_skill_binding_intents_from_input,
     skill_binding_audit_entries,
-    skill_binding_references_from_input,
 )
 
 router = APIRouter()
@@ -198,20 +198,23 @@ async def update_governance_policy(
             payload.prompt_enforcement.prompt_library_id,
         )
 
-    skill_references = None
+    skill_intents = None
     if payload.skills is not None:
-        skill_references = skill_binding_references_from_input(payload.skills.bindings)
+        skill_intents = assistant_skill_binding_intents_from_input(
+            payload.skills.bindings
+        )
 
     policy = await service.update_policy(
         models_restriction=models_restriction,
         mcp_restriction=mcp_restriction,
         prompt_enforcement=prompt_enforcement,
-        skill_references=skill_references,
+        skill_intents=skill_intents,
     )
     if (
         models_restriction is not None
         or prompt_enforcement is not None
-        or skill_references is not None
+        or skill_intents is not None
+        or mcp_restriction is not None
     ):
         assistant_service = container.assistant_service()
         await assistant_service.assert_personal_default_governance_context_fit()

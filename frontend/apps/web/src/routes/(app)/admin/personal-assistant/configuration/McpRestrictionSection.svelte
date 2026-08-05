@@ -10,7 +10,7 @@
   import { m } from "$lib/paraglide/messages";
   import { AlertCircle, ChevronRight, Info, Plug } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import PolicySection from "./PolicySection.svelte";
+  import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type McpTool = { id: string; name: string; description?: string | null };
   type McpServer = {

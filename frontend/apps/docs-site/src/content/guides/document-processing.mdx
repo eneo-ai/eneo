@@ -5,16 +5,28 @@ Eneo's document processing capabilities allow you to create AI-powered knowledge
 ## Overview
 
 Eneo can process and extract knowledge from:
+
 - **Documents**: PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .csv)
 - **Websites**: Automated crawling and content extraction
 - **Text files**: Plain text, Markdown
 
 All content is:
+
 1. **Extracted** from source format
 2. **Chunked** into optimal segments
 3. **Embedded** as vectors for semantic search
-4. **Stored** in PostgreSQL with pgvector
+4. **Published** as one searchable version in PostgreSQL with pgvector
 5. **Retrieved** when relevant to queries
+
+Updating a document does not remove the working knowledge first. Eneo publishes
+the replacement text and all vectors together. If extraction or embedding
+fails, search continues to use the previous complete version. Uploading the
+same content again with the same embedding model reuses the current version
+without another embedding call. Changing the model builds compatible vectors
+before the replacement becomes searchable.
+
+This is separate from file-byte placement. PostgreSQL remains the complete
+default; compatible object storage is optional and does not replace pgvector.
 
 ---
 
@@ -46,34 +58,30 @@ Documents belong to collaborative spaces in Eneo:
 3. Click **Upload**
 
 The worker service will process files in the background. You'll see:
+
 - ✓ **Uploaded**: File received
 - ⏳ **Processing**: Content extraction in progress
 - ✓ **Completed**: Ready for queries
 
 ### Supported Formats
 
-| Format | Extension | Notes |
-|--------|-----------|-------|
-| PDF | `.pdf` | Text-based PDFs work best; OCR not yet supported |
-| Word | `.docx` | Modern Word documents |
-| PowerPoint | `.pptx` | Extracts text from slides |
-| Excel | `.xlsx`, `.csv` | Extracts data as text |
-| Text | `.txt`, `.md` | Plain text and Markdown |
+| Format     | Extension       | Notes                                            |
+| ---------- | --------------- | ------------------------------------------------ |
+| PDF        | `.pdf`          | Text-based PDFs work best; OCR not yet supported |
+| Word       | `.docx`         | Modern Word documents                            |
+| PowerPoint | `.pptx`         | Extracts text from slides                        |
+| Excel      | `.xlsx`, `.csv` | Extracts data as text                            |
+| Text       | `.txt`, `.md`   | Plain text and Markdown                          |
 
 ### File Size Limits
 
-Default maximum file size: **50MB per file**
+Platform admins set the knowledge-file limit in **Admin > Storage**. Changes
+apply without restarting backend or worker. Operators keep a deployment safety
+ceiling for PostgreSQL rows or the optional object-store transport; Eneo uses
+the lower effective limit and shows which setting constrains it.
 
-To increase limits, add to `env_backend.env`:
-
-```bash
-MAX_UPLOAD_SIZE_MB=100
-```
-
-Then restart:
-```bash
-docker compose restart backend
-```
+See [Choose Content Storage](/guides/object-content-storage#admin-and-operator-responsibilities)
+for the exact responsibility split.
 
 ---
 
@@ -95,6 +103,7 @@ Automatically extract content from websites.
 ### Step 2: Monitor Progress
 
 The crawler will:
+
 1. Fetch the initial page
 2. Extract links (if configured)
 3. Process each page in the background
@@ -103,6 +112,7 @@ The crawler will:
 ### Crawling Configuration
 
 **Shallow crawl** (single page):
+
 ```
 URL: https://example.com/documentation
 Max Depth: 0
@@ -110,6 +120,7 @@ Max Pages: 1
 ```
 
 **Deep crawl** (entire section):
+
 ```
 URL: https://example.com/docs
 Max Depth: 3
@@ -151,6 +162,7 @@ response = requests.post(
 ### 1. Extraction
 
 Content is extracted from source formats:
+
 - **PDF**: Text extraction using pdfplumber
 - **Word**: XML parsing of .docx structure
 - **PowerPoint**: Slide text extraction
@@ -174,6 +186,7 @@ Chunk 3:                      [..................] (chars 1600-2600)
 ### 3. Embedding
 
 Each chunk is converted to a vector embedding:
+
 - **Model**: Configurable embedding model (default: OpenAI text-embedding-3-small)
 - **Dimensions**: 1536 dimensions (OpenAI) or model-specific
 - **Storage**: Stored in PostgreSQL with pgvector extension
@@ -181,6 +194,7 @@ Each chunk is converted to a vector embedding:
 ### 4. Retrieval
 
 When users query:
+
 1. Query is converted to an embedding
 2. Vector similarity search finds relevant chunks
 3. Top-k most relevant chunks are retrieved (default: k=5)
@@ -195,11 +209,13 @@ When users query:
 Adjust chunk size based on your content:
 
 **Large chunks** (1500-2000 chars):
+
 - ✓ Better for long-form content
 - ✓ More context per chunk
 - ✗ Less precise retrieval
 
 **Small chunks** (500-800 chars):
+
 - ✓ More precise retrieval
 - ✓ Better for factual Q&A
 - ✗ May lose context
@@ -216,16 +232,19 @@ CHUNK_OVERLAP=200
 Choose the right embedding model:
 
 **OpenAI text-embedding-3-small** (default):
+
 - Fast and cost-effective
 - 1536 dimensions
 - Good for general purpose
 
 **OpenAI text-embedding-3-large**:
+
 - Higher quality
 - 3072 dimensions
 - Better for complex queries
 
 Configure in `env_backend.env`:
+
 ```bash
 EMBEDDING_MODEL=text-embedding-3-small
 ```
@@ -258,19 +277,16 @@ Higher threshold = more precise but may miss relevant content
 ### Search Documents
 
 Use the search bar to find specific documents:
+
 ```
 Search: "quarterly report"
 ```
 
 ### Update Documents
 
-To update a document:
-1. Delete the old version
-2. Upload the new version
-
-Or use versioning:
-1. Keep both versions
-2. Mark old version as archived
+Upload the document again with the same title. Eneo builds the replacement
+first and makes it searchable only when its text and embeddings are complete.
+If processing fails, the previous version remains available.
 
 ### Delete Documents
 
@@ -279,6 +295,7 @@ Or use versioning:
 3. Confirm deletion
 
 Deletion removes:
+
 - Original document
 - All chunks
 - All embeddings
@@ -294,10 +311,10 @@ Deletion removes:
 ```yaml
 worker:
   deploy:
-    replicas: 2  # Run 2 worker instances
+    replicas: 2 # Run 2 worker instances
     resources:
       limits:
-        cpus: '2'
+        cpus: "2"
         memory: 2G
 ```
 
@@ -340,18 +357,21 @@ CACHE_TTL_SECONDS=3600
 ### Files Not Processing
 
 **Check worker status:**
+
 ```bash
 docker compose ps worker
 docker compose logs worker
 ```
 
 **Common issues:**
+
 - Worker not running
 - Insufficient memory
 - Unsupported file format
 - Corrupted file
 
 **Solution:**
+
 ```bash
 docker compose restart worker
 ```
@@ -359,17 +379,20 @@ docker compose restart worker
 ### Web Crawling Fails
 
 **Check error messages:**
+
 ```bash
 docker compose logs worker | grep crawl
 ```
 
 **Common issues:**
+
 - Website blocks crawlers (check robots.txt)
 - Authentication required
 - Rate limiting
 - Network issues
 
 **Solution:**
+
 - Use specific URLs instead of root domains
 - Reduce max_pages and max_depth
 - Add delays between requests
@@ -377,6 +400,7 @@ docker compose logs worker | grep crawl
 ### Poor Retrieval Quality
 
 **Symptoms:**
+
 - AI doesn't use uploaded documents
 - Irrelevant chunks retrieved
 - Missing important information
@@ -384,16 +408,19 @@ docker compose logs worker | grep crawl
 **Solutions:**
 
 1. **Check chunk size:**
+
    - Too large = less precise
    - Too small = loses context
 
 2. **Adjust retrieval parameters:**
+
    ```bash
    RETRIEVAL_K=10  # Retrieve more chunks
    RETRIEVAL_THRESHOLD=0.6  # Lower threshold
    ```
 
 3. **Use better embeddings:**
+
    ```bash
    EMBEDDING_MODEL=text-embedding-3-large
    ```
@@ -413,10 +440,11 @@ worker:
   deploy:
     resources:
       limits:
-        memory: 1G  # Reduce from 2G
+        memory: 1G # Reduce from 2G
 ```
 
 **Process fewer documents simultaneously:**
+
 ```bash
 # env_backend.env
 MAX_CONCURRENT_TASKS=2  # Reduce from default

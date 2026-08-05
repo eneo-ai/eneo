@@ -12,7 +12,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { AlertCircle, Info, Sparkles } from "lucide-svelte";
-  import PolicySection from "./PolicySection.svelte";
+  import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
   type PromptOption = {
     id: string;

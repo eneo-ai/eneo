@@ -7,7 +7,7 @@ from sqlalchemy.orm import defer
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.info_blobs.info_blob import (
     InfoBlobChunkInDB,
     InfoBlobChunkInDBWithScore,
@@ -96,6 +96,7 @@ class InfoBlobChunkRepo:
                 InfoBlobs.title,
             )
             .join(InfoBlobs)
+            .where(active_info_blob_version())
             .options(defer(InfoBlobChunks.embedding))
             .order_by(InfoBlobChunks.embedding.cosine_distance(embedding))
             .limit(limit)
@@ -130,7 +131,9 @@ class InfoBlobChunkRepo:
     ):
         stmt = (
             sa.select(InfoBlobChunks)
+            .join(InfoBlobs)
             .filter(InfoBlobChunks.text.match(search_string))
+            .where(active_info_blob_version())
             .limit(limit)
         )
 

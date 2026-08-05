@@ -333,6 +333,10 @@ def _compute_expected(
     is_admin_scope = endpoint.get("is_admin_scope", False)
     target_resource_key = endpoint.get("target_resource_key")
     is_unguarded = endpoint.get("is_unguarded", False)
+    session_only = endpoint.get("session_only", False)
+
+    if session_only:
+        return "deny"
 
     # Unguarded endpoints: any authenticated key should access them
     if is_unguarded:
@@ -1192,6 +1196,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "is_admin_scope": True,
             "requires_admin_perm": False,
             "target_resource_key": None,
+            "session_only": True,
         },
         # =================================================================
         # SPECIAL: API KEY MANAGEMENT (admin scope, no admin perm guard)

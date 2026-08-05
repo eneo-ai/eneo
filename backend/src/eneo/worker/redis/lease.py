@@ -48,6 +48,7 @@ async def redis_lease(
     ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
     renew_interval_seconds: float | None = None,
     refresh_timeout_seconds: float | None = None,
+    log_lock_key: bool = True,
 ) -> AsyncGenerator[bool]:
     """Acquire a self-renewing distributed lock for the duration of the block.
 
@@ -66,6 +67,8 @@ async def redis_lease(
         refresh_timeout_seconds: Per-refresh Redis call timeout. Defaults to
             ``min(renew_interval_seconds, 10)`` so a hung refresh cannot hide
             an expired lease indefinitely.
+        log_lock_key: Include the Redis key in lease diagnostics. Disable this
+            when the key contains a content-derived or otherwise sensitive value.
     """
     if ttl_seconds <= 0:
         raise ValueError("ttl_seconds must be positive")
@@ -94,9 +97,10 @@ async def redis_lease(
 
     owner_task = asyncio.current_task()
     last_confirmed_owner_at = monotonic()
+    lock_log_context = {"lock_key": key} if log_lock_key else {}
 
     def _cancel_owner(reason: str) -> None:
-        logger.warning(reason, extra={"lock_key": key})
+        logger.warning(reason, extra=lock_log_context)
         if owner_task is not None and not owner_task.done():
             owner_task.cancel(reason)
 
@@ -126,7 +130,7 @@ async def redis_lease(
                 logger.warning(
                     "Failed to refresh Redis lease, will retry",
                     extra={
-                        "lock_key": key,
+                        **lock_log_context,
                         "error": str(exc),
                         "seconds_since_confirmed": seconds_since_confirmed,
                     },
@@ -152,5 +156,5 @@ async def redis_lease(
             # Non-critical: the lock will expire on its own.
             logger.debug(
                 "Failed to release Redis lease",
-                extra={"lock_key": key, "error": str(exc)},
+                extra={**lock_log_context, "error": str(exc)},
             )

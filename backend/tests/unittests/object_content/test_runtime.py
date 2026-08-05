@@ -128,7 +128,6 @@ class _ReadinessStore:
         return StoreBindingCreation(
             binding_id=binding_id,
             body=b"test binding",
-            checksum_sha256="test checksum",
         )
 
     async def create_binding(self, _creation: StoreBindingCreation) -> None:

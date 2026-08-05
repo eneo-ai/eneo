@@ -15,14 +15,21 @@ import { Callout } from "nextra/components";
 
 ## Current adoption
 
-File and Icon are the first product owners using this contract. New content is
-stored inline by default, so Eneo still needs no S3-compatible service. Their
-exact originals and named derivatives use typed references; a bounded upgrade
-migration copies and verifies legacy bytes before removing duplicate columns.
+File and Icon use this contract for exact originals and named derivatives.
+New content is stored inline by default, so Eneo still needs no S3-compatible
+service. A bounded upgrade migration copies and verifies legacy bytes before
+removing duplicate columns.
 
-InfoBlob knowledge generations, administrator-controlled placement/migration,
-and Flow artifacts remain separate slices. Configuring an endpoint alone never
-moves content.
+Platform administrators use **Admin > Storage** to choose where eligible new
+content is written and to queue bounded moves of existing content. Eneo verifies
+each destination before switching the content record to that copy. Changing the
+write target or configuring an endpoint never moves existing content
+automatically. InfoBlob knowledge generations and Flow artifacts remain separate
+slices.
+
+File and Icon visibility is derived from publication: a visible product row and
+its reference always point to already-available, verified bytes. A failed or
+interrupted object-store write before publication leaves no product row visible.
 
 ## Ownership boundary
 
@@ -169,8 +176,10 @@ The supported contract includes:
 - multipart completion, abort, and ordered part listing;
 - deletion with observable not-found convergence.
 
-Native range support remains an endpoint conformance requirement even though
-Eneo verifies a full read before serving a range.
+Native range support remains an endpoint conformance requirement. Eneo fetches
+and verifies only the persisted upload chunks that cover a requested range
+before responding. Content migrated as one whole-object chunk retains its
+full-verification cost for range reads.
 
 ## Why the reference deployment uses SeaweedFS
 
