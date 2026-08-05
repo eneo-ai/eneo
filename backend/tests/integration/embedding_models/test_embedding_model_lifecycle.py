@@ -10,12 +10,14 @@ re-embedding, not repointing), so the lifecycle is soft-delete only:
 """
 
 from datetime import datetime, timezone
+from hashlib import sha256
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
 from eneo.database.tables.ai_models_table import EmbeddingModels
-from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionState
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.spaces_table import SpacesEmbeddingModels
 from eneo.embedding_models.domain.embedding_model_repo import (
@@ -124,6 +126,9 @@ class TestEmbeddingModelSoftDelete:
             info_blob = InfoBlobs(
                 text="historical chunk",
                 size=10,
+                content_hash=sha256(b"historical chunk").digest(),
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.ACTIVE.value,
                 user_id=admin_user.id,
                 tenant_id=admin_user.tenant_id,
                 embedding_model_id=model_id,
@@ -222,6 +227,9 @@ class TestEmbeddingModelCleanupWorker:
                 InfoBlobs(
                     text="historical chunk",
                     size=10,
+                    content_hash=sha256(b"historical chunk").digest(),
+                    source_id=uuid4(),
+                    version_state=InfoBlobVersionState.ACTIVE.value,
                     user_id=admin_user.id,
                     tenant_id=admin_user.tenant_id,
                     embedding_model_id=model_id,

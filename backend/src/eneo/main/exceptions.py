@@ -70,6 +70,20 @@ class ErrorCodes(int, Enum):
     FILE_ORIGINAL_NOT_FOUND = 9045
     DEPLOYMENT_POLICY_CONFLICT = 9046
     OBJECT_STORE_NOT_SELECTABLE = 9047
+    # Skill lifecycle conflicts. Each one needs different client handling, so
+    # they cannot share a code: the client picks its instruction from the code,
+    # and not every blocker can be cleared. They are registered in
+    # eneo.server.exception_handlers, which may depend on the Skills domain
+    # without reversing the dependency.
+    SKILL_SLUG_TAKEN = 9048
+    SKILL_PUBLISHED_NOT_DELETABLE = 9049
+    SKILL_IN_USE_BY_APP_RUN = 9050
+    SKILL_STILL_ATTACHED = 9051
+    SKILL_EXECUTION_BLOCK_CONFLICT = 9052
+    SKILL_NOT_PUBLISHED_FOR_BINDING = 9053
+    SKILL_BLOCKED_FOR_BINDING = 9054
+    SKILL_RUNTIME_POLICY_CHANGED = 9055
+    INVALID_FILENAME = 9056
 
 
 class NotFoundException(Exception):
@@ -289,6 +303,14 @@ class FileTooLargeException(Exception):
         return details
 
 
+class InvalidFilenameException(Exception):
+    pass
+
+
+class InfoBlobPublicationConflictError(RuntimeError):
+    """The locked publication identities resolve to different active sources."""
+
+
 class ChunkEmbeddingMisMatchException(Exception):
     pass
 
@@ -468,6 +490,7 @@ EXCEPTION_MAP = {
     PydanticParseError: (500, None, ErrorCodes.PYDANTIC_PARSE_ERROR),
     FileNotSupportedException: (415, None, ErrorCodes.FILE_NOT_SUPPORTED),
     FileTooLargeException: (413, None, ErrorCodes.FILE_TOO_LARGE),
+    InvalidFilenameException: (400, None, ErrorCodes.INVALID_FILENAME),
     ChunkEmbeddingMisMatchException: (
         500,
         "Something went wrong.",

@@ -78,7 +78,7 @@ async def test_governance_router_keeps_api_key_access_to_non_skill_facets():
     service.get_policy_for_update.assert_awaited_once()
 
 
-async def test_mcp_only_update_skips_personal_baseline_scan():
+async def test_mcp_only_update_revalidates_personal_skill_activation():
     policy = GovernancePolicy(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -105,4 +105,4 @@ async def test_mcp_only_update_skips_personal_baseline_scan():
         container=container,
     )
 
-    assistant_service.assert_personal_default_governance_context_fit.assert_not_awaited()
+    assistant_service.assert_personal_default_governance_context_fit.assert_awaited_once()

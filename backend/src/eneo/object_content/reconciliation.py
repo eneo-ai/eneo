@@ -20,6 +20,7 @@ from eneo.object_content.content import (
 from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import retry_delay_seconds
 from eneo.object_content.lease import OperationLeaseCheckpoint
+from eneo.object_content.move_executor import ObjectContentMoveExecutor
 from eneo.object_content.reconciliation_repository import (
     MultipartAbortLease,
     ObjectContentHealthFacts,
@@ -40,6 +41,7 @@ class ReconciliationResult:
     lifecycle_advanced: int
     inline_deleted: int
     content_processed: int
+    moves_processed: int
     references_audited: int
     reference_drifts: int
     missing_objects: int
@@ -53,6 +55,7 @@ class ReconciliationResult:
             lifecycle_advanced=0,
             inline_deleted=0,
             content_processed=0,
+            moves_processed=0,
             references_audited=0,
             reference_drifts=0,
             missing_objects=0,
@@ -109,6 +112,7 @@ class ObjectContentReconciler:
                 lifecycle_advanced=lifecycle_advanced,
                 inline_deleted=inline_deleted,
                 content_processed=0,
+                moves_processed=0,
                 references_audited=references_audited,
                 reference_drifts=reference_drifts,
                 missing_objects=0,
@@ -170,10 +174,17 @@ class ObjectContentReconciler:
             ).audit_reference_counts(
                 limit=self._core_settings.reconciliation_batch_size
             )
+        moves_processed = await ObjectContentMoveExecutor(
+            self._core_settings,
+            self._database,
+            object_store_settings=settings,
+            object_store=store,
+        ).run_once()
         return ReconciliationResult(
             lifecycle_advanced=lifecycle_advanced,
             inline_deleted=inline_deleted,
             content_processed=len(work),
+            moves_processed=moves_processed,
             references_audited=references_audited,
             reference_drifts=reference_drifts,
             missing_objects=missing_objects,
@@ -315,8 +326,8 @@ class ObjectContentReconciler:
                 await ObjectContentRepository(session).mark_tombstoned(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
-                    # WI-26B's database-owned retention policy supplies this horizon.
-                    # The foundation must not invent an environment business policy.
+                    # Durable retention policy owns this horizon; reconciliation
+                    # must not invent an environment-level business rule.
                     purge_after=None,
                 )
         except (ObjectContentBusyError, ObjectContentStateError):

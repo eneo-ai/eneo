@@ -9,6 +9,9 @@
 /** @typedef {import('../types/resources').OrganizationSkillSummaryPagePublic} OrganizationSkillSummaryPagePublic */
 /** @typedef {import('../types/resources').SkillAdoptionProjectionPagePublic} SkillAdoptionProjectionPagePublic */
 /** @typedef {import('../types/resources').PublishedSkillPublic} PublishedSkillPublic */
+/** @typedef {import('../types/resources').PersonalChatPinAdvancePublic} PersonalChatPinAdvancePublic */
+/** @typedef {import('../types/resources').AssistantFleetAdvancePublic} AssistantFleetAdvancePublic */
+/** @typedef {import('../types/resources').AppFleetAdvancePublic} AppFleetAdvancePublic */
 /** @typedef {import('../types/resources').PublishedSkillSummaryPagePublic} PublishedSkillSummaryPagePublic */
 
 /**
@@ -325,6 +328,53 @@ export function initSkills(client) {
        */
       publish: async ({ skillId, ...request }) => {
         return await client.fetch("/api/v1/skills/organization/{skill_id}/publish/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": request }
+        });
+      },
+
+      /**
+       * Move the Personal Chat binding of this Skill to its currently
+       * published revision, guarded by the pinned revision the
+       * administrator reviewed.
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/personal-chat/advance/">} params
+       * @returns {Promise<PersonalChatPinAdvancePublic>}
+       * @throws {EneoError}
+       */
+      advancePersonalChat: async ({ skillId, ...request }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/personal-chat/advance/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": request }
+        });
+      },
+
+      /**
+       * Move eligible Assistant bindings of this Skill to the reviewed
+       * published revision in bounded server-owned chunks.
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/assistants/advance/">} params
+       * @returns {Promise<AssistantFleetAdvancePublic>}
+       * @throws {EneoError}
+       */
+      advanceAssistants: async ({ skillId, ...request }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/assistants/advance/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": request }
+        });
+      },
+
+      /**
+       * Move eligible App bindings of this Skill to the reviewed published
+       * revision in bounded chunks. Existing run snapshots stay pinned to
+       * the revision captured when the run was queued.
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/apps/advance/">} params
+       * @returns {Promise<AppFleetAdvancePublic>}
+       * @throws {EneoError}
+       */
+      advanceApps: async ({ skillId, ...request }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/apps/advance/", {
           method: "post",
           params: { path: { skill_id: skillId } },
           requestBody: { "application/json": request }

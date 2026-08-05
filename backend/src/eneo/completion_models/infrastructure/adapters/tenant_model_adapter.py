@@ -42,6 +42,9 @@ from eneo.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
     ProviderInput,
 )
+from eneo.completion_models.infrastructure.context_builder import (
+    MIN_PERCENTAGE_KNOWLEDGE,
+)
 from eneo.completion_models.infrastructure.message_payload import (
     build_content,
     build_turn_messages,
@@ -60,7 +63,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
-from eneo.tokens.token_utils import measure_provider_input_tokens
+from eneo.tokens.token_utils import count_tokens, measure_provider_input_tokens
 
 logger = get_logger(__name__)
 
@@ -347,6 +350,47 @@ def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
     return cast(dict[str, Any] | None, cast(Any, tool).arguments)
 
 
+TOOL_RESULT_BUDGET_NOTICE = (
+    "Tool-result budget for this turn is exhausted; this result was withheld. "
+    "Stop calling tools and answer now using the information already gathered."
+)
+
+
+class _ToolResultBudget:
+    """Aggregate cap on tool-result text fed back to the model in one turn.
+
+    Inject mode reserves at most ``MIN_PERCENTAGE_KNOWLEDGE`` of the context
+    window for retrieved knowledge; in tool mode the model steers retrieval
+    itself, so the same share is enforced here as an admission cap instead.
+    Per-call limits (proxy output truncation, the round cap) bound one call;
+    this bounds the turn, so a tool-happy model degrades to an explicit
+    notice instead of a provider-side context overflow failing the turn.
+    """
+
+    def __init__(self, *, token_limit: int, litellm_model: str) -> None:
+        self._remaining = int(token_limit * MIN_PERCENTAGE_KNOWLEDGE)
+        self._litellm_model = litellm_model
+        self._exhausted_logged = False
+
+    def admit(self, llm_text: str) -> str:
+        """Return ``llm_text`` while budget remains, the withhold notice after.
+
+        The result that crosses the line is admitted in full (a single result
+        is already bounded by the proxy's output truncation); only results
+        after exhaustion are withheld.
+        """
+        if self._remaining <= 0:
+            if not self._exhausted_logged:
+                logger.warning(
+                    "[MCP] Tool-result budget exhausted; withholding further "
+                    "tool results this turn"
+                )
+                self._exhausted_logged = True
+            return TOOL_RESULT_BUDGET_NOTICE
+        self._remaining -= count_tokens(llm_text, self._litellm_model)
+        return llm_text
+
+
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
         CompletionModel,
@@ -572,6 +616,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             completion_tokens=getattr(usage, "completion_tokens", None),
             reasoning_tokens=reasoning_tokens,
             context_prompt_tokens=prompt_tokens,
+            context_completion_tokens=getattr(usage, "completion_tokens", None),
         )
 
     def _accumulate_usage(
@@ -582,7 +627,12 @@ class TenantModelAdapter(CompletionModelAdapter):
         if not existing:
             return new or TokenUsage()
         if not new:
-            return existing
+            return existing.model_copy(
+                update={
+                    "context_prompt_tokens": None,
+                    "context_completion_tokens": None,
+                }
+            )
 
         def _add(a: int | None, b: int | None) -> int | None:
             if a is None and b is None:
@@ -593,12 +643,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             prompt_tokens=_add(existing.prompt_tokens, new.prompt_tokens),
             completion_tokens=_add(existing.completion_tokens, new.completion_tokens),
             reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
-            # Window occupancy is the LATEST call's prompt, never a sum.
-            context_prompt_tokens=(
-                new.context_prompt_tokens
-                if new.context_prompt_tokens is not None
-                else existing.context_prompt_tokens
-            ),
+            context_prompt_tokens=new.context_prompt_tokens,
+            context_completion_tokens=new.context_completion_tokens,
         )
 
     def _resolve_request_input_tokens(
@@ -619,6 +665,73 @@ class TenantModelAdapter(CompletionModelAdapter):
             self.litellm_model,
         )
         return measurement.tokens, True
+
+    def _resolve_request_output_tokens(
+        self,
+        *,
+        response: _LiteLLMResponse,
+    ) -> tuple[int, bool]:
+        """Return one provider response's output count and whether it is estimated."""
+
+        usage = self._extract_usage(response)
+        if usage is not None and usage.completion_tokens is not None:
+            return usage.completion_tokens, False
+        if not response.choices:
+            return 0, True
+
+        message = response.choices[0].message
+        tool_calls = (
+            cast(
+                "list[_LiteLLMToolCall] | None",
+                getattr(message, "tool_calls", None),
+            )
+            or []
+        )
+        tool_call_payload = (
+            json.dumps(
+                [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.function.name,
+                            "arguments": call.function.arguments,
+                        },
+                    }
+                    for call in tool_calls
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if tool_calls
+            else ""
+        )
+        return (
+            self._estimate_request_output_tokens(
+                content=cast("str | None", getattr(message, "content", None)),
+                reasoning_content=cast(
+                    "str | None",
+                    getattr(message, "reasoning_content", None),
+                ),
+                tool_call_payload=tool_call_payload,
+            ),
+            True,
+        )
+
+    def _estimate_request_output_tokens(
+        self,
+        *,
+        content: str | None,
+        reasoning_content: str | None,
+        tool_call_payload: str,
+    ) -> int:
+        """Estimate distinct provider output channels with LiteLLM's tokenizer."""
+
+        return (
+            count_tokens(content or "", self.litellm_model)
+            + count_tokens(reasoning_content or "", self.litellm_model)
+            + count_tokens(tool_call_payload, self.litellm_model)
+        )
 
     def _build_tools_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
@@ -892,6 +1005,10 @@ class TenantModelAdapter(CompletionModelAdapter):
         try:
             cumulative_input_tokens = 0
             used_input_estimate = False
+            context_input_token_estimate: int | None = None
+            cumulative_output_tokens = 0
+            used_output_estimate = False
+            context_output_token_estimate: int | None = None
             # Call LiteLLM with drop_params=True to handle unsupported params gracefully
             response = cast(
                 _LiteLLMResponse,
@@ -915,6 +1032,17 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             cumulative_input_tokens += request_input_tokens
             used_input_estimate = used_input_estimate or request_was_estimated
+            context_input_token_estimate = (
+                request_input_tokens if request_was_estimated else None
+            )
+            request_output_tokens, request_output_was_estimated = (
+                self._resolve_request_output_tokens(response=response)
+            )
+            cumulative_output_tokens += request_output_tokens
+            used_output_estimate = used_output_estimate or request_output_was_estimated
+            context_output_token_estimate = (
+                request_output_tokens if request_output_was_estimated else None
+            )
 
             # Extract token usage from provider response
             usage = self._extract_usage(response)
@@ -931,6 +1059,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
+                result_budget = _ToolResultBudget(
+                    token_limit=self.model.token_limit,
+                    litellm_model=self.litellm_model,
+                )
                 activation_available = (
                     skill_runtime is not None
                     and skill_runtime.tool_definition is not None
@@ -1034,7 +1166,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             {
                                 "role": "tool",
                                 "tool_call_id": call.call_id,
-                                "content": llm_text,
+                                "content": result_budget.admit(llm_text),
                             }
                         )
                     response = cast(
@@ -1059,6 +1191,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
                     cumulative_input_tokens += request_input_tokens
                     used_input_estimate = used_input_estimate or request_was_estimated
+                    context_input_token_estimate = (
+                        request_input_tokens if request_was_estimated else None
+                    )
+                    request_output_tokens, request_output_was_estimated = (
+                        self._resolve_request_output_tokens(response=response)
+                    )
+                    cumulative_output_tokens += request_output_tokens
+                    used_output_estimate = (
+                        used_output_estimate or request_output_was_estimated
+                    )
+                    context_output_token_estimate = (
+                        request_output_tokens if request_output_was_estimated else None
+                    )
                     usage = self._accumulate_usage(usage, response)
                     if not response.choices:
                         break
@@ -1075,6 +1220,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                 completion.input_token_estimate = cumulative_input_tokens
                 if usage is not None:
                     usage = usage.model_copy(update={"prompt_tokens": None})
+            if used_output_estimate:
+                completion.output_token_estimate = cumulative_output_tokens
+                if usage is not None:
+                    usage = usage.model_copy(update={"completion_tokens": None})
+            completion.context_input_token_estimate = context_input_token_estimate
+            completion.context_output_token_estimate = context_output_token_estimate
             completion.usage = usage
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Completion successful"
@@ -1264,6 +1415,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.usage: TokenUsage | None = None
                     self.cumulative_input_tokens = 0
                     self.used_input_estimate = False
+                    self.context_input_token_estimate: int | None = None
+                    self.reasoning_content: list[str] = []
+                    self.cumulative_output_tokens = 0
+                    self.used_output_estimate = False
+                    self.context_output_token_estimate: int | None = None
 
             result = _StreamResult()
 
@@ -1281,9 +1437,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                 pending_emitted: set[int] = set()
                 request_prompt_tokens = 0
                 provider_reported_prompt_tokens = False
+                request_completion_tokens = 0
+                provider_reported_completion_tokens = False
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
                 res.assistant_content = []
+                res.reasoning_content = []
+                if res.usage is not None:
+                    res.usage = res.usage.model_copy(
+                        update={
+                            "context_prompt_tokens": None,
+                            "context_completion_tokens": None,
+                        }
+                    )
 
                 async for chunk in s:
                     logger.debug(f"[DEBUG] Raw chunk: {chunk}")
@@ -1296,6 +1462,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                             if chunk_usage.prompt_tokens is not None:
                                 request_prompt_tokens += chunk_usage.prompt_tokens
                                 provider_reported_prompt_tokens = True
+                            if chunk_usage.completion_tokens is not None:
+                                request_completion_tokens += (
+                                    chunk_usage.completion_tokens
+                                )
+                                provider_reported_completion_tokens = True
                             res.usage = (
                                 self._accumulate_usage(res.usage, chunk)
                                 if res.usage
@@ -1315,6 +1486,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     # pollutes the persisted answer.
                     reasoning_delta = getattr(delta, "reasoning_content", None)
                     if reasoning_delta:
+                        res.reasoning_content.append(reasoning_delta)
                         yield Completion(
                             reasoning_content=reasoning_delta,
                             response_type=ResponseType.REASONING,
@@ -1419,6 +1591,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 if provider_reported_prompt_tokens:
                     res.cumulative_input_tokens += request_prompt_tokens
+                    res.context_input_token_estimate = None
                 elif request_messages is not None:
                     measurement = measure_provider_input_tokens(
                         request_messages,
@@ -1427,6 +1600,29 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
                     res.cumulative_input_tokens += measurement.tokens
                     res.used_input_estimate = True
+                    res.context_input_token_estimate = measurement.tokens
+
+                if provider_reported_completion_tokens:
+                    res.cumulative_output_tokens += request_completion_tokens
+                    res.context_output_token_estimate = None
+                else:
+                    tool_call_payload = (
+                        json.dumps(
+                            list(res.tool_calls_acc.values()),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                        if res.tool_calls_acc
+                        else ""
+                    )
+                    request_output_tokens = self._estimate_request_output_tokens(
+                        content="".join(res.assistant_content) or None,
+                        reasoning_content="".join(res.reasoning_content) or None,
+                        tool_call_payload=tool_call_payload,
+                    )
+                    res.cumulative_output_tokens += request_output_tokens
+                    res.used_output_estimate = True
+                    res.context_output_token_estimate = request_output_tokens
 
             # --- Drain initial stream ---
             async for comp in _drain_stream(
@@ -1460,6 +1656,10 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 max_rounds = self.MAX_TOOL_ROUNDS
                 tool_round = 0
+                result_budget = _ToolResultBudget(
+                    token_limit=self.model.token_limit,
+                    litellm_model=self.litellm_model,
+                )
 
                 while result.has_tool_calls and tool_round < max_rounds:
                     tool_round += 1
@@ -1803,7 +2003,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 {
                                     "role": "tool",
                                     "tool_call_id": tc["id"],
-                                    "content": llm_text,
+                                    "content": result_budget.admit(llm_text),
                                 }
                             )
                             tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
@@ -1947,6 +2147,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             final_usage = result.usage
             if result.used_input_estimate and final_usage is not None:
                 final_usage = final_usage.model_copy(update={"prompt_tokens": None})
+            if result.used_output_estimate and final_usage is not None:
+                final_usage = final_usage.model_copy(update={"completion_tokens": None})
             yield Completion(
                 text="",
                 stop=True,
@@ -1956,6 +2158,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                     if result.used_input_estimate
                     else None
                 ),
+                context_input_token_estimate=result.context_input_token_estimate,
+                output_token_estimate=(
+                    result.cumulative_output_tokens
+                    if result.used_output_estimate
+                    else None
+                ),
+                context_output_token_estimate=result.context_output_token_estimate,
             )
 
             logger.info(

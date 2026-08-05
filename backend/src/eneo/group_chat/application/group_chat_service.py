@@ -504,6 +504,7 @@ class GroupChatService:
                 (
                     session,
                     question_id,
+                    _question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=question,
                     question=question,
@@ -511,7 +512,10 @@ class GroupChatService:
                     completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 )
             else:
-                question_id = await self.session_service.create_question_placeholder(
+                (
+                    question_id,
+                    _question_created_at,
+                ) = await self.session_service.create_question_placeholder(
                     question=question,
                     session=session,
                     files=[],

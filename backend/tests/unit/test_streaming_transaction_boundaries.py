@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -65,7 +66,11 @@ async def test_question_placeholder_commits_independently(
     request_session_repo = SimpleNamespace(session=request_session)
     request_question_repo = SimpleNamespace(add=AsyncMock())
     fresh_question_repo = SimpleNamespace(
-        add=AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+        add=AsyncMock(
+            return_value=SimpleNamespace(
+                id=uuid4(), created_at=datetime.now(timezone.utc)
+            )
+        )
     )
 
     @asynccontextmanager
@@ -110,7 +115,9 @@ async def test_new_session_and_first_question_share_one_short_transaction(
 ):
     fresh_session = MagicMock()
     created_session = SimpleNamespace(id=uuid4(), questions=[])
-    created_question = SimpleNamespace(id=uuid4())
+    created_question = SimpleNamespace(
+        id=uuid4(), created_at=datetime.now(timezone.utc)
+    )
     fresh_session_repo = SimpleNamespace(add=AsyncMock(return_value=created_session))
     fresh_question_repo = SimpleNamespace(add=AsyncMock(return_value=created_question))
 
@@ -142,13 +149,18 @@ async def test_new_session_and_first_question_share_one_short_transaction(
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
     )
 
-    session, question_id = await service.create_session_with_question_placeholder(
+    (
+        session,
+        question_id,
+        question_created_at,
+    ) = await service.create_session_with_question_placeholder(
         name="new-session",
         question="first question",
     )
 
     assert session is created_session
     assert question_id == created_question.id
+    assert question_created_at == created_question.created_at
     session_repo_factory.assert_called_once_with(fresh_session)
     question_repo_factory.assert_called_once_with(fresh_session)
     fresh_session_repo.add.assert_awaited_once()

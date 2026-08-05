@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -8,6 +9,11 @@ from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
     MAX_SKILL_SLUG_LENGTH,
+    AppPinAdvanceIncompatibleReason,
+    AppPinAdvanceOutcome,
+    AssistantPinAdvanceIncompatibleReason,
+    AssistantPinAdvanceOutcome,
+    PersonalChatPinAdvanceOutcome,
     SkillActivationFallbackReason,
     SkillActivationMode,
     SkillAdoptionDrift,
@@ -35,6 +41,79 @@ class SkillRevisionCreateRequest(SkillContentInput):
 
 class SkillPublishRequest(BaseModel):
     expected_revision_id: UUID
+
+
+class PersonalChatPinAdvanceRequest(BaseModel):
+    expected_pinned_revision_id: UUID = Field(
+        description=(
+            "The revision the Personal Chat binding was pinned to when the "
+            "administrator reviewed the move."
+        )
+    )
+    expected_published_revision_id: UUID = Field(
+        description=(
+            "The published revision the administrator reviewed as the "
+            "target. A publish that lands after the review is refused as a "
+            "conflict instead of silently applied."
+        )
+    )
+
+
+class PersonalChatPinAdvancePublic(BaseModel):
+    outcome: Literal[
+        PersonalChatPinAdvanceOutcome.ADVANCED,
+        PersonalChatPinAdvanceOutcome.ALREADY_CURRENT,
+    ]
+    from_revision_number: int
+    to_revision_number: int
+
+
+class AssistantFleetAdvanceRequest(BaseModel):
+    expected_published_revision_id: UUID
+    cursor: str | None = None
+
+
+class AssistantFleetAdvanceCountsPublic(BaseModel):
+    advanced: int
+    concurrent_change: int
+    incompatible: int
+
+
+class AssistantPinAdvanceOutcomePublic(BaseModel):
+    assistant_id: UUID
+    outcome: AssistantPinAdvanceOutcome
+    reason: AssistantPinAdvanceIncompatibleReason | None = None
+
+
+class AssistantFleetAdvancePublic(BaseModel):
+    run_id: UUID
+    next_cursor: str | None
+    counts: AssistantFleetAdvanceCountsPublic
+    outcomes: list[AssistantPinAdvanceOutcomePublic] = Field(max_length=100)
+
+
+class AppFleetAdvanceRequest(BaseModel):
+    expected_published_revision_id: UUID
+    cursor: str | None = None
+
+
+class AppFleetAdvanceCountsPublic(BaseModel):
+    advanced: int
+    concurrent_change: int
+    incompatible: int
+
+
+class AppPinAdvanceOutcomePublic(BaseModel):
+    app_id: UUID
+    outcome: AppPinAdvanceOutcome
+    reason: AppPinAdvanceIncompatibleReason | None = None
+
+
+class AppFleetAdvancePublic(BaseModel):
+    run_id: UUID
+    next_cursor: str | None
+    counts: AppFleetAdvanceCountsPublic
+    outcomes: list[AppPinAdvanceOutcomePublic] = Field(max_length=100)
 
 
 class SkillRevisionRestoreRequest(BaseModel):

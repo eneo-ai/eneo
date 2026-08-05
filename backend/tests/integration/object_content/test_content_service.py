@@ -52,6 +52,8 @@ if TYPE_CHECKING:
         CompleteMultipartUploadRequestTypeDef,
         CreateMultipartUploadOutputTypeDef,
         CreateMultipartUploadRequestTypeDef,
+        GetObjectOutputTypeDef,
+        GetObjectRequestTypeDef,
         HeadObjectOutputTypeDef,
         HeadObjectRequestTypeDef,
         PutObjectOutputTypeDef,
@@ -122,6 +124,9 @@ class _DelayedSingleUploadClient:
             raise TimeoutError("test did not release the verification HEAD")
         return self._delegate.head_object(**cast("HeadObjectRequestTypeDef", request))
 
+    def get_object(self, **request: object) -> "GetObjectOutputTypeDef":
+        return self._delegate.get_object(**cast("GetObjectRequestTypeDef", request))
+
 
 class _DelayedMultipartUploadClient:
     def __init__(self, delegate: "S3Client") -> None:
@@ -155,6 +160,9 @@ class _DelayedMultipartUploadClient:
 
     def head_object(self, **request: object) -> "HeadObjectOutputTypeDef":
         return self._delegate.head_object(**cast("HeadObjectRequestTypeDef", request))
+
+    def get_object(self, **request: object) -> "GetObjectOutputTypeDef":
+        return self._delegate.get_object(**cast("GetObjectRequestTypeDef", request))
 
 
 async def _wait_for(event: Event) -> None:

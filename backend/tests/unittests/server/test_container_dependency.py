@@ -122,8 +122,7 @@ async def test_load_container_upload_admission_binds_one_immutable_snapshot(
     session = _Session(in_transaction=True)
     snapshot = UploadAdmissionSnapshot(
         policy_revision=8,
-        session_storage_target=StorageKind.OBJECT_STORE,
-        session_operator_ceiling_bytes=199,
+        new_write_storage_target=StorageKind.OBJECT_STORE,
         session_file_maximum_bytes=11,
         session_image_maximum_bytes=12,
         session_audio_maximum_bytes=13,

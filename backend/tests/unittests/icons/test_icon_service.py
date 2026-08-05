@@ -35,8 +35,7 @@ def service():
         object_content=AsyncMock(),
         upload_admission=UploadAdmissionSnapshot(
             policy_revision=7,
-            session_storage_target=StorageKind.OBJECT_STORE,
-            session_operator_ceiling_bytes=4,
+            new_write_storage_target=StorageKind.OBJECT_STORE,
             session_file_maximum_bytes=4,
             session_image_maximum_bytes=4,
             session_audio_maximum_bytes=4,
@@ -148,8 +147,7 @@ async def test_create_icon_returns_metadata_without_reading_captured_payload() -
         object_content=object_content,
         upload_admission=UploadAdmissionSnapshot(
             policy_revision=7,
-            session_storage_target=StorageKind.POSTGRES_INLINE,
-            session_operator_ceiling_bytes=20,
+            new_write_storage_target=StorageKind.POSTGRES_INLINE,
             session_file_maximum_bytes=20,
             session_image_maximum_bytes=20,
             session_audio_maximum_bytes=20,

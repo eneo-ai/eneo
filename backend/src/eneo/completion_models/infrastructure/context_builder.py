@@ -107,7 +107,8 @@ def _turn_tokens(
 # Share of the context window reserved for knowledge chunks in inject mode
 # (history is capped to the remainder). Inject mode is the legacy path and the
 # fallback for models without tool calling; tool mode retrieves on demand and
-# never reserves this budget.
+# enforces the same share as an aggregate admission cap on tool results
+# (see _ToolResultBudget in the tenant model adapter).
 MIN_PERCENTAGE_KNOWLEDGE = 0.5
 
 

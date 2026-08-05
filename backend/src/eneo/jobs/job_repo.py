@@ -8,7 +8,48 @@ from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.job_table import Jobs
 from eneo.jobs.job_manager import job_manager
-from eneo.jobs.job_models import Job, JobInDb, JobUpdate
+from eneo.jobs.job_models import (
+    KNOWLEDGE_TASKS,
+    Job,
+    JobFailureCode,
+    JobInDb,
+    JobUpdate,
+)
+from eneo.jobs.task_models import DispatchEnvelope
+
+KNOWLEDGE_REAPER_PAGE_SIZE = 50
+KNOWLEDGE_JOB_STALE_AFTER = timedelta(minutes=5)
+_IN_PROGRESS_SQL = sa.literal_column("'in progress'", type_=sa.String())
+_KNOWLEDGE_TASK_VALUES = tuple(task.value for task in KNOWLEDGE_TASKS)
+_KNOWLEDGE_TASKS_SQL = tuple(
+    sa.literal_column(f"'{task}'", type_=sa.String()) for task in _KNOWLEDGE_TASK_VALUES
+)
+
+
+def stale_in_progress_jobs_statement(stale_before: datetime):
+    candidates = (
+        sa.select(Jobs.id)
+        .where(Jobs.status == _IN_PROGRESS_SQL)
+        .where(Jobs.task.in_(_KNOWLEDGE_TASKS_SQL))
+        .where(Jobs.updated_at < stale_before)
+        .order_by(Jobs.updated_at.asc(), Jobs.id.asc())
+        .limit(KNOWLEDGE_REAPER_PAGE_SIZE)
+        .with_for_update(skip_locked=True)
+        .cte("stale_knowledge_jobs")
+    )
+    return (
+        sa.update(Jobs)
+        .where(Jobs.id.in_(sa.select(candidates.c.id)))
+        .where(Jobs.status == _IN_PROGRESS_SQL)
+        .values(
+            status="failed",
+            result_location=sa.null(),
+            failure_code=JobFailureCode.PROCESSING_INTERRUPTED.value,
+            finished_at=sa.func.now(),
+            updated_at=sa.func.now(),
+        )
+        .returning(Jobs.id, Jobs.task)
+    )
 
 
 class JobRepository:
@@ -24,6 +65,19 @@ class JobRepository:
     async def add_job(self, job: Job):
         return await self.delegate.add(job)
 
+    async def add_durable_knowledge_job(
+        self,
+        job: Job,
+        *,
+        job_id: UUID,
+        dispatch_envelope: DispatchEnvelope,
+    ) -> JobInDb:
+        return await self.delegate.add(
+            job,
+            id=job_id,
+            dispatch_envelope=dispatch_envelope.model_dump(mode="json"),
+        )
+
     async def update_job(self, id: UUID, job: JobUpdate):
         stmt = (
             sa.update(Jobs)
@@ -37,8 +91,8 @@ class JobRepository:
     async def get_job(self, id: UUID):
         return await self.delegate.get_by(conditions={Jobs.id: id})
 
-    async def touch_job(self, id: UUID) -> None:
-        """Update job's updated_at timestamp to signal 'still alive'.
+    async def touch_job(self, id: UUID) -> bool:
+        """Update an in-progress job's timestamp to signal 'still alive'.
 
         Used as a heartbeat during long-running tasks like crawls to prevent
         safe preemption from marking the job as stale.
@@ -46,8 +100,16 @@ class JobRepository:
         Args:
             id: Job UUID to touch
         """
-        stmt = sa.update(Jobs).where(Jobs.id == id).values(updated_at=sa.func.now())
-        await self.delegate.session.execute(stmt)
+        from eneo.main.models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .where(Jobs.status == Status.IN_PROGRESS)
+            .values(updated_at=sa.func.now())
+        )
+        result = await self.delegate.session.execute(stmt)
+        return affected_row_count(result) > 0
 
     async def mark_job_started(self, id: UUID) -> bool:
         """Atomically transition job from QUEUED to IN_PROGRESS.
@@ -81,7 +143,28 @@ class JobRepository:
         result = await self.delegate.session.execute(stmt)
         return affected_row_count(result) > 0
 
-    async def mark_job_failed_if_running(self, id: UUID, error_message: str) -> int:
+    async def mark_job_completed(self, id: UUID, result_location: str) -> bool:
+        from eneo.main.models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .where(Jobs.status == Status.IN_PROGRESS)
+            .values(
+                status=Status.COMPLETE,
+                result_location=result_location,
+                finished_at=sa.func.now(),
+                updated_at=sa.func.now(),
+            )
+        )
+        result = await self.delegate.session.execute(stmt)
+        return affected_row_count(result) > 0
+
+    async def mark_job_failed_if_running(
+        self,
+        id: UUID,
+        error_message: str | None,
+    ) -> int:
         """Atomically mark a job as FAILED only if it's currently IN_PROGRESS or QUEUED.
 
         Uses Compare-and-Swap pattern to prevent race conditions when multiple
@@ -103,6 +186,32 @@ class JobRepository:
             .where(Jobs.status.in_([Status.IN_PROGRESS, Status.QUEUED]))
             .values(
                 status=Status.FAILED,
+                result_location=error_message,
+                finished_at=sa.func.now(),
+                updated_at=sa.func.now(),
+            )
+        )
+        result = await self.delegate.session.execute(stmt)
+        return affected_row_count(result)
+
+    async def mark_knowledge_job_failed_if_running(
+        self,
+        id: UUID,
+        failure_code: JobFailureCode,
+    ) -> int:
+        """Fail an active knowledge job without persisting exception prose."""
+        from eneo.main.models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .where(Jobs.task.in_(_KNOWLEDGE_TASK_VALUES))
+            .where(Jobs.status.in_([Status.IN_PROGRESS, Status.QUEUED]))
+            .values(
+                status=Status.FAILED,
+                result_location=None,
+                failure_code=failure_code.value,
+                finished_at=sa.func.now(),
                 updated_at=sa.func.now(),
             )
         )
@@ -143,6 +252,15 @@ class JobRepository:
         )
         result = await self.delegate.session.execute(stmt)
         return [row[0] for row in result.all()]
+
+    async def mark_stale_in_progress_jobs_failed(
+        self,
+        stale_before: datetime,
+    ) -> list[tuple[UUID, str]]:
+        result = await self.delegate.session.execute(
+            stale_in_progress_jobs_statement(stale_before)
+        )
+        return [(row.id, row.task) for row in result.all()]
 
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)

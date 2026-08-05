@@ -126,9 +126,9 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     )
     session_service = AsyncMock(
         create_session=AsyncMock(return_value=session),
-        create_question_placeholder=AsyncMock(return_value=uuid4()),
+        create_question_placeholder=AsyncMock(return_value=(uuid4(), None)),
         create_session_with_question_placeholder=AsyncMock(
-            return_value=(session, uuid4())
+            return_value=(session, uuid4(), None)
         ),
     )
 
@@ -317,9 +317,9 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         assistant_template_service=AsyncMock(),
         session_service=AsyncMock(
             create_session=AsyncMock(return_value=session),
-            create_question_placeholder=AsyncMock(return_value=uuid4()),
+            create_question_placeholder=AsyncMock(return_value=(uuid4(), None)),
             create_session_with_question_placeholder=AsyncMock(
-                return_value=(session, uuid4())
+                return_value=(session, uuid4(), None)
             ),
         ),
         actor_manager=MagicMock(
@@ -397,9 +397,9 @@ async def test_ask_respects_disabled_mcp_server_ids():
         assistant_template_service=AsyncMock(),
         session_service=AsyncMock(
             create_session=AsyncMock(return_value=session),
-            create_question_placeholder=AsyncMock(return_value=uuid4()),
+            create_question_placeholder=AsyncMock(return_value=(uuid4(), None)),
             create_session_with_question_placeholder=AsyncMock(
-                return_value=(session, uuid4())
+                return_value=(session, uuid4(), None)
             ),
         ),
         actor_manager=MagicMock(
@@ -756,9 +756,9 @@ def _runtime_service(
     )
     session_service = AsyncMock(
         create_session=AsyncMock(return_value=session),
-        create_question_placeholder=AsyncMock(return_value=uuid4()),
+        create_question_placeholder=AsyncMock(return_value=(uuid4(), None)),
         create_session_with_question_placeholder=AsyncMock(
-            return_value=(session, uuid4())
+            return_value=(session, uuid4(), None)
         ),
         get_session_by_uuid=AsyncMock(return_value=session),
     )

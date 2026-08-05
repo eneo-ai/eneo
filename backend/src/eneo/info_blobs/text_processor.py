@@ -2,9 +2,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.files.text import TextExtractor
-from eneo.info_blobs.info_blob import InfoBlobAdd
+from eneo.info_blobs.info_blob import (
+    CapturedKnowledgeOriginal,
+    InfoBlobAdd,
+    InfoBlobInDB,
+    PreparedKnowledgeOriginal,
+)
 from eneo.info_blobs.info_blob_service import InfoBlobService
 from eneo.users.user import UserInDB
 
@@ -17,13 +21,11 @@ class TextProcessor:
         self,
         user: UserInDB,
         extractor: TextExtractor,
-        datastore: Datastore,
         info_blob_service: InfoBlobService,
     ):
         super().__init__()
         self.user = user
         self.extractor = extractor
-        self.datastore = datastore
         self.info_blob_service = info_blob_service
 
     async def process_file(
@@ -36,6 +38,7 @@ class TextProcessor:
         group_id: UUID | None = None,
         website_id: UUID | None = None,
         content_hash: bytes | None = None,
+        original: PreparedKnowledgeOriginal | None = None,
     ):
         text = self.extractor.extract(filepath, mimetype)
 
@@ -46,6 +49,72 @@ class TextProcessor:
             group_id=group_id,
             website_id=website_id,
             content_hash=content_hash,  # Pass hash for files too
+            original=original,
+        )
+
+    def _info_blob_add(
+        self,
+        *,
+        text: str,
+        title: str,
+        group_id: UUID | None,
+        website_id: UUID | None,
+        url: str | None,
+        content_hash: bytes | None,
+    ) -> InfoBlobAdd:
+        return InfoBlobAdd(
+            title=title,
+            user_id=self.user.id,
+            text=text,
+            group_id=group_id,
+            url=url,
+            website_id=website_id,
+            tenant_id=self.user.tenant_id,
+            content_hash=content_hash,
+        )
+
+    async def try_refresh_healthy_reupload(
+        self,
+        *,
+        text: str,
+        title: str,
+        embedding_model: "EmbeddingModel",
+        group_id: UUID,
+        original: CapturedKnowledgeOriginal,
+    ) -> InfoBlobInDB | None:
+        return await self.info_blob_service.try_refresh_healthy_reupload(
+            self._info_blob_add(
+                text=text,
+                title=title,
+                group_id=group_id,
+                website_id=None,
+                url=None,
+                content_hash=None,
+            ),
+            embedding_model=embedding_model,
+            original=original,
+        )
+
+    async def precheck_knowledge_publication_capacity(
+        self,
+        *,
+        text: str,
+        title: str,
+        embedding_model: "EmbeddingModel",
+        group_id: UUID,
+        original: CapturedKnowledgeOriginal,
+    ) -> None:
+        await self.info_blob_service.precheck_knowledge_publication_capacity(
+            self._info_blob_add(
+                text=text,
+                title=title,
+                group_id=group_id,
+                website_id=None,
+                url=None,
+                content_hash=None,
+            ),
+            embedding_model=embedding_model,
+            original=original,
         )
 
     async def process_text(
@@ -58,24 +127,19 @@ class TextProcessor:
         website_id: UUID | None = None,
         url: str | None = None,
         content_hash: bytes | None = None,
+        original: PreparedKnowledgeOriginal | None = None,
     ):
-        info_blob_add = InfoBlobAdd(
-            title=title,
-            user_id=self.user.id,
+        info_blob_add = self._info_blob_add(
             text=text,
+            title=title,
             group_id=group_id,
-            url=url,
             website_id=website_id,
-            tenant_id=self.user.tenant_id,
-            content_hash=content_hash,  # Used by files for hash checking
+            url=url,
+            content_hash=content_hash,
         )
 
-        info_blob = await self.info_blob_service.add_info_blob_without_validation(
-            info_blob_add
+        return await self.info_blob_service.publish_info_blob_without_validation(
+            info_blob_add,
+            embedding_model=embedding_model,
+            original=original,
         )
-        await self.datastore.add(info_blob=info_blob, embedding_model=embedding_model)
-        info_blob_updated = await self.info_blob_service.update_info_blob_size(
-            info_blob.id
-        )
-
-        return info_blob_updated

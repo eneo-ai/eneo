@@ -14,6 +14,7 @@ import {
   type Paginated,
   type UploadedFile,
   type ConversationMessage,
+  type ChatTurnDiagnostics,
   EneoError,
   type ConversationTools,
   type SSE
@@ -45,22 +46,35 @@ export class ChatService {
   hasMoreConversations = $derived(this.loadedConversations.length < this.totalConversations);
   #nextCursor = $state<string | null>(null);
 
+  debugPanelOpen = $state(false);
+  #pendingDiagnosticsMessageIds = $state<string[]>([]);
+  #failedDiagnosticsRefreshSessionId = $state<string | null>(null);
+  #activeDiagnosticsStreamGeneration: number | null = null;
+  pendingDiagnosticsMessageIds = $derived([...this.#pendingDiagnosticsMessageIds]);
+  pendingDiagnosticsRefreshFailed = $derived(
+    this.#failedDiagnosticsRefreshSessionId === this.currentConversation.id &&
+      this.#pendingDiagnosticsMessageIds.length > 0
+  );
+
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
 
-  // Context-window usage for the most recent turn. Split into input vs output
-  // so the bar can show what was sent to the LLM (system + MCP + RAG + history
-  // + question, lumped together in the provider's prompt_tokens) separately
-  // from what the model returned. Updated live via SSE token_usage and seeded
-  // from the last persisted message on conversation load.
+  // Context-window usage for the final provider request in the most recent
+  // turn. Skill activation and tool rounds can issue additional requests; their
+  // cumulative usage belongs to cost reporting, not to this headroom snapshot.
   lockedInputTokens = $state<number>(0);
   lockedOutputTokens = $state<number>(0);
+  // Subset of lockedInputTokens owned by the Skill runtime. It is displayed as
+  // a breakdown only and must never be added to contextTokens again.
+  lockedSkillTokens = $state<number>(0);
 
   // Assistant baseline applies only before the first turn of a bare assistant
   // chat. Once a conversation exists, the provider's prompt_tokens for the last
   // turn already include prompt + persistent attachments.
   assistantPromptTokens = $state<number>(0);
   assistantAttachmentTokens = $state<number>(0);
+  // Subset of assistantPromptTokens for the initial assistant baseline.
+  assistantSkillTokens = $state<number>(0);
   assistantBaselineTokens = $derived(this.assistantPromptTokens + this.assistantAttachmentTokens);
   contextTokens = $derived(
     this.assistantBaselineTokens + this.lockedInputTokens + this.lockedOutputTokens
@@ -204,6 +218,7 @@ export class ChatService {
     initialConversation?: Promise<Conversation | null> | Conversation | null;
     initialHistory?: Promise<Paginated<ConversationSparse>> | Paginated<ConversationSparse>;
   }) {
+    this.#resetConversationDiagnostics();
     this.#chatPartner = data.chatPartner;
 
     waitFor(data.initialHistory, {
@@ -216,11 +231,13 @@ export class ChatService {
 
     waitFor(data.initialConversation, {
       onLoaded: (initialConversation) => {
+        this.#resetConversationDiagnostics();
         this.currentConversation = initialConversation;
         this.#seedLockedFromHistory();
         this.#clearPreflight();
       },
       onNull: () => {
+        this.#resetConversationDiagnostics();
         this.currentConversation = emptyConversation();
         this.#resetLocked();
         this.#clearPreflight();
@@ -229,9 +246,25 @@ export class ChatService {
   }
 
   newConversation() {
+    this.#resetConversationDiagnostics();
     this.currentConversation = emptyConversation();
     this.#resetLocked();
     this.#clearPreflight();
+  }
+
+  setDebugPanelOpen(open: boolean) {
+    this.debugPanelOpen = open;
+    if (open && !this.askQuestion.isLoading) {
+      void this.#confirmPendingDiagnosticsMessages();
+    }
+  }
+
+  async getTurnDiagnostics(sessionId: string, messageId: string): Promise<ChatTurnDiagnostics> {
+    return await this.#eneo.conversations.getTurnDiagnostics({ sessionId, messageId });
+  }
+
+  async retryPendingDiagnosticsMetadata() {
+    await this.#confirmPendingDiagnosticsMessages();
   }
 
   async getToolCallResult(toolCallId: string): Promise<string | null> {
@@ -267,16 +300,15 @@ export class ChatService {
     // context fill — fixed when the user sends their next message and we
     // receive a fresh token_usage SSE event.
     const last = messages[messages.length - 1];
-    // Window occupancy, not spend: prefer the final-call prompt size; turns
-    // persisted before it was measured fall back to the (possibly summed)
-    // per-turn prompt tokens.
-    this.lockedInputTokens = last.num_tokens_context ?? last.num_tokens_question ?? 0;
-    this.lockedOutputTokens = last.num_tokens_answer ?? 0;
+    this.lockedInputTokens = last.context_prompt_tokens ?? last.num_tokens_question ?? 0;
+    this.lockedOutputTokens = last.context_completion_tokens ?? last.num_tokens_answer ?? 0;
+    this.lockedSkillTokens = last.skill_context_tokens ?? 0;
   }
 
   #resetLocked() {
     this.lockedInputTokens = 0;
     this.lockedOutputTokens = 0;
+    this.lockedSkillTokens = 0;
   }
 
   #clearPreflight(clearAssistantBaseline = true) {
@@ -288,6 +320,7 @@ export class ChatService {
     if (clearAssistantBaseline) {
       this.assistantPromptTokens = 0;
       this.assistantAttachmentTokens = 0;
+      this.assistantSkillTokens = 0;
     }
     this.pendingInputTokens = 0;
     this.pendingFileTokens = 0;
@@ -342,9 +375,11 @@ export class ChatService {
         if (this.#canRequestAssistantBaseline(partnerAtStart, conversationAtStart)) {
           this.assistantPromptTokens = res.prompt_tokens ?? 0;
           this.assistantAttachmentTokens = res.assistant_attachment_tokens ?? 0;
+          this.assistantSkillTokens = res.skill_context_tokens ?? 0;
         } else {
           this.assistantPromptTokens = 0;
           this.assistantAttachmentTokens = 0;
+          this.assistantSkillTokens = 0;
         }
         this.pendingModelName = res.model_name;
         this.pendingContextWindow = res.context_window;
@@ -353,6 +388,7 @@ export class ChatService {
         if (gen === this.#preflightGen) {
           this.assistantPromptTokens = 0;
           this.assistantAttachmentTokens = 0;
+          this.assistantSkillTokens = 0;
           this.pendingInputTokens = 0;
           this.pendingFileTokens = 0;
           this.pendingModelName = "";
@@ -499,6 +535,7 @@ export class ChatService {
   async loadConversation(conversation: { id: string }) {
     try {
       const loaded = await this.#eneo.conversations.get(conversation);
+      this.#resetConversationDiagnostics();
       this.currentConversation = loaded;
       this.#seedLockedFromHistory();
       this.#clearPreflight();
@@ -524,10 +561,12 @@ export class ChatService {
     ) {
       return;
     }
+    if (partnerChanged) {
+      this.newConversation();
+    }
     this.#chatPartner = newPartner;
 
     if (partnerChanged) {
-      this.newConversation();
       this.reloadHistory();
     }
   }
@@ -546,6 +585,7 @@ export class ChatService {
       // End any previous stream loop/buffer
       this.#finalizeStream();
       const streamGen = ++this.#streamGen;
+      this.#activeDiagnosticsStreamGeneration = streamGen;
       let inrefBuffer = "";
       let ref: ReturnType<typeof emptyMessage> | undefined;
       const isStale = () => this.#streamGen !== streamGen;
@@ -577,6 +617,7 @@ export class ChatService {
               ref =
                 this.currentConversation.messages[this.currentConversation.messages?.length - 1];
               Object.assign(ref, chunk);
+              this.#markDiagnosticsPending(ref.id);
               this.currentConversation.id = chunk.session_id;
               this.currentConversation.name = question;
             },
@@ -651,33 +692,27 @@ export class ChatService {
               if (event.eneo_event_type === "generating_image") {
                 if (!ref) return;
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
-              } else if (event.eneo_event_type === "token_usage") {
+              } else if (event.eneo_event_type === "token_usage" && "usage" in event) {
                 // The backend routes token_usage events through the same SSE
                 // channel as eneo events. Reflect them on the live message
                 // so reload-from-history matches the in-memory state, then
                 // expose the running context fill for the UI bar.
-                const usage = (
-                  event as unknown as {
-                    usage?: {
-                      prompt_tokens: number;
-                      completion_tokens: number;
-                      context_prompt_tokens?: number;
-                    };
-                  }
-                ).usage;
-                if (!usage) return;
+                const usage = event.usage;
                 if (ref) {
                   ref.num_tokens_question = usage.prompt_tokens;
                   ref.num_tokens_answer = usage.completion_tokens;
-                  ref.num_tokens_context = usage.context_prompt_tokens ?? null;
+                  ref.context_prompt_tokens = usage.context_prompt_tokens ?? usage.prompt_tokens;
+                  ref.context_completion_tokens =
+                    usage.context_completion_tokens ?? usage.completion_tokens;
+                  ref.skill_context_tokens = usage.skill_context_tokens;
                 }
-                // The bar shows window occupancy: the final LLM call's prompt,
-                // not the multi-round sum (that one feeds the cumulative-spend
-                // summary instead).
                 this.lockedInputTokens = usage.context_prompt_tokens ?? usage.prompt_tokens;
-                this.lockedOutputTokens = usage.completion_tokens;
+                this.lockedOutputTokens =
+                  usage.context_completion_tokens ?? usage.completion_tokens;
+                this.lockedSkillTokens = usage.skill_context_tokens;
                 this.assistantPromptTokens = 0;
                 this.assistantAttachmentTokens = 0;
+                this.assistantSkillTokens = 0;
               }
             },
             onToolCall: (event) => {
@@ -841,6 +876,7 @@ export class ChatService {
         } else if (error instanceof EneoError && !ref.answer) {
           // If streaming started but no content arrived yet, remove the empty message
           this.currentConversation.messages.pop();
+          this.#clearDiagnosticsPending(ref.id);
           console.error(error);
           throw error;
         } else {
@@ -865,6 +901,10 @@ export class ChatService {
 
           // Flush any remaining buffered content after stream completes
           this.#finalizeStream();
+          this.#activeDiagnosticsStreamGeneration = null;
+          if (this.debugPanelOpen) {
+            void this.#confirmPendingDiagnosticsMessages();
+          }
         }
       }
 
@@ -875,6 +915,55 @@ export class ChatService {
       // The $effect in constructor now handles automatic token calculation
     }
   );
+
+  #markDiagnosticsPending(messageId: string | null | undefined) {
+    if (!messageId || this.#pendingDiagnosticsMessageIds.includes(messageId)) return;
+    this.#pendingDiagnosticsMessageIds = [...this.#pendingDiagnosticsMessageIds, messageId];
+  }
+
+  #clearDiagnosticsPending(messageId: string | null | undefined) {
+    if (!messageId) return;
+    this.#pendingDiagnosticsMessageIds = this.#pendingDiagnosticsMessageIds.filter(
+      (pendingMessageId) => pendingMessageId !== messageId
+    );
+  }
+
+  #resetConversationDiagnostics() {
+    this.#finalizeStream();
+    this.#streamGen += 1;
+    this.#activeDiagnosticsStreamGeneration = null;
+    this.setDebugPanelOpen(false);
+    this.#pendingDiagnosticsMessageIds = [];
+    this.#failedDiagnosticsRefreshSessionId = null;
+  }
+
+  async #confirmPendingDiagnosticsMessages() {
+    // A manual retry must never replace or otherwise reconcile the live message
+    // while SSE callbacks still own it. The existing pending queue is drained by
+    // the terminal stream path above.
+    if (this.#activeDiagnosticsStreamGeneration !== null) return;
+
+    const sessionId = this.currentConversation.id;
+    const pendingMessageIds = [...this.#pendingDiagnosticsMessageIds];
+    if (!sessionId || pendingMessageIds.length === 0) return;
+
+    this.#failedDiagnosticsRefreshSessionId = null;
+    for (const messageId of pendingMessageIds) {
+      try {
+        await this.getTurnDiagnostics(sessionId, messageId);
+        if (this.currentConversation.id !== sessionId) return;
+        this.#clearDiagnosticsPending(messageId);
+      } catch (error) {
+        if (
+          this.currentConversation.id === sessionId &&
+          this.#pendingDiagnosticsMessageIds.includes(messageId)
+        ) {
+          this.#failedDiagnosticsRefreshSessionId = sessionId;
+        }
+        console.error("Could not confirm persisted turn metadata for diagnostics", error);
+      }
+    }
+  }
 
   // Fetch prompt tokens and effective limit from backend.
   // When loading an existing conversation, approximate history tokens from message text.

@@ -425,7 +425,7 @@
                 bind:bindings={$update.skill_bindings}
                 initialCatalogPage={data.skills}
                 bindingSummaries={data.skillBindings}
-                supportsActivationModes
+                activationSurface="assistant"
                 skillRuntime={data.skillRuntime}
                 canEditBindings={data.assistant.permissions?.includes("edit") ?? false}
                 canCreateSkills={$currentSpace.organization !== true &&

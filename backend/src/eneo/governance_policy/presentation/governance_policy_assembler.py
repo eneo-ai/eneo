@@ -54,7 +54,7 @@ class GovernancePolicyAssembler:
             ),
             skills=SkillsPolicyPublic(
                 bindings=[
-                    SkillAssembler.binding_to_summary(binding)
+                    SkillAssembler.assistant_binding_to_summary(binding)
                     for binding in (skill_bindings or [])
                 ]
             ),
