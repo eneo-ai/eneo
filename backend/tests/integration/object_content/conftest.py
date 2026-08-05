@@ -190,6 +190,7 @@ async def object_content_database(
         await session.execute(
             text(
                 "TRUNCATE TABLE "
+                "object_store_connections, "
                 "object_contents, "
                 "object_content_orphan_candidates, "
                 "object_content_multipart_candidates, "

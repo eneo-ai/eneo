@@ -826,7 +826,7 @@ class SkillRuntimePolicySnapshot:
 # Product-standard seeds. Reset restores these values, not a deployment's
 # migrated SKILL_MAX_BINDINGS environment seed.
 SKILL_RUNTIME_POLICY_DEFAULTS = SkillRuntimePolicy(
-    selective_activation_enabled=False,
+    selective_activation_enabled=True,
     max_attached_skills=100,
     context_share_percent=10,
     max_activations_per_turn=10,

@@ -123,6 +123,15 @@ _ON_DEMAND_REJECTION_MESSAGES: dict[SkillActivationFallbackReason, str] = {
         "The selected completion model cannot measure the Skill catalogue exactly"
     ),
 }
+_PERSONAL_CHAT_SAFE_FALLBACK_REASONS = frozenset(
+    {
+        SkillActivationFallbackReason.MODEL_LACKS_TOOL_CALLING,
+        SkillActivationFallbackReason.CATALOG_BUDGET_EXCEEDED,
+        SkillActivationFallbackReason.TOKEN_MEASUREMENT_UNAVAILABLE,
+    }
+)
+# Personal Chat can inherit a model that its policy editor did not choose. Those
+# model limitations degrade to Always-only; the tenant's off switch must not.
 _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES: dict[
     SkillActivationRejectionReason,
     str,
@@ -598,6 +607,7 @@ class AssistantService:
         completion_prompt_files: list[File],
         effective_mcp_servers: list["MCPServer"],
         preflight_adapter: "CompletionModelAdapter | None" = None,
+        allow_always_only_fallback: bool = False,
     ) -> None:
         """Validate one model-specific Skill plan using the runtime calculator."""
         runtime = validation_plan.to_activation_runtime(
@@ -606,9 +616,17 @@ class AssistantService:
             supports_tool_calling=model.supports_tool_calling,
         )
         snapshot = runtime.snapshot()
-        if (
+        # This exception is intentionally surface-scoped. Ordinary Assistant
+        # authors choose the model themselves and still fail closed.
+        uses_safe_fallback = bool(
             candidate_skill_ids
             and snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
+            and allow_always_only_fallback
+            and snapshot.fallback_reason in _PERSONAL_CHAT_SAFE_FALLBACK_REASONS
+        )
+        if candidate_skill_ids and (
+            snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
+            and not uses_safe_fallback
         ):
             message = (
                 _ON_DEMAND_REJECTION_MESSAGES.get(
@@ -620,7 +638,10 @@ class AssistantService:
             )
             raise SkillActivationUnavailableException(message)
 
-        assessments = runtime.assess_on_demand_candidates(candidate_skill_ids)
+        validated_candidate_skill_ids: frozenset[UUID] = (
+            frozenset() if uses_safe_fallback else candidate_skill_ids
+        )
+        assessments = runtime.assess_on_demand_candidates(validated_candidate_skill_ids)
         rejected_assessment = next(
             (
                 assessment
@@ -647,7 +668,7 @@ class AssistantService:
             files=completion_prompt_files,
         )
 
-        if not candidate_skill_ids and not effective_mcp_servers:
+        if not validated_candidate_skill_ids and not effective_mcp_servers:
             return
 
         provider_input = (
@@ -672,7 +693,7 @@ class AssistantService:
                 "model context window"
             )
         provider_assessments = runtime.assess_provider_payload_candidates(
-            candidate_skill_ids,
+            validated_candidate_skill_ids,
             messages=provider_input.messages,
             provider_tools=provider_input.tools,
             provider_input_token_limit=provider_input_token_limit,
@@ -777,6 +798,7 @@ class AssistantService:
             model=model,
             completion_prompt_files=completion_prompt_files,
             effective_mcp_servers=effective_mcp_servers,
+            allow_always_only_fallback=(assistant.is_default and space.is_personal()),
         )
 
     async def assert_assistant_fits_candidate_pin(
@@ -912,12 +934,6 @@ class AssistantService:
             for frozen in policy_validation_plan.available
             if frozen.binding.activation_mode is SkillActivationMode.ON_DEMAND
         )
-        if candidate_skill_ids and not effective_config.models_bounded_for_on_demand:
-            raise BadRequestException(
-                "On-demand Skills require explicit completion models; "
-                "provider-wide or unrestricted model access cannot be validated safely"
-            )
-
         requires_allowlist_adapters = bool(
             candidate_skill_ids
             or (
@@ -947,6 +963,7 @@ class AssistantService:
                         else []
                     ),
                     preflight_adapter=preflight_adapters[model.id],
+                    allow_always_only_fallback=True,
                 )
 
         # Walk the tenant's personal defaults one bounded page at a time — a
@@ -1084,6 +1101,7 @@ class AssistantService:
                 completion_prompt_files=completion_prompt_files,
                 effective_mcp_servers=effective_mcp_servers,
                 preflight_adapter=preflight_adapter,
+                allow_always_only_fallback=True,
             )
             del completion_prompt_files
 

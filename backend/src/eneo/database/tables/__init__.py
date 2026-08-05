@@ -35,6 +35,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.org_space_assistant_roles_table",
     "eneo.database.tables.object_content_table",
     "eneo.database.tables.object_content_policy_table",
+    "eneo.database.tables.object_store_connection_table",
     "eneo.database.tables.prompt_library_table",
     "eneo.database.tables.prompts_table",
     "eneo.database.tables.questions_table",

@@ -8,9 +8,9 @@ offline reference shipped beside the Compose templates.
 
 - Eneo runs normally without S3-compatible storage. PostgreSQL inline is the
   complete ready-to-use default.
-- Platform admins choose one deployment-wide target for eligible new File and
-  Icon writes in **Admin > Storage**. Policy changes need no backend or worker
-  restart.
+- Platform admins connect one approved S3-compatible destination and choose the
+  deployment-wide target for eligible new File and Icon writes in **Admin >
+  Storage**. These changes need no backend or worker restart.
 - PostgreSQL owns identity, SHA-256, size/type, references, access, retention,
   and lifecycle. Exactly one selected backend owns each payload.
 - Compatible object storage is optional. Enabling or selecting it never moves
@@ -34,8 +34,8 @@ silently after a failure.
 
 | Owner          | Responsibility                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Set the deployment-wide new-write target and business upload limits in **Admin > Storage**                                            |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
+| Platform admin | Connect one operator-approved destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; approve outbound endpoint origins and own TLS, certificates, capacity, backups, and process safety tuning |
 
 Tenant admins can review policy, effective limits, and capability status.
 Deployment-wide content inventory spans tenants, so only platform admins can
@@ -64,6 +64,31 @@ a separate migration workflow.
 
 ## Choose the endpoint
 
+For a new installation, the operator first sets Eneo's root encryption key and
+an exact allowlist of S3 endpoint origins. A platform admin can then enter the
+endpoint, bucket, signing region, and access keys in **Admin > Storage**. Eneo
+tests the destination before encrypting and saving the credentials. Saving the
+connection does not select it for new writes or move existing content.
+
+```dotenv
+OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS=["https://objects.example.se"]
+```
+
+The allowlist is an outbound network boundary, not administrator policy. An
+administrator who can store credentials must not also be able to make the
+backend contact an arbitrary network address. Values are exact HTTP(S) origins:
+scheme, host, and optional port, without a bucket name or path. Changing the
+allowlist requires a backend and worker restart; rotating access keys and
+changing storage policy do not. Do not remove an origin used by a saved admin
+connection: the backend then refuses to start until the origin is restored.
+
+Existing operator-managed connections supplied through `OBJECT_CONTENT_*`
+remain supported as trusted deployment input. When encrypted persistence is
+available, Eneo adopts that connection without changing its destination;
+otherwise it remains read-only in the admin interface. Do not configure the
+same destination through both paths. Add the adopted endpoint's origin to the
+allowlist before rotating its access keys in Admin.
+
 The optional `object-content` Compose profile starts an Eneo-built SeaweedFS
 4.40 service on the private `object_content_net`. The image is built from upstream commit
 `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`, not from an upstream image. Eneo
@@ -83,8 +108,11 @@ must pass the same tested subset:
 - bucket-scoped paginated object and multipart listing;
 - single-part `PUT`, `HEAD`, streaming `GET`, and one byte range;
 - multipart create, ordered part upload, complete, abort, and list;
-- object deletion with observable not-found convergence;
-- SHA-256 part/composite semantics for multipart where requested.
+- object deletion with observable not-found convergence.
+
+Eneo does not require AWS additional-checksum extensions from an external
+endpoint. Some compatible services implement them fully, some omit them, and
+some accept only the core multipart fields.
 
 Native range support is an endpoint conformance gate. Eneo fetches and verifies
 only the persisted upload chunks covering the requested interval before sending
@@ -92,10 +120,11 @@ response headers. Content migrated as one whole-object chunk retains its
 full-verification cost for range reads.
 
 Eneo computes the canonical full-byte SHA-256 incrementally over its own upload
-stream. S3 ETags, multipart composite checksums, CRCs, and user metadata never
-replace that digest. A bypassing upload, migration, restore, or ambiguous
-reconciliation must be fully streamed back and rehashed before it becomes
-available.
+stream and stores it in PostgreSQL. Every new remote write is streamed back and
+rehashed before it becomes available. S3 ETags, multipart composite checksums,
+CRCs, and user metadata never replace that digest. The same read-back contract
+also applies to a bypassing upload, migration, restore, or ambiguous
+reconciliation.
 
 For an external endpoint, set `OBJECT_CONTENT_ENDPOINT_URL`, TLS, addressing,
 signing region, bucket, credentials, and the stable deployment ID in `.env`,
@@ -442,10 +471,12 @@ bounded (1-32) and should be raised only after measuring PostgreSQL and endpoint
 capacity. Size the backend/worker temporary volume for concurrent in-flight
 upload and verified-read spools: memory use stops at the configured threshold,
 while the remainder uses temporary disk until each upload or verified response
-finishes. Full reads verify and spool the full object. Range reads fetch and
-verify only the persisted upload chunks covering the requested interval before
-response headers are sent. Their transfer and temporary-disk cost is the
-requested interval plus at most two chunk edges; existing rows migrated as one
+finishes. Account for one full remote read after each new remote write; this is
+the provider-neutral integrity check before publication. Full user reads verify
+and spool the full object. Range reads fetch and verify only the persisted upload
+chunks covering the requested interval before response headers are sent. Their
+transfer and temporary-disk cost is the requested interval plus at most two
+chunk edges; existing rows migrated as one
 whole-object chunk retain their previous full-verification cost. The chunk size
 is captured per object, so later multipart tuning cannot invalidate existing
 content. A range proves the chunks it covers; a full read still checks the

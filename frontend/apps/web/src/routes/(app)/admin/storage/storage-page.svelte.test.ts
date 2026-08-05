@@ -9,6 +9,9 @@ const getMoves = vi.hoisted(() => vi.fn());
 const queueMoves = vi.hoisted(() => vi.fn());
 const setMovesPaused = vi.hoisted(() => vi.fn());
 const replacePolicy = vi.hoisted(() => vi.fn());
+const getObjectStoreConnection = vi.hoisted(() => vi.fn());
+const createObjectStoreConnection = vi.hoisted(() => vi.fn());
+const rotateObjectStoreCredentials = vi.hoisted(() => vi.fn());
 const testUser = vi.hoisted(() => ({ isPlatformAdmin: false }));
 
 vi.mock("$lib/core/AppContext.js", () => ({
@@ -28,6 +31,11 @@ vi.mock("$lib/core/Eneo", () => ({
       queueMoves,
       setMovesPaused,
       replace: replacePolicy
+    },
+    objectStoreConnection: {
+      get: getObjectStoreConnection,
+      create: createObjectStoreConnection,
+      rotateCredentials: rotateObjectStoreCredentials
     }
   })
 }));
@@ -100,18 +108,18 @@ function policy(overrides: Record<string, unknown> = {}) {
       {
         use_case: "knowledge_file",
         configured_bytes: 50 * 1024 * 1024,
-        effective_bytes: 50 * 1024 * 1024,
-        storage_target: null,
-        operator_ceiling_bytes: null,
-        constraining_source: "admin_policy"
+        effective_bytes: 8 * 1024 * 1024,
+        storage_target: "postgres_inline",
+        operator_ceiling_bytes: 8 * 1024 * 1024,
+        constraining_source: "operator_ceiling"
       },
       {
         use_case: "knowledge_audio",
         configured_bytes: 100 * 1024 * 1024,
-        effective_bytes: 100 * 1024 * 1024,
-        storage_target: null,
-        operator_ceiling_bytes: null,
-        constraining_source: "admin_policy"
+        effective_bytes: 8 * 1024 * 1024,
+        storage_target: "postgres_inline",
+        operator_ceiling_bytes: 8 * 1024 * 1024,
+        constraining_source: "operator_ceiling"
       }
     ],
     capabilities: [
@@ -175,6 +183,20 @@ describe("admin storage settings page", () => {
     queueMoves.mockReset();
     setMovesPaused.mockReset();
     replacePolicy.mockReset();
+    getObjectStoreConnection.mockReset();
+    getObjectStoreConnection.mockResolvedValue({
+      source: "unconfigured",
+      configured: false,
+      credentials_can_be_managed: true,
+      revision: null,
+      endpoint_url: null,
+      region: null,
+      bucket: null,
+      addressing_style: null,
+      updated_at: null
+    });
+    createObjectStoreConnection.mockReset();
+    rotateObjectStoreCredentials.mockReset();
   });
 
   test("shows a loading state before rendering the sanitized deployment policy", async () => {
@@ -273,7 +295,7 @@ describe("admin storage settings page", () => {
       .toBeVisible();
   });
 
-  test("explains the knowledge-content exclusion shown by the effective limits", async () => {
+  test("explains knowledge-original routing and shows its effective limits", async () => {
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -281,7 +303,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(
         page.getByText(
-          "Applies to new file and icon content across this deployment. Knowledge content is always stored in the database and is not affected by this choice."
+          "Applies to new file and icon content and to originals from new knowledge file and audio uploads. Searchable knowledge stays in PostgreSQL. Existing content stays where it is; nothing moves automatically."
         )
       )
       .toBeVisible();
@@ -293,7 +315,12 @@ describe("admin storage settings page", () => {
       [...limitsTable.element().querySelectorAll("td")].filter(
         (cell) => cell.textContent === "storage_target_not_applicable"
       )
-    ).toHaveLength(2);
+    ).toHaveLength(0);
+    expect(
+      [...limitsTable.element().querySelectorAll("td")].filter(
+        (cell) => cell.textContent === "storage_target_postgres_inline"
+      )
+    ).toHaveLength(5);
   });
 
   test("shows localized policy governance metadata and links unavailable storage to its guide", async () => {
@@ -312,6 +339,284 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByRole("link", { name: "storage_settings_object_store_docs" }))
       .toHaveAttribute("href", "https://docs.eneo.ai/guides/object-content-storage");
+  });
+
+  test("tests and saves the first connection without changing the storage target", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    createObjectStoreConnection.mockResolvedValue({
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_add_action" }).click();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://objects.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_save" }).click();
+
+    expect(createObjectStoreConnection).toHaveBeenCalledWith({
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      access_key_id: "access-key",
+      secret_access_key: "secret-key",
+      addressing_style: "path"
+    });
+    await expect.element(page.getByText("storage_connection_created_title")).toBeVisible();
+    await expect
+      .element(page.getByRole("radio", { name: /storage_target_postgres_inline/ }))
+      .toBeChecked();
+  });
+
+  test("reloads the existing connection after a setup conflict", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    const configuredConnection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 1,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection
+      .mockReset()
+      .mockResolvedValueOnce({
+        source: "unconfigured",
+        configured: false,
+        credentials_can_be_managed: true,
+        revision: null,
+        endpoint_url: null,
+        region: null,
+        bucket: null,
+        addressing_style: null,
+        updated_at: null
+      })
+      .mockResolvedValueOnce(configuredConnection);
+    createObjectStoreConnection.mockRejectedValue(
+      new EneoError(
+        "Object storage is already configured",
+        "RESPONSE",
+        409,
+        0,
+        { code: "object_store_connection_already_configured" },
+        { endpoint: "POST@/admin/object-store-connection" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_add_action" }).click();
+    await page.getByLabelText("storage_connection_endpoint").fill("https://objects.example.test");
+    await page.getByLabelText("storage_connection_bucket").fill("eneo-content");
+    await page.getByLabelText("storage_connection_region").fill("se-1");
+    await page.getByLabelText("storage_connection_access_key").fill("access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_save" }).click();
+
+    await expect
+      .element(page.getByText("storage_connection_already_configured_title"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_create_title" }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByText("https://objects.example.test")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "storage_connection_add_action" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+    expect(getPolicy).toHaveBeenCalledTimes(2);
+  });
+
+  test("replaces the complete key pair without presenting the destination as editable", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection.mockResolvedValue(connection);
+    rotateObjectStoreCredentials.mockResolvedValue({ ...connection, revision: 4 });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+
+    await expect.element(page.getByText("storage_connection_current_destination")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_connection_destination_locked_help"))
+      .toBeVisible();
+    await expect
+      .element(page.getByLabelText("storage_connection_endpoint"))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByLabelText("storage_connection_bucket")).not.toBeInTheDocument();
+
+    await page.getByLabelText("storage_connection_access_key").fill("replacement-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("replacement-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    expect(rotateObjectStoreCredentials).toHaveBeenCalledWith({
+      expected_revision: 3,
+      access_key_id: "replacement-access-key",
+      secret_access_key: "replacement-secret-key"
+    });
+  });
+
+  test("reloads the connection revision after a concurrent credential rotation", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    let rejectConnectionReload!: (reason: unknown) => void;
+    getObjectStoreConnection
+      .mockResolvedValueOnce(connection)
+      .mockImplementationOnce(
+        () =>
+          new Promise<never>((_resolve, reject) => {
+            rejectConnectionReload = reject;
+          })
+      )
+      .mockResolvedValueOnce({ ...connection, revision: 4 });
+    rotateObjectStoreCredentials
+      .mockRejectedValueOnce(
+        new EneoError(
+          "The connection changed while it was being tested",
+          "RESPONSE",
+          409,
+          0,
+          { code: "object_store_connection_revision_conflict" },
+          { endpoint: "PUT@/admin/object-store-connection/credentials" }
+        )
+      )
+      .mockResolvedValueOnce({ ...connection, revision: 5 });
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await page.getByLabelText("storage_connection_access_key").fill("stale-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("stale-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_rotate_title" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+    await expect
+      .element(page.getByText("storage_connection_error_conflict_title"))
+      .not.toBeInTheDocument();
+
+    rejectConnectionReload(new Error("connection reload failed"));
+
+    await expect.element(page.getByText("storage_connection_load_error_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_connection_error_conflict_title"))
+      .not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: "retry" }).click();
+
+    await expect.element(page.getByText("storage_connection_error_conflict_title")).toBeVisible();
+    await expect
+      .element(page.getByText('storage_connection_revision {"revision":4}'))
+      .toBeVisible();
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await expect.element(page.getByLabelText("storage_connection_access_key")).toHaveValue("");
+    await expect.element(page.getByLabelText("storage_connection_secret_key")).toHaveValue("");
+    await page.getByLabelText("storage_connection_access_key").fill("current-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("current-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    expect(rotateObjectStoreCredentials).toHaveBeenNthCalledWith(2, {
+      expected_revision: 4,
+      access_key_id: "current-access-key",
+      secret_access_key: "current-secret-key"
+    });
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(3);
+    expect(getPolicy).toHaveBeenCalledTimes(3);
+  });
+
+  test("finishes connection and policy recovery when an uncertain save needs a retry", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    const connection = {
+      source: "admin",
+      configured: true,
+      credentials_can_be_managed: true,
+      revision: 3,
+      endpoint_url: "https://objects.example.test",
+      region: "se-1",
+      bucket: "eneo-content",
+      addressing_style: "path",
+      updated_at: "2026-08-03T18:00:00Z"
+    } as const;
+    getObjectStoreConnection
+      .mockResolvedValueOnce(connection)
+      .mockRejectedValueOnce(new Error("connection reload failed"))
+      .mockResolvedValueOnce({ ...connection, revision: 4 });
+    rotateObjectStoreCredentials.mockRejectedValue(
+      new EneoError(
+        "The database could not confirm the save",
+        "RESPONSE",
+        503,
+        0,
+        { code: "object_store_connection_mutation_outcome_unknown" },
+        { endpoint: "PUT@/admin/object-store-connection/credentials" }
+      )
+    );
+
+    render(StoragePage);
+
+    await page.getByRole("button", { name: "storage_connection_rotate_action" }).click();
+    await page.getByLabelText("storage_connection_access_key").fill("replacement-access-key");
+    await page.getByLabelText("storage_connection_secret_key").fill("replacement-secret-key");
+    await page.getByRole("button", { name: "storage_connection_test_and_rotate" }).click();
+
+    await expect
+      .element(page.getByText("storage_connection_mutation_outcome_unknown_title"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: "storage_connection_dialog_rotate_title" }))
+      .not.toBeInTheDocument();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(2);
+
+    await page.getByRole("button", { name: "retry" }).click();
+
+    await expect
+      .element(page.getByText('storage_connection_revision {"revision":4}'))
+      .toBeVisible();
+    expect(getObjectStoreConnection).toHaveBeenCalledTimes(3);
+    expect(getPolicy).toHaveBeenCalledTimes(2);
   });
 
   test("refreshes move progress and inventory independently without reloading policy", async () => {
@@ -1351,7 +1656,21 @@ describe("admin storage settings page", () => {
 
   test("shows all five effective limits plus bounded capability and inventory facts", async () => {
     testUser.isPlatformAdmin = true;
-    getPolicy.mockResolvedValue(policy());
+    const currentPolicy = policy();
+    getPolicy.mockResolvedValue(
+      policy({
+        limits: currentPolicy.limits.map((limit) =>
+          limit.use_case === "session_image"
+            ? {
+                ...limit,
+                effective_bytes: limit.configured_bytes,
+                operator_ceiling_bytes: 20 * 1024 * 1024,
+                constraining_source: "admin_policy"
+              }
+            : limit
+        )
+      })
+    );
 
     render(StoragePage);
 
@@ -1371,7 +1690,10 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByText("storage_readiness_object_store_not_configured").first())
       .toBeVisible();
-    await page.getByRole("button", { name: "storage_capabilities_caption" }).click();
+    const connectionSection = page.getByRole("region", { name: "storage_connection_title" });
+    await expect
+      .element(connectionSection.getByText("storage_connection_empty_title"))
+      .toBeVisible();
     await page.getByRole("button", { name: "storage_inventory_caption" }).click();
     await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
     await expect

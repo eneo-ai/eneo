@@ -1547,7 +1547,6 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        models_bounded_for_on_demand=True,
         governance_skill_resolution=SkillRuntimeResolution(
             eligible=(on_demand,),
             blocked=(),
@@ -1610,7 +1609,6 @@ async def test_governance_preflight_projects_each_personal_assistants_mcp_tools(
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        models_bounded_for_on_demand=True,
         governance_skill_resolution=SkillRuntimeResolution(
             eligible=(on_demand,),
             blocked=(),
@@ -1670,7 +1668,6 @@ async def test_governance_preflight_walks_every_page_of_personal_defaults():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        models_bounded_for_on_demand=True,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service = _service()
@@ -1743,7 +1740,6 @@ async def test_governance_preflight_does_not_load_unused_page_model_adapter():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        models_bounded_for_on_demand=True,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service = _service()
@@ -1831,7 +1827,6 @@ async def test_governance_preflight_hydrates_each_assistant_projection_separatel
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        models_bounded_for_on_demand=True,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service = _service()
@@ -1899,7 +1894,6 @@ async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        models_bounded_for_on_demand=True,
         governance_skill_resolution=SkillRuntimeResolution(
             eligible=(on_demand,),
             blocked=(),
@@ -1934,13 +1928,24 @@ async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
 
 
 @pytest.mark.asyncio
-async def test_governance_preflight_rejects_on_demand_for_unbounded_models():
+async def test_governance_preflight_validates_on_demand_against_the_current_unbounded_model():
     on_demand = _resolved_skill(
         name="On demand",
         position=0,
         activation_mode=SkillActivationMode.ON_DEMAND,
     )
+    assistant = _assistant_with_runtime_model()
     service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            )
+        ],
+        next_after=None,
+    )
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_personal_default.return_value = (
         SimpleNamespace(
@@ -1952,19 +1957,184 @@ async def test_governance_preflight_rejects_on_demand_for_unbounded_models():
             available_mcp_servers=[],
             prompt_enforced=False,
             enforced_prompt_text=None,
-            models_bounded_for_on_demand=False,
             governance_skill_resolution=SkillRuntimeResolution(
                 eligible=(on_demand,),
                 blocked=(),
             ),
         )
     )
+    service._validate_skill_activation_fit = AsyncMock()
 
-    with pytest.raises(
-        BadRequestException,
-        match="explicit completion models",
-    ):
-        await service.assert_personal_default_governance_context_fit()
+    await service.assert_personal_default_governance_context_fit()
+
+    service._validate_skill_activation_fit.assert_awaited_once()
+    assert (
+        service._validate_skill_activation_fit.await_args.kwargs["model"]
+        is assistant.completion_model
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "selective_activation_enabled",
+        "supports_tool_calling",
+        "measurement",
+        "expected_error",
+    ),
+    [
+        (
+            True,
+            False,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            None,
+        ),
+        (
+            True,
+            True,
+            SimpleNamespace(
+                tokens=1_001,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            None,
+        ),
+        (
+            True,
+            True,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.FALLBACK_ESTIMATE,
+            ),
+            None,
+        ),
+        (
+            False,
+            True,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            "disabled by the organisation runtime policy",
+        ),
+    ],
+    ids=("no-tool-support", "catalogue-too-large", "estimated", "disabled"),
+)
+@pytest.mark.asyncio
+async def test_personal_chat_only_keeps_on_demand_configuration_for_safe_fallbacks(
+    selective_activation_enabled,
+    supports_tool_calling,
+    measurement,
+    expected_error,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: measurement,
+    )
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.is_default = True
+    assistant.completion_model.supports_tool_calling = supports_tool_calling
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    space = MagicMock()
+    space.is_personal.return_value = True
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=effective_config)
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=selective_activation_enabled,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=3,
+            ),
+        )
+    )
+
+    if expected_error is not None:
+        with pytest.raises(BadRequestException, match=expected_error):
+            await service._validate_attachments_fit(
+                assistant,
+                space=space,
+                validate_all_on_demand_candidates=True,
+            )
+    else:
+        await service._validate_attachments_fit(
+            assistant,
+            space=space,
+            validate_all_on_demand_candidates=True,
+        )
+
+        service.completion_service.prepare_skill_activation_preflight.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_keeps_on_demand_for_current_model_without_tool_calling():
+    on_demand = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.supports_tool_calling = False
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(on_demand,),
+            blocked=(),
+        ),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_page.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                assistant=assistant,
+                configured_mcp_servers=(),
+                has_knowledge=False,
+            )
+        ],
+        next_after=None,
+    )
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_personal_default.return_value = (
+        effective_config
+    )
+
+    await service.assert_personal_default_governance_context_fit()
+
+    service.completion_service.prepare_skill_activation_preflight.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2000,7 +2170,6 @@ async def test_governance_preflight_validates_each_explicit_model_without_assist
             available_mcp_servers=[],
             prompt_enforced=False,
             enforced_prompt_text=None,
-            models_bounded_for_on_demand=True,
             governance_skill_resolution=SkillRuntimeResolution(
                 eligible=(on_demand,),
                 blocked=(),

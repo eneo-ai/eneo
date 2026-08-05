@@ -218,6 +218,7 @@ export class ChatService {
     initialConversation?: Promise<Conversation | null> | Conversation | null;
     initialHistory?: Promise<Paginated<ConversationSparse>> | Paginated<ConversationSparse>;
   }) {
+    this.#resetConversationDiagnostics();
     this.#chatPartner = data.chatPartner;
 
     waitFor(data.initialHistory, {
@@ -230,14 +231,14 @@ export class ChatService {
 
     waitFor(data.initialConversation, {
       onLoaded: (initialConversation) => {
+        this.#resetConversationDiagnostics();
         this.currentConversation = initialConversation;
-        this.#resetDiagnosticsMetadata();
         this.#seedLockedFromHistory();
         this.#clearPreflight();
       },
       onNull: () => {
+        this.#resetConversationDiagnostics();
         this.currentConversation = emptyConversation();
-        this.#resetDiagnosticsMetadata();
         this.#resetLocked();
         this.#clearPreflight();
       }
@@ -245,8 +246,8 @@ export class ChatService {
   }
 
   newConversation() {
+    this.#resetConversationDiagnostics();
     this.currentConversation = emptyConversation();
-    this.#resetDiagnosticsMetadata();
     this.#resetLocked();
     this.#clearPreflight();
   }
@@ -529,8 +530,8 @@ export class ChatService {
   async loadConversation(conversation: { id: string }) {
     try {
       const loaded = await this.#eneo.conversations.get(conversation);
+      this.#resetConversationDiagnostics();
       this.currentConversation = loaded;
-      this.#resetDiagnosticsMetadata();
       this.#seedLockedFromHistory();
       this.#clearPreflight();
       return loaded;
@@ -555,10 +556,12 @@ export class ChatService {
     ) {
       return;
     }
+    if (partnerChanged) {
+      this.newConversation();
+    }
     this.#chatPartner = newPartner;
 
     if (partnerChanged) {
-      this.newConversation();
       this.reloadHistory();
     }
   }
@@ -922,7 +925,11 @@ export class ChatService {
     );
   }
 
-  #resetDiagnosticsMetadata() {
+  #resetConversationDiagnostics() {
+    this.#finalizeStream();
+    this.#streamGen += 1;
+    this.#activeDiagnosticsStreamGeneration = null;
+    this.setDebugPanelOpen(false);
     this.#pendingDiagnosticsMessageIds = [];
     this.#failedDiagnosticsRefreshSessionId = null;
   }

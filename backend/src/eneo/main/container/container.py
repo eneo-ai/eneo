@@ -1102,7 +1102,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         file_size_service=file_size_service,
         job_service=job_service,
-        quota_service=quota_service,
+        object_content=object_content_service,
         upload_admission=upload_admission,
     )
     group_service = providers.Factory(
@@ -1124,9 +1124,6 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         actor_manager=actor_manager,
         group_service=group_service,
-    )
-    quota_service = providers.Factory(
-        QuotaService, user=user, info_blob_repo=info_blob_repo
     )
     allowed_origin_service = providers.Factory(
         AllowedOriginService,
@@ -1184,6 +1181,7 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         datastore=datastore,
+        object_content=object_content_service,
     )
     prompt_service = providers.Factory(
         PromptService, user=user, repo=prompt_repo, factory=prompt_factory

@@ -39,6 +39,7 @@ from eneo.object_content.content_service import (
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.object_content.lease import OperationCheckpoint
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.s3_object_store import (
     MultipartStarted,
     ObjectHead,
@@ -85,8 +86,10 @@ class _ControlledObjectContentService(ObjectContentService):
         super().__init__(
             real_object_store.settings,
             database,
-            object_store_settings=real_object_store.settings,
-            object_store=real_object_store.store,
+            object_store_provider=ObjectStoreProvider.fixed(
+                real_object_store.settings,
+                real_object_store.store,
+            ),
         )
         self._pause_before_publication = pause_before_publication
         self._cancel_after_publication = cancel_after_publication
@@ -94,15 +97,26 @@ class _ControlledObjectContentService(ObjectContentService):
         self.object_keys: tuple[str, ...] = ()
         self.paused = asyncio.Event()
 
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del object_store_revision
         assert storage_kind is StorageKind.OBJECT_STORE
 
     @asynccontextmanager
     async def upload_for_publication(
         self,
         contents: Sequence[CapturedContent],
+        *,
+        object_store_revision: int | None = None,
     ) -> AsyncGenerator[VerifiedObjectPublication]:
-        async with super().upload_for_publication(contents) as publication:
+        async with super().upload_for_publication(
+            contents,
+            object_store_revision=object_store_revision,
+        ) as publication:
             self.store_calls = len(publication.uploads)
             self.object_keys = tuple(
                 upload.object_key for upload in publication.uploads
@@ -121,8 +135,7 @@ def _snapshot(storage_target: StorageKind) -> UploadAdmissionSnapshot:
     maximum = 20 * 1024 * 1024
     return UploadAdmissionSnapshot(
         policy_revision=41,
-        session_storage_target=storage_target,
-        session_operator_ceiling_bytes=maximum,
+        new_write_storage_target=storage_target,
         session_file_maximum_bytes=maximum,
         session_image_maximum_bytes=maximum,
         session_audio_maximum_bytes=maximum,
@@ -668,15 +681,9 @@ async def test_generated_file_family_content_uses_operator_not_source_business_l
             ("inline-generated", StorageKind.POSTGRES_INLINE, inline_content),
             ("remote-generated", StorageKind.OBJECT_STORE, remote_content),
         ):
-            operator_maximum = (
-                real_object_store.settings.inline_maximum_bytes
-                if target is StorageKind.POSTGRES_INLINE
-                else real_object_store.settings.maximum_multipart_bytes
-            )
             snapshot = UploadAdmissionSnapshot(
                 policy_revision=42,
-                session_storage_target=target,
-                session_operator_ceiling_bytes=operator_maximum,
+                new_write_storage_target=target,
                 session_file_maximum_bytes=source_business_maximum,
                 session_image_maximum_bytes=source_business_maximum,
                 session_audio_maximum_bytes=source_business_maximum,

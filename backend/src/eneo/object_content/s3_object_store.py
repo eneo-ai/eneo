@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import io
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from hashlib import sha256
 from secrets import token_hex
 from tempfile import SpooledTemporaryFile
@@ -19,7 +19,11 @@ from botocore.exceptions import (
     BotoCoreError,
     ChecksumError,
     ClientError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
     FlexibleChecksumError,
+    ReadTimeoutError,
+    SSLError,
 )
 from botocore.response import StreamingBody
 from botocore.session import get_session
@@ -44,6 +48,7 @@ if TYPE_CHECKING:
 _SHA256_BYTES: Final = 32
 _BINDING_MEDIA_TYPE: Final = "application/vnd.eneo.object-content-binding"
 _BINDING_PREAMBLE: Final = b"eneo-object-content-binding-v1\n"
+_BINDING_PROBE_ID: Final = UUID(int=0)
 
 
 class ObjectStoreError(RuntimeError):
@@ -66,19 +71,27 @@ class ObjectStoreBindingError(ObjectStoreError):
     pass
 
 
+class ObjectStoreProbeCleanupError(ObjectStoreError):
+    pass
+
+
+class ObjectStoreFailureKind(StrEnum):
+    AUTHENTICATION = "authentication"
+    TLS = "tls"
+    CONNECTION = "connection"
+    UNAVAILABLE = "unavailable"
+
+
 @dataclass(frozen=True, slots=True)
 class StoreBindingCreation:
     binding_id: UUID
     body: bytes
-    checksum_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
 class ObjectHead:
     size_bytes: int
     media_type: str
-    checksum_sha256: str | None
-    checksum_type: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,20 +195,6 @@ def new_object_key(settings: ObjectContentSettings) -> str:
     return f"{settings.object_key_prefix}{token_hex(16)}"
 
 
-def composite_sha256(part_sha256: Sequence[bytes]) -> str:
-    """Return the S3 SHA-256 composite checksum; never a content digest."""
-    if not part_sha256 or any(len(digest) != _SHA256_BYTES for digest in part_sha256):
-        raise ValueError("part SHA-256 values must be non-empty 32-byte digests")
-    digest = sha256(b"".join(part_sha256)).digest()
-    return f"{base64.b64encode(digest).decode()}-{len(part_sha256)}"
-
-
-def _base64_sha256(digest: bytes) -> str:
-    if len(digest) != _SHA256_BYTES:
-        raise ValueError("canonical SHA-256 must be a 32-byte digest")
-    return base64.b64encode(digest).decode()
-
-
 def _client_error_code(error: ClientError) -> str:
     response = cast(Mapping[str, object], error.response)
     detail = response.get("Error")
@@ -204,6 +203,34 @@ def _client_error_code(error: ClientError) -> str:
     typed_detail = cast(Mapping[str, object], detail)
     code = typed_detail.get("Code")
     return str(code) if code is not None else "unknown"
+
+
+def classify_object_store_failure(error: BaseException) -> ObjectStoreFailureKind:
+    """Classify an SDK failure without exposing provider messages or credentials."""
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, ClientError):
+            if _client_error_code(current) in {
+                "401",
+                "403",
+                "AccessDenied",
+                "AuthorizationHeaderMalformed",
+                "ExpiredToken",
+                "InvalidAccessKeyId",
+                "InvalidToken",
+                "SignatureDoesNotMatch",
+            }:
+                return ObjectStoreFailureKind.AUTHENTICATION
+            return ObjectStoreFailureKind.UNAVAILABLE
+        if isinstance(current, SSLError):
+            return ObjectStoreFailureKind.TLS
+        if isinstance(
+            current,
+            (ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError),
+        ):
+            return ObjectStoreFailureKind.CONNECTION
+        current = current.__cause__
+    return ObjectStoreFailureKind.UNAVAILABLE
 
 
 def _create_client(
@@ -231,6 +258,8 @@ def _create_client(
                     "total_max_attempts": max_attempts,
                 },
                 s3={"addressing_style": settings.addressing_style},
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
             ),
         ),
     )
@@ -282,8 +311,11 @@ class S3ObjectStore:
 
     async def verify_binding(self, binding_id: UUID) -> bool:
         """Return whether this store has this database's immutable marker."""
+        return await self._verify_binding_at(self._binding_key, binding_id)
+
+    async def _verify_binding_at(self, key: str, binding_id: UUID) -> bool:
         expected = _BINDING_PREAMBLE + binding_id.bytes
-        observed = await self._read_binding()
+        observed = await self._read_binding(key)
         if observed is None:
             return False
         if observed != expected:
@@ -302,24 +334,49 @@ class S3ObjectStore:
 
         await self._require_empty_content_namespace()
         expected = _BINDING_PREAMBLE + binding_id.bytes
-        checksum = base64.b64encode(sha256(expected).digest()).decode()
         return StoreBindingCreation(
             binding_id=binding_id,
             body=expected,
-            checksum_sha256=checksum,
         )
 
     async def create_binding(self, creation: StoreBindingCreation) -> None:
         """Create a preflighted marker without replacing an existing marker."""
+        await self._create_binding_at(self._binding_key, creation)
+
+    async def probe_binding_creation(self) -> None:
+        """Exercise conditional marker creation at this deployment's key."""
+        creation = StoreBindingCreation(
+            binding_id=_BINDING_PROBE_ID,
+            body=_BINDING_PREAMBLE + _BINDING_PROBE_ID.bytes,
+        )
+        primary_error: BaseException | None = None
+        try:
+            await self._create_binding_at(self._binding_key, creation)
+        except BaseException as error:
+            primary_error = error
+
+        try:
+            await self._delete_binding_probe(self._binding_key, creation)
+        except ObjectStoreProbeCleanupError as cleanup_error:
+            if primary_error is not None:
+                raise cleanup_error from primary_error
+            raise
+        if primary_error is not None:
+            raise primary_error
+
+    async def _create_binding_at(
+        self,
+        key: str,
+        creation: StoreBindingCreation,
+    ) -> None:
         try:
             await asyncio.to_thread(
                 self._readiness_client.put_object,
                 Bucket=self._settings.bucket,
-                Key=self._binding_key,
+                Key=key,
                 Body=creation.body,
                 ContentLength=len(creation.body),
                 ContentType=_BINDING_MEDIA_TYPE,
-                ChecksumSHA256=creation.checksum_sha256,
                 IfNoneMatch="*",
             )
         except ClientError as error:
@@ -332,10 +389,38 @@ class S3ObjectStore:
                 "Object content storage binding failed"
             ) from error
 
-        if not await self.verify_binding(creation.binding_id):
+        if not await self._verify_binding_at(key, creation.binding_id):
             raise ObjectStoreBindingError(
                 "Object content storage binding marker was not persisted"
             )
+
+    async def _delete_binding_probe(
+        self,
+        key: str,
+        creation: StoreBindingCreation,
+    ) -> None:
+        try:
+            if not await self._verify_binding_at(key, creation.binding_id):
+                return
+            await asyncio.to_thread(
+                self._readiness_client.delete_object,
+                Bucket=self._settings.bucket,
+                Key=key,
+            )
+
+            deadline = monotonic() + self._settings.delete_visibility_timeout_seconds
+            while await self._verify_binding_at(key, creation.binding_id):
+                if monotonic() >= deadline:
+                    raise ObjectStoreProbeCleanupError(
+                        "Object content storage binding probe deletion was not visible"
+                    )
+                await asyncio.sleep(self._settings.delete_poll_interval_seconds)
+        except ObjectStoreProbeCleanupError:
+            raise
+        except (ObjectStoreError, BotoCoreError, ClientError) as error:
+            raise ObjectStoreProbeCleanupError(
+                "Object content storage binding probe cleanup failed"
+            ) from error
 
     async def upload(
         self,
@@ -346,19 +431,24 @@ class S3ObjectStore:
         operation_checkpoint: OperationCheckpoint | None = None,
     ) -> ObjectHead:
         self._require_owned_key(key)
-        if content.size_bytes >= self._settings.multipart_threshold_bytes:
-            head = await self._upload_multipart(
-                key,
-                content,
-                multipart_started=multipart_started,
-                operation_checkpoint=operation_checkpoint,
-            )
-        else:
-            head = await self._upload_single(
-                key,
-                content,
-                operation_checkpoint=operation_checkpoint,
-            )
+        try:
+            if content.size_bytes >= self._settings.multipart_threshold_bytes:
+                head = await self._upload_multipart(
+                    key,
+                    content,
+                    multipart_started=multipart_started,
+                    operation_checkpoint=operation_checkpoint,
+                )
+            else:
+                head = await self._upload_single(
+                    key,
+                    content,
+                    operation_checkpoint=operation_checkpoint,
+                )
+        except ObjectStoreNotFoundError as error:
+            raise ObjectStoreUnavailableError(
+                "Stored object disappeared before verification"
+            ) from error
         if head.size_bytes != content.size_bytes:
             raise ObjectStoreIntegrityError(
                 "Stored object length does not match intent"
@@ -376,10 +466,9 @@ class S3ObjectStore:
         *,
         operation_checkpoint: OperationCheckpoint | None,
     ) -> ObjectHead:
-        expected_checksum = _base64_sha256(content.sha256)
         content.file.seek(0)
         try:
-            result = await _run_mutation(
+            await _run_mutation(
                 operation_checkpoint,
                 lambda: asyncio.to_thread(
                     self._client.put_object,
@@ -388,28 +477,19 @@ class S3ObjectStore:
                     Body=content.file,
                     ContentLength=content.size_bytes,
                     ContentType=content.verified_media_type,
-                    ChecksumSHA256=expected_checksum,
                 ),
             )
         except (BotoCoreError, ClientError) as error:
             raise ObjectStoreUnavailableError("Object upload failed") from error
 
-        if result.get("ChecksumSHA256") != expected_checksum:
-            raise ObjectStoreIntegrityError(
-                "Object store did not confirm the full-object SHA-256"
-            )
-
         if operation_checkpoint is not None:
             await operation_checkpoint()
         head = await self.head(key)
-        if head.checksum_sha256 != expected_checksum:
-            raise ObjectStoreIntegrityError(
-                "Object store HEAD checksum does not match the upload"
-            )
-        if head.checksum_type not in {None, "FULL_OBJECT"}:
-            raise ObjectStoreIntegrityError(
-                "Unexpected checksum type for single upload"
-            )
+        await self._verify_stored_bytes(
+            key,
+            content,
+            operation_checkpoint=operation_checkpoint,
+        )
         return head
 
     async def _upload_multipart(
@@ -433,8 +513,6 @@ class S3ObjectStore:
                     Bucket=self._settings.bucket,
                     Key=key,
                     ContentType=content.verified_media_type,
-                    ChecksumAlgorithm="SHA256",
-                    ChecksumType="COMPOSITE",
                 ),
             )
             upload_id = created.get("UploadId")
@@ -451,8 +529,7 @@ class S3ObjectStore:
                 content,
                 operation_checkpoint=operation_checkpoint,
             )
-            expected_composite = composite_sha256(content.part_sha256)
-            completed = await _run_mutation(
+            await _run_mutation(
                 operation_checkpoint,
                 lambda: asyncio.to_thread(
                     self._client.complete_multipart_upload,
@@ -460,7 +537,6 @@ class S3ObjectStore:
                     Key=key,
                     UploadId=upload_id,
                     MultipartUpload={"Parts": completed_parts},
-                    ChecksumType="COMPOSITE",
                 ),
             )
         except ObjectStoreError:
@@ -470,25 +546,14 @@ class S3ObjectStore:
                 "Multipart object upload failed"
             ) from error
 
-        if (
-            "ChecksumSHA256" in completed
-            and completed["ChecksumSHA256"] != expected_composite
-        ):
-            raise ObjectStoreIntegrityError(
-                "Object store returned the wrong multipart composite SHA-256"
-            )
-        if completed.get("ChecksumType") not in {None, "COMPOSITE"}:
-            raise ObjectStoreIntegrityError("Unexpected multipart checksum type")
-
         if operation_checkpoint is not None:
             await operation_checkpoint()
         head = await self.head(key)
-        if head.checksum_sha256 != expected_composite:
-            raise ObjectStoreIntegrityError(
-                "Object store HEAD composite checksum does not match the parts"
-            )
-        if head.checksum_type not in {None, "COMPOSITE"}:
-            raise ObjectStoreIntegrityError("Unexpected multipart HEAD checksum type")
+        await self._verify_stored_bytes(
+            key,
+            content,
+            operation_checkpoint=operation_checkpoint,
+        )
         return head
 
     async def _upload_parts(
@@ -501,22 +566,17 @@ class S3ObjectStore:
     ) -> list[CompletedPartTypeDef]:
         completed_parts: list[CompletedPartTypeDef] = []
         transferred = 0
-        expected_part_count = (
+        part_count = (
             content.size_bytes + self._settings.multipart_part_bytes - 1
         ) // self._settings.multipart_part_bytes
-        if len(content.part_sha256) != expected_part_count:
-            raise ObjectStoreIntegrityError(
-                "Multipart part inventory has the wrong part count"
-            )
 
-        for index, part_digest in enumerate(content.part_sha256, start=1):
+        for index in range(1, part_count + 1):
             part_length = min(
                 self._settings.multipart_part_bytes,
                 content.size_bytes - transferred,
             )
             if part_length <= 0:
                 raise ObjectStoreIntegrityError("Multipart intent has an extra part")
-            expected_checksum = _base64_sha256(part_digest)
             part = _FileSlice(
                 content.file,
                 start=transferred,
@@ -534,13 +594,8 @@ class S3ObjectStore:
                     PartNumber=index,
                     Body=cast(BinaryIO, part),
                     ContentLength=part_length,
-                    ChecksumSHA256=expected_checksum,
                 ),
             )
-            if result.get("ChecksumSHA256") != expected_checksum:
-                raise ObjectStoreIntegrityError(
-                    "Object store did not confirm a part SHA-256"
-                )
             etag = result.get("ETag")
             if not etag:
                 raise ObjectStoreIntegrityError(
@@ -549,7 +604,6 @@ class S3ObjectStore:
             completed_parts.append(
                 {
                     "ETag": etag,
-                    "ChecksumSHA256": expected_checksum,
                     "PartNumber": index,
                 }
             )
@@ -561,6 +615,24 @@ class S3ObjectStore:
             )
         return completed_parts
 
+    async def _verify_stored_bytes(
+        self,
+        key: str,
+        content: CapturedContent,
+        *,
+        operation_checkpoint: OperationCheckpoint | None,
+    ) -> None:
+        persisted_sha256 = await self.recompute_sha256(
+            key,
+            expected_size_bytes=content.size_bytes,
+            expected_media_type=content.verified_media_type,
+            operation_checkpoint=operation_checkpoint,
+        )
+        if persisted_sha256 != content.sha256:
+            raise ObjectStoreIntegrityError(
+                "Stored object bytes do not match the upload"
+            )
+
     async def head(self, key: str) -> ObjectHead:
         self._require_owned_key(key)
         try:
@@ -568,7 +640,6 @@ class S3ObjectStore:
                 self._client.head_object,
                 Bucket=self._settings.bucket,
                 Key=key,
-                ChecksumMode="ENABLED",
             )
         except ClientError as error:
             if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
@@ -582,8 +653,6 @@ class S3ObjectStore:
         return ObjectHead(
             size_bytes=result.get("ContentLength", -1),
             media_type=result.get("ContentType", ""),
-            checksum_sha256=result.get("ChecksumSHA256"),
-            checksum_type=result.get("ChecksumType"),
         )
 
     @asynccontextmanager
@@ -600,7 +669,6 @@ class S3ObjectStore:
                 self._client.get_object,
                 Bucket=self._settings.bucket,
                 Key=key,
-                ChecksumMode="ENABLED",
             )
         except ClientError as error:
             if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
@@ -925,12 +993,12 @@ class S3ObjectStore:
     def _binding_key(self) -> str:
         return f"v1/.eneo-bindings/{self._settings.deployment_id.hex}"
 
-    async def _read_binding(self) -> bytes | None:
+    async def _read_binding(self, key: str) -> bytes | None:
         try:
             result = await asyncio.to_thread(
                 self._readiness_client.get_object,
                 Bucket=self._settings.bucket,
-                Key=self._binding_key,
+                Key=key,
             )
         except ClientError as error:
             if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:

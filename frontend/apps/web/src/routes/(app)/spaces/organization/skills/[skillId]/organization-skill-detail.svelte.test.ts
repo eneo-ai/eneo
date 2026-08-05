@@ -125,8 +125,18 @@ function unblockedState(): SkillExecutionBlockState {
 function publicationLifecycleData({
   skill = updatePendingSkill(),
   adoption = Promise.resolve(adoptionPage()),
-  advanceApps = vi.fn(),
-  advanceAssistants = vi.fn(),
+  advanceApps = vi.fn(async (): Promise<AppFleetAdvancePublic> => ({
+    run_id: "app-run-empty",
+    next_cursor: null,
+    counts: { advanced: 0, concurrent_change: 0, incompatible: 0 },
+    outcomes: []
+  })),
+  advanceAssistants = vi.fn(async (): Promise<AssistantFleetAdvancePublic> => ({
+    run_id: "assistant-run-empty",
+    next_cursor: null,
+    counts: { advanced: 0, concurrent_change: 0, incompatible: 0 },
+    outcomes: []
+  })),
   advancePersonalChat = vi.fn(),
   getAdoption = vi.fn(),
   publish = vi.fn(async () => {}),
@@ -789,10 +799,15 @@ describe("organisation Skill detail page", () => {
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
   });
 
-  test("offers binding updates only for publish and respects an unchecked choice", async () => {
+  test("defaults both publish scopes on and allows an App-only update", async () => {
     const pendingPublish = deferred<void>();
     const publish = vi.fn(() => pendingPublish.promise);
-    const advanceApps = vi.fn();
+    const advanceApps = vi.fn(async (): Promise<AppFleetAdvancePublic> => ({
+      run_id: "app-run-1",
+      next_cursor: null,
+      counts: { advanced: 1, concurrent_change: 0, incompatible: 0 },
+      outcomes: [{ app_id: "app-1", outcome: "advanced" }]
+    }));
     const advancePersonalChat = vi.fn();
     const advanceAssistants = vi.fn();
 
@@ -843,16 +858,17 @@ describe("organisation Skill detail page", () => {
     const updateApps = page.getByRole("checkbox", {
       name: m.organization_skills_publish_update_apps_label()
     });
-    await expect.element(updateApps).not.toBeChecked();
+    await expect.element(updateApps).toBeChecked();
     await expect
       .element(page.getByText(m.organization_skills_publish_update_apps_description()))
       .toBeVisible();
     await updateBindings.click();
     await expect.element(updateBindings).not.toBeChecked();
-    await expect.element(updateApps).toBeDisabled();
+    await expect.element(updateApps).toBeEnabled();
     await page.getByRole("button", { name: m.cancel() }).click();
     await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
     await expect.element(updateBindings).toBeChecked();
+    await expect.element(updateApps).toBeChecked();
     await updateBindings.click();
 
     await page
@@ -870,7 +886,18 @@ describe("organisation Skill detail page", () => {
     );
     expect(advancePersonalChat).not.toHaveBeenCalled();
     expect(advanceAssistants).not.toHaveBeenCalled();
-    expect(advanceApps).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(advanceApps).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_published_revision_id: "revision-2",
+        cursor: null
+      })
+    );
+    await expect
+      .element(
+        page.getByText(m.organization_skills_rollout_apps_progress({ updated: "1", total: "1" }))
+      )
+      .toBeVisible();
 
     await page
       .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
@@ -981,6 +1008,9 @@ describe("organisation Skill detail page", () => {
     });
 
     await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
+    await page
+      .getByRole("checkbox", { name: m.organization_skills_publish_update_apps_label() })
+      .click();
     await page
       .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
       .last()
@@ -1133,9 +1163,6 @@ describe("organisation Skill detail page", () => {
 
     await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
     await page
-      .getByRole("checkbox", { name: m.organization_skills_publish_update_apps_label() })
-      .click();
-    await page
       .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
       .last()
       .click();
@@ -1229,7 +1256,7 @@ describe("organisation Skill detail page", () => {
 
     await page.getByRole("button", { name: m.organization_skills_publish_update_action() }).click();
     await page
-      .getByRole("checkbox", { name: m.organization_skills_publish_update_apps_label() })
+      .getByRole("checkbox", { name: m.organization_skills_publish_update_bindings_label() })
       .click();
     await page
       .getByRole("button", { name: m.organization_skills_publish_action(), exact: true })
@@ -1328,7 +1355,9 @@ describe("organisation Skill detail page", () => {
     });
     expect(advancePersonalChat).not.toHaveBeenCalled();
     await expect
-      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
       .toBeVisible();
     await expect
       .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
@@ -1450,7 +1479,9 @@ describe("organisation Skill detail page", () => {
       .click();
 
     await expect
-      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
       .toBeVisible();
     await expect
       .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
@@ -1527,7 +1558,9 @@ describe("organisation Skill detail page", () => {
       .click();
 
     await expect
-      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
       .toBeVisible();
     await expect
       .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
@@ -1724,7 +1757,9 @@ describe("organisation Skill detail page", () => {
     });
     restartChunk.resolve(restartedResult);
     await expect
-      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
       .toBeVisible();
     await expect
       .element(
@@ -1942,11 +1977,13 @@ describe("organisation Skill detail page", () => {
       cursor: "cursor-2"
     });
     await expect
-      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
       .toBeVisible();
   });
 
-  test("starts a fresh Assistant walk from saved adoption after a remount", async () => {
+  test("updates every outdated binding scope from saved adoption after a remount", async () => {
     const advanceAssistants = vi.fn(async () => ({
       run_id: "run-2",
       next_cursor: null,
@@ -1960,6 +1997,12 @@ describe("organisation Skill detail page", () => {
         { assistant_id: "assistant-2", outcome: "advanced" as const }
       ]
     }));
+    const advanceApps = vi.fn(async (): Promise<AppFleetAdvancePublic> => ({
+      run_id: "app-run-2",
+      next_cursor: null,
+      counts: { advanced: 1, concurrent_change: 0, incompatible: 0 },
+      outcomes: [{ app_id: "app-1", outcome: "advanced" }]
+    }));
     const publishedRevision = revision(2);
     const published = publishedSkillAt(2);
     const adoption = {
@@ -1967,13 +2010,14 @@ describe("organisation Skill detail page", () => {
       summary: {
         ...adoptionPage().summary,
         assistant_count: 2,
-        behind_published_count: 2,
+        app_count: 1,
+        behind_published_count: 3,
         revision_counts: [
           {
             revision_id: "revision-1",
             revision_number: 1,
             assistant_count: 2,
-            app_count: 0,
+            app_count: 1,
             personal_chat_pinned: false
           }
         ]
@@ -1990,6 +2034,7 @@ describe("organisation Skill detail page", () => {
             current_revision: publishedRevision
           },
           adoption: Promise.resolve(adoption),
+          advanceApps,
           advanceAssistants
         }),
         published
@@ -2007,8 +2052,17 @@ describe("organisation Skill detail page", () => {
         cursor: null
       })
     );
+    await vi.waitFor(() =>
+      expect(advanceApps).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expected_published_revision_id: "revision-2",
+        cursor: null
+      })
+    );
     await expect
-      .element(page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }))
+      .element(
+        page.getByText(m.organization_skills_rollout_status_completed(), { exact: true }).first()
+      )
       .toBeVisible();
   });
 

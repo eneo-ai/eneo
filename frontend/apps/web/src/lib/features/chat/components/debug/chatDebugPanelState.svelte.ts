@@ -26,7 +26,6 @@ export class ChatDebugPanelState {
   refreshing = $state(false);
   loadError = $state(false);
   #selectionTouched = $state(false);
-  #previousContextKey = "";
   #lastRequestKey = "";
   #requestGeneration = 0;
 
@@ -86,15 +85,11 @@ export class ChatDebugPanelState {
     );
 
     $effect(() => {
-      const nextContextKey = this.#contextKey;
       const canOpen = isAvailable();
+      const open = chat.debugPanelOpen;
       untrack(() => {
-        if (!this.#previousContextKey) this.#previousContextKey = nextContextKey;
-        if (!canOpen || this.#previousContextKey !== nextContextKey) {
-          this.#previousContextKey = nextContextKey;
-          this.reset();
-          if (chat.debugPanelOpen) chat.setDebugPanelOpen(false);
-        }
+        if (!canOpen && open) chat.setDebugPanelOpen(false);
+        if (!canOpen || !open) this.reset();
       });
     });
 
@@ -124,7 +119,6 @@ export class ChatDebugPanelState {
 
   setOpen(open: boolean) {
     this.#chat.setDebugPanelOpen(open);
-    if (!open) this.reset();
   }
 
   reset() {
@@ -139,7 +133,7 @@ export class ChatDebugPanelState {
   }
 
   selectTurn(messageId: string) {
-    this.#selectionTouched = true;
+    this.#selectionTouched = messageId !== this.turns.at(-1)?.messageId;
     this.selectedMessageId = messageId;
   }
 

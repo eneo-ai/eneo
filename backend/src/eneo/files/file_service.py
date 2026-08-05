@@ -123,7 +123,7 @@ class FileService:
 
     async def save_file(self, upload_file: UploadFile) -> FileInfo:
         snapshot = self._require_upload_admission()
-        storage_target = snapshot.session_storage_target
+        storage_target = snapshot.new_write_storage_target
         if (
             storage_target is StorageKind.OBJECT_STORE
             and self.repo.session.in_transaction()
@@ -131,7 +131,10 @@ class FileService:
             raise RuntimeError(
                 "Object-store File admission requires a non-ambient transaction"
             )
-        await self._object_content.ensure_target_ready(storage_target)
+        await self._object_content.ensure_target_ready(
+            storage_target,
+            object_store_revision=snapshot.object_store_revision,
+        )
 
         async with self.protocol.prepare_upload(
             upload_file,
@@ -187,7 +190,8 @@ class FileService:
                     for entry in captured_file.contents
                 )
                 async with self._object_content.upload_for_publication(
-                    contents
+                    contents,
+                    object_store_revision=snapshot.object_store_revision,
                 ) as publication:
                     async with self._write_transaction():
                         return await self._publish_verified_family(
@@ -218,6 +222,11 @@ class FileService:
                     declared_media_type=pending.declared_media_type,
                     verified_media_type=pending.verified_media_type,
                     business_maximum_bytes=source_business_maximum_bytes,
+                    object_store_revision=(
+                        self._upload_admission.object_store_revision
+                        if self._upload_admission is not None
+                        else None
+                    ),
                 )
             )
             contents.append(
