@@ -22,6 +22,9 @@ SEED_VARIABLES = (
 def _alembic_cfg(database_url: str) -> Config:
     backend_dir = Path(__file__).parent.parent.parent.parent
     config = Config(str(backend_dir / "alembic.ini"))
+    # Absolute, so the seed-precedence tests below can chdir away from the
+    # backend directory without breaking migration discovery.
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
     config.set_main_option("sqlalchemy.url", database_url)
     return config
 
@@ -37,7 +40,21 @@ def seed_default_models():
 
 
 @pytest.fixture
-def round_trip_db(test_settings):
+def round_trip_db(test_settings, monkeypatch, tmp_path):
+    # Two separate .env leaks decide what this module's migration seeds, and
+    # both have to be closed or the tests read a developer's backend/.env
+    # instead of the values under test. The seed only lands on the first
+    # upgrade, so this has to cover the fixture's own upgrade too.
+    #
+    # 1. The policy migration itself reads a CWD-relative .env ahead of
+    #    os.environ — chdir to a directory that has none.
+    monkeypatch.chdir(tmp_path)
+    # 2. Revision 000000000000 calls load_dotenv() at import time, and Alembic
+    #    re-executes every version module on each command, so .env is copied
+    #    back into os.environ after any delenv here. find_dotenv walks up from
+    #    the migration file, so chdir does not reach it.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+
     config = _alembic_cfg(test_settings.sync_database_url)
     connection = psycopg2.connect(
         host=test_settings.postgres_host,

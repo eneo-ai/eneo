@@ -9,7 +9,6 @@ from eneo.object_content.object_store_connection import (
 )
 
 
-@pytest.mark.asyncio
 async def test_connection_table_outage_does_not_stop_startup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

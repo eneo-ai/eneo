@@ -55,7 +55,15 @@ cd backend
 uv run pytest tests/unit/spaces -q                  # one dir
 uv run pytest tests/integration/skills -q           # one integration domain
 uv run pytest tests/path/test_file.py::test_name    # one test
-uv run pytest -m migration_isolation tests/integration/migrations -q
+uv run pytest -m migration_isolation tests/integration/migrations/test_one.py -q
+```
+
+The migration suite needs one pytest process per file — the Postgres container
+is session-scoped, so a shared process lets one file's leftover revision break
+the next. Run the whole suite through the wrapper that enforces that:
+
+```bash
+scripts/run_migration_tests.sh -q
 ```
 
 Notes:

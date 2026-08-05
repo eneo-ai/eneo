@@ -253,7 +253,10 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
 ) -> None:
     database_url, config = migration_database
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [_NORMALIZATION_REVISION]
+    # Single head, not a specific one: pinning the id here would make every
+    # subsequent migration fail this test. The head's identity is guarded by
+    # tests/unit/test_alembic_migration_graph.py.
+    assert len(script.get_heads()) == 1
     seeded = _seed_legacy_owners(database_url)
     _assert_byte_bounded_page_plan(
         database_url,

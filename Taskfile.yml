@@ -53,9 +53,8 @@ tasks:
 
   test:migrations:
     desc: "Alembic downgrade/upgrade suite (slow; one container per file)"
-    dir: ./backend
     cmds:
-      - uv run pytest -m migration_isolation tests/integration/migrations -q
+      - scripts/run_migration_tests.sh -q
 
   # --- Quality gates (enforced) ---------------------------------------------
   # `task check` is the single aggregated, deterministic pass/fail signal:

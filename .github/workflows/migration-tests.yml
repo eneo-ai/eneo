@@ -89,12 +89,12 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run migration isolation tests
-        # Serial on purpose: each file boots its own Postgres container and
-        # walks the schema down and back up.
-        run: >-
-          uv run pytest -v -m migration_isolation
-          --durations=25 --durations-min=1.0
-          tests/integration/migrations/
+        # Serial on purpose, one pytest process per file: each file boots its
+        # own Postgres container and walks the schema down and back up, so
+        # sharing a process (and therefore a container) would let one file's
+        # leftover revision break the next.
+        working-directory: .
+        run: scripts/run_migration_tests.sh -v --durations=25 --durations-min=1.0
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
