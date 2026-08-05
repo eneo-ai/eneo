@@ -15,7 +15,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow import FlowPersistedJsonObject, RuntimeInputExecutionMode
 from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
@@ -207,13 +207,28 @@ def complete_structured_source_reader_fields(
     fields: tuple[StructuredFieldDraft, ...],
     *,
     required_fields: tuple[SourceCaptureField, ...],
+    runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call",
 ) -> tuple[StructuredFieldDraft, ...]:
+    completed = _add_missing_source_reader_fields(
+        list(fields),
+        required_fields=_dedupe_capture_fields(list(required_fields)),
+    )
     return tuple(
-        _add_missing_source_reader_fields(
-            list(fields),
-            required_fields=_dedupe_capture_fields(list(required_fields)),
+        _with_source_identity_contract(
+            completed,
+            runtime_input_execution_mode=runtime_input_execution_mode,
         )
     )
+
+
+def runtime_owned_source_identity_field_names(
+    *,
+    runtime_input_execution_mode: RuntimeInputExecutionMode,
+    previous_item_map_enabled: bool,
+) -> frozenset[str]:
+    if runtime_input_execution_mode == "per_source" or previous_item_map_enabled:
+        return frozenset({"source_label", "source_file_id"})
+    return frozenset()
 
 
 def source_contract_shadow_form_field_names(
@@ -447,6 +462,55 @@ def _ensure_source_label_field(
         ),
         *fields,
     ]
+
+
+def _with_source_identity_contract(
+    fields: list[StructuredFieldDraft],
+    *,
+    runtime_input_execution_mode: RuntimeInputExecutionMode,
+) -> list[StructuredFieldDraft]:
+    updated_fields: list[StructuredFieldDraft] = []
+    for field in fields:
+        if not _structured_field_is_documents_array(field):
+            updated_fields.append(field)
+            continue
+        source_label_description = (
+            "Runtime-provided source label from uploaded file metadata."
+            if runtime_input_execution_mode == "per_source"
+            else "Model-emitted source label copied from the source document."
+        )
+        item_fields: list[StructuredFieldDraft] = []
+        for item in field.item_fields or ():
+            if item.name == "source_label":
+                item_fields.append(
+                    item.model_copy(
+                        update={
+                            "field_type": "string",
+                            "description": source_label_description,
+                            "fields": None,
+                            "item_fields": None,
+                        }
+                    )
+                )
+                continue
+            if item.name == "source_file_id":
+                if runtime_input_execution_mode == "per_source":
+                    item_fields.append(
+                        item.model_copy(
+                            update={
+                                "field_type": "string",
+                                "description": (
+                                    "Runtime-provided file id for this source document."
+                                ),
+                                "fields": None,
+                                "item_fields": None,
+                            }
+                        )
+                    )
+                continue
+            item_fields.append(item)
+        updated_fields.append(field.model_copy(update={"item_fields": item_fields}))
+    return updated_fields
 
 
 def _add_runtime_source_file_id_field(

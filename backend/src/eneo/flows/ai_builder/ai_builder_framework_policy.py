@@ -238,7 +238,13 @@ def has_explicit_structured_answer(
 def aggregate_unprompted_user_text(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
 ) -> str:
-    return _aggregate_user_text(conversation)
+    return _aggregate_user_text(conversation, preserve_case=False)
+
+
+def aggregate_unprompted_user_text_preserving_case(
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
+) -> str:
+    return _aggregate_user_text(conversation, preserve_case=True)
 
 
 def extract_freeform_user_messages(
@@ -277,6 +283,8 @@ def extract_freeform_user_messages(
 
 def _aggregate_user_text(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
+    *,
+    preserve_case: bool,
 ) -> str:
     parts: list[str] = []
     for message in conversation:
@@ -304,7 +312,7 @@ def _aggregate_user_text(
             content, question_answer
         ):
             continue
-        parts.append(content.casefold())
+        parts.append(content if preserve_case else content.casefold())
     return "\n".join(parts)
 
 

@@ -6,6 +6,10 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    CreateCompileContext,
+    compile_create_intent_to_spec,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderEditApproval,
     FlowBuilderProposal,
@@ -24,6 +28,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    parse_create_flow_intent_arguments,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
@@ -37,6 +44,8 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+from eneo.flows.ai_builder.planning_state import ReportDisposition
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -378,6 +387,107 @@ async def test_finalize_compiled_proposal_preserves_contextual_quality_issue_cod
     assert result.feedback is not None
     assert "Quality issues" in result.feedback
     store_plan.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "report_disposition",
+    ["per_source_sections", "synthesized_overview", "both"],
+)
+@pytest.mark.parametrize(
+    "requested_output_sections",
+    [
+        RequestedOutputSections.empty(),
+        RequestedOutputSections(
+            sections=(
+                "Résumé",
+                "Findings",
+                "Analysis",
+                "Recommendations",
+            ),
+            confidence="high",
+        ),
+    ],
+    ids=["no-named-sections", "named-sections"],
+)
+@pytest.mark.asyncio
+async def test_finalize_compiler_lowered_report_enforces_named_section_coverage(
+    report_disposition: ReportDisposition,
+    requested_output_sections: RequestedOutputSections,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source report",
+            "plan_rationale": "Extract source evidence and render the report.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the requested report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+    spec = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition=report_disposition,
+            requested_output_sections=requested_output_sections,
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+    if requested_output_sections.sections:
+        compose_bindings = str(spec.steps[-2].input_bindings)
+        assert all(
+            section in compose_bindings
+            for section in requested_output_sections.sections
+        )
+    compiled = CompiledProposal(
+        content=FlowBuilderProposalContent(
+            spec=spec,
+            plan_rationale="Extract source evidence and render the report.",
+        ),
+        validation=validate_spec(spec),
+    )
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await _make_finalizer().finalize_compiled_proposal(
+            _make_request(
+                compiled=compiled,
+                requested_output_sections=requested_output_sections,
+            )
+        )
+
+    assert result.feedback is None
+    assert [event.event for event in result.events] == ["plan"]
+    store_plan.assert_awaited_once()
 
 
 @pytest.mark.asyncio

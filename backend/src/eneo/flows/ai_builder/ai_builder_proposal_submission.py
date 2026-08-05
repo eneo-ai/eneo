@@ -438,6 +438,7 @@ class ProposalSubmissionOwner:
                 available_kb_refs=invocation.available_kb_refs,
                 resource_catalog=invocation.resource_catalog,
                 planning_state=planning_state,
+                requested_output_sections=requested_output_sections,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
             )

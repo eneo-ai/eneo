@@ -42,7 +42,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_unprompted_user_text,
+    aggregate_unprompted_user_text_preserving_case,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -331,7 +331,7 @@ def build_proposal_prepared(
     section_signal_text = "\n".join(
         part
         for part in (
-            aggregate_unprompted_user_text(conversation),
+            aggregate_unprompted_user_text_preserving_case(conversation),
             build_requirements_signal_text(confirmed_requirements),
         )
         if part
@@ -354,6 +354,7 @@ def build_proposal_prepared(
     compile_context = create_compile_context_from_planning_state(
         planning_state,
         ui_language=ui_language,
+        requested_output_sections=requested_output_sections,
     )
     incompatible_field_names = (
         compile_context.incompatible_confirmed_form_field_names

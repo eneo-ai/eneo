@@ -8,6 +8,9 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     StructuredFieldDraft,
 )
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSectionContract,
+)
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
     source_capture_fields_from_terminal_schema,
@@ -107,6 +110,12 @@ class PlannedStep:
 
 
 @dataclass(frozen=True, slots=True)
+class DocumentReportSectionSource:
+    producer_ref: str
+    field_name: str
+
+
+@dataclass(frozen=True, slots=True)
 class FlowAssemblyPlan:
     flow_name: str
     flow_description: str
@@ -116,6 +125,8 @@ class FlowAssemblyPlan:
     source_reader_required_fields: tuple[SourceCaptureField, ...]
     aggregation_intent: AggregationIntent
     ui_language: str | None
+    requested_output_section_contracts: tuple[RequestedOutputSectionContract, ...] = ()
+    document_report_section_source: DocumentReportSectionSource | None = None
 
     def __post_init__(self) -> None:
         if not self.steps:

@@ -22,7 +22,10 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousOutputRef,
     StructuredFieldDraft,
 )
-from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    SourceCaptureField,
+    runtime_owned_source_identity_field_names,
+)
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -535,6 +538,10 @@ def compile_assistant_instructions(
             if assistant_output_fields is not None
             else step_draft.output_fields
         ),
+        runtime_managed_field_names=runtime_owned_source_identity_field_names(
+            runtime_input_execution_mode=step_draft.runtime_input_execution_mode,
+            previous_item_map_enabled=step_draft.previous_item_map_enabled,
+        ),
     )
 
 
@@ -924,6 +931,7 @@ def _append_output_field_guidance(
     *,
     instructions: str,
     output_fields: list[StructuredFieldDraft] | None,
+    runtime_managed_field_names: frozenset[str],
 ) -> str:
     if not output_fields:
         return instructions
@@ -933,7 +941,12 @@ def _append_output_field_guidance(
     guidance_lines.extend(
         f"- {field.name}: {field.description}" for field in top_level_fields
     )
-    guidance_lines.extend(_nested_output_field_guidance(output_fields))
+    guidance_lines.extend(
+        _nested_output_field_guidance(
+            output_fields,
+            runtime_managed_field_names=runtime_managed_field_names,
+        )
+    )
     if not guidance_lines:
         return instructions
 
@@ -943,6 +956,7 @@ def _append_output_field_guidance(
 def _nested_output_field_guidance(
     output_fields: list[StructuredFieldDraft],
     *,
+    runtime_managed_field_names: frozenset[str],
     parent_path: str = "",
 ) -> list[str]:
     lines: list[str] = []
@@ -951,8 +965,14 @@ def _nested_output_field_guidance(
             continue
         field_path = f"{parent_path}.{field.name}" if parent_path else field.name
         if field.field_type == "array" and field.item_fields:
-            runtime_item_names = _runtime_managed_field_name_list(field.item_fields)
-            item_names = _model_emitted_field_name_list(field.item_fields)
+            runtime_item_names = _runtime_managed_field_name_list(
+                field.item_fields,
+                runtime_managed_field_names=runtime_managed_field_names,
+            )
+            item_names = _model_emitted_field_name_list(
+                field.item_fields,
+                runtime_managed_field_names=runtime_managed_field_names,
+            )
             if runtime_item_names:
                 lines.append(
                     f"Runtime-managed fields for items of {field_path}: "
@@ -967,12 +987,19 @@ def _nested_output_field_guidance(
             lines.extend(
                 _nested_output_field_guidance(
                     field.item_fields,
+                    runtime_managed_field_names=runtime_managed_field_names,
                     parent_path=f"{field_path}[]",
                 )
             )
         elif field.field_type == "object" and field.fields:
-            runtime_object_names = _runtime_managed_field_name_list(field.fields)
-            object_names = _model_emitted_field_name_list(field.fields)
+            runtime_object_names = _runtime_managed_field_name_list(
+                field.fields,
+                runtime_managed_field_names=runtime_managed_field_names,
+            )
+            object_names = _model_emitted_field_name_list(
+                field.fields,
+                runtime_managed_field_names=runtime_managed_field_names,
+            )
             if runtime_object_names:
                 lines.append(
                     f"Runtime-managed fields for object {field_path}: "
@@ -987,28 +1014,32 @@ def _nested_output_field_guidance(
             lines.extend(
                 _nested_output_field_guidance(
                     field.fields,
+                    runtime_managed_field_names=runtime_managed_field_names,
                     parent_path=field_path,
                 )
             )
     return lines
 
 
-_RUNTIME_MANAGED_OUTPUT_FIELD_NAMES: frozenset[str] = frozenset(
-    {"source_label", "source_file_id"}
-)
-
-
-def _model_emitted_field_name_list(fields: list[StructuredFieldDraft]) -> str:
+def _model_emitted_field_name_list(
+    fields: list[StructuredFieldDraft],
+    *,
+    runtime_managed_field_names: frozenset[str],
+) -> str:
     return ", ".join(
         field.name
         for field in fields
-        if field.name and field.name not in _RUNTIME_MANAGED_OUTPUT_FIELD_NAMES
+        if field.name and field.name not in runtime_managed_field_names
     )
 
 
-def _runtime_managed_field_name_list(fields: list[StructuredFieldDraft]) -> str:
+def _runtime_managed_field_name_list(
+    fields: list[StructuredFieldDraft],
+    *,
+    runtime_managed_field_names: frozenset[str],
+) -> str:
     return ", ".join(
         field.name
         for field in fields
-        if field.name and field.name in _RUNTIME_MANAGED_OUTPUT_FIELD_NAMES
+        if field.name and field.name in runtime_managed_field_names
     )

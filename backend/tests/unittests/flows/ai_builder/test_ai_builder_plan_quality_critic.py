@@ -3921,6 +3921,104 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
             "to pull structured fields from earlier predecessors"
         )
 
+    def test_compiler_report_exemption_rejects_unbound_downstream_producer(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Source risk report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Read documents",
+                    "Extract source evidence.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "documents": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {"summary": {"type": "string"}},
+                                },
+                            }
+                        },
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Build source sections",
+                    "Build source sections.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "source_sections": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "section_title": {"type": "string"},
+                                        "section_body": {"type": "string"},
+                                        "source_label": {"type": "string"},
+                                    },
+                                },
+                            }
+                        },
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Assess risks",
+                    "Assess risks across source sections.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("risk_assessment"),
+                ),
+                _step(
+                    "step_d",
+                    "Compose report",
+                    "Compose the report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.TEXT,
+                    output_mode=OutputMode.COMPOSE_TEXT,
+                    input_bindings={
+                        "question": "# Source report",
+                        "source_refs": [
+                            {
+                                "step_ref": "step_b",
+                                "output": "structured",
+                                "field_path": "source_sections",
+                                "item_template": (
+                                    "## {section_title}\n\n{section_body}\n\n"
+                                    "Source: {source_label}"
+                                ),
+                            }
+                        ],
+                    },
+                ),
+                _step(
+                    "step_e",
+                    "Render PDF",
+                    "Render the report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                    output_mode=OutputMode.RENDER_VERBATIM,
+                ),
+            ],
+            document_body_writer_step_refs=("step_d",),
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
     def test_template_fill_alias_still_omits_earlier_structured_producer(
         self,
     ) -> None:

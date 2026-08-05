@@ -29,6 +29,13 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentSchemaDiscovery,
     build_ai_builder_attachment_context,
 )
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    compile_create_intent_to_spec,
+    create_compile_context_from_planning_state,
+)
+from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+    evaluate_critic_invariants,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -61,6 +68,9 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import AIBuilderPlanEditContext
+from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
+    build_conversation_critic_context,
+)
 from eneo.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
 )
@@ -72,7 +82,10 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     prepare_planner_request,
     validate_preprovider_schema_gate,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    FlowInputFieldIntent,
+    parse_create_flow_intent_arguments,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalMessageGroup,
@@ -138,6 +151,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from eneo.flows.input_binding_contract_rules import source_ref_bindings
 from eneo.main.exceptions import BadRequestException
 from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
 
@@ -466,6 +480,124 @@ def _budget_policy() -> AIBuilderBudgetPolicy:
         conversation_safety_buffer_tokens=128,
         minimum_conversation_budget_tokens=256,
     )
+
+
+def test_named_report_sections_flow_from_request_preparation_into_lowering() -> None:
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=(
+                "Create a PDF report with these sections:\n"
+                "- Résumé\n- Findings\n- Analysis\n- Recommendations"
+            ),
+        )
+    ]
+    state = _document_architecture_state()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="pdf",
+                output_mode="render_verbatim",
+            )
+        ],
+        chosen_patterns=["document_to_structured_report"],
+        required_capabilities=["input_document", "output_pdf"],
+        report_disposition="both",
+        committed_at=datetime(2026, 8, 5, tzinfo=timezone.utc),
+        architecture_hash="b" * 64,
+    )
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=conversation,
+        planning_state=state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        current_steps=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+    assert prepared.requested_output_sections.sections == (
+        "Résumé",
+        "Findings",
+        "Analysis",
+        "Recommendations",
+    )
+
+    context = create_compile_context_from_planning_state(
+        prepared.planning_state,
+        ui_language=prepared.ui_language,
+        requested_output_sections=prepared.requested_output_sections,
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source report",
+            "plan_rationale": "Extract source evidence and render the report.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the requested report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+    assert context is not None
+    spec = compile_create_intent_to_spec(intent, context=context)
+
+    compose_refs = source_ref_bindings(spec.steps[-2].input_bindings)
+    assert {
+        (ref.field_path, ref.label)
+        for ref in compose_refs
+        if ref.label in prepared.requested_output_sections.sections
+    } == {
+        (("requested_section_1",), "Résumé"),
+        (("requested_section_2",), "Findings"),
+        (("requested_section_3",), "Analysis"),
+        (("requested_section_4",), "Recommendations"),
+    }
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            conversation,
+            spec,
+            planning_state=prepared.planning_state,
+            requested_output_sections=prepared.requested_output_sections,
+        )
+    )
+    assert "requested_output_sections_require_section_writers" not in {
+        issue.id for issue in issues
+    }
 
 
 def _server_output_prepared() -> ServerOutputPrepared:

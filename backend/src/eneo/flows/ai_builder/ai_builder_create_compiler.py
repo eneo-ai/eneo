@@ -23,6 +23,10 @@ from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
 from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import FlowInputFieldProvenance
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
@@ -101,6 +105,7 @@ class CreateCompileContext:
     terminal_output_schema: JsonObject | None = None
     source_reader_required_fields: tuple[SourceCaptureField, ...] = ()
     result_contract_output_fields: tuple[StructuredFieldDraft, ...] = ()
+    requested_output_sections: RequestedOutputSections = EMPTY_REQUESTED_OUTPUT_SECTIONS
     report_disposition: ReportDisposition | None = None
     checkpoint_intents: tuple[CheckpointIntent, ...] | None = None
 
@@ -269,6 +274,11 @@ def compile_create_intent_to_spec(
         source_reader_required_fields=source_reader_required_fields,
         result_contract_output_fields=(
             context.result_contract_output_fields if context is not None else ()
+        ),
+        requested_output_sections=(
+            context.requested_output_sections
+            if context is not None
+            else EMPTY_REQUESTED_OUTPUT_SECTIONS
         ),
         report_disposition=context.report_disposition if context is not None else None,
         runtime_required=context.runtime_required if context is not None else True,
@@ -529,6 +539,9 @@ def create_compile_context_from_planning_state(
     planning_state: PlanningState | None,
     *,
     ui_language: str | None = None,
+    requested_output_sections: RequestedOutputSections = (
+        EMPTY_REQUESTED_OUTPUT_SECTIONS
+    ),
 ) -> CreateCompileContext | None:
     runtime_metadata_state = _runtime_metadata_state_from_planning_state(planning_state)
     metadata_disables_declared_input_fields = (
@@ -552,6 +565,7 @@ def create_compile_context_from_planning_state(
             ui_language is None
             and not runtime_input_field_hints
             and not template_placeholder_field_hints
+            and not requested_output_sections.sections
         ):
             return None
         return CreateCompileContext(
@@ -563,6 +577,7 @@ def create_compile_context_from_planning_state(
             runtime_input_field_hints=runtime_input_field_hints,
             template_placeholder_field_hints=template_placeholder_field_hints,
             selected_template_count=None,
+            requested_output_sections=requested_output_sections,
         )
     architecture = planning_state.architecture_commit
     runtime_input_type = _runtime_input_type_from_architecture(architecture)
@@ -609,6 +624,7 @@ def create_compile_context_from_planning_state(
                 ui_language=ui_language,
             )
         ),
+        requested_output_sections=requested_output_sections,
         report_disposition=(
             architecture.report_disposition if architecture is not None else None
         ),

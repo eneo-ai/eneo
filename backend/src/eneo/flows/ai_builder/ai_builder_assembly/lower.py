@@ -84,6 +84,10 @@ def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
                 step=compiled_step,
                 prior_steps=compiled_steps,
                 form_field_refs=planned_step.form_field_refs,
+                requested_output_section_contracts=(
+                    plan.requested_output_section_contracts
+                ),
+                document_report_section_source=plan.document_report_section_source,
                 ui_language=plan.ui_language,
             )
         compiled_steps.append(compiled_step)

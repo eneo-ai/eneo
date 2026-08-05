@@ -22,6 +22,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     LintWarning,
     TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     validate_scoped_plan_revision,
@@ -82,6 +86,9 @@ async def process_create_intent_arguments(
     available_kb_refs: set[str] | None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
     planning_state: PlanningState | None = None,
+    requested_output_sections: RequestedOutputSections = (
+        EMPTY_REQUESTED_OUTPUT_SECTIONS
+    ),
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolProcessingResult:
@@ -90,6 +97,7 @@ async def process_create_intent_arguments(
         compile_context = create_compile_context_from_planning_state(
             planning_state,
             ui_language=resolve_ui_language(conversation),
+            requested_output_sections=requested_output_sections,
         )
         field_diagnostics: list[LintWarning] = []
         spec = compile_create_intent_to_spec(

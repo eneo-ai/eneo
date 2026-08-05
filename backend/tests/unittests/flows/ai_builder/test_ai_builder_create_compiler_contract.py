@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -25,6 +25,10 @@ from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     evaluate_critic_invariants,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+    extract_requested_output_sections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_critic_context,
 )
@@ -74,7 +78,12 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
-from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.input_binding_contract_rules import (
+    effective_question_binding,
+    item_template_field_names,
+    source_ref_bindings,
+)
+from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
 from eneo.json_types import JsonObject
 
 
@@ -3881,16 +3890,9 @@ def test_report_lowering_converts_intermediate_text_writer_without_repair(
                     "output_type": "json",
                     "output_fields": [
                         {
-                            "name": "documents",
-                            "field_type": "array",
-                            "description": "One evidence record per source.",
-                            "item_fields": [
-                                {
-                                    "name": "summary",
-                                    "field_type": "string",
-                                    "description": "Grounded source summary.",
-                                }
-                            ],
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Grounded source summary.",
                         }
                     ],
                 },
@@ -3932,10 +3934,350 @@ def test_report_lowering_converts_intermediate_text_writer_without_repair(
     assert "Draft the evidence-backed findings." in instructions
     assert "Refine the findings without losing source evidence." in instructions
     assert "Write the complete final report." in instructions
+    assert "documents" in compiled.steps[0].output_contract["properties"]
     assert compiled.steps[-2].output_mode == OutputMode.COMPOSE_TEXT
     assert compiled.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
     validation = validate_spec(compiled)
     assert validation.valid, validation.errors
+
+
+def test_per_source_requested_section_label_stays_with_canonical_producer() -> None:
+    requested_sections = RequestedOutputSections(
+        sections=("Résumé",),
+        confidence="high",
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source risk report",
+            "plan_rationale": "Build source sections and assess their risks.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Build source sections",
+                    "instructions": "Write one report section per source.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "source_sections",
+                            "field_type": "array",
+                            "description": "Finished source sections.",
+                            "item_fields": [
+                                {
+                                    "name": "section_title",
+                                    "field_type": "string",
+                                    "description": "Section title.",
+                                },
+                                {
+                                    "name": "section_body",
+                                    "field_type": "string",
+                                    "description": "Section body.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Assess risks",
+                    "instructions": "Assess risks across the source sections.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "requested_section_1",
+                            "field_type": "string",
+                            "description": "Cross-source risk assessment.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the complete report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition="per_source_sections",
+            requested_output_sections=requested_sections,
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+
+    compose_bindings = compiled.steps[-2].input_bindings
+    assert compose_bindings is not None
+    assert {
+        (ref["step_ref"], ref["field_path"]) for ref in compose_bindings["source_refs"]
+    } == {
+        ("step_b", "source_sections"),
+        ("step_c", "requested_section_1"),
+    }
+    canonical_ref, independent_ref = compose_bindings["source_refs"]
+    assert "Résumé: {requested_section_1}" in canonical_ref["item_template"]
+    assert independent_ref["label"] == "Requested section 1"
+    assert validate_spec(compiled).valid
+
+    corrupt_canonical_ref = dict(canonical_ref)
+    corrupt_canonical_ref["item_template"] = canonical_ref["item_template"].replace(
+        "Résumé: {requested_section_1}",
+        "Other section: {requested_section_1}",
+    )
+    corrupt_independent_ref = dict(independent_ref)
+    corrupt_independent_ref["label"] = "Résumé"
+    corrupt_compose = compiled.steps[-2].model_copy(
+        update={
+            "input_bindings": {
+                **compose_bindings,
+                "source_refs": [corrupt_canonical_ref, corrupt_independent_ref],
+            }
+        }
+    )
+    corrupt_spec = compiled.model_copy(
+        update={"steps": [*compiled.steps[:-2], corrupt_compose, compiled.steps[-1]]}
+    )
+    assert validate_spec(corrupt_spec).valid
+    corrupt_issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            build_conversation_critic_context(
+                [],
+                corrupt_spec,
+                requested_output_sections=requested_sections,
+            )
+        )
+    }
+    assert "requested_output_sections_require_section_writers" in corrupt_issue_ids
+
+
+def test_per_source_report_keeps_first_section_producer_canonical() -> None:
+    requested_sections = RequestedOutputSections(
+        sections=("Résumé",),
+        confidence="high",
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Refined source report",
+            "plan_rationale": "Build source sections and refine them independently.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Build source sections",
+                    "instructions": "Write one report section per source.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "source_sections",
+                            "field_type": "array",
+                            "description": "Finished source sections.",
+                            "item_fields": [
+                                {
+                                    "name": "section_title",
+                                    "field_type": "string",
+                                    "description": "Section title.",
+                                },
+                                {
+                                    "name": "section_body",
+                                    "field_type": "string",
+                                    "description": "Section body.",
+                                },
+                                {
+                                    "name": "source_label",
+                                    "field_type": "string",
+                                    "description": "Source label.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Refine sections",
+                    "instructions": "Refine the source sections independently.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "refined_sections",
+                            "field_type": "array",
+                            "description": "Independent refined sections.",
+                            "item_fields": [
+                                {
+                                    "name": "section_title",
+                                    "field_type": "string",
+                                    "description": "Refined section title.",
+                                },
+                                {
+                                    "name": "section_body",
+                                    "field_type": "string",
+                                    "description": "Refined section body.",
+                                },
+                                {
+                                    "name": "source_label",
+                                    "field_type": "string",
+                                    "description": "Source label.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the complete report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition="per_source_sections",
+            requested_output_sections=requested_sections,
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+
+    compose_refs = source_ref_bindings(compiled.steps[-2].input_bindings)
+    assert [(ref.step_ref, ref.field_path) for ref in compose_refs] == [
+        ("step_b", ("source_sections",)),
+        ("step_c", ("refined_sections",)),
+    ]
+    assert compose_refs[0].item_template is not None
+    assert "Résumé: {requested_section_1}" in compose_refs[0].item_template
+    assert validate_spec(compiled).valid
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(
+            [],
+            compiled,
+            requested_output_sections=requested_sections,
+        )
+    )
+    assert not issues
+
+
+@pytest.mark.parametrize("runtime_max_files", [None, 1])
+def test_single_call_custom_section_array_guidance_uses_selected_field(
+    runtime_max_files: int | None,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source chapters",
+            "plan_rationale": "Build one chapter per source.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Build chapters",
+                    "instructions": "Build one report chapter per source.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "chapters",
+                            "field_type": "array",
+                            "description": "Finished report chapters.",
+                            "item_fields": [
+                                {
+                                    "name": "section_title",
+                                    "field_type": "string",
+                                    "description": "Chapter title.",
+                                },
+                                {
+                                    "name": "section_body",
+                                    "field_type": "string",
+                                    "description": "Chapter body.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the complete report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition="per_source_sections",
+            runtime_max_files=runtime_max_files,
+            ui_language="en",
+        ),
+    )
+
+    compose_refs = compiled.steps[-2].input_bindings["source_refs"]
+    assert compose_refs[0]["field_path"] == "chapters"
+    section_instructions = compiled.steps[1].assistant_spec.instructions
+    assert "one chapters item" in section_instructions
+    assert "source_sections" not in section_instructions
+    assert validate_spec(compiled).valid
 
 
 def test_create_intent_rejects_fields_outside_structured_contract() -> None:
@@ -4996,54 +5338,142 @@ def test_single_source_text_report_materializes_missing_reader() -> None:
     assert validate_spec(compiled).valid
 
 
-def test_compile_context_uses_only_accepted_mapped_file_limit() -> None:
+@pytest.mark.parametrize(
+    ("mapped_file_limit", "expected_runtime_max_files"),
+    [
+        (MappedFileLimit(), None),
+        (
+            MappedFileLimit(
+                proposed_value=8,
+                diagnostic="confirmation_required",
+            ),
+            None,
+        ),
+        (
+            MappedFileLimit(
+                proposed_value=1,
+                accepted_value=1,
+                provenance="authored",
+            ),
+            1,
+        ),
+    ],
+    ids=["policy-unset", "unaccepted-policy", "accepted-one"],
+)
+def test_single_call_report_state_to_lowering_matrix(
+    mapped_file_limit: MappedFileLimit,
+    expected_runtime_max_files: int | None,
+) -> None:
     state = PlanningState.empty()
-    state.mapped_file_limit = MappedFileLimit(
-        proposed_value=8,
-        accepted_value=3,
-        provenance="authored",
-    )
+    state.resolved_slots = {
+        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
+        "terminal_output": _slot("terminal_output", "pdf_document"),
+        "pdf_generation_mode": _slot("pdf_generation_mode", "generated_pdf"),
+        "document_material_scope": _slot(
+            "document_material_scope", "multiple_documents_case"
+        ),
+        "report_disposition": _slot("report_disposition", "per_source_sections"),
+    }
+    state.mapped_file_limit = mapped_file_limit
+    _commit_architecture(state)
 
     context = create_compile_context_from_planning_state(state)
 
     assert context is not None
-    assert context.runtime_max_files == 3
-
-
-def test_compile_context_does_not_use_unaccepted_policy_proposal() -> None:
-    state = PlanningState.empty()
-    state.mapped_file_limit = MappedFileLimit(
-        proposed_value=8,
-        diagnostic="confirmation_required",
+    assert context.runtime_max_files == expected_runtime_max_files
+    compiled = compile_create_intent_to_spec(
+        parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Bounded report",
+                "plan_rationale": "Read sources and write the committed report.",
+                "steps": [
+                    {
+                        "name": "Read documents",
+                        "instructions": "Extract one summary per source.",
+                        "output_type": "json",
+                        "output_fields": [
+                            {
+                                "name": "documents",
+                                "field_type": "array",
+                                "description": "One record per source.",
+                                "item_fields": [
+                                    {
+                                        "name": "summary",
+                                        "field_type": "string",
+                                        "description": "Source summary.",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "name": "Write report",
+                        "instructions": "Write the report.",
+                        "output_type": "text",
+                    },
+                ],
+            }
+        ),
+        context=context,
     )
 
-    context = create_compile_context_from_planning_state(state)
+    runtime_input = compiled.steps[0].input_config["runtime_input"]
+    assert runtime_input.get("max_files") == expected_runtime_max_files
+    assert runtime_input.get("execution_mode") is None
+    assert compiled.steps[-2].output_mode == OutputMode.COMPOSE_TEXT
+    assert validate_spec(compiled).valid
 
-    assert context is not None
-    assert context.runtime_max_files is None
 
-
-def test_runtime_max_files_none_keeps_document_reader_single_call() -> None:
+@pytest.mark.parametrize(
+    "sections",
+    [
+        ("Résumé", "Resume", "Findings", "Recommendations"),
+        ("Risk / controls", "Risk controls", "Findings", "Recommendations"),
+        ("💡💡💡", "Background", "Findings", "Recommendations"),
+        ("Source label", "Section title", "Section body", "Report title"),
+    ],
+    ids=[
+        "accent-collision",
+        "punctuation-collision",
+        "empty-derived-key",
+        "reserved-looking-labels",
+    ],
+)
+@pytest.mark.parametrize(
+    "report_disposition",
+    ["per_source_sections", "synthesized_overview", "both"],
+)
+def test_requested_section_labels_get_lossless_collision_proof_contracts(
+    sections: tuple[str, ...],
+    report_disposition: ReportDisposition,
+) -> None:
     intent = parse_create_flow_intent_arguments(
         {
-            "flow_name": "Single-call document reader",
-            "plan_rationale": "Read source material before writing a summary.",
+            "flow_name": "Source report",
+            "plan_rationale": "Extract source evidence and render the report.",
             "steps": [
                 {
                     "name": "Read documents",
-                    "instructions": "Extract one summary from the supplied material.",
+                    "instructions": "Extract source-grounded evidence.",
                     "output_type": "json",
                     "output_fields": [
                         {
                             "name": "documents",
                             "field_type": "array",
-                            "description": "The supplied source material.",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
                         }
                     ],
                 },
                 {
-                    "name": "Write summary",
-                    "instructions": "Write one combined summary.",
+                    "name": "Write report",
+                    "instructions": "Write the requested report.",
                     "output_type": "text",
                 },
             ],
@@ -5054,10 +5484,389 @@ def test_runtime_max_files_none_keeps_document_reader_single_call() -> None:
         intent,
         context=CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
-            runtime_max_files=None,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition=report_disposition,
+            requested_output_sections=RequestedOutputSections(
+                sections=sections,
+                confidence="high",
+            ),
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+    compose = next(
+        step for step in compiled.steps if step.output_mode == OutputMode.COMPOSE_TEXT
+    )
+    refs = source_ref_bindings(compose.input_bindings)
+    for index, original_label in enumerate(sections, start=1):
+        key = f"requested_section_{index}"
+        assert any(
+            (ref.field_path == (key,) and ref.label == original_label)
+            or (
+                ref.item_template is not None
+                and key in item_template_field_names(ref.item_template)
+                and f"{original_label}: {{{key}}}" in ref.item_template
+            )
+            for ref in refs
+        )
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+    issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            build_conversation_critic_context(
+                [],
+                compiled,
+                requested_output_sections=RequestedOutputSections(
+                    sections=sections,
+                    confidence="high",
+                ),
+            )
+        )
+    }
+    assert "requested_output_sections_require_section_writers" not in issue_ids
+
+
+@pytest.mark.parametrize(
+    "report_disposition",
+    ["per_source_sections", "synthesized_overview", "both"],
+)
+def test_requested_section_labels_with_braces_compile_for_every_disposition(
+    report_disposition: ReportDisposition,
+) -> None:
+    requested_sections = extract_requested_output_sections(
+        "Create a report with these sections:\n"
+        "- Risk {qualitative}\n"
+        "- Background\n"
+        "- Findings\n"
+        "- Recommendations"
+    )
+    assert requested_sections == RequestedOutputSections(
+        sections=(
+            "Risk {qualitative}",
+            "Background",
+            "Findings",
+            "Recommendations",
+        ),
+        confidence="high",
+    )
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source report",
+            "plan_rationale": "Extract source evidence and render the report.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract source-grounded evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the requested report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition=report_disposition,
+            requested_output_sections=requested_sections,
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+
+    compose = next(
+        step for step in compiled.steps if step.output_mode == OutputMode.COMPOSE_TEXT
+    )
+    refs = source_ref_bindings(compose.input_bindings)
+    assert any(
+        ref.label == "Risk {qualitative}"
+        or (
+            ref.item_template is not None
+            and "Risk &#123;qualitative&#125;: {requested_section_1}"
+            in ref.item_template
+        )
+        for ref in refs
+    )
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+    issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            build_conversation_critic_context(
+                [],
+                compiled,
+                requested_output_sections=requested_sections,
+            )
+        )
+    }
+    assert "requested_output_sections_require_section_writers" not in issue_ids
+
+
+@pytest.mark.parametrize(
+    "report_disposition",
+    ["per_source_sections", "synthesized_overview", "both"],
+)
+@pytest.mark.parametrize(
+    "runtime_max_files",
+    [
+        None,
+        1,
+    ],
+)
+def test_single_call_report_dispositions_keep_bounded_section_ownership(
+    report_disposition: ReportDisposition,
+    runtime_max_files: int | None,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Single-call document report",
+            "plan_rationale": "Read source material before writing a report.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract one summary for each supplied source.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One item per supplied source.",
+                            "item_fields": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source-grounded summary.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the requested source report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition=report_disposition,
+            runtime_max_files=runtime_max_files,
+            ui_language="en",
         ),
     )
 
     runtime_input = compiled.steps[0].input_config["runtime_input"]
+    assert runtime_input.get("max_files") == runtime_max_files
     assert runtime_input.get("execution_mode") is None
-    assert validate_spec(compiled).valid
+    reader_instructions = compiled.steps[0].assistant_spec.instructions
+    assert "source_label" in reader_instructions
+    assert "Runtime-managed fields for items of documents" not in reader_instructions
+    reader_source_label = compiled.steps[0].output_contract["properties"]["documents"][
+        "items"
+    ]["properties"]["source_label"]
+    assert "Model-emitted" in reader_source_label["description"]
+    assert "Allowed fields for items of documents: source_label, summary." in (
+        reader_instructions
+    )
+    assert all("item_map" not in (step.input_config or {}) for step in compiled.steps)
+    if report_disposition in {"per_source_sections", "both"}:
+        section_step = next(
+            step
+            for step in compiled.steps
+            if "source_sections" in (step.output_contract or {}).get("properties", {})
+        )
+        section_properties = section_step.output_contract["properties"][
+            "source_sections"
+        ]["items"]["properties"]
+        assert "section_title" in section_properties
+        assert "section_body" in section_properties
+        assert "source_label" in section_properties
+        assert "source_file_id" not in section_properties
+        section_instructions = section_step.assistant_spec.instructions
+        assert "copy its source_label" in section_instructions
+        assert (
+            "Allowed fields for items of source_sections: section_title, "
+            "section_body, source_label."
+        ) in section_instructions
+        assert (
+            "Runtime-managed fields for items of source_sections"
+            not in section_instructions
+        )
+    assert compiled.steps[-2].output_mode == OutputMode.COMPOSE_TEXT
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_mapped_reader_canonicalizes_authored_identity_fields_for_runtime() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Mapped source reader",
+            "plan_rationale": "Extract one source record for each document.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract grounded source evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "source_label",
+                                    "field_type": "number",
+                                    "description": "Authored with the wrong type.",
+                                },
+                                {
+                                    "name": "source_file_id",
+                                    "field_type": "boolean",
+                                    "description": "Authored with the wrong type.",
+                                },
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Summarize",
+                    "instructions": "Summarize the source evidence.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+
+    reader = compiled.steps[0]
+    item_properties = reader.output_contract["properties"]["documents"]["items"][
+        "properties"
+    ]
+    assert item_properties["source_label"]["type"] == "string"
+    assert item_properties["source_file_id"]["type"] == "string"
+    runtime_steps = parse_runtime_steps(
+        {
+            "steps": [
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 1,
+                    "assistant_id": str(uuid4()),
+                    "input_source": reader.input_source.value,
+                    "input_type": reader.input_type.value,
+                    "output_type": reader.output_type.value,
+                    "output_mode": reader.output_mode.value,
+                    "input_config": reader.input_config,
+                    "output_contract": reader.output_contract,
+                }
+            ]
+        }
+    )
+    assert runtime_steps[0].input_config["runtime_input"]["execution_mode"] == (
+        "per_source"
+    )
+
+
+def test_single_call_reader_removes_authored_runtime_source_file_id() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Single-call source reader",
+            "plan_rationale": "Extract source records in one call.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract grounded source evidence.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "item_fields": [
+                                {
+                                    "name": "source_label",
+                                    "field_type": "number",
+                                    "description": "Authored with the wrong type.",
+                                },
+                                {
+                                    "name": "source_file_id",
+                                    "field_type": "string",
+                                    "description": "Runtime-only identity.",
+                                },
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Source summary.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Summarize",
+                    "instructions": "Summarize the source evidence.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.TEXT,
+            runtime_max_files=1,
+            ui_language="en",
+        ),
+    )
+
+    reader = compiled.steps[0]
+    item_properties = reader.output_contract["properties"]["documents"]["items"][
+        "properties"
+    ]
+    assert item_properties["source_label"]["type"] == "string"
+    assert "source_file_id" not in item_properties
+    assert "source_file_id" not in reader.assistant_spec.instructions

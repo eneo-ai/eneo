@@ -207,7 +207,7 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
 
 
 @pytest.mark.asyncio
-async def test_outline_assembly_rejection_returns_validation_failure_code() -> None:
+async def test_outline_assembly_rejection_succeeds_after_model_correction() -> None:
     state = PlanningState.empty()
     state.architecture_commit = finalize_architecture_commit(
         ArchitectureCommitDraft(
@@ -252,6 +252,44 @@ async def test_outline_assembly_rejection_returns_validation_failure_code() -> N
     )
     assert result.feedback is not None
     assert "first semantic step" in result.feedback
+
+    corrected = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(role="user", content="Bygg ett dokumentflöde.")
+        ],
+        arguments={
+            "flow_name": "Corrected document reader",
+            "plan_rationale": "Read the document before writing the summary.",
+            "steps": [
+                {
+                    "name": "Read document",
+                    "instructions": "Extract source-grounded facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Source-grounded summary.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write a summary from the extracted facts.",
+                    "output_type": "text",
+                },
+            ],
+        },
+        tool_call_id="call-corrected-assembly",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert corrected.failure_kind is None
+    assert corrected.compiled_proposal is not None
+    assert corrected.compiled_proposal.validation.valid
 
 
 @pytest.mark.asyncio

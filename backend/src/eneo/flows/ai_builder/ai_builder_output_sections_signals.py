@@ -72,6 +72,12 @@ class RequestedOutputSections:
         return self.confidence == "high"
 
 
+@dataclass(frozen=True, slots=True)
+class RequestedOutputSectionContract:
+    original_label: str
+    derived_key: str
+
+
 EMPTY_REQUESTED_OUTPUT_SECTIONS = RequestedOutputSections()
 
 
@@ -257,6 +263,7 @@ def _has_any(text: str, markers: tuple[str, ...]) -> bool:
 __all__ = [
     "EMPTY_REQUESTED_OUTPUT_SECTIONS",
     "OutputSectionConfidence",
+    "RequestedOutputSectionContract",
     "RequestedOutputSections",
     "extract_requested_output_sections",
 ]

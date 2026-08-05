@@ -11,7 +11,10 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
     DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK,
+    admit_document_report_semantic_shape,
+    append_terminal_helper_output_fields,
     lower_document_report_topology,
+    requested_output_section_contracts,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     fixed_audio_transcription_step,
@@ -34,6 +37,9 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     StructuredFieldDraft,
+)
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
@@ -264,6 +270,7 @@ def try_compile_create_intent_with_assembly(
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+    requested_output_sections: RequestedOutputSections,
     report_disposition: ReportDisposition | None,
     runtime_required: bool,
     runtime_max_files: int | None,
@@ -285,6 +292,7 @@ def try_compile_create_intent_with_assembly(
             terminal_output_schema=terminal_output_schema,
             source_reader_required_fields=source_reader_required_fields,
             result_contract_output_fields=result_contract_output_fields,
+            requested_output_sections=requested_output_sections,
             report_disposition=report_disposition,
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
@@ -313,6 +321,7 @@ def _assemble_create_intent(
     terminal_output_schema: JsonObject | None,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
+    requested_output_sections: RequestedOutputSections,
     report_disposition: ReportDisposition | None,
     runtime_required: bool,
     runtime_max_files: int | None,
@@ -404,7 +413,7 @@ def _assemble_create_intent(
         document_artifact_requested=document_artifact_requested,
         ui_language=ui_language,
     )
-    semantic_steps = _semantic_steps_with_single_source_report_reader(
+    semantic_steps = admit_document_report_semantic_shape(
         semantic_steps,
         runtime_input_type=runtime_input_type,
         final_semantic_output_type=terminal_semantic_output_type,
@@ -549,16 +558,21 @@ def _assemble_create_intent(
             ui_language=ui_language,
         )
         planned_steps.append(renderer_step)
-    completed_steps = _complete_planned_source_reader_contracts(
+    completed_steps = _apply_per_source_reader_execution(
         tuple(planned_steps),
+        ui_language=ui_language,
+    )
+    completed_steps = _complete_planned_source_reader_contracts(
+        completed_steps,
         terminal_output_schema=terminal_output_schema,
         required_fields=source_reader_required_fields,
     )
-    completed_steps = _apply_per_source_reader_execution(
-        completed_steps,
-        ui_language=ui_language,
+    section_contracts = (
+        requested_output_section_contracts(requested_output_sections)
+        if report_disposition is not None
+        else ()
     )
-    completed_steps = lower_document_report_topology(
+    completed_steps, document_report_section_source = lower_document_report_topology(
         completed_steps,
         report_disposition=report_disposition,
         runtime_input_type=runtime_input_type,
@@ -568,6 +582,7 @@ def _assemble_create_intent(
         chain_steps=chain_steps,
         semantic_step_count=len(semantic_steps),
         result_contract_output_fields=result_contract_output_fields,
+        requested_output_section_contracts=section_contracts,
         ui_language=ui_language,
     )
     section_writer_material = _resolve_section_writer_structured_sources(
@@ -593,6 +608,8 @@ def _assemble_create_intent(
         source_reader_required_fields=source_reader_required_fields,
         aggregation_intent=aggregation_intent,
         ui_language=ui_language,
+        requested_output_section_contracts=section_contracts,
+        document_report_section_source=document_report_section_source,
     )
 
 
@@ -661,7 +678,7 @@ def _semantic_steps_without_terminal_document_render_helper(
             *semantic_steps[:-2],
             previous_step.model_copy(
                 update={
-                    "instructions": _append_terminal_helper_output_fields(
+                    "instructions": append_terminal_helper_output_fields(
                         previous_step.instructions,
                         helper_candidate.output_fields,
                         ui_language=ui_language,
@@ -678,104 +695,6 @@ def _semantic_steps_without_terminal_document_render_helper(
         },
     )
     return retained_steps
-
-
-def _semantic_steps_with_single_source_report_reader(
-    steps: Sequence[SemanticStepIntent],
-    *,
-    runtime_input_type: InputType,
-    final_semantic_output_type: OutputType,
-    source_reader_required_fields: tuple[SourceCaptureField, ...],
-    report_disposition: ReportDisposition | None,
-    ui_language: str | None,
-) -> tuple[SemanticStepIntent, ...]:
-    semantic_steps = tuple(steps)
-    if (
-        len(semantic_steps) != 1
-        or runtime_input_type not in _FILE_INPUT_TYPES
-        or final_semantic_output_type != OutputType.TEXT
-    ):
-        return semantic_steps
-
-    semantic_step = semantic_steps[0]
-    source_fields = tuple(semantic_step.output_fields or ())
-    if not source_fields:
-        source_fields = _structured_fields_from_source_capture_fields(
-            source_reader_required_fields
-        )
-    if not source_fields:
-        if report_disposition is None:
-            return semantic_steps
-        source_fields = (_default_document_report_source_field(ui_language),)
-    source_fields = complete_structured_source_reader_fields(
-        source_fields,
-        required_fields=(),
-    )
-    if report_disposition is not None and not structured_fields_have_document_items(
-        source_fields
-    ):
-        source_fields = (
-            _document_report_source_array_field(
-                source_fields,
-                ui_language=ui_language,
-            ),
-        )
-
-    reader_step = semantic_step.model_copy(
-        update={
-            "name": _source_report_reader_name(ui_language),
-            "instructions": _source_report_reader_instructions(ui_language),
-            "output_type": OutputType.JSON,
-            "output_fields": list(source_fields),
-            "uses_form_fields": [],
-        }
-    )
-    writer_step = semantic_step.model_copy(
-        update={
-            "name": _source_report_writer_name(ui_language),
-            "instructions": _append_terminal_helper_output_fields(
-                semantic_step.instructions,
-                source_fields,
-                ui_language=ui_language,
-            ),
-            "output_type": OutputType.TEXT,
-            "output_fields": None,
-        }
-    )
-    return (reader_step, writer_step)
-
-
-def _document_report_source_array_field(
-    source_fields: tuple[StructuredFieldDraft, ...],
-    *,
-    ui_language: str | None,
-) -> StructuredFieldDraft:
-    description = (
-        "Source-grounded report material for the current document."
-        if ui_language == "en"
-        else "Källgrundat rapportunderlag för det aktuella dokumentet."
-    )
-    return StructuredFieldDraft(
-        name="documents",
-        field_type="array",
-        description=description,
-        item_fields=list(source_fields),
-    )
-
-
-def _default_document_report_source_field(
-    ui_language: str | None,
-) -> StructuredFieldDraft:
-    description = (
-        "Source-grounded material needed to write the requested report."
-        if ui_language == "en"
-        else "Källgrundat underlag som behövs för att skriva den begärda rapporten."
-    )
-    return StructuredFieldDraft(
-        name="source_material",
-        field_type="string",
-        description=description,
-    )
 
 
 def _semantic_steps_with_terminal_text_fields_folded(
@@ -798,7 +717,7 @@ def _semantic_steps_with_terminal_text_fields_folded(
 
     folded_terminal_step = terminal_step.model_copy(
         update={
-            "instructions": _append_terminal_helper_output_fields(
+            "instructions": append_terminal_helper_output_fields(
                 terminal_step.instructions,
                 terminal_step.output_fields,
                 ui_language=ui_language,
@@ -919,53 +838,6 @@ def _is_plain_terminal_document_helper(
         f"{step.name} {step.instructions}",
         final_output_type=final_output_type,
     )
-
-
-def _append_terminal_helper_output_fields(
-    instructions: str,
-    output_fields: Sequence[StructuredFieldDraft],
-    *,
-    ui_language: str | None,
-) -> str:
-    field_names = ", ".join(field.name for field in output_fields if field.name)
-    if not field_names:
-        return instructions
-    if ui_language == "en":
-        field_instruction = "Ensure the report body covers these fields: "
-    else:
-        field_instruction = "Säkerställ att rapporttexten täcker dessa fält: "
-    return f"{instructions}\n\n{field_instruction}{field_names}."
-
-
-def _structured_fields_from_source_capture_fields(
-    fields: tuple[SourceCaptureField, ...],
-) -> tuple[StructuredFieldDraft, ...]:
-    return tuple(
-        StructuredFieldDraft(
-            name=field.name,
-            field_type="string",
-            description=field.description or f"Source-derived value for {field.name}.",
-        )
-        for field in fields
-    )
-
-
-def _source_report_reader_name(ui_language: str | None) -> str:
-    if ui_language == "en":
-        return "Extract source fields"
-    return "Extrahera källfält"
-
-
-def _source_report_writer_name(ui_language: str | None) -> str:
-    if ui_language == "en":
-        return "Write report"
-    return "Skriv rapport"
-
-
-def _source_report_reader_instructions(ui_language: str | None) -> str:
-    if ui_language == "en":
-        return "Extract the source-derived fields needed before writing the report."
-    return "Extrahera de källbaserade fält som behövs innan rapporten skrivs."
 
 
 def _mentions_output_artifact_type(
@@ -1129,14 +1001,14 @@ def _assemble_docx_template_fill(
 
     fixed_template_fill_step = template_fill_step(ui_language=ui_language)
     planned_steps = (reader_step, *semantic_steps, fixed_template_fill_step)
-    completed_steps = _complete_planned_source_reader_contracts(
+    completed_steps = _apply_per_source_reader_execution(
         planned_steps,
+        ui_language=ui_language,
+    )
+    completed_steps = _complete_planned_source_reader_contracts(
+        completed_steps,
         terminal_output_schema=None,
         required_fields=source_reader_required_fields,
-    )
-    completed_steps = _apply_per_source_reader_execution(
-        completed_steps,
-        ui_language=ui_language,
     )
     completed_steps, admitted_form_fields = (
         _drop_planned_source_contract_shadow_form_fields(
@@ -1472,6 +1344,7 @@ def _complete_planned_source_reader_contracts(
         completed_fields = complete_structured_source_reader_fields(
             planned_step.output_fields,
             required_fields=tuple(fields),
+            runtime_input_execution_mode=(planned_step.runtime_input_execution_mode),
         )
         if completed_fields == planned_step.output_fields:
             continue

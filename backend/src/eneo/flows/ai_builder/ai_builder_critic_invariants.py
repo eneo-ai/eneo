@@ -25,6 +25,10 @@ from typing import TYPE_CHECKING, Literal, cast
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
+    document_report_compose_covers_requested_sections,
+    is_bound_document_report_compose_topology,
+)
 from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
 from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
     baseline_spec_from_flow_steps,
@@ -1279,6 +1283,19 @@ def _requested_output_sections_require_section_writers_evidence(
     requested = context.requested_output_sections
     if not requested.high_confidence or not _spec_has_report_terminal(context.spec):
         return False
+    lowered_composers = tuple(
+        step
+        for step in context.spec.steps
+        if is_bound_document_report_compose_topology(context.spec, step)
+    )
+    if lowered_composers:
+        return not any(
+            document_report_compose_covers_requested_sections(
+                composer,
+                requested,
+            )
+            for composer in lowered_composers
+        )
     # One writer may cover at most two adjacent requested sections; fewer writers
     # recreates the overloaded single-step shape this invariant is meant to reject.
     required_writers = (len(requested.sections) + 1) // 2
@@ -1434,6 +1451,8 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     if composer_index is None or composer_index == 0:
         return False
     composer = spec.steps[composer_index]
+    if is_bound_document_report_compose_topology(spec, composer):
+        return False
     if composer.input_source != InputSource.PREVIOUS_STEP:
         return False
     if composer.output_type != OutputType.TEXT:
