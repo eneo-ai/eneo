@@ -444,6 +444,11 @@ external release gate (item 10); BM0.2 is external (item 10).
     flow with mutation-proven behavior tests. Deferred by honesty: the
     template-failure and edit-retention journeys return with executed-cohort
     and edit-session harness support respectively.
+    Product decisions recorded 2026-08-05: compare/corpus-to-JSON is
+    SUPPORTED (B9(e2) becomes an implementation slice) and document-report
+    CITATIONS are SUPPORTED (carry citation identity through compose/render
+    in the document_report owner; replaces the
+    assembly_document_report_citations_unsupported refusal; 4 live cases).
     First tjansteskrivelse/attachment cohort attempt (2026-08-05,
     `7d791c41a`): attachment cases still fixture-skip pending the
     post-upload evidence-SHA capture loop (file IDs uploaded; capture in
@@ -783,10 +788,12 @@ plan above controls all other ordering.
   truncating. (e1) **LANDED `85516be94`** — related document packages are
   linear multi-file input, not cross-step aggregation; only explicit same-run
   comparison selects non-linear dataflow, so package-to-JSON compilation no
-  longer reaches the aggregate-output rejection. (e2) once product chooses
-  whether genuine compare/corpus synthesis plus JSON is supported, encode one
-  shared architecture-compatibility predicate before provider work and keep
-  assembly's rejection as a fail-closed invariant. *(M)*
+  longer reaches the aggregate-output rejection. (e2) **product decision 2026-08-05: SUPPORTED** — genuine
+  compare/corpus synthesis may terminate in a JSON contract. Implementation
+  slice: one shared architecture-compatibility predicate before provider
+  work plus compare-to-JSON compiler support; assembly's rejection remains a
+  fail-closed invariant for genuinely impossible internal plans. Queued
+  after prose-leaf recall. *(M)*
 - **B10** (precise semantic dataflow, ordered owner slices): (a) **LANDED
   `7ffaf5f6b`** — project exact confirmed form-field names/types from `PlanningState`
   into proposal context, keep existing `uses_form_fields` as the semantic
