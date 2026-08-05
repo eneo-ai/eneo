@@ -90,6 +90,55 @@ def _chunk_columns(database_url: str) -> set[tuple[str, str]]:
         return {(row[0], row[1]) for row in cursor.fetchall()}
 
 
+def _mark_index_invalid(database_url: str) -> None:
+    """Reproduce what a failed CREATE INDEX CONCURRENTLY leaves behind."""
+    with (
+        psycopg2.connect(database_url.replace("+psycopg2", "")) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            "UPDATE pg_index SET indisvalid = false WHERE indexrelid = %s::regclass",
+            (_INDEX,),
+        )
+
+
+def test_a_failed_index_build_leaves_the_revision_retryable() -> None:
+    """The revision cannot be stamped atomically, so retry has to be safe.
+
+    Entering the autocommit block commits the column additions, but Alembic records
+    the revision only once upgrade() returns. A failed index build therefore leaves
+    the columns present with the revision unrecorded — exactly the state reproduced
+    here by stamping back down without touching the schema.
+    """
+    postgres = PostgresContainer(
+        image=_POSTGRES_13_IMAGE,
+        username="chunk_config_retry",
+        password="chunk_config_retry_password",
+        dbname="chunk_config_retry",
+    )
+    with postgres:
+        database_url = postgres.get_connection_url()
+        config = _alembic_config(database_url)
+        command.upgrade(config, _CHUNK_REVISION)
+
+        # The post-failure state: schema changed, revision unrecorded, and the index
+        # left behind as the invalid carcass a broken concurrent build produces.
+        _mark_index_invalid(database_url)
+        command.stamp(config, _PREVIOUS_REVISION)
+        assert _index_state(database_url) == {_INDEX: False}
+
+        # A plain ADD COLUMN would die on a duplicate here instead of finishing, and
+        # a bare IF NOT EXISTS on the index would accept the invalid one.
+        command.upgrade(config, _CHUNK_REVISION)
+
+        assert _index_state(database_url) == {_INDEX: True}
+        assert _chunk_columns(database_url) == {
+            (table, column)
+            for table in ("groups", "websites", "integration_knowledge", "info_blobs")
+            for column in ("chunk_size", "chunk_overlap")
+        }
+
+
 def test_chunk_config_index_upgrade_downgrade_and_reupgrade() -> None:
     postgres = PostgresContainer(
         image=_POSTGRES_13_IMAGE,

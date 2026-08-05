@@ -140,6 +140,13 @@
   $: displayPercent =
     sizeValue > 0 ? Math.round((overlapTokens / sizeValue) * 100) : overlapPercent;
 
+  // What the overlap really is, in the same words the visible text uses. The slider's
+  // own value is a percentage while the field is labelled in tokens, so without this
+  // a screen reader announces "10" as though it were 10 tokens.
+  $: overlapValueText = overlapIsDefault
+    ? m.chunk_overlap_value_default({ tokens: overlapTokens })
+    : m.chunk_overlap_value({ percent: displayPercent, tokens: overlapTokens });
+
   // Customisation is pair-level, matching the API: (null, null) is the only delegating
   // state, and touching either field submits both. Sending one side as null would store
   // a pair whose meaning depends on defaults that can change under it — a size stored
@@ -194,6 +201,7 @@
       <div class="flex items-center gap-3 pt-3">
         <Input.Slider
           label={m.chunk_overlap_label()}
+          ariaValueText={overlapValueText}
           value={overlapIsDefault ? defaultPercentOnStep : overlapPercent}
           min={0}
           max={maxOverlapPercent}
@@ -206,11 +214,7 @@
           }}
         />
         <span class="text-secondary w-28 shrink-0 text-right text-xs">
-          {#if overlapIsDefault}
-            {m.chunk_overlap_value_default({ tokens: overlapTokens })}
-          {:else}
-            {m.chunk_overlap_value({ percent: displayPercent, tokens: overlapTokens })}
-          {/if}
+          {overlapValueText}
         </span>
       </div>
       <p class="text-secondary mt-1 pl-3 text-xs">{m.chunk_overlap_description()}</p>

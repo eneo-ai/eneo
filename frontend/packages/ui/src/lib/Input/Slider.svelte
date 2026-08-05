@@ -16,6 +16,13 @@
    * existing consumers are unchanged: Svelte omits an undefined attribute.
    */
   export let label: string | undefined = undefined;
+  /**
+   * Spoken value for the thumb. The numeric value a slider carries is often not the
+   * quantity the label names — a percentage thumb under a "(tokens)" label announces
+   * the wrong unit — so a consumer whose displayed value differs from `value` should
+   * pass the same string it shows.
+   */
+  export let ariaValueText: string | undefined = undefined;
 
   const {
     elements: { root, range, thumbs },
@@ -53,6 +60,7 @@
     {...$thumbs[0]}
     use:thumbs
     aria-label={label}
+    aria-valuetext={ariaValueText}
     class="border-strongest bg-primary focus:ring-default h-5 w-5 rounded-full border shadow-md focus:ring-4"
   ></span>
 </div>

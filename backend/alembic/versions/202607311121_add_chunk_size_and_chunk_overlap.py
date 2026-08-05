@@ -18,8 +18,6 @@ Create Date: 2026-07-31 11:21:00.000000
 
 from collections.abc import Sequence
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision: str = "202607311121"
@@ -28,26 +26,46 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+INDEX_NAME = "ix_info_blobs_integration_knowledge_chunking"
+
+
 def upgrade() -> None:
-    # Requested configuration, per knowledge source.
+    # Every step here is idempotent, because this revision cannot be stamped
+    # atomically. Entering the autocommit block below commits the column additions so
+    # CREATE INDEX CONCURRENTLY can run outside a transaction, but Alembic records the
+    # revision only once upgrade() returns. A failed index build therefore leaves the
+    # columns in place with the revision unrecorded, and a plain ADD COLUMN would make
+    # the retry die on a duplicate instead of finishing the job.
     for table in ("groups", "websites", "integration_knowledge"):
-        op.add_column(table, sa.Column("chunk_size", sa.Integer(), nullable=True))
-        op.add_column(table, sa.Column("chunk_overlap", sa.Integer(), nullable=True))
+        for column in ("chunk_size", "chunk_overlap"):
+            op.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} INTEGER")
 
     # Effective values the stored chunks were produced with. Nullable and left
     # unbackfilled: pre-existing blobs were chunked with unknown settings, and
     # guessing would make the stale check re-index them all on the next crawl.
-    op.add_column("info_blobs", sa.Column("chunk_size", sa.Integer(), nullable=True))
-    op.add_column("info_blobs", sa.Column("chunk_overlap", sa.Integer(), nullable=True))
+    for column in ("chunk_size", "chunk_overlap"):
+        op.execute(f"ALTER TABLE info_blobs ADD COLUMN IF NOT EXISTS {column} INTEGER")
 
     # CONCURRENTLY cannot run inside a transaction, so this uses Alembic's autocommit
     # block like the other production indexes in this directory. The predicates mirror
     # the drift query exactly, and the stamp pair is carried so the comparison is
     # answered from the index rather than from heap rows.
     with op.get_context().autocommit_block():
-        op.execute("""
+        # A failed concurrent build leaves an invalid index of the same name behind.
+        # IF NOT EXISTS would then accept that carcass on retry and quietly return the
+        # per-delta drift query to a table scan, so drop it first. Only an invalid one:
+        # a valid index means the build already succeeded.
+        connection = op.get_bind()
+        invalid = connection.exec_driver_sql(
+            "SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+            f"WHERE c.relname = '{INDEX_NAME}' AND NOT i.indisvalid"
+        ).scalar()
+        if invalid:
+            op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX_NAME}")
+
+        op.execute(f"""
             CREATE INDEX CONCURRENTLY IF NOT EXISTS
-                ix_info_blobs_integration_knowledge_chunking
+                {INDEX_NAME}
             ON info_blobs (integration_knowledge_id, chunk_size, chunk_overlap)
             WHERE version_state = 'active'
               AND integration_knowledge_id IS NOT NULL
@@ -57,15 +75,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Idempotent for the same reason the upgrade is: the revision is unstamped only
+    # after downgrade() returns, so a failure after the index drop must be retryable.
     with op.get_context().autocommit_block():
-        op.execute(
-            "DROP INDEX CONCURRENTLY IF EXISTS "
-            "ix_info_blobs_integration_knowledge_chunking;"
-        )
+        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX_NAME}")
 
-    op.drop_column("info_blobs", "chunk_overlap")
-    op.drop_column("info_blobs", "chunk_size")
+    for column in ("chunk_overlap", "chunk_size"):
+        op.execute(f"ALTER TABLE info_blobs DROP COLUMN IF EXISTS {column}")
 
     for table in ("groups", "websites", "integration_knowledge"):
-        op.drop_column(table, "chunk_overlap")
-        op.drop_column(table, "chunk_size")
+        for column in ("chunk_overlap", "chunk_size"):
+            op.execute(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}")

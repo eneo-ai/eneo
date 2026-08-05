@@ -76,6 +76,27 @@ describe("ChunkSettings", () => {
     await expect.element(page.getByRole("spinbutton")).toHaveValue(180);
   });
 
+  it("announces the overlap as tokens, not as the slider's percentage", async () => {
+    // 40 of 400 tokens is 10%, and the thumb's numeric value is that 10. Under a
+    // label that says "tokens", announcing a bare 10 would name the wrong quantity
+    // in the wrong unit.
+    render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });
+
+    const expected = m.chunk_overlap_value({ percent: 10, tokens: 40 });
+    await expect.element(overlapSlider()).toHaveAttribute("aria-valuetext", expected);
+
+    const thumb = overlapSlider().element() as HTMLElement;
+    thumb.focus();
+    thumb.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
+    );
+
+    // And it keeps up with the value, rather than being a one-time mount string.
+    await expect
+      .element(overlapSlider())
+      .toHaveAttribute("aria-valuetext", m.chunk_overlap_value({ percent: 15, tokens: 60 }));
+  });
+
   it("gives the overlap slider a localized accessible name", async () => {
     // An explicit override starts the disclosure expanded.
     render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });
