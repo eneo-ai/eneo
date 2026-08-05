@@ -435,6 +435,12 @@ external release gate (item 10); BM0.2 is external (item 10).
     for the four skipped cases are configured first; the user supplies the
     internal fixture packet (anonymized template, matter documents,
     `.oeflow` export, three submissions).
+    The post-B7(h) smoke_v3 run (2026-08-05, served `a4894ee63`, locked
+    Luna route, 9 live journeys) shows purpose-first live: every asked first
+    question rated preferred, zero forbidden questions, the prior
+    unanswered-question stall now completes as a repaired plan (6/9 plans),
+    and the two remaining Builder errors are the recorded B10(e) residuals.
+    No checkpoint or admission regressions. Single repetition: directional.
     A 2026-08-03 source-verified Fable review ranks the product work without
     creating another roadmap. First preserve the classifier's validated
     explicit evidence level through `ResolvedSlot`, action admission, replay,
