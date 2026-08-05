@@ -25,20 +25,6 @@ from eneo.database.tables.mcp_exchanged_tokens_table import MCPExchangedTokens
 from eneo.database.tables.mcp_server_table import MCPServers
 
 
-@pytest.fixture
-async def default_user(db_container):
-    async with db_container() as container:
-        user_repo = container.user_repo()
-        return await user_repo.get_user_by_email("test@example.com")
-
-
-@pytest.fixture
-async def default_user_token(db_container, patch_auth_service_jwt, default_user):
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        return auth_service.create_access_token_for_user(default_user)
-
-
 async def _insert_server(
     db_container,
     *,

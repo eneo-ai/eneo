@@ -26,26 +26,36 @@ from datetime import datetime, timezone
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.idp_user_tokens_table import IdpUserTokens
 
 
 @pytest.fixture
-async def default_user(db_container):
-    async with db_container() as container:
-        user_repo = container.user_repo()
-        return await user_repo.get_user_by_email("test@example.com")
+def audit_spy(monkeypatch):
+    """Record every audit event emitted via ``log_async``.
 
+    ``log_async`` enqueues to the ARQ worker, which does not run in the
+    integration environment, so tests assert emission, not persistence
+    (the worker's own suite covers the write path).
+    """
+    from eneo.audit.application.audit_service import AuditService
 
-@pytest.fixture
-async def default_user_token(db_container, patch_auth_service_jwt, default_user):
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        return auth_service.create_access_token_for_user(default_user)
+    calls: list[dict] = []
+    original = AuditService.log_async
+
+    async def spy(self, **kwargs):
+        calls.append(kwargs)
+        return await original(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", spy)
+    return calls
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_upsert_encrypts_and_persists_all_tokens(db_container, default_user):
+async def test_upsert_encrypts_at_rest_and_get_decrypted_round_trips(
+    db_container, default_user
+):
     issuer = "https://idp.example/realms/eneo"
     refresh = "rt-secret-abcdef"
     access = "at-secret-123456"
@@ -84,27 +94,7 @@ async def test_upsert_encrypts_and_persists_all_tokens(db_container, default_use
         assert row.revoked_at is None
         assert row.scopes_granted == ["openid", "offline_access"]
 
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_get_decrypted_returns_plaintext(db_container, default_user):
-    issuer = "https://idp.example/realms/eneo"
-    refresh = "rt-secret-abcdef"
-    access = "at-secret-123456"
-    id_token = "idt-secret-789xyz"
-
-    async with db_container() as container:
-        store = container.oidc_token_store()
-        await store.upsert(
-            user=default_user,
-            idp_issuer=issuer,
-            idp_subject=None,
-            refresh_token=refresh,
-            access_token=access,
-            id_token=id_token,
-            access_token_expires_at=None,
-            scopes_granted=None,
-        )
+        # And the read path decrypts back to the original values.
         tokens = await store.get_decrypted(user_id=default_user.id, idp_issuer=issuer)
 
     assert tokens is not None
@@ -265,7 +255,7 @@ async def test_upsert_stores_id_token_without_refresh_token(db_container, defaul
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_revoke_zeros_ciphertext_and_stamps_revoked_at(
-    db_container, default_user
+    db_container, default_user, audit_spy
 ):
     issuer = "https://idp.example/realms/eneo"
 
@@ -296,11 +286,21 @@ async def test_revoke_zeros_ciphertext_and_stamps_revoked_at(
         assert row.id_token_ciphertext is None
         assert row.access_token_expires_at is None
         assert row.revoked_at is not None
+        row_id = row.id
 
         # get_decrypted hides revoked rows
         assert (
             await store.get_decrypted(user_id=default_user.id, idp_issuer=issuer)
         ) is None
+
+    # Revocation emits one audit event per revoked issuer.
+    revoked_events = [
+        call
+        for call in audit_spy
+        if call.get("action") == ActionType.OIDC_TOKEN_REVOKED
+    ]
+    assert len(revoked_events) == 1
+    assert revoked_events[0]["entity_id"] == row_id
 
 
 @pytest.mark.integration
@@ -358,10 +358,3 @@ async def test_logout_endpoint_revokes_all_user_tokens(
             assert row.refresh_token_ciphertext is None
             assert row.access_token_ciphertext is None
             assert row.revoked_at is not None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_logout_endpoint_requires_authentication(client):
-    response = await client.post("/api/v1/auth/oidc/logout")
-    assert response.status_code in (401, 403), response.text

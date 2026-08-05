@@ -26,20 +26,6 @@ import sqlalchemy as sa
 from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
 
 
-@pytest.fixture
-async def default_user(db_container):
-    async with db_container() as container:
-        user_repo = container.user_repo()
-        return await user_repo.get_user_by_email("test@example.com")
-
-
-@pytest.fixture
-async def default_user_token(db_container, patch_auth_service_jwt, default_user):
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        return auth_service.create_access_token_for_user(default_user)
-
-
 async def _insert_mcp_row(
     db_container,
     *,
@@ -76,62 +62,18 @@ async def _insert_mcp_row(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_existing_rows_default_to_static_bearer(
+async def test_scope_columns_default_and_round_trip_through_public_dto(
     client, db_container, default_user, default_user_token
 ):
-    """A row inserted without ``auth_scope`` reads back as ``static_bearer``."""
-    mcp_id = await _insert_mcp_row(
+    """A row inserted without ``auth_scope`` reads back as ``static_bearer``,
+    and ``expected_idp_issuer`` round-trips through the public DTO."""
+    issuer = "https://keycloak.example/realms/eneo"
+    legacy_id = await _insert_mcp_row(
         db_container,
         tenant_id=default_user.tenant_id,
         name=f"legacy-{uuid4().hex[:8]}",
     )
-
-    response = await client.get(
-        "/api/v1/mcp-servers/",
-        headers={"Authorization": f"Bearer {default_user_token}"},
-    )
-    assert response.status_code == 200, response.text
-    row = next(item for item in response.json()["items"] if item["id"] == mcp_id)
-    assert row["auth_scope"] == "static_bearer"
-    assert row["expected_idp_issuer"] is None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("scope", ["per_user", "per_tenant"])
-async def test_create_rejects_oauth_scopes_when_flag_disabled(
-    client, default_user_token, scope, monkeypatch
-):
-    """POST /mcp-servers/ with per_user / per_tenant returns 501 while the
-    broker flag is off. Pinned explicitly: the surrounding environment may
-    run with MCP_OAUTH_ENABLED=true."""
-    from eneo.main.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "mcp_oauth_enabled", False)
-    response = await client.post(
-        "/api/v1/mcp-servers/",
-        json={
-            "name": f"oauth-{uuid4().hex[:8]}",
-            "http_url": "https://example.invalid/mcp",
-            "http_auth_type": "none",
-            "auth_scope": scope,
-        },
-        headers={"Authorization": f"Bearer {default_user_token}"},
-    )
-    assert response.status_code == 501, response.text
-    # The HTTPException handler flattens {code, message} details to the
-    # top-level body.
-    assert response.json().get("code") == "mcp_oauth_not_enabled"
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_static_bearer_round_trip_includes_expected_idp_issuer(
-    client, db_container, default_user, default_user_token
-):
-    """``expected_idp_issuer`` round-trips through the public DTO."""
-    issuer = "https://keycloak.example/realms/eneo"
-    mcp_id = await _insert_mcp_row(
+    issuer_id = await _insert_mcp_row(
         db_container,
         tenant_id=default_user.tenant_id,
         name=f"with-issuer-{uuid4().hex[:8]}",
@@ -144,20 +86,50 @@ async def test_static_bearer_round_trip_includes_expected_idp_issuer(
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert response.status_code == 200, response.text
-    row = next(item for item in response.json()["items"] if item["id"] == mcp_id)
-    assert row["auth_scope"] == "static_bearer"
-    assert row["expected_idp_issuer"] == issuer
+    items = {item["id"]: item for item in response.json()["items"]}
+    assert items[legacy_id]["auth_scope"] == "static_bearer"
+    assert items[legacy_id]["expected_idp_issuer"] is None
+    assert items[issuer_id]["auth_scope"] == "static_bearer"
+    assert items[issuer_id]["expected_idp_issuer"] == issuer
 
 
-@pytest.mark.parametrize("scope", ["per_user", "per_tenant"])
-async def test_create_sso_scope_saves_without_connection_probe(
-    client, default_user_token, scope, monkeypatch
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_create_rejects_oauth_scopes_when_flag_disabled(
+    client, default_user_token, monkeypatch
 ):
-    """POST /mcp-servers/ with an SSO scope persists the server without
-    probing the remote: the broker mints tokens per user at call time, so
-    there are no admin-time credentials to probe with. The unreachable URL
-    proves no probe ran (a probe would 400 the request). Tools arrive later
-    via tools/sync, so the catalog starts empty."""
+    """POST /mcp-servers/ with an SSO scope returns 501 while the broker
+    flag is off (both SSO scopes share the gate's non-static branch).
+    Pinned explicitly: the surrounding environment may run with
+    MCP_OAUTH_ENABLED=true."""
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "mcp_oauth_enabled", False)
+    response = await client.post(
+        "/api/v1/mcp-servers/",
+        json={
+            "name": f"oauth-{uuid4().hex[:8]}",
+            "http_url": "https://example.invalid/mcp",
+            "http_auth_type": "none",
+            "auth_scope": "per_user",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 501, response.text
+    # The HTTPException handler flattens {code, message} details to the
+    # top-level body.
+    assert response.json().get("code") == "mcp_oauth_not_enabled"
+
+
+async def test_create_sso_scope_saves_without_connection_probe(
+    client, default_user_token, monkeypatch
+):
+    """POST /mcp-servers/ with an SSO scope (per_user and per_tenant share
+    the same branch) persists the server without probing the remote: the
+    broker mints tokens per user at call time, so there are no admin-time
+    credentials to probe with. The unreachable URL proves no probe ran (a
+    probe would 400 the request). Tools arrive later via tools/sync, so
+    the catalog starts empty."""
     from eneo.main.config import get_settings
 
     monkeypatch.setattr(get_settings(), "mcp_oauth_enabled", True)
@@ -166,10 +138,10 @@ async def test_create_sso_scope_saves_without_connection_probe(
     response = await client.post(
         "/api/v1/mcp-servers/",
         json={
-            "name": f"sso-{scope}-{uuid4().hex[:8]}",
+            "name": f"sso-{uuid4().hex[:8]}",
             "http_url": "https://example.invalid/mcp",
             "http_auth_type": "bearer",
-            "auth_scope": scope,
+            "auth_scope": "per_user",
             "exchange_protocol": "id_jag",
             "expected_idp_issuer": "https://idp.example/oauth2/default",
             "target_resource_or_scope": "https://example.invalid/mcp",
@@ -181,7 +153,7 @@ async def test_create_sso_scope_saves_without_connection_probe(
     assert body["connection"]["success"] is True
     assert body["connection"]["probe_skipped"] is True
     assert body["connection"]["tools_discovered"] == 0
-    assert body["server"]["auth_scope"] == scope
+    assert body["server"]["auth_scope"] == "per_user"
 
     server_id = body["server"]["id"]
     tools = await client.get(f"/api/v1/mcp-servers/{server_id}/tools/", headers=headers)

@@ -48,7 +48,7 @@ def _make_service(broker=None) -> tuple[MCPServerService, SimpleNamespace]:
     return service, user
 
 
-async def test_broker_token_provider_mints_for_per_user_server():
+async def test_broker_token_provider_mints_for_sso_scopes():
     broker = _RecordingBroker()
     service, user = _make_service(broker)
     server = _make_server("per_user")
@@ -61,12 +61,7 @@ async def test_broker_token_provider_mints_for_per_user_server():
     assert call["mcp_server"] is server
     assert call["tenant_federation_config"] == {"mcp_default_target": "aud"}
     assert call["principal"] == UserPrincipal(user=user)
-
-
-async def test_broker_token_provider_covers_per_tenant_scope():
-    broker = _RecordingBroker()
-    service, _ = _make_service(broker)
-
+    # per_tenant shares the same SSO branch.
     assert service._broker_token_provider(_make_server("per_tenant")) is not None
 
 

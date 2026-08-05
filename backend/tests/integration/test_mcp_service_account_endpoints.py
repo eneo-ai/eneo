@@ -13,8 +13,9 @@ secret used by the broker's ``per_tenant`` exchange path. Coverage:
    reports ``configured=false``.
 5. Non-admin callers get 403 on PUT and DELETE. (GET allows admin only
    in this revision; covered separately to make the boundary explicit.)
-6. Audit rows are written for PUT (``mcp_service_account_set``) and
-   DELETE (``mcp_service_account_cleared``).
+6. Audit events are emitted for PUT (``mcp_service_account_set``) and
+   DELETE (``mcp_service_account_cleared``); persistence is the ARQ
+   worker's concern, covered by its own suite.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main.models import ModelId
 from eneo.roles.role import RoleCreate
@@ -88,6 +90,31 @@ async def _read_federation_config(db_container, tenant_id) -> dict:
         return dict(row or {})
 
 
+@pytest.fixture
+def audit_spy(monkeypatch):
+    """Record every audit event emitted via ``log_async``.
+
+    ``log_async`` enqueues to the ARQ worker, which does not run in the
+    integration environment, so tests assert emission, not persistence
+    (the worker's own suite covers the write path).
+    """
+    from eneo.audit.application.audit_service import AuditService
+
+    calls: list[dict] = []
+    original = AuditService.log_async
+
+    async def spy(self, **kwargs):
+        calls.append(kwargs)
+        return await original(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", spy)
+    return calls
+
+
+def _emitted_actions(audit_spy: list[dict]) -> list[ActionType]:
+    return [call.get("action") for call in audit_spy]
+
+
 async def test_get_reports_not_configured_when_empty(client, admin_user_token):
     response = await client.get(
         "/api/v1/mcp-servers/service-account/",
@@ -101,7 +128,7 @@ async def test_get_reports_not_configured_when_empty(client, admin_user_token):
 
 
 async def test_put_encrypts_secret_at_rest_and_get_returns_masked(
-    client, db_container, admin_user, admin_user_token
+    client, db_container, admin_user, admin_user_token, audit_spy
 ):
     response = await client.put(
         "/api/v1/mcp-servers/service-account/",
@@ -122,6 +149,9 @@ async def test_put_encrypts_secret_at_rest_and_get_returns_masked(
     # Plaintext must NOT be stored
     assert "super-secret-value-9999" not in sa_config["client_secret_ciphertext"]
 
+    # Setting credentials emits an audit event.
+    assert ActionType.MCP_SERVICE_ACCOUNT_SET in _emitted_actions(audit_spy)
+
     # Subsequent GET reflects the same row
     get_response = await client.get(
         "/api/v1/mcp-servers/service-account/",
@@ -135,7 +165,7 @@ async def test_put_encrypts_secret_at_rest_and_get_returns_masked(
 
 
 async def test_delete_removes_subkey_and_reports_not_configured(
-    client, db_container, admin_user, admin_user_token
+    client, db_container, admin_user, admin_user_token, audit_spy
 ):
     # Seed credentials
     await client.put(
@@ -159,6 +189,9 @@ async def test_delete_removes_subkey_and_reports_not_configured(
     )
     assert get_response.status_code == 200
     assert get_response.json()["configured"] is False
+
+    # Clearing credentials emits an audit event too.
+    assert ActionType.MCP_SERVICE_ACCOUNT_CLEARED in _emitted_actions(audit_spy)
 
 
 async def test_non_admin_caller_is_refused_on_put_and_delete(client, non_admin_token):

@@ -96,13 +96,6 @@ def patch_prm(monkeypatch):
     return prm_state
 
 
-@pytest.fixture
-async def default_user(db_container):
-    async with db_container() as container:
-        user_repo = container.user_repo()
-        return await user_repo.get_user_by_email("test@example.com")
-
-
 async def _insert_per_user_mcp_server(
     db_container,
     *,
@@ -525,14 +518,12 @@ async def test_auto_uses_id_jag_when_as_advertises_grant_profile(
         )
 
     assert token == as_token
+    # Routing only: the wire format of each leg is pinned by the strategy
+    # unit tests. Here we care that leg 1 hit the IdP, leg 2 the AS, and
+    # the leg-1 assertion flowed into leg 2.
     endpoints = [call["endpoint"] for call in patch_two_leg_post["calls"]]
     assert endpoints == [idp_token_endpoint, AS_TOKEN_ENDPOINT]
-    leg1_form = patch_two_leg_post["calls"][0]["form"]
-    assert leg1_form["subject_token"] == "the-id-token"
-    assert leg1_form["audience"] == AS_ISSUER
-    leg2_form = patch_two_leg_post["calls"][1]["form"]
-    assert leg2_form["grant_type"] == "urn:ietf:params:oauth:grant-type:jwt-bearer"
-    assert leg2_form["assertion"] == assertion
+    assert patch_two_leg_post["calls"][1]["form"]["assertion"] == assertion
 
 
 @pytest.mark.integration
