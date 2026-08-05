@@ -435,6 +435,15 @@ external release gate (item 10); BM0.2 is external (item 10).
     for the four skipped cases are configured first; the user supplies the
     internal fixture packet (anonymized template, matter documents,
     `.oeflow` export, three submissions).
+    The corpus/harness slice landed at `c5bc31f22` (five-iteration gate,
+    green 8/10): deterministic fixtures un-skip the four attachment/template
+    cases, the tjansteskrivelse plan-authoring family (two honest cases)
+    anchors on the authentic BUN §17 protokollsutdrag, the loader rejects
+    runtime bindings on non-executed cases, and the evaluator gains
+    `expected_primary_input_type` validated against proposal AND applied
+    flow with mutation-proven behavior tests. Deferred by honesty: the
+    template-failure and edit-retention journeys return with executed-cohort
+    and edit-session harness support respectively.
     The post-B7(h) smoke_v3 run (2026-08-05, served `a4894ee63`, locked
     Luna route, 9 live journeys) shows purpose-first live: every asked first
     question rated preferred, zero forbidden questions, the prior
