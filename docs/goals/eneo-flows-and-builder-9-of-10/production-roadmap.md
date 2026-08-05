@@ -969,7 +969,8 @@ returns. Execution order and binding decisions:
    role; corpus answer-closure separate.
 **Ungated commits awaiting batch peer review** (self-validated: full flows
 suite + pyright + ruff): `8e720e359` A-closeout (prompt roles +
-declared-schema-only critic exemption + runtime input-resolution proof).
+declared-schema-only critic exemption + runtime input-resolution proof);
+slice B strict output_fields admission (lossless-or-rejected, this series).
 Loss-matrix checklist: `notes/loss-matrix.md`.
 
 9. **G citations**: write ONLY the red end-to-end test

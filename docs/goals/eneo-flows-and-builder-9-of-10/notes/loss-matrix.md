@@ -18,7 +18,7 @@ survey, service, or second state model).
 
 | Transition | Rule | Owner | Failure code | Behavior test |
 |---|---|---|---|---|
-| tool args → drafts | TODO(B): accept None/empty/typed drafts/canonical complete-object lists; reject strings, string lists, dict-of-name maps, missing name/properties, unknown types, over-depth; whole-proposal rejection, first-decisive-error feedback | ai_builder_structured_field_normalizer + proposal_intent | ProposalIntentArgumentError (parse) | TODO incident-shaped matrix |
+| tool args → drafts | DONE(B): admission delegates to StructuredFieldDraft (typed defaults stay lossless); strings, string lists, dict-of-name maps, missing name/description, unknown types, container misuse reject the WHOLE list with first-decisive-error feedback; over-depth rejects at the step boundary; no field_N invention, no downgrades, no partial retention | ai_builder_structured_field_normalizer + proposal_intent | StructuredFieldAdmissionError → ProposalIntentArgumentError (parse) | test_ai_builder_structured_field_normalizer.py (13) |
 | drafts → planned step | preserved verbatim; empty list = no fields (no "dropped" log) | assembly/create | n/a | normalizer log-noise tests (DONE 9aa10352c) |
 | planned → compiled contract | terminal schema suppression only under pinned declared schema | lower.py | terminal_output_fields_suppressed_by_schema log | existing |
 

@@ -1,275 +1,117 @@
+"""Strict admission for proposal ``output_fields``.
+
+The propose/edit tool contract requires an array of complete field objects
+with a closed type enum, and ``StructuredFieldDraft`` is the canonical
+typed form of that contract. Admission delegates to it: a payload is either
+preserved losslessly or the whole list is rejected with repairable feedback
+naming the first decisive error. Nothing is invented (no ``field_N``
+names), downgraded (no unknown-type or over-depth coercion to string), or
+partially retained — silent lossy coercion is what turned a valid live
+proposal into an unwinnable repair loop.
+"""
+
 from __future__ import annotations
 
-import logging
 from typing import Any, cast
 
-from eneo.flows.ai_builder.ai_builder_new_step_models import (
-    MAX_STRUCTURED_FIELD_DEPTH,
-    StructuredFieldDraft,
+from pydantic import ValidationError
+
+from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+
+_REJECTION_SUFFIX = (
+    "No output_fields were accepted. "
+    "Resend the complete output_fields list using the declared tool shape."
 )
 
-logger = logging.getLogger(__name__)
+
+class StructuredFieldAdmissionError(ValueError):
+    """One decisive, model-repairable admission failure."""
+
+    def __init__(self, path: str, detail: str) -> None:
+        super().__init__(f"{path}: {detail} {_REJECTION_SUFFIX}")
 
 
 def normalize_structured_field_list(
     value: Any,
     *,
-    depth: int = 1,
+    path: str = "output_fields",
 ) -> list[dict[str, Any]] | None:
-    """Coerce loose LLM-shaped field hints into strict field drafts."""
+    """Admit a complete field list losslessly or reject it whole."""
 
-    if isinstance(value, list) and not value:
-        # An explicit empty list is a statement ("no structured fields"),
-        # not lost content — logging it as dropped misleads incident triage.
-        return None
-    raw_items = _coerce_field_items(value)
-    if raw_items is None:
-        if value is not None:
-            _log_field_list_dropped(reason="unsupported_shape")
-        return None
-
-    fields: list[dict[str, Any]] = []
-    for index, raw_item in enumerate(raw_items):
-        field = _normalize_structured_field_item(
-            raw_item,
-            fallback_name=f"field_{index + 1}",
-            depth=depth,
-        )
-        if field is not None:
-            fields.append(field)
-    if not fields:
-        _log_field_list_dropped(reason="no_valid_fields")
-        return None
-    return fields
-
-
-def _coerce_field_items(value: Any) -> list[Any] | None:
     if value is None:
         return None
-    if isinstance(value, list):
-        return cast(list[Any], value)
-    if isinstance(value, dict):
-        raw = cast(dict[str, Any], value)
-        if looks_like_structured_field_spec(raw):
-            return [raw]
-        properties = raw.get("properties")
-        if isinstance(properties, dict):
-            raw_properties = cast(dict[str, Any], properties)
-            return [
-                {"name": name, **cast(dict[str, Any], spec)}
-                if isinstance(spec, dict)
-                else {"name": name, "field_type": _field_type_from_scalar(spec)}
-                for name, spec in raw_properties.items()
-            ]
-        return [
-            {"name": name, **cast(dict[str, Any], spec)}
-            if isinstance(spec, dict)
-            else {"name": name, "field_type": _field_type_from_scalar(spec)}
-            for name, spec in raw.items()
-        ]
-    if isinstance(value, str) and value.strip():
-        return [value]
-    return None
-
-
-def _normalize_structured_field_item(
-    value: Any,
-    *,
-    fallback_name: str,
-    depth: int,
-) -> dict[str, Any] | None:
-    if isinstance(value, StructuredFieldDraft):
-        return value.model_dump()
-
-    if isinstance(value, str):
-        name = _field_name(value, fallback=fallback_name)
-        return _strict_field(name=name, field_type="string", description=value)
-
-    if not isinstance(value, dict):
+    if not isinstance(value, list):
+        raise StructuredFieldAdmissionError(
+            path,
+            "must be an array of field objects.",
+        )
+    items = cast(list[Any], value)
+    if not items:
+        # An explicit empty list is a statement ("no structured fields"),
+        # not lost content.
         return None
+    return [
+        _admit_structured_field_item(item, path=f"{path}[{index}]")
+        for index, item in enumerate(items)
+    ]
 
-    raw = cast(dict[str, Any], value)
-    if not looks_like_structured_field_spec(raw) and len(raw) == 1:
-        name, spec = next(iter(raw.items()))
-        if isinstance(spec, dict):
-            raw = {"name": name, **cast(dict[str, Any], spec)}
-        else:
-            raw = {"name": name, "field_type": _field_type_from_scalar(spec)}
 
-    name = _field_name(raw.get("name"), fallback=fallback_name)
-    field_type = _normalize_field_type(
-        raw.get("field_type") or raw.get("type"),
-        raw=raw,
-    )
-    description = _field_description(raw, fallback=name.replace("_", " "))
-    required = raw.get("required")
-    normalized: dict[str, Any] = _strict_field(
-        name=name,
-        field_type=field_type,
-        description=description,
-        required=required if isinstance(required, bool) else True,
-    )
-
-    child_fields = raw.get("fields") or raw.get("properties")
-    item_fields = raw.get("item_fields")
-    items = raw.get("items")
-
-    if field_type == "object":
-        if depth >= MAX_STRUCTURED_FIELD_DEPTH:
-            _log_object_downgrade(name=name, depth=depth, reason="max_depth")
-            normalized["field_type"] = "string"
-            return normalized
-        normalized_children = normalize_structured_field_list(
-            child_fields,
-            depth=depth + 1,
+def _admit_structured_field_item(value: Any, *, path: str) -> dict[str, Any]:
+    if isinstance(value, StructuredFieldDraft):
+        draft = value
+    elif isinstance(value, dict):
+        try:
+            draft = StructuredFieldDraft.model_validate(value)
+        except ValidationError as error:
+            raise StructuredFieldAdmissionError(
+                _admission_error_path(path, error),
+                _admission_error_detail(error),
+            ) from error
+    else:
+        raise StructuredFieldAdmissionError(
+            path,
+            "must be a field object with name, field_type, and description.",
         )
-        if normalized_children:
-            normalized["fields"] = normalized_children
-        else:
-            _log_object_downgrade(name=name, depth=depth, reason="missing_fields")
-            normalized["field_type"] = "string"
-        return normalized
+    _require_container_shape(draft, path=path)
+    return draft.model_dump()
 
-    if field_type == "array":
-        if depth >= MAX_STRUCTURED_FIELD_DEPTH:
-            return normalized
-        normalized_item_fields = normalize_structured_field_list(
-            item_fields,
-            depth=depth + 1,
+
+def _require_container_shape(draft: StructuredFieldDraft, *, path: str) -> None:
+    # The typed model already requires object fields to declare children;
+    # these rules cover the converse misuses it permits.
+    if draft.field_type != "object" and draft.fields:
+        raise StructuredFieldAdmissionError(
+            f"{path}.fields",
+            "child fields belong to object fields; use item_fields for arrays.",
         )
-        if normalized_item_fields is None:
-            normalized_item_fields = _normalize_array_item_fields(
-                items,
-                depth=depth + 1,
-            )
-        if normalized_item_fields is None:
-            normalized_item_fields = normalize_structured_field_list(
-                child_fields,
-                depth=depth + 1,
-            )
-        if normalized_item_fields:
-            normalized["item_fields"] = normalized_item_fields
-        return normalized
-
-    return normalized
+    if draft.field_type != "array" and draft.item_fields:
+        raise StructuredFieldAdmissionError(
+            f"{path}.item_fields",
+            "item_fields belong to array fields.",
+        )
+    for child_path, children in (
+        (f"{path}.fields", draft.fields),
+        (f"{path}.item_fields", draft.item_fields),
+    ):
+        for index, child in enumerate(children or []):
+            _require_container_shape(child, path=f"{child_path}[{index}]")
 
 
-def _normalize_array_item_fields(
-    value: Any,
-    *,
-    depth: int,
-) -> list[dict[str, Any]] | None:
-    if isinstance(value, dict):
-        raw = cast(dict[str, Any], value)
-        properties = raw.get("properties")
-        if isinstance(properties, dict):
-            return normalize_structured_field_list(properties, depth=depth)
-        if looks_like_structured_field_spec(raw):
-            return normalize_structured_field_list(raw, depth=depth)
-    return None
-
-
-def _strict_field(
-    *,
-    name: str,
-    field_type: str,
-    description: str,
-    required: bool = True,
-) -> dict[str, Any]:
-    return {
-        "name": name,
-        "field_type": field_type,
-        "description": description,
-        "required": required,
-    }
-
-
-def looks_like_structured_field_spec(value: dict[str, Any]) -> bool:
-    return bool(
-        {
-            "name",
-            "field_type",
-            "type",
-            "description",
-            "title",
-            "fields",
-            "item_fields",
-            "items",
-        }
-        & value.keys()
+def _admission_error_path(path: str, error: ValidationError) -> str:
+    first = error.errors()[0]
+    location = ".".join(
+        str(part) for part in first.get("loc", ()) if not isinstance(part, int)
     )
+    return f"{path}.{location}" if location else path
 
 
-def _field_name(value: Any, *, fallback: str) -> str:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return fallback
-
-
-def _field_description(value: dict[str, Any], *, fallback: str) -> str:
-    for key in ("description", "title"):
-        raw = value.get(key)
-        if isinstance(raw, str) and raw.strip():
-            return raw.strip()
-    return fallback
-
-
-def _normalize_field_type(value: Any, *, raw: dict[str, Any]) -> str:
-    if not isinstance(value, str) or not value.strip():
-        if raw.get("fields") is not None or raw.get("properties") is not None:
-            return "object"
-        if raw.get("item_fields") is not None or raw.get("items") is not None:
-            return "array"
-        return "string"
-
-    normalized = value.strip().lower()
-    aliases = {
-        "str": "string",
-        "text": "string",
-        "integer": "number",
-        "float": "number",
-        "double": "number",
-        "bool": "boolean",
-    }
-    normalized = aliases.get(normalized, normalized)
-    if normalized not in {"string", "number", "boolean", "object", "array"}:
-        return "string"
-    return normalized
-
-
-def _field_type_from_scalar(value: Any) -> str:
-    if isinstance(value, str):
-        return _normalize_field_type(value, raw={})
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, int | float):
-        return "number"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, dict):
-        return "object"
-    return "string"
-
-
-def _log_object_downgrade(*, name: str, depth: int, reason: str) -> None:
-    logger.info(
-        "ai_builder_structured_field_object_downgraded",
-        extra={
-            "field_name": name,
-            "depth": depth,
-            "reason": reason,
-        },
-    )
-
-
-def _log_field_list_dropped(*, reason: str) -> None:
-    logger.info(
-        "ai_builder_structured_field_list_dropped",
-        extra={"reason": reason},
-    )
+def _admission_error_detail(error: ValidationError) -> str:
+    first = error.errors()[0]
+    message = str(first.get("msg", "is invalid"))
+    return f"{message.removeprefix('Value error, ').rstrip('.')}."
 
 
 __all__ = [
-    "looks_like_structured_field_spec",
+    "StructuredFieldAdmissionError",
     "normalize_structured_field_list",
 ]
