@@ -142,6 +142,7 @@ async def test_unready_object_store_rejects_without_inline_fallback_or_mutation(
             session_audio_maximum_bytes=100,
             knowledge_file_maximum_bytes=100,
             knowledge_audio_maximum_bytes=100,
+            object_store_revision=9,
         ),
     )
 
@@ -149,7 +150,8 @@ async def test_unready_object_store_rejects_without_inline_fallback_or_mutation(
         await service.save_file(MagicMock())
 
     object_content.ensure_target_ready.assert_awaited_once_with(
-        StorageKind.OBJECT_STORE
+        StorageKind.OBJECT_STORE,
+        object_store_revision=9,
     )
     protocol.prepare_upload.assert_not_called()
     object_content.capture_for_target.assert_not_called()

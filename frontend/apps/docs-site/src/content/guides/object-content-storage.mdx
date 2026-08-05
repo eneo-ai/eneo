@@ -6,9 +6,10 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 - PostgreSQL inline is the complete ready-to-use default. Compatible object
   storage is optional.
-- Operators configure storage infrastructure and safety bounds. Platform admins
-  choose one deployment-wide target for eligible new File, Icon, and knowledge
-  original writes in **Admin > Storage** without restarting backend or worker.
+- Operators configure storage infrastructure, outbound endpoint approval, and
+  safety bounds. Platform admins connect an approved destination and choose one
+  deployment-wide target for eligible new File, Icon, and knowledge original
+  writes in **Admin > Storage** without restarting backend or worker.
 - A policy change affects new writes only. Existing content never moves
   implicitly.
 - Each payload has one byte authority. Eneo does not fall back, dual-write, or
@@ -164,8 +165,8 @@ mean “more services.”
 
 | Owner          | Responsibility                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Set the one deployment-wide new-write target and business upload limits in **Admin > Storage**                                        |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
+| Platform admin | Connect one approved destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; approve outbound endpoint origins and own TLS, certificates, capacity, backups, and process safety tuning |
 
 Tenant admins can review policy, effective limits, and capability status.
 Deployment-wide content inventory spans tenants, so only platform admins can
@@ -327,21 +328,31 @@ Create a non-admin application identity with bucket-scoped permissions for:
 MinIO policy files use `arn:aws:s3` syntax locally; those strings do not connect
 Eneo or MinIO to AWS.
 
-Configure backend and worker with the same secret-safe values:
+Allow Eneo to contact the exact external endpoint. Keep this operator-owned
+network boundary in the deployment environment; a platform admin cannot extend
+it from the application:
 
 ```dotenv
-OBJECT_CONTENT_ENDPOINT_URL=https://minio.storage.example.eu:9000
-OBJECT_CONTENT_REGION=<signing scope required by the endpoint>
-OBJECT_CONTENT_BUCKET=eneo-object-content
-OBJECT_CONTENT_ACCESS_KEY_ID=<application access key>
-OBJECT_CONTENT_SECRET_ACCESS_KEY=<application secret key>
-OBJECT_CONTENT_DEPLOYMENT_ID=<stable UUID>
-OBJECT_CONTENT_ALLOW_INSECURE_HTTP=false
+ENCRYPTION_KEY=<44-character Fernet key>
+OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS=["https://minio.storage.example.eu:9000"]
 ```
 
-Keep `OBJECT_CONTENT_ADDRESSING_STYLE=path` unless the endpoint has wildcard
-DNS and TLS for virtual-host bucket names. Mount a private CA read-only into
-both backend and worker and set `OBJECT_CONTENT_CA_BUNDLE` when required.
+Restart backend and worker after changing these deployment values. Then open
+**Admin > Storage**, add the endpoint, signing region, bucket, and application
+access keys, and let Eneo test and save the encrypted connection. Adding the
+connection does not select it for new writes or move existing content. Keep
+path-based bucket addressing unless the endpoint has wildcard DNS and TLS for
+bucket subdomains. Do not remove an origin used by a saved admin connection:
+the backend then refuses to start until the origin is restored.
+
+Mount a private CA read-only into both backend and worker and set
+`OBJECT_CONTENT_CA_BUNDLE` when required. Existing operator-managed
+`OBJECT_CONTENT_ENDPOINT_URL`, bucket, deployment ID, and credential settings
+remain supported for upgrades. Eneo adopts them when encrypted persistence is
+available; otherwise they remain read-only in the admin interface. Do not
+configure the same destination through both paths.
+Add the adopted endpoint's origin to the allowlist before rotating its access
+keys in Admin.
 
 Do **not** enable the bundled profile. Start the normal stack and verify:
 
@@ -351,10 +362,10 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-After readiness reports `ready`, a platform admin can select **Object store**
-in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
-or incompatible. No backend or worker restart is required for the policy
-change.
+After the connection reports **Ready**, a platform admin can select **Object
+storage** in **Admin > Storage**. Connection tests and policy changes fail
+clearly if the endpoint is unavailable or incompatible. Neither action needs a
+backend or worker restart.
 
 Before production, test the exact service version and configuration: single and
 multipart write, `HEAD`, full and single-range read, deletion, pagination, TLS,

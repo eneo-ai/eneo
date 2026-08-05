@@ -974,12 +974,19 @@ class SkillRepoImpl:
                     )
                 ),
             )
-            .order_by(AssistantSkillBindings.assistant_id)
+            .order_by(
+                AssistantSkillBindings.skill_id,
+                AssistantSkillBindings.assistant_id,
+            )
             .limit(limit + 1)
         )
         if after_assistant_id is not None:
             statement = statement.where(
-                AssistantSkillBindings.assistant_id > after_assistant_id
+                sa.tuple_(
+                    AssistantSkillBindings.skill_id,
+                    AssistantSkillBindings.assistant_id,
+                )
+                > (skill_id, after_assistant_id)
             )
         rows = (await self.session.execute(statement)).all()
         visible = rows[:limit]

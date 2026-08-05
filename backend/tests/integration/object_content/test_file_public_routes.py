@@ -25,6 +25,7 @@ from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.object_content.content import StorageKind
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.runtime import object_content_runtime
 
 
@@ -38,7 +39,13 @@ def _opaque_png(*, width: int, height: int) -> bytes:
 
 
 class _ReadyObjectStoreContentService(ObjectContentService):
-    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+    async def ensure_target_ready(
+        self,
+        storage_kind: StorageKind,
+        *,
+        object_store_revision: int | None = None,
+    ) -> None:
+        del object_store_revision
         assert storage_kind is StorageKind.OBJECT_STORE
 
 
@@ -68,8 +75,10 @@ async def test_file_upload_respects_audit_kill_switch_after_storage_commit(
             _ReadyObjectStoreContentService(
                 real_object_store.settings,
                 sessionmanager,
-                object_store_settings=real_object_store.settings,
-                object_store=real_object_store.store,
+                object_store_provider=ObjectStoreProvider.fixed(
+                    real_object_store.settings,
+                    real_object_store.store,
+                ),
             ),
         )
 

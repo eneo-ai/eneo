@@ -37,6 +37,7 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
 )
@@ -109,8 +110,7 @@ async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
     service = ObjectContentService(
         settings,
         object_content_database,
-        object_store_settings=settings,
-        object_store=store,
+        object_store_provider=ObjectStoreProvider.fixed(settings, store),
     )
     original_preflight = store._require_empty_content_namespace
     preflight_calls = 0

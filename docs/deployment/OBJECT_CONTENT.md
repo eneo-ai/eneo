@@ -8,9 +8,9 @@ offline reference shipped beside the Compose templates.
 
 - Eneo runs normally without S3-compatible storage. PostgreSQL inline is the
   complete ready-to-use default.
-- Platform admins choose one deployment-wide target for eligible new File and
-  Icon writes in **Admin > Storage**. Policy changes need no backend or worker
-  restart.
+- Platform admins connect one approved S3-compatible destination and choose the
+  deployment-wide target for eligible new File and Icon writes in **Admin >
+  Storage**. These changes need no backend or worker restart.
 - PostgreSQL owns identity, SHA-256, size/type, references, access, retention,
   and lifecycle. Exactly one selected backend owns each payload.
 - Compatible object storage is optional. Enabling or selecting it never moves
@@ -34,8 +34,8 @@ silently after a failure.
 
 | Owner          | Responsibility                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Platform admin | Set the deployment-wide new-write target and business upload limits in **Admin > Storage**                                            |
-| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
+| Platform admin | Connect one operator-approved destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; approve outbound endpoint origins and own TLS, certificates, capacity, backups, and process safety tuning |
 
 Tenant admins can review policy, effective limits, and capability status.
 Deployment-wide content inventory spans tenants, so only platform admins can
@@ -63,6 +63,31 @@ work. A target change affects new writes only; moving existing content remains
 a separate migration workflow.
 
 ## Choose the endpoint
+
+For a new installation, the operator first sets Eneo's root encryption key and
+an exact allowlist of S3 endpoint origins. A platform admin can then enter the
+endpoint, bucket, signing region, and access keys in **Admin > Storage**. Eneo
+tests the destination before encrypting and saving the credentials. Saving the
+connection does not select it for new writes or move existing content.
+
+```dotenv
+OBJECT_CONTENT_ADMIN_ALLOWED_ENDPOINT_ORIGINS=["https://objects.example.se"]
+```
+
+The allowlist is an outbound network boundary, not administrator policy. An
+administrator who can store credentials must not also be able to make the
+backend contact an arbitrary network address. Values are exact HTTP(S) origins:
+scheme, host, and optional port, without a bucket name or path. Changing the
+allowlist requires a backend and worker restart; rotating access keys and
+changing storage policy do not. Do not remove an origin used by a saved admin
+connection: the backend then refuses to start until the origin is restored.
+
+Existing operator-managed connections supplied through `OBJECT_CONTENT_*`
+remain supported as trusted deployment input. When encrypted persistence is
+available, Eneo adopts that connection without changing its destination;
+otherwise it remains read-only in the admin interface. Do not configure the
+same destination through both paths. Add the adopted endpoint's origin to the
+allowlist before rotating its access keys in Admin.
 
 The optional `object-content` Compose profile starts an Eneo-built SeaweedFS
 4.40 service on the private `object_content_net`. The image is built from upstream commit

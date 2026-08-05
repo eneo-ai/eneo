@@ -12,6 +12,7 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.s3_object_store import S3ObjectStore
 
 
@@ -37,8 +38,10 @@ def _service(
     )
     return ObjectContentService(
         core,
-        object_store_settings=remote,
-        object_store=cast(S3ObjectStore, object()),
+        object_store_provider=ObjectStoreProvider.fixed(
+            remote,
+            cast(S3ObjectStore, object()),
+        ),
     )
 
 
