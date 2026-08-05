@@ -709,10 +709,16 @@ plan above controls all other ordering.
   assumptions; concise summary labels are owned by the canonical bilingual
   Question Catalog, cover every slot in Swedish and English, and fail closed
   instead of exposing internal identifiers; the public payload is unchanged.
-  (h) after the purpose-first/input-first product decision,
-  replace the remaining processing-goal phrase consumers with admitted typed
-  planning/result evidence, including critic enforcement, then delete the
-  phrase family and its behavior-locking tests. (i) **LANDED `3afe6e947`** —
+  (h) **LANDED `5b018c604`** — purpose-first
+  is enforced end to end: typed classifier evidence (unknown or
+  low-confidence goal) creates the purpose question, the action policy ranks
+  it ahead of every core gap except primary input, and the emitted turn
+  decision is protected by a seam test. The processing-goal phrase family and
+  its behavior-locking tests are deleted, and the three blocking critic
+  rules (explicit JSON contract, action follow-up with canonical
+  Swedish-capable obligation roles, typed field reuse) decide from
+  commit-grade typed evidence with their marker tables removed
+  (six-iteration Codex gate, final green 8/10). (i) **LANDED `3afe6e947`** —
   persist typed classifier attempt outcomes in the existing metadata owner, with
   resolved as the only fact-carrying/replayed outcome and provider failure owned
   separately. (j) **LANDED `961c8c63f`** — one
