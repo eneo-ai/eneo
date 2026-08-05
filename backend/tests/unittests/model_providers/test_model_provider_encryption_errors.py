@@ -17,7 +17,6 @@ from eneo.server.exception_handlers import add_exception_handlers
 from eneo.settings.encryption_service import EncryptionService
 
 
-@pytest.mark.asyncio
 async def test_create_provider_without_encryption_key_fails_before_persistence():
     repository = MagicMock()
     repository.get_by_name = AsyncMock(return_value=None)
@@ -43,6 +42,13 @@ def test_all_service_dependent_provider_routes_document_configuration_503(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ENCRYPTION_KEY", "malformed-key")
+    # A malformed key must reach the lazy per-request encryption check (503).
+    # If tenant credentials or federation are enabled, Settings hard-exits on
+    # the malformed key instead, so pin them off regardless of the ambient
+    # environment (.env in the devcontainer enables federation).
+    monkeypatch.setenv("TENANT_CREDENTIALS_ENABLED", "false")
+    monkeypatch.setenv("FEDERATION_ENABLED", "false")
+    monkeypatch.setenv("FEDERATION_PER_TENANT_ENABLED", "false")
     reset_settings()
 
     app = FastAPI()

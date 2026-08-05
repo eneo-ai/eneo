@@ -17,9 +17,10 @@ tenant deletion, worker crashes, and Job state corruption scenarios.
 These tests verify the configuration and integration layers.
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
+
+import pytest
 
 from eneo.jobs.job_models import Task
 from eneo.main.models import Status
@@ -57,6 +58,7 @@ async def test_embedding_model_id(db_container):
     The seed_default_models fixture creates 'fixture-text-embedding'.
     """
     from sqlalchemy import select
+
     from eneo.database.tables.ai_models_table import EmbeddingModels
 
     async with db_container() as container:
@@ -69,8 +71,6 @@ async def test_embedding_model_id(db_container):
         return result.scalar_one()
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOrphanCleanupConfiguration:
     """Tests that orphan cleanup timeout is configured correctly."""
 
@@ -89,8 +89,6 @@ class TestOrphanCleanupConfiguration:
         assert timeout <= 48, "Timeout should be reasonable (<=48 hours)"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOrphanJobDetection:
     """Tests for identifying orphaned jobs based on age and status."""
 
@@ -184,8 +182,6 @@ class TestOrphanJobDetection:
             assert age_hours > timeout_hours
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOrphanCleanupPreservesActiveJobs:
     """Tests that cleanup only affects orphaned jobs, not active ones."""
 
@@ -243,8 +239,6 @@ class TestOrphanCleanupPreservesActiveJobs:
             assert job.status == Status.FAILED
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOrphanCleanupMultiTenant:
     """Tests that orphan cleanup respects tenant isolation."""
 
@@ -280,6 +274,7 @@ class TestOrphanCleanupMultiTenant:
     ):
         """Orphan cleanup should not leak between tenants."""
         from uuid import uuid4
+
         from eneo.database.tables.job_table import Jobs
         from eneo.database.tables.users_table import Users
 
@@ -356,8 +351,6 @@ class TestOrphanCleanupMultiTenant:
             assert user_1.tenant_id != user_2.tenant_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOrphanCleanupTimingBoundaries:
     """Tests boundary conditions for orphan detection timing."""
 
@@ -423,8 +416,6 @@ class TestOrphanCleanupTimingBoundaries:
             assert age_hours < timeout_hours
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOrphanCleanupPreventsBlocking:
     """Tests that orphan cleanup prevents "Crawl already in progress" blocking."""
 
@@ -474,8 +465,6 @@ class TestOrphanCleanupPreventsBlocking:
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOrphanCrawlRunCleanup:
     """Tests for cleanup of CrawlRuns with NULL job_id (ghost records).
 
@@ -587,8 +576,8 @@ class TestOrphanCrawlRunCleanup:
         test_embedding_model_id,
     ):
         """CrawlRuns WITH valid job_id should NOT be cleaned up, even if old."""
-        from eneo.database.tables.websites_table import CrawlRuns
         from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
 
         async with db_container() as container:
             session = container.session()
@@ -635,8 +624,6 @@ class TestOrphanCrawlRunCleanup:
             assert crawl_run.job_id == job.id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOrphanCrawlRunCleanupExecution:
     """Tests that actually execute the cleanup method."""
 
@@ -650,6 +637,7 @@ class TestOrphanCrawlRunCleanupExecution:
     ):
         """Cleanup should delete old CrawlRuns with NULL job_id."""
         from sqlalchemy import select
+
         from eneo.database.tables.websites_table import CrawlRuns
         from eneo.worker.crawl_feeder import CrawlFeeder
 
@@ -734,8 +722,9 @@ class TestOrphanCrawlRunCleanupExecution:
     ):
         """Cleanup should NOT delete CrawlRuns with valid job_id, even if old."""
         from sqlalchemy import select
-        from eneo.database.tables.websites_table import CrawlRuns
+
         from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
         from eneo.worker.crawl_feeder import CrawlFeeder
 
         async with db_container() as container:

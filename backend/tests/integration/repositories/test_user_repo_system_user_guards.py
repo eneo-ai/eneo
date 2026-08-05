@@ -79,8 +79,6 @@ async def _row_exists(session: sa.ext.asyncio.AsyncSession, *, user_id: UUID) ->
     ) is not None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_is_system_user_distinguishes_system_from_regular(
     db_container, admin_user
 ):
@@ -99,8 +97,6 @@ async def test_is_system_user_distinguishes_system_from_regular(
         assert await repo.is_system_user(uuid4()) is False
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_hard_delete_raises_for_system_user(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -118,8 +114,6 @@ async def test_hard_delete_raises_for_system_user(db_container, admin_user):
         assert await _row_exists(session, user_id=system_user_id)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_soft_delete_raises_for_system_user(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -140,8 +134,6 @@ async def test_soft_delete_raises_for_system_user(db_container, admin_user):
         assert deleted_at is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_delete_wrapper_raises_for_system_user(db_container, admin_user):
     """Both the soft and hard branches of ``delete()`` block system users."""
     async with db_container() as container:
@@ -161,8 +153,6 @@ async def test_delete_wrapper_raises_for_system_user(db_container, admin_user):
         assert await _row_exists(session, user_id=system_user_id)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_regular_user_can_still_be_soft_deleted(db_container, admin_user):
     """Regression guard: the guard does not block legitimate deletions."""
     async with db_container() as container:
@@ -195,8 +185,6 @@ async def test_regular_user_can_still_be_soft_deleted(db_container, admin_user):
         assert deleted_at is not None
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_all_users_excludes_system_user_by_default(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -214,8 +202,6 @@ async def test_get_all_users_excludes_system_user_by_default(db_container, admin
         assert system_user_id not in returned_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_internal_helper_opts_in_via_include_system_user(
     db_container, admin_user
 ):
@@ -238,8 +224,6 @@ async def test_internal_helper_opts_in_via_include_system_user(
         assert admin_user.id in returned_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_total_count_excludes_system_user(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -254,8 +238,6 @@ async def test_get_total_count_excludes_system_user(db_container, admin_user):
         assert after == before
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_paginated_excludes_system_user(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
@@ -278,8 +260,6 @@ async def test_get_paginated_excludes_system_user(db_container, admin_user):
         assert admin_user.id in returned_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_list_tenant_admins_excludes_system_user(db_container, admin_user):
     """Defense-in-depth: even if a system user ever held an admin role, the
     ``is_system_user`` filter on the inner helper hides them.
@@ -316,8 +296,6 @@ async def test_list_tenant_admins_excludes_system_user(db_container, admin_user)
         assert admin_user.id in returned_ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_count_users_with_admin_permission_excludes_system_user(
     db_container, admin_user
 ):
@@ -352,8 +330,6 @@ async def test_count_users_with_admin_permission_excludes_system_user(
         assert after == before
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_system_user_survives_data_retention_cleanup(db_container, admin_user):
     """Cleanup-job survival: the conversation-retention sweep does not touch
     the ``users`` table, so a system user with an old marker stays put.
@@ -390,8 +366,6 @@ async def test_system_user_survives_data_retention_cleanup(db_container, admin_u
         assert await _row_exists(session, user_id=system_user_id)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_system_user_survives_audit_retention_purge(db_container, admin_user):
     """Audit-log retention purge runs per tenant and does not touch users."""
     from eneo.audit.application.retention_service import RetentionService

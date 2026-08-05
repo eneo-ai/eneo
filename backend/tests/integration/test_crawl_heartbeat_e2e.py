@@ -16,7 +16,6 @@ live crawler jobs. These tests verify the configuration layer that enables
 heartbeat functionality.
 """
 
-import pytest
 from httpx import AsyncClient
 
 from eneo.tenants.crawler_settings_helper import (
@@ -24,8 +23,6 @@ from eneo.tenants.crawler_settings_helper import (
 )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestHeartbeatConfiguration:
     """Tests that heartbeat interval setting configures correctly."""
 
@@ -92,8 +89,6 @@ class TestHeartbeatConfiguration:
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestHeartbeatRangeValidation:
     """Tests that heartbeat interval enforces its 30-3600 second range."""
 
@@ -148,8 +143,6 @@ class TestHeartbeatRangeValidation:
         assert response.status_code == 200
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestHeartbeatMultiTenantIsolation:
     """Tests that heartbeat intervals are isolated between tenants."""
 
@@ -223,8 +216,6 @@ class TestHeartbeatMultiTenantIsolation:
             assert t2_interval == 1800, "Tenant 2 should have infrequent heartbeats"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestHeartbeatUpdatePropagation:
     """Tests that heartbeat interval changes propagate immediately."""
 
@@ -267,8 +258,6 @@ class TestHeartbeatUpdatePropagation:
             assert interval_2 == 60, "Updated interval should be visible immediately"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestHeartbeatUseCases:
     """Tests for different heartbeat interval use cases."""
 
@@ -341,8 +330,6 @@ class TestHeartbeatUseCases:
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestHeartbeatWithOtherSettings:
     """Tests heartbeat interval interaction with other crawler settings."""
 

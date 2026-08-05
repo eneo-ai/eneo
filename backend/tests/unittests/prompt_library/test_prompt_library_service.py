@@ -47,7 +47,6 @@ def _entry(tenant_id, name="Standard"):
     )
 
 
-@pytest.mark.asyncio
 async def test_list_requires_admin():
     tenant_id = uuid4()
     repo = AsyncMock()
@@ -56,7 +55,6 @@ async def test_list_requires_admin():
         await service.list_entries()
 
 
-@pytest.mark.asyncio
 async def test_list_returns_repo_entries():
     tenant_id = uuid4()
     entry = _entry(tenant_id)
@@ -69,7 +67,6 @@ async def test_list_returns_repo_entries():
     repo.list_by_tenant.assert_awaited_once_with(tenant_id)
 
 
-@pytest.mark.asyncio
 async def test_create_rejects_duplicate_name():
     tenant_id = uuid4()
     repo = AsyncMock()
@@ -80,7 +77,6 @@ async def test_create_rejects_duplicate_name():
         await service.create_entry(name="Standard", description=None, text="t")
 
 
-@pytest.mark.asyncio
 async def test_create_translates_name_collision_integrity_error():
     # Two admins racing the same name: exists_by_name passes for both, the
     # second insert hits uq_prompt_library_tenant_name. It must surface as the
@@ -104,7 +100,6 @@ async def test_create_translates_name_collision_integrity_error():
         await service.create_entry(name="Standard", description=None, text="t")
 
 
-@pytest.mark.asyncio
 async def test_create_reraises_unrelated_integrity_error():
     from sqlalchemy.exc import IntegrityError
 
@@ -122,7 +117,6 @@ async def test_create_reraises_unrelated_integrity_error():
         await service.create_entry(name="Standard", description=None, text="t")
 
 
-@pytest.mark.asyncio
 async def test_create_calls_repo_with_user_id_and_tenant_id():
     tenant_id = uuid4()
     user = _admin_user(tenant_id)
@@ -148,7 +142,6 @@ async def test_create_calls_repo_with_user_id_and_tenant_id():
     assert captured[0].current_version == 1
 
 
-@pytest.mark.asyncio
 async def test_get_entry_returns_404_when_missing():
     tenant_id = uuid4()
     repo = AsyncMock()
@@ -159,7 +152,6 @@ async def test_get_entry_returns_404_when_missing():
         await service.get_entry(uuid4())
 
 
-@pytest.mark.asyncio
 async def test_update_rejects_duplicate_name():
     tenant_id = uuid4()
     target = _entry(tenant_id, name="Old")
@@ -172,7 +164,6 @@ async def test_update_rejects_duplicate_name():
         await service.update_entry(target.id, name="New")
 
 
-@pytest.mark.asyncio
 async def test_update_creates_new_version_when_text_changes():
     tenant_id = uuid4()
     target = _entry(tenant_id, name="Old")
@@ -194,7 +185,6 @@ async def test_update_creates_new_version_when_text_changes():
     )
 
 
-@pytest.mark.asyncio
 async def test_update_creates_new_version_when_metadata_changes():
     tenant_id = uuid4()
     target = _entry(tenant_id, name="Old")
@@ -215,7 +205,6 @@ async def test_update_creates_new_version_when_metadata_changes():
     )
 
 
-@pytest.mark.asyncio
 async def test_delete_blocked_when_policy_uses_prompt():
     tenant_id = uuid4()
     target = _entry(tenant_id)
@@ -234,7 +223,6 @@ async def test_delete_blocked_when_policy_uses_prompt():
     repo.delete.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_delete_proceeds_when_policy_repo_not_wired():
     tenant_id = uuid4()
     target = _entry(tenant_id)

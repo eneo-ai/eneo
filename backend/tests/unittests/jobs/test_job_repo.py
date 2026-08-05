@@ -1,12 +1,9 @@
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from eneo.jobs.job_repo import JobRepository
 
 
-@pytest.mark.asyncio
 async def test_mark_stale_jobs_failed_targets_queued_and_in_progress():
     """The reaper must cover QUEUED too: a hard crash rolls the sync transaction
     back to QUEUED, so an IN_PROGRESS-only filter would never find stuck jobs."""

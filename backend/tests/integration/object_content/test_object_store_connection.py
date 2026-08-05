@@ -70,8 +70,6 @@ def _candidate(settings: ObjectContentSettings) -> ObjectStoreConnectionInput:
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_first_admin_connection_is_verified_encrypted_and_leaves_no_probe_object(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -114,8 +112,6 @@ async def test_first_admin_connection_is_verified_encrypted_and_leaves_no_probe_
     assert page.objects == ()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_rotation_racing_initial_binding_cannot_remove_the_durable_marker(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -194,8 +190,6 @@ async def test_rotation_racing_initial_binding_cannot_remove_the_durable_marker(
     await readiness_store.close()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_existing_store_binding_refuses_a_new_destination_before_remote_io(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -229,8 +223,6 @@ async def test_existing_store_binding_refuses_a_new_destination_before_remote_io
     assert factory_calls == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_invalid_legacy_connection_is_not_adopted_and_can_recover(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

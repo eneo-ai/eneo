@@ -14,7 +14,6 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 )
 
 
-@pytest.mark.asyncio
 async def test_tool_approval_lifecycle_accept_then_wait():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -60,7 +59,6 @@ async def test_tool_approval_lifecycle_accept_then_wait():
     assert by_id["tool-2"].approved is False
 
 
-@pytest.mark.asyncio
 async def test_tool_approval_submit_idempotent_and_conflicting_replay():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -105,7 +103,6 @@ async def test_tool_approval_submit_idempotent_and_conflicting_replay():
     await manager.wait_for_approval(approval_id, timeout=0.1)
 
 
-@pytest.mark.asyncio
 async def test_tool_approval_rejects_wrong_actor_context():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -130,7 +127,6 @@ async def test_tool_approval_rejects_wrong_actor_context():
     assert forbidden.status == "forbidden"
 
 
-@pytest.mark.asyncio
 async def test_tool_approval_reports_unrecognized_tool_ids_and_processes_valid_ids():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -163,7 +159,6 @@ async def test_tool_approval_reports_unrecognized_tool_ids_and_processes_valid_i
     await manager.cancel_approval(approval_id)
 
 
-@pytest.mark.asyncio
 async def test_tool_approval_timeout_denies_all_tools():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -197,7 +192,6 @@ async def test_tool_approval_timeout_denies_all_tools():
     assert not_found.status == "not_found"
 
 
-@pytest.mark.asyncio
 async def test_tool_approval_cancel_unblocks_waiter():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -223,7 +217,6 @@ async def test_tool_approval_cancel_unblocks_waiter():
     assert {d.approved for d in result.decisions} == {False}
 
 
-@pytest.mark.asyncio
 async def test_get_approval_context_returns_context_for_valid_actor():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -256,7 +249,6 @@ async def test_get_approval_context_returns_context_for_valid_actor():
     await manager.cancel_approval(approval_id)
 
 
-@pytest.mark.asyncio
 async def test_get_approval_context_rejects_wrong_user():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -282,7 +274,6 @@ async def test_get_approval_context_rejects_wrong_user():
     await manager.cancel_approval(approval_id)
 
 
-@pytest.mark.asyncio
 async def test_get_approval_context_rejects_wrong_tenant():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -308,7 +299,6 @@ async def test_get_approval_context_rejects_wrong_tenant():
     await manager.cancel_approval(approval_id)
 
 
-@pytest.mark.asyncio
 async def test_get_approval_context_returns_not_found_for_expired_id(monkeypatch):
     monkeypatch.setattr(tool_approval_module, "APPROVAL_TIMEOUT_SECONDS", 0.01)
     monkeypatch.setattr(tool_approval_module, "APPROVAL_TTL_SECONDS", 1)
@@ -340,7 +330,6 @@ async def test_get_approval_context_returns_not_found_for_expired_id(monkeypatch
     assert context_result.context is None
 
 
-@pytest.mark.asyncio
 async def test_concurrent_cancel_and_submit_does_not_deadlock():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())
@@ -373,7 +362,6 @@ async def test_concurrent_cancel_and_submit_does_not_deadlock():
     assert isinstance(cancelled, bool)
 
 
-@pytest.mark.asyncio
 async def test_submit_after_timeout_returns_not_found(monkeypatch):
     monkeypatch.setattr(tool_approval_module, "APPROVAL_TIMEOUT_SECONDS", 0.01)
 
@@ -402,7 +390,6 @@ async def test_submit_after_timeout_returns_not_found(monkeypatch):
     assert submit_result.status == "not_found"
 
 
-@pytest.mark.asyncio
 async def test_request_approval_uses_namespaced_redis_key_and_ttl():
     redis_client = AsyncMock()
     manager = ToolApprovalManager(redis_client=redis_client)
@@ -463,7 +450,6 @@ def test_denial_reason_sanitization_resists_xss_like_payloads():
         ToolApprovalDecision(tool_call_id="tool-1", approved=True, reason="not allowed")
 
 
-@pytest.mark.asyncio
 async def test_malformed_context_payload_returns_not_found():
     manager = ToolApprovalManager(redis_client=None)
     approval_id = str(uuid4())

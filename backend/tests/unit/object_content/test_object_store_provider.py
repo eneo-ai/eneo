@@ -127,7 +127,6 @@ def _settings(revision: int) -> ObjectContentSettings:
     )
 
 
-@pytest.mark.asyncio
 async def test_remote_acquisition_observes_rotation_and_drains_the_old_client() -> None:
     service = _ConnectionService(_stored(1))
     stores: list[_Store] = []
@@ -159,7 +158,6 @@ async def test_remote_acquisition_observes_rotation_and_drains_the_old_client() 
     assert stores[1].closed is True
 
 
-@pytest.mark.asyncio
 async def test_initialization_cannot_replace_a_newer_published_revision() -> None:
     service = _CapturedBlockingConnectionService(_stored(1))
     provider = ObjectStoreProvider(
@@ -184,7 +182,6 @@ async def test_initialization_cannot_replace_a_newer_published_revision() -> Non
     await provider.close()
 
 
-@pytest.mark.asyncio
 async def test_concurrent_acquisitions_share_one_connection_refresh() -> None:
     service = _BlockingConnectionService(_stored(1))
     stores: list[_Store] = []
@@ -228,7 +225,6 @@ async def test_concurrent_acquisitions_share_one_connection_refresh() -> None:
     await provider.close()
 
 
-@pytest.mark.asyncio
 async def test_admitted_revision_acquires_without_another_connection_read() -> None:
     service = _BlockingConnectionService(_stored(1))
     provider = ObjectStoreProvider(
@@ -257,7 +253,6 @@ async def test_admitted_revision_acquires_without_another_connection_read() -> N
     await provider.close()
 
 
-@pytest.mark.asyncio
 async def test_cancelled_waiter_does_not_reuse_a_completed_refresh() -> None:
     service = _BlockingConnectionService(_stored(1))
     stores: list[_Store] = []
@@ -301,7 +296,6 @@ async def test_cancelled_waiter_does_not_reuse_a_completed_refresh() -> None:
     await provider.close()
 
 
-@pytest.mark.asyncio
 async def test_legacy_adoption_cannot_replace_a_newer_published_revision() -> None:
     service = _BlockingAdoptionConnectionService()
     stores: list[_Store] = []
@@ -333,7 +327,6 @@ async def test_legacy_adoption_cannot_replace_a_newer_published_revision() -> No
     await provider.close()
 
 
-@pytest.mark.asyncio
 async def test_legacy_settings_are_adopted_only_after_validation() -> None:
     service = _ConnectionService(None)
     stores: list[_Store] = []

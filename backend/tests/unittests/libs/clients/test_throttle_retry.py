@@ -22,7 +22,6 @@ def _response_error(status: int, headers: dict[str, str] | None = None):
     )
 
 
-@pytest.mark.asyncio
 async def test_retries_on_429_then_succeeds_honoring_retry_after():
     calls = {"n": 0}
 
@@ -42,7 +41,6 @@ async def test_retries_on_429_then_succeeds_honoring_retry_after():
     assert all(call.args[0] == 2.0 for call in sleep.await_args_list)
 
 
-@pytest.mark.asyncio
 async def test_retries_on_429_without_retry_after_uses_backoff():
     calls = {"n": 0}
 
@@ -62,7 +60,6 @@ async def test_retries_on_429_without_retry_after_uses_backoff():
     assert sleep.await_args_list[0].args[0] > 0
 
 
-@pytest.mark.asyncio
 async def test_retries_on_503():
     calls = {"n": 0}
 
@@ -82,7 +79,6 @@ async def test_retries_on_503():
     assert calls["n"] == 2
 
 
-@pytest.mark.asyncio
 async def test_default_policy_does_not_retry_503():
     calls = {"n": 0}
 
@@ -99,7 +95,6 @@ async def test_default_policy_does_not_retry_503():
     sleep.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_reraises_after_max_attempts_exhausted():
     calls = {"n": 0}
 
@@ -115,7 +110,6 @@ async def test_reraises_after_max_attempts_exhausted():
     assert calls["n"] == 3
 
 
-@pytest.mark.asyncio
 async def test_does_not_retry_non_throttle_error():
     calls = {"n": 0}
 
@@ -136,7 +130,6 @@ def test_parse_retry_after_integer_seconds():
     assert parse_retry_after("5") == 5.0
 
 
-@pytest.mark.asyncio
 async def test_retry_after_uses_separate_server_cap():
     calls = {"n": 0}
 
@@ -157,7 +150,6 @@ async def test_retry_after_uses_separate_server_cap():
     assert sleep.await_args_list[0].args[0] == 120.0
 
 
-@pytest.mark.asyncio
 async def test_retry_after_is_capped_by_retry_after_cap():
     calls = {"n": 0}
 

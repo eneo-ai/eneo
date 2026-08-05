@@ -214,8 +214,6 @@ async def _explain_statement(
     return _walk_plan(plan)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_discovery_walks_all_old_revision_cohorts_with_a_keyset_cursor(
     db_container,
     admin_user,
@@ -385,8 +383,6 @@ async def test_discovery_walks_all_old_revision_cohorts_with_a_keyset_cursor(
         ]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_advance_preserves_binding_rows_and_only_touches_parent_versions(
     db_container,
     admin_user,
@@ -554,8 +550,6 @@ async def test_advance_preserves_binding_rows_and_only_touches_parent_versions(
             assert before["xmin"] != after["xmin"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_discovery_excludes_personal_default_assistants(
     db_container,
     admin_user,
@@ -605,8 +599,6 @@ async def test_discovery_excludes_personal_default_assistants(
         assert default_id not in {target.assistant_id for target in targets}
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_parent_change_after_discovery_skips_only_that_assistant(
     db_container,
     admin_user,
@@ -666,8 +658,6 @@ async def test_parent_change_after_discovery_skips_only_that_assistant(
     assert revisions[targets[1].assistant_id] == seed.published_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_skips_binding_removed_after_discovery(
     monkeypatch,
     db_container,
@@ -725,8 +715,6 @@ async def test_service_skips_binding_removed_after_discovery(
         }
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_service_rejects_policy_changed_after_validation(
     monkeypatch,
     db_container,
@@ -793,8 +781,6 @@ async def test_service_rejects_policy_changed_after_validation(
     assert pinned_revision_id == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_binding_change_after_discovery_is_not_overwritten(
     db_container,
     admin_user,
@@ -856,8 +842,6 @@ async def test_binding_change_after_discovery_is_not_overwritten(
     assert revision_id == third_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_in_flight_parent_save_drains_before_xmin_guard(
     db_container,
     admin_user,
@@ -938,8 +922,6 @@ async def test_in_flight_parent_save_drains_before_xmin_guard(
         ("blocked", SkillBlockedForBindingError),
     ],
 )
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_terminal_state_rolls_back_current_chunk_but_keeps_prior_chunk(
     terminal_state,
     expected_error,
@@ -1029,8 +1011,6 @@ async def test_terminal_state_rolls_back_current_chunk_but_keeps_prior_chunk(
     assert revisions[targets[1].assistant_id] == seed.old_revision_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_concurrent_chunks_advance_each_assistant_at_most_once(
     db_container,
     admin_user,
@@ -1091,8 +1071,6 @@ async def test_concurrent_chunks_advance_each_assistant_at_most_once(
     assert current_count == len(seed.assistant_ids)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_apply_statement_count_is_independent_of_chunk_size(
     db_container,
     admin_user,
@@ -1166,8 +1144,6 @@ async def test_apply_statement_count_is_independent_of_chunk_size(
     assert hundred_count <= 8
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_discovery_scales_as_one_bounded_forward_index_walk(
     db_container,
     admin_user,

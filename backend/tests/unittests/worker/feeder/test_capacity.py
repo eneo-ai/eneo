@@ -48,7 +48,6 @@ class TestCapacityManagerInit:
 class TestGetTenantSettings:
     """Tests for get_tenant_settings method."""
 
-    @pytest.mark.asyncio
     async def test_returns_settings_from_database(self):
         """Should fetch and return tenant settings from DB."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -84,7 +83,6 @@ class TestGetTenantSettings:
 
         assert result == expected_settings
 
-    @pytest.mark.asyncio
     async def test_returns_empty_dict_when_no_settings(self):
         """Should return empty dict when tenant has no settings."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -118,7 +116,6 @@ class TestGetTenantSettings:
 
         assert result == {}
 
-    @pytest.mark.asyncio
     async def test_returns_none_on_database_error(self):
         """Should return None and log warning on DB error."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -213,7 +210,6 @@ class TestGetSlotTtl:
 class TestTryAcquireSlot:
     """Tests for try_acquire_slot method."""
 
-    @pytest.mark.asyncio
     async def test_returns_true_when_slot_acquired(self, mock_settings):
         """Should return True when Lua script acquires slot."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -238,7 +234,6 @@ class TestTryAcquireSlot:
             assert result is True
             mock_acquire.assert_called_once_with(redis_mock, tenant_id, 10, 300)
 
-    @pytest.mark.asyncio
     async def test_returns_false_when_at_capacity(self, mock_settings):
         """Should return False when Lua script returns 0."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -262,7 +257,6 @@ class TestTryAcquireSlot:
 
             assert result is False
 
-    @pytest.mark.asyncio
     async def test_returns_false_on_redis_error(self, mock_settings):
         """Should return False on Redis error."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -290,7 +284,6 @@ class TestTryAcquireSlot:
 class TestReleaseSlot:
     """Tests for release_slot method."""
 
-    @pytest.mark.asyncio
     async def test_calls_lua_script(self, mock_settings):
         """Should call Lua script to release slot."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -313,7 +306,6 @@ class TestReleaseSlot:
 
             mock_release.assert_called_once_with(redis_mock, tenant_id, 300)
 
-    @pytest.mark.asyncio
     async def test_swallows_redis_error(self, mock_settings):
         """Should not raise on Redis error (best effort)."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -340,7 +332,6 @@ class TestReleaseSlot:
 class TestGetAvailableCapacity:
     """Tests for get_available_capacity method."""
 
-    @pytest.mark.asyncio
     async def test_returns_max_when_no_active_jobs(self, mock_settings):
         """Should return max concurrent when key doesn't exist."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -364,7 +355,6 @@ class TestGetAvailableCapacity:
 
             assert result == 10
 
-    @pytest.mark.asyncio
     async def test_returns_remaining_capacity(self, mock_settings):
         """Should return remaining slots when some are in use."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -388,7 +378,6 @@ class TestGetAvailableCapacity:
 
             assert result == 7  # 10 - 3
 
-    @pytest.mark.asyncio
     async def test_returns_zero_when_at_capacity(self, mock_settings):
         """Should return 0 when at max capacity."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -412,7 +401,6 @@ class TestGetAvailableCapacity:
 
             assert result == 0
 
-    @pytest.mark.asyncio
     async def test_returns_zero_on_redis_error(self, mock_settings):
         """Should return 0 (conservative) on Redis error."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -440,7 +428,6 @@ class TestGetAvailableCapacity:
 class TestMarkSlotPreacquired:
     """Tests for mark_slot_preacquired method."""
 
-    @pytest.mark.asyncio
     async def test_sets_flag_with_ttl(self, mock_settings):
         """Should set flag with tenant_id as value."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -463,7 +450,6 @@ class TestMarkSlotPreacquired:
                 ex=300,
             )
 
-    @pytest.mark.asyncio
     async def test_raises_on_redis_error(self, mock_settings):
         """Should raise on Redis error (caller must handle)."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -486,7 +472,6 @@ class TestMarkSlotPreacquired:
 class TestClearPreacquiredFlag:
     """Tests for clear_preacquired_flag method."""
 
-    @pytest.mark.asyncio
     async def test_deletes_flag(self):
         """Should delete the flag key."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -500,7 +485,6 @@ class TestClearPreacquiredFlag:
 
         redis_mock.delete.assert_called_once_with(f"job:{job_id}:slot_preacquired")
 
-    @pytest.mark.asyncio
     async def test_swallows_redis_error(self):
         """Should not raise on Redis error (best effort)."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -517,7 +501,6 @@ class TestClearPreacquiredFlag:
 class TestGetPreacquiredTenant:
     """Tests for get_preacquired_tenant method."""
 
-    @pytest.mark.asyncio
     async def test_returns_tenant_id_from_flag(self):
         """Should return tenant UUID when flag exists."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -532,7 +515,6 @@ class TestGetPreacquiredTenant:
 
         assert result == tenant_id
 
-    @pytest.mark.asyncio
     async def test_returns_none_when_no_flag(self):
         """Should return None when flag doesn't exist."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -546,7 +528,6 @@ class TestGetPreacquiredTenant:
 
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_returns_none_on_error(self):
         """Should return None on Redis error."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -584,7 +565,6 @@ class TestGetMinimumFeederInterval:
 
     # --- Core Contract Tests ---
 
-    @pytest.mark.asyncio
     async def test_returns_default_when_no_pending_queues(self, mock_settings):
         """Should return global default when no tenant queues found."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -597,7 +577,6 @@ class TestGetMinimumFeederInterval:
 
         assert result == 10
 
-    @pytest.mark.asyncio
     async def test_returns_minimum_across_tenants(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
@@ -636,7 +615,6 @@ class TestGetMinimumFeederInterval:
 
         assert result == 10  # min(60, 15, 45, 10) = 10 (global default)
 
-    @pytest.mark.asyncio
     async def test_tenant_override_less_than_default_wins(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
@@ -665,7 +643,6 @@ class TestGetMinimumFeederInterval:
 
         assert result == 5
 
-    @pytest.mark.asyncio
     async def test_uses_default_for_tenants_without_override(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
@@ -706,7 +683,6 @@ class TestGetMinimumFeederInterval:
 
     # --- Error Policy Tests ---
 
-    @pytest.mark.asyncio
     async def test_returns_default_on_scan_error(self, mock_settings):
         """Should return global default on Redis scan error."""
         from eneo.worker.feeder.capacity import CapacityManager
@@ -719,7 +695,6 @@ class TestGetMinimumFeederInterval:
 
         assert result == 10
 
-    @pytest.mark.asyncio
     async def test_skips_failed_tenant_and_continues(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
@@ -758,7 +733,6 @@ class TestGetMinimumFeederInterval:
         # Tenant fail skipped, tenant ok has 8s, global is 10s
         assert result == 8
 
-    @pytest.mark.asyncio
     async def test_returns_default_when_all_tenants_fail(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
@@ -792,7 +766,6 @@ class TestGetMinimumFeederInterval:
 
     # --- Pagination Tests ---
 
-    @pytest.mark.asyncio
     async def test_handles_paginated_scan(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
@@ -830,7 +803,6 @@ class TestGetMinimumFeederInterval:
 
     # --- Key Parsing Edge Cases ---
 
-    @pytest.mark.asyncio
     async def test_skips_invalid_tenant_ids(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
@@ -866,7 +838,6 @@ class TestGetMinimumFeederInterval:
 
         assert result == 6
 
-    @pytest.mark.asyncio
     async def test_handles_string_keys_from_redis(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
@@ -895,7 +866,6 @@ class TestGetMinimumFeederInterval:
 
         assert result == 9
 
-    @pytest.mark.asyncio
     async def test_handles_null_tenant_settings(
         self, mock_settings, mock_crawler_setting_passthrough
     ):

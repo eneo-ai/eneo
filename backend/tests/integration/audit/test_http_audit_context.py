@@ -8,14 +8,11 @@ import contextlib
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-import pytest
 from sqlalchemy import select
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
-
-pytestmark = pytest.mark.integration
 
 
 @dataclass(frozen=True)

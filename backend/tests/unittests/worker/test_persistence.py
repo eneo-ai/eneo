@@ -9,11 +9,12 @@ Tests the crawl/persistence.py module directly to ensure:
 Run with: pytest tests/unittests/worker/test_persistence.py -v
 """
 
-import pytest
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from eneo.worker.crawl_context import CrawlContext, PreparedPage, EmbeddingModelSpec
+import pytest
+
+from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
 
 
 def create_mock_container(embeddings_service):
@@ -59,7 +60,6 @@ class TestPersistenceModuleImports:
 class TestPersistenceModuleSemantics:
     """Tests for persist_batch behavior after extraction."""
 
-    @pytest.mark.asyncio
     async def test_empty_buffer_returns_zeros(self):
         """Empty page buffer should return (0, 0, [], {})."""
         from eneo.worker.crawl.persistence import persist_batch
@@ -103,7 +103,6 @@ class TestPersistenceModuleSemantics:
         assert success_urls == []
         assert failures_by_reason == {}
 
-    @pytest.mark.asyncio
     async def test_none_embedding_model_fails_all_pages(self):
         """None embedding model should fail all pages with NO_EMBEDDING_MODEL reason."""
         from eneo.worker.crawl.persistence import persist_batch
@@ -152,6 +151,7 @@ class TestEmbeddingSemaphore:
     def test_semaphore_returns_asyncio_semaphore(self):
         """_get_embedding_semaphore should return an asyncio.Semaphore."""
         import asyncio
+
         from eneo.worker.crawl.persistence import _get_embedding_semaphore
 
         sem = _get_embedding_semaphore()

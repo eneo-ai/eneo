@@ -223,7 +223,6 @@ async def _object_key(
         return descriptor.object_key
 
 
-@pytest.mark.asyncio
 async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
     monkeypatch: pytest.MonkeyPatch,
     object_content_database: DatabaseSessionManager,
@@ -345,7 +344,6 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
         raw_client.close()
 
 
-@pytest.mark.asyncio
 async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -446,7 +444,6 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
         raw_client.close()
 
 
-@pytest.mark.asyncio
 async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -588,7 +585,6 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
         )
 
 
-@pytest.mark.asyncio
 async def test_batch_object_store_reads_use_one_source_query(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -690,7 +686,6 @@ async def test_batch_object_store_reads_use_one_source_query(
     assert len(source_queries) == 1
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("range_header", [None, "bytes=2-5"], ids=("full", "range"))
 async def test_service_rejects_replaced_bytes_before_response_and_marks_them_corrupt(
     range_header: str | None,

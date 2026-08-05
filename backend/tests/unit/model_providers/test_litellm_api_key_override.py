@@ -9,12 +9,12 @@ Run with:
     cd backend && uv run pytest tests/validation/test_litellm_api_key_override.py -v
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
 import litellm
+import pytest
 
 
-@pytest.mark.asyncio
 async def test_per_request_api_key_override():
     """
     Verify LiteLLM accepts per-request api_key parameter.
@@ -80,7 +80,6 @@ async def test_per_request_api_key_override():
             pytest.fail(f"LiteLLM does not support api_key parameter: {e}")
 
 
-@pytest.mark.asyncio
 async def test_api_key_parameter_signature():
     """
     Verify that api_key is a valid parameter in acompletion's signature.

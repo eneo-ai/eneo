@@ -50,7 +50,6 @@ def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=Fal
     return service, assistant_id, session
 
 
-@pytest.mark.asyncio
 async def test_add_mcp_to_assistant_rejects_server_not_enabled_for_tenant():
     service, assistant_id, session = _build_assistant_service_with_mocks()
     session.scalar.return_value = None
@@ -63,7 +62,6 @@ async def test_add_mcp_to_assistant_rejects_server_not_enabled_for_tenant():
     assert session.scalar.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_add_mcp_to_assistant_rejects_server_not_in_shared_space():
     # Shared (non-personal) space: a tenant-enabled server that is not a member
     # of the space is still rejected. Membership now comes from the space read
@@ -84,7 +82,6 @@ async def test_add_mcp_to_assistant_rejects_server_not_in_shared_space():
     assert session.scalar.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_add_mcp_to_assistant_allows_personal_space_server_enabled_after_creation():
     # Regression for #500: a personal space exposes every tenant-enabled server
     # via the read model (space.is_mcp_server_in_space -> True), even though the
@@ -129,7 +126,6 @@ async def test_add_mcp_to_assistant_allows_personal_space_server_enabled_after_c
     service._validate_attachments_fit.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_add_mcp_to_assistant_skips_space_mapping_when_governed():
     service, assistant_id, session = _build_assistant_service_with_mocks()
     mcp_server_id = uuid4()
@@ -162,7 +158,6 @@ async def test_add_mcp_to_assistant_skips_space_mapping_when_governed():
     )
 
 
-@pytest.mark.asyncio
 async def test_assistant_repo_rejects_tool_overrides_outside_assigned_servers():
     repo = object.__new__(AssistantRepository)
     assistant_in_db = SimpleNamespace(id=uuid4())
@@ -195,7 +190,6 @@ async def test_assistant_repo_rejects_tool_overrides_outside_assigned_servers():
         await repo._set_mcp_tools(assistant_in_db, [(invalid_tool_id, True)])
 
 
-@pytest.mark.asyncio
 async def test_assistant_repo_accepts_tool_overrides_within_assigned_servers():
     repo = object.__new__(AssistantRepository)
     assistant_in_db = SimpleNamespace(id=uuid4())

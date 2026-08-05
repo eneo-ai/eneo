@@ -94,8 +94,6 @@ async def _delete_tenant_credential(
     assert response.status_code in {200, 404}, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_encryption_key_rotation_invalidates_old_credentials(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -172,8 +170,6 @@ async def test_encryption_key_rotation_invalidates_old_credentials(
     ), f"Error message should mention decryption failure: {error_message}"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_mixed_encryption_states_during_migration(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -290,8 +286,6 @@ async def test_mixed_encryption_states_during_migration(
     print(migration_procedure)  # Document for operators
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_client_secret_rotation_procedure(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -395,8 +389,6 @@ async def test_federation_client_secret_rotation_procedure(
     assert decrypted_new_secret != old_secret, "Old secret should be replaced"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_credential_re_encryption_with_new_key(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -498,8 +490,6 @@ async def test_credential_re_encryption_with_new_key(
         resolver_old_key.get_api_key("openai")
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_encryption_service_detects_corrupted_ciphertext(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -584,8 +574,6 @@ async def test_encryption_service_detects_corrupted_ciphertext(
         ), f"Error should be actionable: {error_message}"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_encryption_disabled_mode_stores_plaintext(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -644,8 +632,6 @@ async def test_encryption_disabled_mode_stores_plaintext(
         # This test documents expected behavior when encryption is disabled
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_credential_deletion_during_key_rotation(
     client: AsyncClient,
     async_session: AsyncSession,

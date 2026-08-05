@@ -92,7 +92,6 @@ async def _serve_test_app(app: FastAPI) -> AsyncIterator[str]:
 class TestMCPClientListToolsErrorPropagation:
     """Test that list_tools() propagates errors instead of returning empty list."""
 
-    @pytest.mark.asyncio
     async def test_list_tools_raises_mcp_client_error_on_failure(self):
         """When list_tools fails, it should raise MCPClientError, not return []."""
         # Create a mock MCP server
@@ -114,7 +113,6 @@ class TestMCPClientListToolsErrorPropagation:
 
         assert "Failed to list tools" in str(exc_info.value)
 
-    @pytest.mark.asyncio
     async def test_list_tools_raises_when_not_connected(self):
         """list_tools should raise when not connected."""
         mock_server = MagicMock()
@@ -128,7 +126,6 @@ class TestMCPClientListToolsErrorPropagation:
 
         assert "Not connected" in str(exc_info.value)
 
-    @pytest.mark.asyncio
     async def test_list_tools_rejects_catalog_over_configured_limit(self):
         mock_server = MagicMock()
         mock_server.name = "test-server"
@@ -153,7 +150,6 @@ class TestMCPClientListToolsErrorPropagation:
         with pytest.raises(MCPClientError, match="exceeds the configured maximum of 2"):
             await client.list_tools()
 
-    @pytest.mark.asyncio
     async def test_list_tools_rejects_oversized_definition(self):
         mock_server = MagicMock()
         mock_server.name = "test-server"
@@ -177,7 +173,6 @@ class TestMCPClientListToolsErrorPropagation:
         with pytest.raises(MCPClientError, match="definition exceeds"):
             await client.list_tools()
 
-    @pytest.mark.asyncio
     async def test_streaming_tools_list_is_bounded_before_sdk_decoding(self):
         app = FastAPI()
         stream_cancelled = asyncio.Event()
@@ -244,7 +239,6 @@ class TestMCPClientListToolsErrorPropagation:
         await asyncio.wait_for(stream_cancelled.wait(), timeout=1)
         assert chunks_sent < total_chunks
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize("method", ["initialize", "ping"])
     async def test_control_responses_are_bounded_before_sdk_decoding(
         self, monkeypatch: pytest.MonkeyPatch, method: str
@@ -329,7 +323,6 @@ class TestMCPClientListToolsErrorPropagation:
         await asyncio.wait_for(stream_closed.wait(), timeout=1)
         assert chunks_sent < total_chunks
 
-    @pytest.mark.asyncio
     async def test_failed_catalog_cleanup_does_not_buffer_delete_body(self) -> None:
         app = FastAPI()
         delete_stream_closed = asyncio.Event()
@@ -390,7 +383,6 @@ class TestMCPClientListToolsErrorPropagation:
         await asyncio.wait_for(delete_stream_closed.wait(), timeout=1)
         assert delete_chunks_sent < total_chunks
 
-    @pytest.mark.asyncio
     async def test_message_less_connection_diagnostic_does_not_buffer_body(
         self,
     ) -> None:
@@ -431,7 +423,6 @@ class TestMCPClientListToolsErrorPropagation:
         await asyncio.wait_for(diagnostic_stream_closed.wait(), timeout=1)
         assert diagnostic_chunks_sent < total_chunks
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize("response_mode", ["json", "sse_lf", "sse_crlf"])
     async def test_tool_count_is_bounded_before_sdk_model_validation(
         self, monkeypatch: pytest.MonkeyPatch, response_mode: str
@@ -535,7 +526,6 @@ class TestMCPClientListToolsErrorPropagation:
 
         assert sdk_materialized_catalog is False
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize("response_mode", ["json", "sse_lf", "sse_crlf"])
     async def test_predecode_count_accepts_nested_and_escaped_tool_definitions(
         self, response_mode: str
@@ -685,7 +675,6 @@ class TestMCPToolCatalogPolicyValidation:
 class TestMCPClientAuthenticationErrorMapping:
     """Test that upstream auth errors map to MCPAuthenticationError."""
 
-    @pytest.mark.asyncio
     async def test_list_tools_maps_upstream_401_to_authentication_error(self):
         server = MagicMock()
         server.name = "test-server"
@@ -699,7 +688,6 @@ class TestMCPClientAuthenticationErrorMapping:
         with pytest.raises(MCPAuthenticationError):
             await client.list_tools()
 
-    @pytest.mark.asyncio
     async def test_call_tool_maps_upstream_403_to_authentication_error(self):
         server = MagicMock()
         server.name = "test-server"
@@ -713,7 +701,6 @@ class TestMCPClientAuthenticationErrorMapping:
         with pytest.raises(MCPAuthenticationError):
             await client.call_tool("tool", {})
 
-    @pytest.mark.asyncio
     async def test_non_auth_upstream_error_does_not_map_to_authentication_error(self):
         server = MagicMock()
         server.name = "test-server"
@@ -744,7 +731,6 @@ class TestMCPClientSessionHeaderNotDuplicated:
     transport's ``session_id`` — ``_build_auth_headers`` must never emit it.
     """
 
-    @pytest.mark.asyncio
     async def test_resume_session_id_absent_from_auth_headers(self):
         server = MagicMock()
         server.name = "test-server"
@@ -762,7 +748,6 @@ class TestMCPClientSessionHeaderNotDuplicated:
         assert {k.lower() for k in headers} == {"authorization"}
         assert not any(k.lower() == "mcp-session-id" for k in headers)
 
-    @pytest.mark.asyncio
     async def test_fresh_connect_auth_headers_have_no_session_id(self):
         server = MagicMock()
         server.name = "test-server"
@@ -886,7 +871,6 @@ class TestMCPProxySessionToolCollision:
 class TestMCPServerSettingsServiceBareExceptFix:
     """Test that is_enabled_for_tenant only catches NotFoundException."""
 
-    @pytest.mark.asyncio
     async def test_returns_false_for_not_found(self):
         """Should return False when server is not found."""
         from eneo.mcp_servers.application.mcp_server_settings_service import (
@@ -904,7 +888,6 @@ class TestMCPServerSettingsServiceBareExceptFix:
         result = await service.is_enabled_for_tenant(uuid4(), uuid4())
         assert result is False
 
-    @pytest.mark.asyncio
     async def test_propagates_other_exceptions(self):
         """Should propagate exceptions other than NotFoundException."""
         from eneo.mcp_servers.application.mcp_server_settings_service import (
@@ -925,7 +908,6 @@ class TestMCPServerSettingsServiceBareExceptFix:
 
         assert "Database connection failed" in str(exc_info.value)
 
-    @pytest.mark.asyncio
     async def test_returns_true_when_enabled(self):
         """Should return True when server exists, matches tenant, and is enabled."""
         from eneo.mcp_servers.application.mcp_server_settings_service import (
@@ -949,7 +931,6 @@ class TestMCPServerSettingsServiceBareExceptFix:
         result = await service.is_enabled_for_tenant(uuid4(), tenant_id)
         assert result is True
 
-    @pytest.mark.asyncio
     async def test_returns_false_when_disabled(self):
         """Should return False when server exists but is disabled."""
         from eneo.mcp_servers.application.mcp_server_settings_service import (
@@ -982,7 +963,6 @@ class TestMCPServerSettingsServiceBareExceptFix:
 class TestMCPServerServiceTenantOwnership:
     """Test tenant ownership check in get_tools_with_tenant_settings."""
 
-    @pytest.mark.asyncio
     async def test_raises_unauthorized_for_different_tenant(self):
         """Should raise UnauthorizedException when server belongs to different tenant."""
         from eneo.mcp_servers.application.mcp_server_service import MCPServerService
@@ -1008,7 +988,6 @@ class TestMCPServerServiceTenantOwnership:
 
         assert "not accessible" in str(exc_info.value)
 
-    @pytest.mark.asyncio
     async def test_raises_not_found_when_server_missing(self):
         """Should raise NotFoundException when server doesn't exist."""
         from eneo.mcp_servers.application.mcp_server_service import MCPServerService
@@ -1143,7 +1122,6 @@ class TestMCPServerURLValidation:
 class TestSpaceRepoToolOwnershipValidation:
     """Test that _set_mcp_tools validates tool ownership."""
 
-    @pytest.mark.asyncio
     async def test_rejects_invalid_tool_ids(self):
         """Should raise BadRequestException for tool IDs not belonging to selected servers."""
         from eneo.spaces.space_repo import SpaceRepository
@@ -1177,7 +1155,6 @@ class TestSpaceRepoToolOwnershipValidation:
         assert "Invalid tool IDs" in str(exc_info.value)
         assert str(invalid_tool_id) in str(exc_info.value)
 
-    @pytest.mark.asyncio
     async def test_accepts_valid_tool_ids(self):
         """Should accept tool IDs that belong to selected servers."""
         from eneo.spaces.space_repo import SpaceRepository
@@ -1219,7 +1196,6 @@ class TestSpaceRepoToolOwnershipValidation:
         # Verify all three queries were executed (delete, select, insert)
         assert call_count[0] == 3
 
-    @pytest.mark.asyncio
     async def test_empty_tool_settings_skips_validation(self):
         """Should handle empty tool settings without error."""
         from eneo.spaces.space_repo import SpaceRepository

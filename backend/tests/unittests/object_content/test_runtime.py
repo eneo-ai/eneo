@@ -189,7 +189,6 @@ def test_runtime_exposes_the_configured_portable_object_store_ceiling() -> None:
     assert runtime.object_store_maximum_bytes == settings.maximum_multipart_bytes
 
 
-@pytest.mark.asyncio
 async def test_committed_connection_mutations_survive_local_publication_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -229,7 +228,6 @@ async def test_committed_connection_mutations_survive_local_publication_failure(
     assert provider.publish.await_count == 2
 
 
-@pytest.mark.asyncio
 async def test_absent_object_store_is_a_healthy_inline_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -268,7 +266,6 @@ async def test_absent_object_store_is_a_healthy_inline_capability(
     assert runtime.state is ObjectContentRuntimeState.NOT_STARTED
 
 
-@pytest.mark.asyncio
 async def test_absent_object_store_fails_closed_when_remote_content_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -295,7 +292,6 @@ async def test_absent_object_store_fails_closed_when_remote_content_exists(
         await runtime.reconcile_once()
 
 
-@pytest.mark.asyncio
 async def test_reconciliation_before_start_remains_a_loud_initialization_error() -> (
     None
 ):
@@ -305,7 +301,6 @@ async def test_reconciliation_before_start_remains_a_loud_initialization_error()
         await runtime.reconcile_once()
 
 
-@pytest.mark.asyncio
 async def test_readiness_recovers_after_cache_expiry_without_process_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -331,7 +326,6 @@ async def test_readiness_recovers_after_cache_expiry_without_process_restart(
     assert store.closed
 
 
-@pytest.mark.asyncio
 async def test_readiness_recovery_adopts_validated_legacy_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -370,7 +364,6 @@ async def test_readiness_recovery_adopts_validated_legacy_connection(
     await runtime.stop()
 
 
-@pytest.mark.asyncio
 async def test_readiness_reports_database_outage_and_recovers_after_cache_expiry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -397,7 +390,6 @@ async def test_readiness_reports_database_outage_and_recovers_after_cache_expiry
     await runtime.stop()
 
 
-@pytest.mark.asyncio
 async def test_connection_table_outage_is_database_unavailable_readiness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -421,7 +413,6 @@ async def test_connection_table_outage_is_database_unavailable_readiness(
     await runtime.stop()
 
 
-@pytest.mark.asyncio
 async def test_concurrent_enabled_readiness_coalesces_dependency_probes_and_expires(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -453,7 +444,6 @@ async def test_concurrent_enabled_readiness_coalesces_dependency_probes_and_expi
     await runtime.stop()
 
 
-@pytest.mark.asyncio
 async def test_runtime_stop_is_idempotent() -> None:
     client = MagicMock()
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))

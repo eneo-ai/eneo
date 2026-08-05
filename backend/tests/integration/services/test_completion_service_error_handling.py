@@ -64,8 +64,6 @@ async def provider_with_credentials(db_container, test_tenant):
         yield provider
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_model_without_provider_id_raises_value_error(
     db_container,
     test_tenant,
@@ -119,8 +117,6 @@ async def test_model_without_provider_id_raises_value_error(
         assert "GPT-4" in str(exc_info.value)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_model_with_inactive_provider_raises_error(
     db_container,
     test_tenant,
@@ -188,8 +184,6 @@ async def test_model_with_inactive_provider_raises_error(
         assert "Inactive Provider" in str(exc_info.value)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_model_with_nonexistent_provider_raises_error(
     db_container,
     test_tenant,
@@ -246,8 +240,6 @@ async def test_model_with_nonexistent_provider_raises_error(
         assert str(non_existent_provider_id) in str(exc_info.value)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_model_cannot_resolve_provider_from_another_tenant(
     db_container,
     test_tenant,
@@ -309,8 +301,6 @@ async def test_model_cannot_resolve_provider_from_another_tenant(
             await service._get_adapter(model)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_adapter_creation_succeeds_with_valid_provider(
     db_container,
     test_tenant,
@@ -376,8 +366,6 @@ async def test_adapter_creation_succeeds_with_valid_provider(
         assert adapter is not None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_different_provider_types_create_correct_adapters(
     db_container,
     test_tenant,

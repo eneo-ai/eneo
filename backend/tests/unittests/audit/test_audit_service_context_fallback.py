@@ -68,7 +68,6 @@ def test_fill_mixes_explicit_and_contextvar_values():
     assert req is None  # absent from both
 
 
-@pytest.mark.asyncio
 async def test_log_async_picks_up_context_when_kwargs_omitted(monkeypatch):
     """Calling log_async without ip/ua/request_id reads them from contextvars."""
 
@@ -110,7 +109,6 @@ async def test_log_async_picks_up_context_when_kwargs_omitted(monkeypatch):
     assert enqueued["request_id"] == str(request_id)
 
 
-@pytest.mark.asyncio
 async def test_log_async_writes_null_when_context_is_empty(monkeypatch):
     """Worker / migration paths have no contextvars and must write NULL."""
 
@@ -141,7 +139,6 @@ async def test_log_async_writes_null_when_context_is_empty(monkeypatch):
     assert enqueued["request_id"] is None
 
 
-@pytest.mark.asyncio
 async def test_log_async_explicit_kwargs_override_contextvars(monkeypatch):
     enqueued: dict = {}
 
@@ -180,7 +177,6 @@ async def test_log_async_explicit_kwargs_override_contextvars(monkeypatch):
     assert enqueued["request_id"] == str(explicit_request_id)
 
 
-@pytest.mark.asyncio
 async def test_log_async_skips_when_should_log_returns_false(monkeypatch):
     """Sanity: contextvar fallback does not interfere with the should_log gate."""
 
@@ -213,7 +209,6 @@ async def test_log_async_skips_when_should_log_returns_false(monkeypatch):
     assert enqueued == {}
 
 
-@pytest.mark.asyncio
 async def test_log_async_swallows_redis_enqueue_failure(monkeypatch, caplog):
     """Audit is best-effort: a Redis/ARQ enqueue exception must not propagate.
 
@@ -253,7 +248,6 @@ async def test_log_async_swallows_redis_enqueue_failure(monkeypatch, caplog):
     )
 
 
-@pytest.mark.asyncio
 async def test_log_persists_contextvars_through_repository(monkeypatch):
     """The sync log() method also reads contextvars."""
 

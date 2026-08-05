@@ -22,7 +22,6 @@ import asyncio
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-import pytest
 import redis.asyncio as aioredis
 from httpx import AsyncClient
 
@@ -104,8 +103,6 @@ async def _create_user(
     return response.json()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_worker_limit_enforced_under_load(
     client: AsyncClient,
     super_admin_token: str,
@@ -180,8 +177,6 @@ async def test_tenant_worker_limit_enforced_under_load(
     assert final_count is None or int(final_count) == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_redis_failure_opens_circuit_and_enforces_fallback(
     client: AsyncClient,
     super_admin_token: str,
@@ -253,8 +248,6 @@ async def test_redis_failure_opens_circuit_and_enforces_fallback(
     await working_limiter.release(tenant_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_semaphore_ttl_prevents_slot_leakage(
     client: AsyncClient,
     super_admin_token: str,
@@ -319,8 +312,6 @@ async def test_semaphore_ttl_prevents_slot_leakage(
     await limiter.release(tenant_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_multiple_tenants_share_global_worker_pool_fairly(
     client: AsyncClient,
     super_admin_token: str,
@@ -377,8 +368,6 @@ async def test_multiple_tenants_share_global_worker_pool_fairly(
             await limiter.release(tenant_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_concurrent_acquire_and_release_race_condition(
     client: AsyncClient,
     super_admin_token: str,
@@ -452,8 +441,6 @@ async def test_concurrent_acquire_and_release_race_condition(
         await limiter.release(tenant_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_zero_limit_disables_concurrency_control(
     client: AsyncClient,
     super_admin_token: str,
@@ -507,8 +494,6 @@ async def test_zero_limit_disables_concurrency_control(
 # ============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_circuit_breaker_end_to_end_redis_recovery(
     client: AsyncClient,
     super_admin_token: str,
@@ -595,8 +580,6 @@ async def test_circuit_breaker_end_to_end_redis_recovery(
         await limiter.release(tenant_id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_multiple_tenants_independent_fallback_limits(
     client: AsyncClient,
     super_admin_token: str,

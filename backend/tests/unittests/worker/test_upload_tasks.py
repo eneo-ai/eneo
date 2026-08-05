@@ -13,7 +13,6 @@ from eneo.object_content.content import ObjectContentBusyError
 from eneo.worker import upload_tasks
 
 
-@pytest.mark.asyncio
 async def test_publication_claim_loss_cancels_protected_remote_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -51,7 +50,6 @@ async def test_publication_claim_loss_cancels_protected_remote_work(
             await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
 async def test_publication_claim_timeout_fails_without_logging_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -4,8 +4,6 @@ import asyncio
 import time
 from uuid import uuid4
 
-import pytest
-
 from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
 
@@ -50,7 +48,6 @@ class FakeRedis:
         return current
 
 
-@pytest.mark.asyncio
 async def test_acquire_and_release_respects_limit():
     redis = FakeRedis()
     limiter = TenantConcurrencyLimiter(redis=redis, max_concurrent=2, ttl_seconds=60)
@@ -65,7 +62,6 @@ async def test_acquire_and_release_respects_limit():
     assert await limiter.acquire(tenant_id) is True
 
 
-@pytest.mark.asyncio
 async def test_limit_disabled_when_max_zero():
     redis = FakeRedis()
     limiter = TenantConcurrencyLimiter(redis=redis, max_concurrent=0, ttl_seconds=60)
@@ -82,7 +78,6 @@ async def test_limit_disabled_when_max_zero():
 # ============================================================================
 
 
-@pytest.mark.asyncio
 async def test_release_does_not_leak_when_circuit_open_after_redis_acquire(monkeypatch):
     """CRITICAL: Verify Redis-acquired slots are released even when circuit opens.
 
@@ -131,7 +126,6 @@ async def test_release_does_not_leak_when_circuit_open_after_redis_acquire(monke
     )
 
 
-@pytest.mark.asyncio
 async def test_circuit_opens_on_exception_and_stays_open_for_duration(monkeypatch):
     """Verify circuit breaker opens on Redis failure and stays open for configured duration."""
     redis = FakeRedis()
@@ -171,7 +165,6 @@ async def test_circuit_opens_on_exception_and_stays_open_for_duration(monkeypatc
     assert limiter._is_circuit_open(t0 + 5.1) is False
 
 
-@pytest.mark.asyncio
 async def test_circuit_closes_on_redis_recovery(monkeypatch):
     """Verify circuit closes when Redis recovers and successful operation completes."""
     redis = FakeRedis()
@@ -203,7 +196,6 @@ async def test_circuit_closes_on_redis_recovery(monkeypatch):
     await limiter.release(tenant_id)
 
 
-@pytest.mark.asyncio
 async def test_local_fallback_enforces_limit_with_lock():
     """Verify local fallback enforces limit correctly under concurrent load."""
     redis = FakeRedis()
@@ -247,7 +239,6 @@ async def test_local_fallback_enforces_limit_with_lock():
         await limiter.release(tenant_id)
 
 
-@pytest.mark.asyncio
 async def test_cleanup_expired_removes_old_entries(monkeypatch):
     """Verify _cleanup_expired() removes entries with past expiration times."""
     redis = FakeRedis()
@@ -292,7 +283,6 @@ async def test_cleanup_expired_removes_old_entries(monkeypatch):
     assert len(limiter._local_counts) == 1, "Expired entries should be removed"
 
 
-@pytest.mark.asyncio
 async def test_task_fallback_flag_set_and_consumed():
     """Verify task fallback flag is properly set on acquire and consumed on release."""
     redis = FakeRedis()
@@ -335,7 +325,6 @@ async def test_task_fallback_flag_set_and_consumed():
     await limiter.release(tenant_id)  # Should not raise
 
 
-@pytest.mark.asyncio
 async def test_concurrent_fallback_calls_respect_per_tenant_limit():
     """Verify multiple tenants have independent fallback limits during circuit-open."""
     redis = FakeRedis()
@@ -377,7 +366,6 @@ async def test_concurrent_fallback_calls_respect_per_tenant_limit():
     assert len(limiter._local_counts) == 2, "Should have 2 separate tenant entries"
 
 
-@pytest.mark.asyncio
 async def test_asyncio_current_task_none_safety(monkeypatch):
     """Verify flag marking/consuming is safe when asyncio.current_task() returns None."""
 

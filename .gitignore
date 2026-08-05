@@ -84,6 +84,7 @@ dist/
 build/
 __pycache__/
 .pytest_cache/
+.pytest-container-mounts/
 .ruff_cache/
 venv/
 target/

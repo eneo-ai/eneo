@@ -75,7 +75,6 @@ def mock_container():
 class TestGetTokenForSubscription:
     """Tests for get_token_for_subscription helper function."""
 
-    @pytest.mark.asyncio
     async def test_returns_oauth_token_for_user_oauth_auth(
         self, mock_subscription, mock_container
     ):
@@ -111,7 +110,6 @@ class TestGetTokenForSubscription:
         mock_container.oauth_token_service().get_oauth_token_by_user_integration.assert_called_once()
         mock_container.oauth_token_service().refresh_and_update_token.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_returns_tenant_app_token_for_tenant_app_auth(
         self, mock_subscription, mock_container
     ):
@@ -148,7 +146,6 @@ class TestGetTokenForSubscription:
             tenant_app
         )
 
-    @pytest.mark.asyncio
     async def test_returns_service_account_token_for_service_account_auth(
         self, mock_subscription, mock_container
     ):
@@ -193,7 +190,6 @@ class TestGetTokenForSubscription:
             tenant_app
         )
 
-    @pytest.mark.asyncio
     async def test_returns_none_when_no_oauth_token_found(
         self, mock_subscription, mock_container
     ):
@@ -212,7 +208,6 @@ class TestGetTokenForSubscription:
 
         assert token is None
 
-    @pytest.mark.asyncio
     async def test_returns_none_when_tenant_app_id_missing(
         self, mock_subscription, mock_container
     ):
@@ -229,7 +224,6 @@ class TestGetTokenForSubscription:
 
         assert token is None
 
-    @pytest.mark.asyncio
     async def test_returns_none_when_user_integration_not_found(
         self, mock_subscription, mock_container
     ):
@@ -246,7 +240,6 @@ class TestGetTokenForSubscription:
 class TestCleanupOrphanedSubscriptions:
     """Tests for cleanup_orphaned_subscriptions cron job."""
 
-    @pytest.mark.asyncio
     async def test_skips_subscriptions_with_references(self, mock_container):
         """Test that subscriptions with references are skipped."""
         subscription = SharePointSubscription(
@@ -280,7 +273,6 @@ class TestCleanupOrphanedSubscriptions:
         assert result["skipped"] == 1
         assert result["deleted"] == 0
 
-    @pytest.mark.asyncio
     async def test_deletes_orphaned_subscription_with_tenant_app(self, mock_container):
         """Test that orphaned subscription with tenant app auth is deleted."""
         subscription = SharePointSubscription(
@@ -343,7 +335,6 @@ class TestCleanupOrphanedSubscriptions:
 class TestRenewExpiringSubscriptions:
     """Tests for renew_expiring_subscriptions cron job."""
 
-    @pytest.mark.asyncio
     async def test_renews_subscription_with_tenant_app(self, mock_container):
         """Test that expiring subscription with tenant app auth is renewed."""
         subscription = SharePointSubscription(
@@ -400,7 +391,6 @@ class TestRenewExpiringSubscriptions:
         assert result["failed"] == 0
         mock_container.sharepoint_subscription_service().renew_subscription.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_returns_early_when_no_expiring_subscriptions(self, mock_container):
         """Test that job returns early when no subscriptions need renewal."""
         mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
@@ -422,7 +412,6 @@ class TestRenewExpiringSubscriptions:
         assert result["renewed"] == 0
         assert result["failed"] == 0
 
-    @pytest.mark.asyncio
     async def test_records_failure_when_token_cannot_be_resolved(self, mock_container):
         """Token resolution failures are persisted on the subscription."""
         subscription = SharePointSubscription(
@@ -468,7 +457,6 @@ class TestRenewExpiringSubscriptions:
             subscription
         )
 
-    @pytest.mark.asyncio
     async def test_records_failure_when_renewal_returns_false(self, mock_container):
         """Graph renewal failures are persisted on the subscription."""
         subscription = SharePointSubscription(
@@ -526,7 +514,6 @@ class TestRenewExpiringSubscriptions:
             subscription
         )
 
-    @pytest.mark.asyncio
     async def test_refreshes_token_before_renewal_savepoint(self, mock_container):
         """Rotated refresh tokens must not roll back with Graph renewal failures."""
         events: list[str] = []
@@ -608,7 +595,6 @@ class TestRenewExpiringSubscriptions:
 class TestFailStaleSharePointSyncJobs:
     """Tests for the stuck-job sweeper cron."""
 
-    @pytest.mark.asyncio
     async def test_marks_stale_jobs_failed(self, mock_container):
         failed_ids = [uuid4(), uuid4()]
         job_repo = AsyncMock()
@@ -638,7 +624,6 @@ class TestFailStaleSharePointSyncJobs:
             <= SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES + 5
         )
 
-    @pytest.mark.asyncio
     async def test_returns_zero_when_no_stale_jobs(self, mock_container):
         job_repo = AsyncMock()
         job_repo.mark_stale_jobs_failed = AsyncMock(return_value=[])

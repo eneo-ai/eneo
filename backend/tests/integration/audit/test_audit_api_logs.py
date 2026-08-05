@@ -1,9 +1,6 @@
 """Integration tests for the /audit/logs API endpoint."""
 
-import pytest
-from datetime import datetime, timezone, timedelta
-
-pytestmark = pytest.mark.integration
+from datetime import datetime, timedelta, timezone
 
 
 class TestLogsEndpointAuthentication:

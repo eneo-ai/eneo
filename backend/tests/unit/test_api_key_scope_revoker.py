@@ -4,8 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import (
@@ -26,7 +24,6 @@ def _make_key(**overrides: object) -> ApiKeyV2InDB:
     )
 
 
-@pytest.mark.asyncio
 async def test_scope_revoker_updates_and_audits():
     key = _make_key()
     repo = AsyncMock()

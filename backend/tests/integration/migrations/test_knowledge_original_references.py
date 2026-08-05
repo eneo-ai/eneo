@@ -12,7 +12,7 @@ from testcontainers.postgres import PostgresContainer
 from alembic import command
 from alembic.config import Config
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _PREVIOUS_REVISION = "202607301200"
 _REVISION = "202607311000"

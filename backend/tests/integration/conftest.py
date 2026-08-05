@@ -12,6 +12,19 @@ from pathlib import Path
 
 import pytest
 
+# Shared fixture modules for the integration tree. Star imports register the
+# fixtures with pytest for tests/integration only; pytest_plugins cannot be
+# used here because pytest requires it in the rootdir conftest, which would
+# expose these fixtures to unit tests as well.
+from tests.integration.fixtures.apps import *  # noqa: F401,F403
+from tests.integration.fixtures.assistants import *  # noqa: F401,F403
+from tests.integration.fixtures.completion_models import *  # noqa: F401,F403
+from tests.integration.fixtures.integrations import *  # noqa: F401,F403
+from tests.integration.fixtures.organization_knowledge import *  # noqa: F401,F403
+from tests.integration.fixtures.services import *  # noqa: F401,F403
+from tests.integration.fixtures.spaces import *  # noqa: F401,F403
+from tests.integration.fixtures.transcription_models import *  # noqa: F401,F403
+
 
 @dataclass(frozen=True, slots=True)
 class _DeploymentPolicySeed:
@@ -250,6 +263,12 @@ def test_settings(
 
     encryption_key = Fernet.generate_key().decode()
 
+    # In devcontainer mode every xdist worker shares the compose Redis, so each
+    # worker gets its own logical DB (gw0 -> 1, gw1 -> 2, ...). DB 0 stays
+    # reserved for dev data. Redis ships 16 DBs, which bounds this at -n 15.
+    xdist_worker = os.getenv("PYTEST_XDIST_WORKER", "gw0")
+    redis_db = 1 + int(xdist_worker.removeprefix("gw") or 0)
+
     # Create test settings
     settings = Settings(
         # PostgreSQL settings
@@ -261,7 +280,7 @@ def test_settings(
         # Redis settings
         redis_host=redis_host,
         redis_port=redis_port,
-        redis_db=1,  # Use database 1 for tests to avoid collisions with dev data
+        redis_db=redis_db,
         # File upload limits
         # API settings
         api_prefix="/api/v1",

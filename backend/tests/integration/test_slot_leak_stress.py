@@ -18,12 +18,10 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-import pytest
 import redis.asyncio as aioredis
 
 from eneo.worker.feeder.capacity import CapacityManager
 from eneo.worker.redis.lua_scripts import LuaScripts
-
 
 # =============================================================================
 # HELPER: Slot Counter Assertion
@@ -75,8 +73,6 @@ class SlotLeakDetector:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestEnqueueGapSlotLeak:
     """Tests for slot leak when ARQ enqueue fails after pre-acquisition.
 
@@ -177,8 +173,6 @@ class TestEnqueueGapSlotLeak:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestEmergencyReleaseSlot:
     """Tests for emergency_release_slot() dual-failure recovery.
 
@@ -282,8 +276,6 @@ class TestEmergencyReleaseSlot:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestHeartbeatTTLTiming:
     """Tests for heartbeat TTL refresh timing under load.
 
@@ -365,8 +357,6 @@ class TestHeartbeatTTLTiming:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestWatchdogWorkerRace:
     """Tests for race condition between watchdog cleanup and worker completion.
 
@@ -399,8 +389,6 @@ class TestWatchdogWorkerRace:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestCancellationDuringPersist:
     """Tests for task cancellation safety during persist_batch.
 
@@ -436,8 +424,6 @@ class TestCancellationDuringPersist:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestSlotCounterAccuracy:
     """Tests for slot counter accuracy under concurrent operations."""
 
@@ -526,8 +512,6 @@ class TestSlotCounterAccuracy:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestFlagCleanupConsistency:
     """Tests for preacquired flag cleanup in all exit paths."""
 

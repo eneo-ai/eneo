@@ -236,8 +236,6 @@ async def _expire_crashed_operation(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_queue_creates_only_bounded_per_content_intents(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -278,8 +276,6 @@ async def test_queue_creates_only_bounded_per_content_intents(
     assert queued_ids == {first_id, second_id}
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_queue_records_maximum_plus_one_as_a_bounded_typed_failure(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -307,8 +303,6 @@ async def test_queue_records_maximum_plus_one_as_a_bounded_typed_failure(
     assert failure_code == "target_too_large"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_command_requires_readiness_before_queueing(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -408,8 +402,6 @@ async def test_admin_command_requires_readiness_before_queueing(
         assert move.target_kind == StorageKind.OBJECT_STORE.value
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_degraded_store_still_queues_moves_back_to_postgres(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -460,8 +452,6 @@ async def test_degraded_store_still_queues_moves_back_to_postgres(
             assert move.target_kind == StorageKind.POSTGRES_INLINE.value
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_unconfigured_store_queue_toward_postgres_reports_reality(
     object_content_database: DatabaseSessionManager,
     monkeypatch: pytest.MonkeyPatch,
@@ -507,8 +497,6 @@ async def test_unconfigured_store_queue_toward_postgres_reports_reality(
     assert queued.queued_count == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_reconciler_moves_verified_bytes_in_both_directions(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -700,8 +688,6 @@ async def test_reconciler_moves_verified_bytes_in_both_directions(
     await inline_runtime.stop()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_reconciler_round_trips_content_across_the_multipart_boundary(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -800,8 +786,6 @@ async def test_reconciler_round_trips_content_across_the_multipart_boundary(
         assert candidate.completed_observations == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_store_outage_retries_without_changing_authority(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -862,8 +846,6 @@ async def test_store_outage_retries_without_changing_authority(
         assert content.storage_kind == StorageKind.OBJECT_STORE.value
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_current_target_limits_fence_io_after_configuration_changes(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -994,8 +976,6 @@ async def test_current_target_limits_fence_io_after_configuration_changes(
         assert move.failure_code == "target_too_large"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_pause_blocks_move_claim_until_resumed(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1045,8 +1025,6 @@ async def test_pause_blocks_move_claim_until_resumed(
     assert resumed.moves_processed == 1
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_blocked_move_does_not_starve_eligible_work_or_lose_its_source(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1124,8 +1102,6 @@ async def test_blocked_move_does_not_starve_eligible_work_or_lose_its_source(
         assert move.failure_code == "content_ineligible"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_failed_staged_move_releases_store_dependency_after_orphan_cleanup(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1234,8 +1210,6 @@ async def test_failed_staged_move_releases_store_dependency_after_orphan_cleanup
     await inline_runtime.stop()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_inline_to_object_recovers_at_each_crash_boundary(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1442,8 +1416,6 @@ async def test_inline_to_object_recovers_at_each_crash_boundary(
     assert (await reconciler.run_once()).moves_processed == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_object_to_inline_recovers_when_capture_precedes_a_crash(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1532,8 +1504,6 @@ async def test_object_to_inline_recovers_when_capture_precedes_a_crash(
         assert inline.payload == payload
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_local_timeout_is_not_reported_as_a_store_outage(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -1577,8 +1547,6 @@ async def test_local_timeout_is_not_reported_as_a_store_outage(
         assert move.failure_code is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_move_candidate_query_uses_bounded_ordered_index(
     object_content_database: DatabaseSessionManager,
 ) -> None:

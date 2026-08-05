@@ -106,7 +106,6 @@ async def _prepare(protocol: FileProtocol, upload: UploadFile):
         return prepared
 
 
-@pytest.mark.asyncio
 async def test_prepare_pdf_preserves_original_and_extracted_text_variants(
     protocol, tmp_path
 ):
@@ -137,7 +136,6 @@ async def test_prepare_pdf_preserves_original_and_extracted_text_variants(
         )
 
 
-@pytest.mark.asyncio
 async def test_prepare_image_keeps_original_separate_from_model_input(
     protocol, tmp_path, monkeypatch
 ):
@@ -176,7 +174,6 @@ async def test_prepare_image_keeps_original_separate_from_model_input(
         )
 
 
-@pytest.mark.asyncio
 async def test_prepare_audio_preserves_exact_original(protocol, tmp_path):
     original = b"exact audio bytes"
     upload = UploadFile(
@@ -206,7 +203,6 @@ async def test_prepare_audio_preserves_exact_original(protocol, tmp_path):
 # ── Tests: text files use TEXT_MAX ───────────────────────────────────────
 
 
-@pytest.mark.asyncio
 async def test_text_under_limit_accepted(protocol):
     upload, size = _make_upload("text/plain", TEXT_MAX)
     protocol.file_size_service.get_file_size.return_value = size
@@ -216,7 +212,6 @@ async def test_text_under_limit_accepted(protocol):
     assert result.file_type.value == "text"
 
 
-@pytest.mark.asyncio
 async def test_text_over_limit_rejected(protocol):
     upload, size = _make_upload("text/plain", TEXT_MAX + 1)
     protocol.file_size_service.get_file_size.return_value = size
@@ -228,7 +223,6 @@ async def test_text_over_limit_rejected(protocol):
     assert exc_info.value.limit_name == "session_file"
 
 
-@pytest.mark.asyncio
 async def test_object_store_envelope_plus_one_rejected_before_disk_spool(protocol):
     upload, size = _make_upload("text/plain", _OBJECT_STORE_ENVELOPE + 1)
     protocol.file_size_service.get_file_size.return_value = size
@@ -250,7 +244,6 @@ async def test_object_store_envelope_plus_one_rejected_before_disk_spool(protoco
 # ── Tests: image files use IMAGE_MAX ─────────────────────────────────────
 
 
-@pytest.mark.asyncio
 async def test_image_under_limit_accepted(protocol):
     upload, size = _make_upload("image/png", IMAGE_MAX)
     protocol.file_size_service.get_file_size.return_value = size
@@ -260,7 +253,6 @@ async def test_image_under_limit_accepted(protocol):
     assert result.file_type.value == "image"
 
 
-@pytest.mark.asyncio
 async def test_image_over_limit_rejected(protocol):
     upload, size = _make_upload("image/png", IMAGE_MAX + 1)
     protocol.file_size_service.get_file_size.return_value = size
@@ -275,7 +267,6 @@ async def test_image_over_limit_rejected(protocol):
 # ── Tests: audio files use AUDIO_MAX (the 200 MB fix) ───────────────────
 
 
-@pytest.mark.asyncio
 async def test_audio_under_limit_accepted(protocol):
     """Audio files up to AUDIO_MAX (200 MB) should be accepted — this was the bug."""
     upload, size = _make_upload("audio/mpeg", AUDIO_MAX)
@@ -286,7 +277,6 @@ async def test_audio_under_limit_accepted(protocol):
     assert result.file_type.value == "audio"
 
 
-@pytest.mark.asyncio
 async def test_audio_over_limit_rejected(protocol):
     upload, size = _make_upload("audio/mpeg", AUDIO_MAX + 1)
     protocol.file_size_service.get_file_size.return_value = size
@@ -298,7 +288,6 @@ async def test_audio_over_limit_rejected(protocol):
     assert exc_info.value.limit_name == "session_audio"
 
 
-@pytest.mark.asyncio
 async def test_audio_50mb_accepted(protocol):
     """50 MB audio file — well within 200 MB limit, but would have failed with old 10 MB limit."""
     upload, size = _make_upload("audio/mpeg", 50_000_000)
@@ -312,7 +301,6 @@ async def test_audio_50mb_accepted(protocol):
 # ── Tests: to_domain dispatches correctly without explicit max_size ──────
 
 
-@pytest.mark.asyncio
 async def test_to_domain_routes_audio_mime_types(protocol):
     """All audio MIME types should route through audio_to_domain."""
     for mime in [
@@ -331,7 +319,6 @@ async def test_to_domain_routes_audio_mime_types(protocol):
         assert result.file_type.value == "audio", f"MIME {mime} should route to audio"
 
 
-@pytest.mark.asyncio
 async def test_to_domain_routes_image_mime_types(protocol):
     """Image MIME types should route through image_to_domain."""
     for mime in ["image/png", "image/jpeg", "image/webp", "image/avif"]:
@@ -347,7 +334,6 @@ async def test_to_domain_routes_image_mime_types(protocol):
         }
 
 
-@pytest.mark.asyncio
 async def test_to_domain_routes_text_mime_types(protocol):
     """Non-image, non-audio MIME types should route through text_to_domain."""
     for mime in ["text/plain", "application/pdf", "text/csv"]:
@@ -362,7 +348,6 @@ async def test_to_domain_routes_text_mime_types(protocol):
 # ── Test: each type has independent limits ───────────────────────────────
 
 
-@pytest.mark.asyncio
 async def test_audio_limit_is_independent_of_text_limit(protocol):
     """Audio admission uses the persisted transcription policy, not the text policy."""
     upload, size = _make_upload("audio/mpeg", 15_000_000)

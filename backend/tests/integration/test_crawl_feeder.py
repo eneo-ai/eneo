@@ -10,7 +10,6 @@ import asyncio
 import json
 from uuid import uuid4
 
-import pytest
 import redis.asyncio as aioredis
 
 from eneo.worker.feeder.capacity import CapacityManager
@@ -18,8 +17,6 @@ from eneo.worker.feeder.election import LeaderElection
 from eneo.worker.feeder.queues import PendingQueue
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestLeaderElection:
     """Tests for leader election mechanism."""
 
@@ -89,8 +86,6 @@ class TestLeaderElection:
         await redis_client.delete("crawl_feeder:leader")
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestCapacityManager:
     """Tests for capacity observation."""
 
@@ -163,8 +158,6 @@ class TestCapacityManager:
         await redis_client.delete(f"tenant:{tenant_id}:active_jobs")
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestPendingQueue:
     """Tests for pending queue management."""
 
@@ -239,8 +232,6 @@ class TestPendingQueue:
         await redis_client.delete(queue_key)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestMultiTenantIsolation:
     """Tests for multi-tenant isolation."""
 
@@ -300,8 +291,6 @@ class TestMultiTenantIsolation:
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestSplitBrainPrevention:
     """Tests for split-brain leader election scenarios."""
 

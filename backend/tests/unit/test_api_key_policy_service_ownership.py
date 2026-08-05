@@ -45,7 +45,6 @@ def _service_with_user(patterns: list[str], *, permissions: list[object] | None 
     )
 
 
-@pytest.mark.asyncio
 async def test_service_key_rejected_for_non_admin():
     """Non-admin user creating ownership=SERVICE gets ApiKeyValidationError with 403."""
     service = _service_with_user([], permissions=[])
@@ -66,7 +65,6 @@ async def test_service_key_rejected_for_non_admin():
     assert exc.value.code == "insufficient_permission"
 
 
-@pytest.mark.asyncio
 async def test_service_key_tenant_write_rejected_without_guardrails():
     """Admin user creating service + tenant scope + WRITE without IP or expiry gets 400."""
     service = _service_with_user([], permissions=[Permission.ADMIN])
@@ -88,7 +86,6 @@ async def test_service_key_tenant_write_rejected_without_guardrails():
     assert "IP allowlist or expiration" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_service_key_tenant_admin_rejected_without_guardrails():
     """Admin user creating service + tenant scope + ADMIN without IP or expiry gets 400."""
     service = _service_with_user([], permissions=[Permission.ADMIN])
@@ -110,7 +107,6 @@ async def test_service_key_tenant_admin_rejected_without_guardrails():
     assert "IP allowlist or expiration" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_service_key_tenant_write_accepted_with_ip():
     """Admin user creating service + tenant + WRITE + allowed_ips passes validation."""
     service = _service_with_user([], permissions=[Permission.ADMIN])
@@ -129,7 +125,6 @@ async def test_service_key_tenant_write_accepted_with_ip():
     await service.validate_create_request(request=request)
 
 
-@pytest.mark.asyncio
 async def test_service_key_tenant_write_accepted_with_expiry():
     """Admin user creating service + tenant + ADMIN + expires_at passes validation."""
     service = _service_with_user([], permissions=[Permission.ADMIN])
@@ -148,7 +143,6 @@ async def test_service_key_tenant_write_accepted_with_expiry():
     await service.validate_create_request(request=request)
 
 
-@pytest.mark.asyncio
 async def test_service_key_tenant_read_accepted_without_guardrails():
     """Admin user creating service + tenant + READ (no guardrail needed) passes."""
     service = _service_with_user([], permissions=[Permission.ADMIN])
@@ -166,7 +160,6 @@ async def test_service_key_tenant_read_accepted_without_guardrails():
     await service.validate_create_request(request=request)
 
 
-@pytest.mark.asyncio
 async def test_service_key_uses_derived_resource_permission_for_guardrail():
     """Service keys cannot bypass guardrails with read permission + write/admin resources."""
     service = _service_with_user([], permissions=[Permission.ADMIN])
@@ -194,7 +187,6 @@ async def test_service_key_uses_derived_resource_permission_for_guardrail():
     assert "IP allowlist or expiration" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_service_key_space_scoped_write_rejected_without_guardrails():
     """Service + space + ADMIN without IP/expiry is rejected (guardrail applies to all write/admin)."""
     service = _service_with_user([], permissions=[Permission.ADMIN])
@@ -214,7 +206,6 @@ async def test_service_key_space_scoped_write_rejected_without_guardrails():
         await service.validate_create_request(request=request)
 
 
-@pytest.mark.asyncio
 async def test_service_key_space_scoped_read_accepted_without_guardrails():
     """Service + space + READ (no guardrail needed for read) passes."""
     service = _service_with_user([], permissions=[Permission.ADMIN])

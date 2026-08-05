@@ -40,8 +40,6 @@ async def regular_user_token(db_container, regular_user, patch_auth_service_jwt)
         return auth_service.create_access_token_for_user(regular_user)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_full_crud_round_trip(client, admin_token):
     create_resp = await client.post(
         "/api/v1/admin/prompt-library/",
@@ -103,8 +101,6 @@ async def test_admin_full_crud_round_trip(client, admin_token):
     assert get_after_delete.status_code == 404
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_non_admin_gets_403(client, regular_user_token):
     resp = await client.get(
         "/api/v1/admin/prompt-library/",
@@ -113,8 +109,6 @@ async def test_non_admin_gets_403(client, regular_user_token):
     assert resp.status_code == 403
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_duplicate_name_returns_400(client, admin_token):
     first = await client.post(
         "/api/v1/admin/prompt-library/",
@@ -131,8 +125,6 @@ async def test_duplicate_name_returns_400(client, admin_token):
     assert second.status_code == 400, second.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_get_unknown_id_returns_404(client, admin_token):
     resp = await client.get(
         f"/api/v1/admin/prompt-library/{uuid4()}/",

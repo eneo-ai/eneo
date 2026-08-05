@@ -417,7 +417,6 @@ class _RecordingCheckpoint:
         return result
 
 
-@pytest.mark.asyncio
 async def test_single_upload_verifies_stored_bytes() -> None:
     payload = b"portable s3 content"
     digest = sha256(payload).digest()
@@ -439,7 +438,6 @@ async def test_single_upload_verifies_stored_bytes() -> None:
     assert client.get_calls == 1
 
 
-@pytest.mark.asyncio
 async def test_single_upload_rejects_corrupted_readback() -> None:
     payload = b"portable s3 content"
     replacement = b"corrupted s3 bytes!"
@@ -463,7 +461,6 @@ async def test_single_upload_rejects_corrupted_readback() -> None:
     assert client.get_calls == 1
 
 
-@pytest.mark.asyncio
 async def test_single_upload_retries_when_object_disappears_before_readback() -> None:
     payload = b"portable s3 content"
     digest = sha256(payload).digest()
@@ -485,7 +482,6 @@ async def test_single_upload_retries_when_object_disappears_before_readback() ->
     assert client.get_calls == 1
 
 
-@pytest.mark.asyncio
 async def test_single_upload_checkpoints_before_each_sdk_request() -> None:
     payload = b"content"
     digest = sha256(payload).digest()
@@ -525,7 +521,6 @@ async def test_single_upload_checkpoints_before_each_sdk_request() -> None:
     )
 
 
-@pytest.mark.asyncio
 async def test_remote_inventory_cannot_escape_the_deployment_prefix() -> None:
     client = cast("S3Client", _EscapedInventoryClient())
     store = S3ObjectStore(_settings(), client=client)
@@ -534,7 +529,6 @@ async def test_remote_inventory_cannot_escape_the_deployment_prefix() -> None:
         await store.list_object_page()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("continuation_token", "page"),
     [
@@ -561,7 +555,6 @@ async def test_object_inventory_rejects_incomplete_pagination(
         await store.list_object_page(continuation_token=continuation_token)
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("key_marker", "upload_id_marker", "page"),
     [
@@ -602,7 +595,6 @@ async def test_multipart_inventory_rejects_incomplete_pagination(
         )
 
 
-@pytest.mark.asyncio
 async def test_multipart_upload_emits_bounded_lease_checkpoints() -> None:
     mebibyte = 1024 * 1024
     part_bytes = 5 * mebibyte
@@ -664,7 +656,6 @@ async def test_multipart_upload_emits_bounded_lease_checkpoints() -> None:
     assert client.get_calls == 1
 
 
-@pytest.mark.asyncio
 async def test_multipart_upload_rejects_corrupted_readback() -> None:
     mebibyte = 1024 * 1024
     part_bytes = 5 * mebibyte
@@ -701,7 +692,6 @@ async def test_multipart_upload_rejects_corrupted_readback() -> None:
     assert client.get_calls == 1
 
 
-@pytest.mark.asyncio
 async def test_full_rehash_emits_checkpoints_around_each_bounded_read() -> None:
     payload = b"0123456789"
     settings = ObjectContentSettings(
@@ -744,7 +734,6 @@ async def test_full_rehash_emits_checkpoints_around_each_bounded_read() -> None:
     assert checkpoints == 5
 
 
-@pytest.mark.asyncio
 async def test_delete_checkpoints_before_delete_and_each_visibility_head() -> None:
     events: list[str] = []
     client = _EventuallyDeletedClient(events)
@@ -774,7 +763,6 @@ async def test_delete_checkpoints_before_delete_and_each_visibility_head() -> No
     ]
 
 
-@pytest.mark.asyncio
 async def test_multipart_abort_checkpoints_before_the_sdk_request() -> None:
     events: list[str] = []
     settings = _settings()
@@ -794,7 +782,6 @@ async def test_multipart_abort_checkpoints_before_the_sdk_request() -> None:
     assert events == ["checkpoint", "abort", "checkpoint"]
 
 
-@pytest.mark.asyncio
 async def test_verified_full_read_rejects_replacement_before_yielding() -> None:
     original = b"abcdefghij"
     replacement = b"0123456789"
@@ -828,7 +815,6 @@ def test_verification_chunk_window_rejects_inconsistent_manifest() -> None:
         )
 
 
-@pytest.mark.asyncio
 async def test_verified_range_fetches_and_spools_only_covering_chunks() -> None:
     payload = b"abcdefghijklmnopq"
     chunk_size = 4
@@ -857,7 +843,6 @@ async def test_verified_range_fetches_and_spools_only_covering_chunks() -> None:
     assert [request["Range"] for request in client.requests] == ["bytes=4-11"]
 
 
-@pytest.mark.asyncio
 async def test_verified_range_rejects_covering_corruption_before_yielding() -> None:
     original = b"abcdefghijklmnopq"
     replacement = original[:7] + b"X" + original[8:]
@@ -890,7 +875,6 @@ async def test_verified_range_rejects_covering_corruption_before_yielding() -> N
     assert emitted == b""
 
 
-@pytest.mark.asyncio
 async def test_verified_range_does_not_read_corruption_outside_covering_chunks() -> (
     None
 ):
@@ -922,7 +906,6 @@ async def test_verified_range_does_not_read_corruption_outside_covering_chunks()
     assert body == original[9:11]
 
 
-@pytest.mark.asyncio
 async def test_binding_create_is_atomic_and_idempotent_across_replicas() -> None:
     client = _BindingClient()
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
@@ -939,7 +922,6 @@ async def test_binding_create_is_atomic_and_idempotent_across_replicas() -> None
     assert client.put_calls == 2
 
 
-@pytest.mark.asyncio
 async def test_binding_probe_uses_and_removes_candidate_deployment_key() -> None:
     client = _BindingClient()
     settings = _settings()
@@ -952,7 +934,6 @@ async def test_binding_probe_uses_and_removes_candidate_deployment_key() -> None
     assert client.delete_keys == [binding_key]
 
 
-@pytest.mark.asyncio
 async def test_binding_never_overwrites_a_foreign_database_identity() -> None:
     client = _BindingClient()
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
@@ -966,7 +947,6 @@ async def test_binding_never_overwrites_a_foreign_database_identity() -> None:
         await store.prepare_binding_creation(uuid4())
 
 
-@pytest.mark.asyncio
 async def test_missing_binding_is_reported_without_creating_a_marker() -> None:
     client = _BindingClient()
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
@@ -976,7 +956,6 @@ async def test_missing_binding_is_reported_without_creating_a_marker() -> None:
     assert client.put_calls == 0
 
 
-@pytest.mark.asyncio
 async def test_unpaired_nonempty_namespace_is_never_adopted() -> None:
     client = _BindingClient(contains_durable_bytes=True)
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
@@ -987,7 +966,6 @@ async def test_unpaired_nonempty_namespace_is_never_adopted() -> None:
     assert client.put_calls == 0
 
 
-@pytest.mark.asyncio
 async def test_mid_stream_timeout_is_retryable_and_closes_the_body() -> None:
     client = _MidStreamTimeoutClient()
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
@@ -1003,7 +981,6 @@ async def test_mid_stream_timeout_is_retryable_and_closes_the_body() -> None:
     assert client.body.closed
 
 
-@pytest.mark.asyncio
 async def test_stream_checksum_failure_remains_an_integrity_error() -> None:
     client = _ChecksumFailureClient()
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))

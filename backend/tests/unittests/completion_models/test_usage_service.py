@@ -19,7 +19,6 @@ def _service_with_count(count: int = 3) -> CompletionModelUsageService:
     )
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "entity_type",
     [
@@ -40,7 +39,6 @@ async def test_count_entities_accepts_api_and_canonical_entity_names(entity_type
     service.session.execute.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "method_name,entity_type",
     [

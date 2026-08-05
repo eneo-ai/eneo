@@ -126,7 +126,6 @@ def _independent_placeholder_store(service: SessionService) -> Iterator[None]:
 # ----- SessionService.create_question_placeholder ---------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_question_placeholder_inserts_row_with_seeded_question_tokens():
     """Placeholder commits with the user's question, empty answer, and a best-effort
     `count_tokens(question, model)` so abort-only requests don't undercount in
@@ -166,7 +165,6 @@ async def test_create_question_placeholder_inserts_row_with_seeded_question_toke
     assert kwargs.get("web_search_results") == []
 
 
-@pytest.mark.asyncio
 async def test_create_question_placeholder_falls_back_to_zero_when_count_tokens_raises():
     """tiktoken can raise on unknown model names — the placeholder write must still
     succeed with num_tokens_question=0 instead of crashing the request."""
@@ -192,7 +190,6 @@ async def test_create_question_placeholder_falls_back_to_zero_when_count_tokens_
     assert args[0].num_tokens_question == 0
 
 
-@pytest.mark.asyncio
 async def test_create_question_placeholder_without_model_records_zero_tokens():
     """If no completion model is configured (e.g. some sysadmin/test paths), don't
     even try to count — store 0 and move on."""
@@ -218,7 +215,6 @@ async def test_create_question_placeholder_without_model_records_zero_tokens():
 # ----- SessionService.complete_question_with_answer -------------------------
 
 
-@pytest.mark.asyncio
 async def test_complete_question_with_answer_calls_repo_update():
     service = _make_session_service()
     question_id = uuid4()
@@ -256,7 +252,6 @@ async def test_complete_question_with_answer_calls_repo_update():
 # ----- persist_partial_question_answer --------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_persist_partial_question_answer_uses_fresh_session():
     """The abort helper must NOT depend on the request-scoped AsyncSession — it has
     to open its own via sessionmanager.session(), since by the time we hit `finally`
@@ -318,7 +313,6 @@ async def test_persist_partial_question_answer_uses_fresh_session():
     assert update_called["num_tokens_answer"] == 2
 
 
-@pytest.mark.asyncio
 async def test_persist_partial_question_answer_swallows_db_errors():
     """Best-effort cleanup — must not raise even if the DB is unreachable."""
 
@@ -368,7 +362,6 @@ async def _drain_until(gen, n: int) -> list[Completion]:
     return out
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_schedules_partial_save_on_abort():
     """When the SSE consumer aborts after some TEXT chunks have arrived, the streaming
     generator's `finally` must fire-and-forget a background save of the partial answer."""
@@ -445,7 +438,6 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
     session_service_mock.complete_question_with_answer.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_streaming_abort_persists_changed_skill_evidence_without_text():
     async def fake_completion_stream():
         yield Completion(
@@ -502,7 +494,6 @@ async def test_streaming_abort_persists_changed_skill_evidence_without_text():
     session_service_mock.complete_question_with_answer.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_no_partial_save_on_normal_completion():
     """When the stream completes naturally, complete_question_with_answer must be
     called (once) and no partial-save task should be scheduled."""
@@ -577,7 +568,6 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
     assert persist_calls == []
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_persists_cumulative_input_estimate():
     async def fake_completion_stream():
         yield Completion(
@@ -638,7 +628,6 @@ async def test_streaming_handle_response_persists_cumulative_input_estimate():
     assert persisted["context_completion_tokens"] == 7
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_separates_billing_from_context_usage():
     async def fake_completion_stream():
         yield Completion(
@@ -703,7 +692,6 @@ async def test_streaming_handle_response_separates_billing_from_context_usage():
     assert usage_event.skill_context_tokens == 37
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("usage", "context_input_token_estimate"),
     [
@@ -772,7 +760,6 @@ async def test_non_streaming_handle_response_persists_context_without_changing_c
     assert persisted["skill_context_tokens"] == 37
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
     first_ref = McpToolReference(
         id=uuid4(),
@@ -840,7 +827,6 @@ async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
     assert update_kwargs["mcp_tool_references"] == [first_ref, second_ref]
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_persists_reasoning_separately_from_answer():
     """REASONING chunks must accumulate into the persisted `reasoning` field, never
     into the answer text."""
@@ -902,7 +888,6 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
     assert update_kwargs["context_completion_tokens"] == 11
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_partial_save_keeps_reasoning_on_abort():
     """Aborting while the model is still thinking (no TEXT yet) must still schedule
     a partial save carrying the streamed reasoning — the trace is part of the
@@ -970,7 +955,6 @@ async def test_streaming_handle_response_partial_save_keeps_reasoning_on_abort()
     session_service_mock.complete_question_with_answer.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_skips_partial_save_when_no_content():
     """When the stream is aborted *before* any TEXT chunk arrives — or the LLM
     raises before producing output — `response_string` is empty and an UPDATE
@@ -1032,7 +1016,6 @@ async def test_streaming_handle_response_skips_partial_save_when_no_content():
     )
 
 
-@pytest.mark.asyncio
 async def test_streaming_handle_response_count_tokens_failure_still_persists_partial():
     """The pre-fix code computed count_tokens inline inside `finally` — if tiktoken
     raised on an exotic model name, the asyncio.create_task call was never reached
@@ -1112,7 +1095,6 @@ async def test_streaming_handle_response_count_tokens_failure_still_persists_par
 # ----- _schedule_background_save strong-ref invariant -----------------------
 
 
-@pytest.mark.asyncio
 async def test_schedule_background_save_holds_strong_reference_until_done():
     """asyncio.create_task internally holds only a weak reference — without
     `_background_save_tasks` keeping a strong one, the GC can collect the task

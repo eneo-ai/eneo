@@ -49,8 +49,6 @@ class _ReadyObjectStoreContentService(ObjectContentService):
         assert storage_kind is StorageKind.OBJECT_STORE
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "storage_target",
     [StorageKind.POSTGRES_INLINE, StorageKind.OBJECT_STORE],
@@ -130,8 +128,6 @@ async def test_file_upload_respects_audit_kill_switch_after_storage_commit(
         assert deletion.status_code == 204, deletion.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_used_file_delete_returns_the_typed_preview_before_mutation(
     client,
     db_container,
@@ -198,8 +194,6 @@ async def test_used_file_delete_returns_the_typed_preview_before_mutation(
         assert await session.get(QuestionsFiles, (question_id, file_id)) is not None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_file_metadata_routes_preserve_persisted_transcription(
     client,
     db_container,
@@ -233,8 +227,6 @@ async def test_file_metadata_routes_preserve_persisted_transcription(
     assert listed["transcription"] == "durable transcript"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_file_listing_batches_multiple_transcriptions_in_one_payload_query(
     client,
     db_container,
@@ -308,8 +300,6 @@ async def test_file_listing_batches_multiple_transcriptions_in_one_payload_query
     assert len(inline_payload_queries) == 1
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_signed_download_rejects_corrupt_content_before_success_headers(
     client,
     db_container,
@@ -355,8 +345,6 @@ async def test_signed_download_rejects_corrupt_content_before_success_headers(
     assert download.json()["code"] == "object_content_integrity_failure"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_image_metadata_matches_the_selected_download_representation(
     client,
     admin_user_api_key,

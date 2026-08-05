@@ -56,8 +56,6 @@ async def second_tenant_token(db_container, patch_auth_service_jwt, second_tenan
     return token
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_tenant_isolation_for_management_endpoints(
     client,
     default_user_token: str,

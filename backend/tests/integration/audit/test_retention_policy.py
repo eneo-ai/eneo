@@ -1,8 +1,9 @@
 """Integration tests for audit log retention policy."""
 
-import pytest
 from datetime import datetime, timedelta
 from uuid import uuid4
+
+import pytest
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.application.retention_service import RetentionService
@@ -10,10 +11,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-pytestmark = pytest.mark.integration
 
-
-@pytest.mark.asyncio
 async def test_get_default_retention_policy(db_session, test_tenant):
     """Test that default retention policy is 365 days."""
     async with db_session() as session:
@@ -27,7 +25,6 @@ async def test_get_default_retention_policy(db_session, test_tenant):
         assert policy.last_purge_at is None
 
 
-@pytest.mark.asyncio
 async def test_update_retention_policy(db_session, test_tenant):
     """Test updating retention policy."""
     async with db_session() as session:
@@ -44,7 +41,6 @@ async def test_update_retention_policy(db_session, test_tenant):
         assert policy.retention_days == 90
 
 
-@pytest.mark.asyncio
 async def test_retention_policy_validation(db_session, test_tenant):
     """Test retention policy validation (1-2555 days)."""
     async with db_session() as session:
@@ -74,7 +70,6 @@ async def test_retention_policy_validation(db_session, test_tenant):
         await retention_service.update_policy(test_tenant.id, 2555)  # Max (7 years)
 
 
-@pytest.mark.asyncio
 @pytest.mark.skip(
     reason="Complex transaction management - purge logic verified in service tests"
 )
@@ -113,8 +108,9 @@ async def test_purge_old_logs(db_session, test_tenant, test_user):
 
     # Second session: Update old log timestamp
     async with db_session() as session:
-        from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
         from sqlalchemy import update
+
+        from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 
         old_timestamp = datetime.utcnow() - timedelta(days=100)
         query = (
@@ -146,7 +142,6 @@ async def test_purge_old_logs(db_session, test_tenant, test_user):
         assert recent_log.id in active_ids
 
 
-@pytest.mark.asyncio
 async def test_retention_policy_service_methods(db_session, test_tenant):
     """Test retention policy service methods directly."""
     async with db_session() as session:

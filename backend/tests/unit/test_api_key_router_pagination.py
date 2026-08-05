@@ -6,10 +6,8 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
-
-from eneo.authentication.api_key_router import _collect_manageable_keys_for_page
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.api_key_router import _collect_manageable_keys_for_page
 from eneo.authentication.auth_models import ApiKeyScopeType
 from tests.unit.api_key_test_utils import make_api_key
 
@@ -23,7 +21,6 @@ def _key(name: str, created_at: datetime):
     )
 
 
-@pytest.mark.asyncio
 async def test_collect_manageable_keys_fetches_next_batch_when_first_batch_underfills():
     now = datetime.now(timezone.utc)
     batch_one = [
@@ -81,7 +78,6 @@ async def test_collect_manageable_keys_fetches_next_batch_when_first_batch_under
     assert second_call["cursor"] == batch_one[-1].created_at
 
 
-@pytest.mark.asyncio
 async def test_collect_manageable_keys_stops_when_raw_batch_exhausted():
     now = datetime.now(timezone.utc)
     batch = [

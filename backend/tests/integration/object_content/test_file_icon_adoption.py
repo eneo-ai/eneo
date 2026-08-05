@@ -114,7 +114,6 @@ class _PausingLockFileRepository(FileRepository):
         return metadata
 
 
-@pytest.mark.asyncio
 async def test_file_upload_reads_exact_bytes_without_an_object_store(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -182,7 +181,6 @@ async def test_file_upload_reads_exact_bytes_without_an_object_store(
     assert download.media_type == "text/plain"
 
 
-@pytest.mark.asyncio
 async def test_file_hydration_batches_multiple_inline_payloads_in_one_query(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -255,7 +253,6 @@ async def test_file_hydration_batches_multiple_inline_payloads_in_one_query(
     assert len(inline_payload_queries) == 1
 
 
-@pytest.mark.asyncio
 async def test_file_capture_persists_payload_above_the_old_inline_default(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -307,7 +304,6 @@ async def test_file_capture_persists_payload_above_the_old_inline_default(
         assert control.storage_kind == "postgres_inline"
 
 
-@pytest.mark.asyncio
 async def test_signed_download_preserves_the_established_text_and_image_variants(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -466,7 +462,6 @@ async def test_signed_download_preserves_the_established_text_and_image_variants
             assert download.filename == expected_name
 
 
-@pytest.mark.asyncio
 async def test_text_hydration_without_readable_text_returns_typed_not_found(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -513,7 +508,6 @@ async def test_text_hydration_without_readable_text_returns_typed_not_found(
             await service.get_file_content(saved.id)
 
 
-@pytest.mark.asyncio
 async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -616,7 +610,6 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
     assert ranged.content_range == f"bytes 3-8/{len(audio)}"
 
 
-@pytest.mark.asyncio
 async def test_concurrent_transcription_writes_converge_on_one_reference(
     object_content_database: DatabaseSessionManager,
 ) -> None:

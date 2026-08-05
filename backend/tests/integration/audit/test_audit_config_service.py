@@ -9,8 +9,6 @@ from eneo.audit.infrastructure.audit_config_repository import (
 from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 from eneo.worker.redis import get_redis
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture
 async def seeded_tenant(db_session, test_tenant):

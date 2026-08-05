@@ -28,9 +28,6 @@ from eneo.main.models import ModelId
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
-
-
 # ---------------------------------------------------------------------------
 # Helpers — mirror the seed-migration shape so each test gets the system
 # user + assistant prerequisites the router endpoints expect.

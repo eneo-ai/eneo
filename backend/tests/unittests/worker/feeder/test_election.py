@@ -5,8 +5,6 @@ Tests the Redis-based distributed lock for singleton feeder election.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 
 class TestLeaderElectionInit:
     """Tests for LeaderElection initialization."""
@@ -42,7 +40,6 @@ class TestLeaderElectionInit:
 class TestTryAcquire:
     """Tests for try_acquire method."""
 
-    @pytest.mark.asyncio
     async def test_returns_true_when_lock_acquired(self):
         """Should return True when SET NX succeeds."""
         from eneo.worker.feeder.election import LeaderElection
@@ -61,7 +58,6 @@ class TestTryAcquire:
             ex=30,
         )
 
-    @pytest.mark.asyncio
     async def test_returns_false_when_lock_held_by_another(self):
         """Should return False when another process holds the lock."""
         from eneo.worker.feeder.election import LeaderElection
@@ -74,7 +70,6 @@ class TestTryAcquire:
 
         assert result is False
 
-    @pytest.mark.asyncio
     async def test_returns_false_on_redis_error(self):
         """Should return False and log warning on Redis error."""
         from eneo.worker.feeder.election import LeaderElection
@@ -91,7 +86,6 @@ class TestTryAcquire:
 class TestRefresh:
     """Tests for refresh method."""
 
-    @pytest.mark.asyncio
     async def test_returns_true_when_still_owner(self):
         """Should return True when Lua script confirms ownership."""
         from eneo.worker.feeder.election import LeaderElection
@@ -114,7 +108,6 @@ class TestRefresh:
                 30,
             )
 
-    @pytest.mark.asyncio
     async def test_returns_false_when_not_owner(self):
         """Should return False when another process owns the lock."""
         from eneo.worker.feeder.election import LeaderElection
@@ -131,7 +124,6 @@ class TestRefresh:
 
             assert result is False
 
-    @pytest.mark.asyncio
     async def test_returns_false_on_error(self):
         """Should return False on Lua script error."""
         from eneo.worker.feeder.election import LeaderElection
@@ -152,7 +144,6 @@ class TestRefresh:
 class TestRelease:
     """Tests for release method."""
 
-    @pytest.mark.asyncio
     async def test_returns_true_when_released(self):
         """Should return True when Lua script releases lock."""
         from eneo.worker.feeder.election import LeaderElection
@@ -174,7 +165,6 @@ class TestRelease:
                 "worker-1",
             )
 
-    @pytest.mark.asyncio
     async def test_returns_false_when_not_owner(self):
         """Should return False when another process owns the lock."""
         from eneo.worker.feeder.election import LeaderElection
@@ -191,7 +181,6 @@ class TestRelease:
 
             assert result is False
 
-    @pytest.mark.asyncio
     async def test_returns_false_on_error(self):
         """Should return False on Lua script error."""
         from eneo.worker.feeder.election import LeaderElection

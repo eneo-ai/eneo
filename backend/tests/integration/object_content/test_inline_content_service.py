@@ -31,7 +31,6 @@ async def _payload_source(payload: bytes) -> AsyncIterator[bytes]:
     yield payload
 
 
-@pytest.mark.asyncio
 async def test_inline_create_read_range_and_final_delete_need_no_object_store(
     object_content_database: DatabaseSessionManager,
 ) -> None:

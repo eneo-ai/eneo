@@ -11,15 +11,14 @@ would fail with "Can't operate on closed transaction inside context manager",
 triggering unnecessary session recovery on every successful crawl.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
 import sqlalchemy as sa
 
 
 class TestTimestampUpdateNoCommit:
     """Verify _do_timestamp_update does NOT commit the transaction."""
 
-    @pytest.mark.asyncio
     async def test_timestamp_update_does_not_commit(self):
         """_do_timestamp_update should execute SQL but NOT commit.
 
@@ -55,7 +54,6 @@ class TestTimestampUpdateNoCommit:
         # CRITICAL: Verify commit was NOT called
         mock_session.commit.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_timestamp_update_begins_transaction_if_not_active(self):
         """If transaction not active, _do_timestamp_update should begin one."""
         mock_session = AsyncMock()
@@ -77,7 +75,6 @@ class TestTimestampUpdateNoCommit:
         # Should call begin() when not in transaction
         mock_session.begin.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_timestamp_update_skips_begin_if_transaction_active(self):
         """If transaction already active, _do_timestamp_update should NOT begin."""
         mock_session = AsyncMock()
@@ -104,7 +101,6 @@ class TestTimestampUpdateNoCommit:
 class TestTransactionFlowIntegrity:
     """Test that the transaction flow remains intact across all _do_* operations."""
 
-    @pytest.mark.asyncio
     async def test_sequential_operations_share_transaction(self):
         """Multiple _do_* operations should share the same transaction state.
 
@@ -151,7 +147,6 @@ class TestTransactionFlowIntegrity:
         # CRITICAL: No intermediate commits
         mock_session.commit.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_final_complete_job_commits(self):
         """Only _do_complete_job (final operation) should commit."""
         mock_session = AsyncMock()
@@ -179,7 +174,6 @@ class TestTransactionFlowIntegrity:
 class TestRecoveryNotTriggeredOnHappyPath:
     """Verify session recovery is NOT triggered on normal successful crawls."""
 
-    @pytest.mark.asyncio
     async def test_no_recovery_when_transaction_stays_open(self):
         """When transaction stays open, recovery should not be needed.
 

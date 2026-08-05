@@ -389,8 +389,6 @@ SESSIONS_REPO_CASES: list[tuple[str, Callable[..., Awaitable[set[UUID]]], str]] 
 ]
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 @pytest.mark.parametrize(
     "case_id,call,shape",
     SESSIONS_REPO_CASES,
@@ -435,8 +433,6 @@ async def test_sessions_repo_excludes_helper(
             raise AssertionError(f"unknown shape {shape}")
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_sessions_repo_returns_regular_sessions(db_container, admin_user):
     """Baseline: the filter does not over-exclude. Regular sessions still
     surface in every method, so the helper-only exclusion above is a real
@@ -680,8 +676,6 @@ def _assert_total_buckets(result, expected_total: int, name: str) -> None:
     )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 @pytest.mark.parametrize(
     "case_id,call,assertion",
     ANALYSIS_REPO_CASES,
@@ -708,8 +702,6 @@ ANALYSIS_HTTP_CASES = [
 ]
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 @pytest.mark.parametrize("path,field,expected", ANALYSIS_HTTP_CASES)
 async def test_analysis_http_endpoints_exclude_helper(
     db_container,

@@ -151,8 +151,6 @@ def _transcription_payload(provider_id: str, **overrides) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_with_valid_classification(
     client,
     admin_token,
@@ -183,8 +181,6 @@ async def test_create_completion_with_valid_classification(
         assert stored.scalar_one() == tenant_classification
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_without_classification(
     client,
     admin_token,
@@ -199,8 +195,6 @@ async def test_create_completion_without_classification(
     assert response.json()["security_classification"] is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_description_is_stored_verbatim(
     client,
     admin_token,
@@ -246,8 +240,6 @@ async def test_create_completion_description_is_stored_verbatim(
     assert explicit_row == "my notes"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_with_unknown_classification_404(
     client,
     admin_token,
@@ -264,8 +256,6 @@ async def test_create_completion_with_unknown_classification_404(
     assert response.status_code == 404, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_rejects_cross_tenant_classification(
     client,
     admin_token,
@@ -302,8 +292,6 @@ async def _create_completion_model(client, admin_token, provider_id, **overrides
     return response.json()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_completion_can_clear_nullable_fields(
     client,
     admin_token,
@@ -350,8 +338,6 @@ async def test_update_completion_can_clear_nullable_fields(
         assert row.output_cost_per_token is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_completion_omitted_field_preserved(
     client,
     admin_token,
@@ -398,8 +384,6 @@ async def test_update_completion_omitted_field_preserved(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_embedding_with_valid_classification(
     client,
     admin_token,
@@ -430,8 +414,6 @@ async def test_create_embedding_with_valid_classification(
         assert stored.scalar_one() == tenant_classification
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_embedding_rejects_cross_tenant_classification(
     client,
     admin_token,
@@ -449,8 +431,6 @@ async def test_create_embedding_rejects_cross_tenant_classification(
     assert response.status_code == 404, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_embedding_can_clear_dimensions_and_cost(
     client,
     admin_token,
@@ -502,8 +482,6 @@ async def test_update_embedding_can_clear_dimensions_and_cost(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_transcription_with_valid_classification(
     client,
     admin_token,
@@ -534,8 +512,6 @@ async def test_create_transcription_with_valid_classification(
         assert stored.scalar_one() == tenant_classification
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_transcription_rejects_cross_tenant_classification(
     client,
     admin_token,
@@ -553,8 +529,6 @@ async def test_create_transcription_rejects_cross_tenant_classification(
     assert response.status_code == 404, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_transcription_can_clear_cost_per_minute(
     client,
     admin_token,
@@ -591,8 +565,6 @@ async def test_update_transcription_can_clear_cost_per_minute(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_delete_classification_blocked_when_referenced_by_model(
     client,
     admin_token,
@@ -622,8 +594,6 @@ async def test_delete_classification_blocked_when_referenced_by_model(
     assert "in use" in delete.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_delete_classification_allowed_with_force_flag(
     client,
     admin_token,
@@ -666,8 +636,6 @@ async def test_delete_classification_allowed_with_force_flag(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_completion_in_other_tenant_404(
     client,
     admin_token,
@@ -742,8 +710,6 @@ async def test_update_completion_in_other_tenant_404(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_completion_promotes_default_and_unsets_sibling(
     client,
     admin_token,
@@ -783,8 +749,6 @@ async def test_update_completion_promotes_default_and_unsets_sibling(
     assert defaults[first["id"]] is False
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_completion_sets_and_clears_security_classification(
     client,
     admin_token,
@@ -828,8 +792,6 @@ async def test_update_completion_sets_and_clears_security_classification(
         assert stored.scalar_one() is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_completion_rejects_cross_tenant_classification(
     client,
     admin_token,
@@ -849,8 +811,6 @@ async def test_update_completion_rejects_cross_tenant_classification(
     assert response.status_code == 404, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_completion_combines_default_and_classification(
     client,
     admin_token,
@@ -890,8 +850,6 @@ async def test_update_completion_combines_default_and_classification(
     assert row.security_classification_id == tenant_classification
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_embedding_promotes_default_and_clears_classification(
     client,
     admin_token,
@@ -935,8 +893,6 @@ async def test_update_embedding_promotes_default_and_clears_classification(
     assert row.security_classification_id is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_transcription_promotes_default_and_sets_classification(
     client,
     admin_token,

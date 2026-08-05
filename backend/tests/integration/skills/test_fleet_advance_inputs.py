@@ -1,6 +1,5 @@
 from uuid import uuid4
 
-import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
@@ -27,8 +26,6 @@ async def _organization_space(session, *, tenant_id):
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_batch_runtime_resolution_query_count_is_independent_of_assistant_count(
     db_container,
     admin_user,
@@ -153,8 +150,6 @@ async def test_batch_runtime_resolution_query_count_is_independent_of_assistant_
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_preflight_adapter_batch_loads_one_shared_provider_once(
     db_container,
     completion_model_factory,
@@ -209,8 +204,6 @@ async def test_preflight_adapter_batch_loads_one_shared_provider_once(
         assert provider_queries == 1
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_candidate_pin_fit_matches_current_save_and_reports_candidate_refusal(
     db_container,
     admin_user,

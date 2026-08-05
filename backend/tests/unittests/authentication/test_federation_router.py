@@ -178,7 +178,6 @@ class MockContainer:
         return self._user_repo
 
 
-@pytest.mark.asyncio
 async def test_initiate_auth_blocks_inactive_tenant(monkeypatch):
     tenant = TenantInDB(
         id=uuid4(),
@@ -211,7 +210,6 @@ async def test_initiate_auth_blocks_inactive_tenant(monkeypatch):
     assert exc.value.status_code == 403
 
 
-@pytest.mark.asyncio
 async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monkeypatch):
     tenant = TenantInDB(
         id=uuid4(),
@@ -261,7 +259,6 @@ async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monke
     assert query["redirect_uri"] == ["https://external.example.com/auth/callback"]
 
 
-@pytest.mark.asyncio
 async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
     tenant = TenantInDB(
         id=uuid4(),
@@ -316,7 +313,6 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
     assert query["redirect_uri"] == ["https://external.example.com/auth/callback"]
 
 
-@pytest.mark.asyncio
 async def test_initiate_auth_rejects_unregistered_redirect_uri(monkeypatch):
     tenant = TenantInDB(
         id=uuid4(),
@@ -367,7 +363,6 @@ async def test_initiate_auth_rejects_unregistered_redirect_uri(monkeypatch):
     assert "not registered" in exc.value.detail
 
 
-@pytest.mark.asyncio
 async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
@@ -478,7 +473,6 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
     assert redis_client._store == {}
 
 
-@pytest.mark.asyncio
 async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
     dummy_settings = DummySettings(
         federation_enabled=True,
@@ -589,7 +583,6 @@ async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
     assert redis_client._store == {}
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("bad_email", ["@example.com", "user@@example.com"])
 async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email):
     dummy_settings = DummySettings(federation_enabled=True)
@@ -790,7 +783,6 @@ class MockContainerForJIT:
         return self._allowed_origin_repo
 
 
-@pytest.mark.asyncio
 async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
     """Test that JIT provisioning creates a user when enabled and user doesn't exist."""
     dummy_settings = DummySettings(federation_enabled=True)
@@ -904,7 +896,6 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
     assert audit_event["tenant_id"] == tenant_id
 
 
-@pytest.mark.asyncio
 async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
     """Test that login fails with 403 when JIT provisioning is disabled and user doesn't exist."""
     dummy_settings = DummySettings(federation_enabled=True)
@@ -1005,7 +996,6 @@ async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
     assert user_repo._created_user is None
 
 
-@pytest.mark.asyncio
 async def test_auth_callback_rejects_malformed_state_redirect_uri(monkeypatch):
     dummy_settings = DummySettings(
         federation_enabled=True,

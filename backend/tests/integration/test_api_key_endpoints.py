@@ -116,8 +116,6 @@ async def _add_space_member_role(
         await session.commit()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_crud_flow(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -159,8 +157,6 @@ async def test_api_key_crud_flow(client, default_user_token):
     assert revoke_response.json()["state"] == "revoked"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_legacy_api_key_endpoints_removed(client, default_user_token):
     """The v1 key endpoints are retired; only /api/v1/api-keys mints keys."""
     post_response = await client.post(
@@ -182,8 +178,6 @@ async def test_legacy_api_key_endpoints_removed(client, default_user_token):
     assert assistant_key_response.status_code == 404, assistant_key_response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_pk_origin_guardrail(
     client, db_container, default_user, default_user_token
 ):
@@ -229,8 +223,6 @@ async def test_pk_origin_guardrail(
     assert payload["context"]["auth_layer"] == "guardrail"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_pk_localhost_origin_rejected_when_not_listed_on_key(
     client, default_user_token
 ):
@@ -265,8 +257,6 @@ async def test_pk_localhost_origin_rejected_when_not_listed_on_key(
     assert localhost_response.json()["code"] == "origin_not_allowed"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_pk_localhost_origin_allowed_when_listed_on_key(
     client, default_user_token
 ):
@@ -295,8 +285,6 @@ async def test_pk_localhost_origin_allowed_when_listed_on_key(
     assert localhost_response.status_code == 200, localhost_response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sk_ip_guardrail(client, default_user_token):
     settings = get_settings()
     patched = settings.model_copy(update={"trusted_proxy_count": 1})
@@ -338,8 +326,6 @@ async def test_sk_ip_guardrail(client, default_user_token):
         set_settings(settings)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_rate_limit_enforced(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -374,8 +360,6 @@ async def test_rate_limit_enforced(client, default_user_token):
     assert int(retry_after) > 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_api_key_policy_update(
     client,
     default_user_token,
@@ -391,8 +375,6 @@ async def test_admin_api_key_policy_update(
     assert payload["max_expiration_days"] == 90
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_creation_constraints_reflect_tenant_policy(
     client,
     default_user_token,
@@ -428,8 +410,6 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert user_payload == admin_payload
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_rejects_missing_origins(client, default_user_token):
     response = await client.post(
         "/api/v1/api-keys",
@@ -445,8 +425,6 @@ async def test_api_key_rejects_missing_origins(client, default_user_token):
     assert response.json()["code"] == "invalid_request"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_rejects_zero_rate_limit(client, default_user_token):
     response = await client.post(
         "/api/v1/api-keys",
@@ -465,8 +443,6 @@ async def test_api_key_rejects_zero_rate_limit(client, default_user_token):
     assert "rate_limit" in payload["message"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_auth_performance_smoke(
     client,
     default_user_token,
@@ -496,8 +472,6 @@ async def test_api_key_auth_performance_smoke(
     assert elapsed < 5.0, f"Auth path too slow: {elapsed:.2f}s for 10 calls"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_expired_denied(client, default_user_token):
     expired_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     create_response = await client.post(
@@ -526,8 +500,6 @@ async def test_api_key_expired_denied(client, default_user_token):
     assert "expired" in payload["message"].lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_suspended_denied(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -563,8 +535,6 @@ async def test_api_key_suspended_denied(client, default_user_token):
     assert "suspended" in payload["message"].lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_invalid_api_key_denied(client):
     response = await client.get(
         _AUTH_ENDPOINT,
@@ -580,8 +550,6 @@ async def test_invalid_api_key_denied(client):
     assert payload["context"]["auth_layer"] == "identity"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_api_key_management_flow(client, default_user_token, default_user):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -679,8 +647,6 @@ async def test_admin_api_key_management_flow(client, default_user_token, default
     assert metadata_update_response.json()["name"] == "Revoked Name Update Allowed"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "method,path",
     [
@@ -695,8 +661,6 @@ async def test_admin_api_key_endpoints_require_auth(client, method: str, path: s
     assert response.status_code == 401
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_api_key_update_requires_auth(client):
     response = await client.patch(
         f"/api/v1/admin/api-keys/{uuid4()}",
@@ -705,8 +669,6 @@ async def test_admin_api_key_update_requires_auth(client):
     assert response.status_code == 401
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_api_key_endpoints_reject_non_admin(
     client, default_user_token, regular_user_token
 ):
@@ -765,8 +727,6 @@ async def test_admin_api_key_endpoints_reject_non_admin(
     assert policy_response.status_code == 403, policy_response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_user_list_pagination_and_filtering(client, default_user_token):
     keys_to_create = [
         {
@@ -824,8 +784,6 @@ async def test_user_list_pagination_and_filtering(client, default_user_token):
     assert all(item["key_type"] == "pk_" for item in filtered_items)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_non_admin_list_total_count_is_null(client, regular_user_token):
     list_response = await client.get(
         "/api/v1/api-keys",
@@ -836,8 +794,6 @@ async def test_non_admin_list_total_count_is_null(client, regular_user_token):
     assert payload["total_count"] is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_list_filtering_and_total_count(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -863,8 +819,6 @@ async def test_admin_list_filtering_and_total_count(client, default_user_token):
     assert all(item["key_type"] == "sk_" for item in payload["items"])
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_list_supports_search_and_creator_filters(
     client, default_user_token, default_user
 ):
@@ -930,8 +884,6 @@ async def test_admin_list_supports_search_and_creator_filters(
     assert no_results.json()["items"] == []
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_list_supports_owner_relation_filters(
     client, default_user_token, default_user
 ):
@@ -970,8 +922,6 @@ async def test_admin_list_supports_owner_relation_filters(
     assert "owner" in (matched.get("search_match_reasons") or [])
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_lookup_finds_exact_secret(
     client, default_user_token, default_user
 ):
@@ -1002,8 +952,6 @@ async def test_admin_lookup_finds_exact_secret(
     assert lookup_payload["api_key"]["owner_user"]["id"] == str(default_user.id)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_lookup_returns_404_for_unknown_secret(client, default_user_token):
     response = await client.post(
         "/api/v1/admin/api-keys/lookup",
@@ -1014,8 +962,6 @@ async def test_admin_lookup_returns_404_for_unknown_secret(client, default_user_
     assert response.json()["code"] == "resource_not_found"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_admin_usage_endpoint_returns_key_events(
     client, default_user_token, db_container
 ):
@@ -1111,8 +1057,6 @@ async def test_admin_usage_endpoint_returns_key_events(
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sk_guardrail_rejects_malformed_forwarded_ip(client, default_user_token):
     settings = get_settings()
     patched = settings.model_copy(update={"trusted_proxy_count": 1})
@@ -1145,8 +1089,6 @@ async def test_sk_guardrail_rejects_malformed_forwarded_ip(client, default_user_
         set_settings(settings)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_pk_guardrail_allows_ipv6_localhost_origin(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -1169,8 +1111,6 @@ async def test_pk_guardrail_allows_ipv6_localhost_origin(client, default_user_to
     assert response.status_code == 200
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_lifecycle_negative_paths(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -1214,8 +1154,6 @@ async def test_lifecycle_negative_paths(client, default_user_token):
     assert rotate_after_revoke.json()["code"] == "invalid_api_key"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_max_rate_limit_override_enforced_on_create_and_update(
     client,
     default_user_token,
@@ -1286,8 +1224,6 @@ async def test_max_rate_limit_override_enforced_on_create_and_update(
     assert update_exceeding.json()["code"] == "invalid_request"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_rotate_preserves_resource_permissions(client, default_user_token):
     requested_permissions = {
         "assistants": "read",
@@ -1318,8 +1254,6 @@ async def test_rotate_preserves_resource_permissions(client, default_user_token)
     assert rotated_payload["api_key"]["resource_permissions"] == requested_permissions
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_extend_expiration_changes_date(client, default_user_token):
     initial = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     create_response = await client.post(
@@ -1346,8 +1280,6 @@ async def test_extend_expiration_changes_date(client, default_user_token):
     assert extend_response.json()["expires_at"].startswith(new_expiry[:10])
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_extend_expiration_rejects_past_date(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -1372,8 +1304,6 @@ async def test_extend_expiration_rejects_past_date(client, default_user_token):
     assert response.json()["code"] == "invalid_request"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_extend_expiration_rejects_revoked_key(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -1404,8 +1334,6 @@ async def test_extend_expiration_rejects_revoked_key(client, default_user_token)
     assert response.json()["code"] == "invalid_request"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_purge_revoked_key(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -1439,8 +1367,6 @@ async def test_purge_revoked_key(client, default_user_token):
     assert get_after.status_code == 404
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_purge_active_key_rejected(client, default_user_token):
     create_response = await client.post(
         "/api/v1/api-keys",
@@ -1463,8 +1389,6 @@ async def test_purge_active_key_rejected(client, default_user_token):
     assert purge.json()["code"] == "invalid_request"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_rotate_disable_grace_period_revokes_old_key_immediately(
     client, db_container, default_user_token
 ):
@@ -1519,8 +1443,6 @@ async def test_rotate_disable_grace_period_revokes_old_key_immediately(
     assert post_response.status_code == 401, post_response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_rotate_default_grace_period_keeps_old_key_active(
     client, db_container, default_user_token
 ):
@@ -1554,8 +1476,6 @@ async def test_rotate_default_grace_period_keeps_old_key_active(
         assert grace_until > datetime.now(timezone.utc)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_rotate_can_update_expiration(client, default_user_token):
     initial = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
     create_response = await client.post(
@@ -1583,8 +1503,6 @@ async def test_rotate_can_update_expiration(client, default_user_token):
     assert rotated["expires_at"].startswith(new_expiry[:10])
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_method_aware_guard_blocks_write_key_on_app_run_delete(
     client,
     default_user_token,
@@ -1619,8 +1537,6 @@ async def test_method_aware_guard_blocks_write_key_on_app_run_delete(
     assert detail["context"]["auth_layer"] == "api_key_method"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_method_aware_guard_allows_read_override_for_group_semantic_search(
     client,
     default_user_token,
@@ -1657,8 +1573,6 @@ async def test_method_aware_guard_allows_read_override_for_group_semantic_search
     ), response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_method_aware_guard_blocks_read_key_on_assistant_session_create(
     client, default_user_token
 ):
@@ -1699,8 +1613,6 @@ async def test_method_aware_guard_blocks_read_key_on_assistant_session_create(
     assert "granted_level" not in detail["context"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_assistant_scoped_write_key_can_create_assistant_session(
     client, default_user_token
 ):
@@ -1742,8 +1654,6 @@ async def test_assistant_scoped_write_key_can_create_assistant_session(
     assert create_session_response.status_code == 404, create_session_response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_domain_policy_publish_assistant_denial_returns_actionable_error(
     client,
     db_container,
@@ -1780,8 +1690,6 @@ async def test_domain_policy_publish_assistant_denial_returns_actionable_error(
     assert body["context"]["action"] == "publish"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_domain_policy_app_create_denial_returns_actionable_error(
     client,
     db_container,
@@ -1822,8 +1730,6 @@ async def test_domain_policy_app_create_denial_returns_actionable_error(
     assert body["context"]["action"] == "create"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_invalid_request_payload_does_not_include_auth_layer_context(
     client,
     default_user_token,
@@ -1855,8 +1761,6 @@ async def test_invalid_request_payload_does_not_include_auth_layer_context(
     assert "context" not in body
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_can_hit_conversations_without_autobegin_error(
     client, default_user_token
 ):
@@ -1900,8 +1804,6 @@ async def test_space_scoped_key_can_hit_conversations_without_autobegin_error(
     assert response.status_code in {400, 404}, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_assistant_scoped_write_key_can_hit_followup_without_autobegin_error(
     client, default_user_token
 ):
@@ -1942,8 +1844,6 @@ async def test_assistant_scoped_write_key_can_hit_followup_without_autobegin_err
     assert response.status_code in {400, 404}, response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_conversations_session_scope_check_no_autobegin_error(
     client, default_user_token
 ):
@@ -1985,8 +1885,6 @@ async def test_space_scoped_key_conversations_session_scope_check_no_autobegin_e
     assert body.get("context", {}).get("auth_layer") == "api_key_scope"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_scoped_key_can_list_conversations_for_scoped_assistant(
     client, default_user_token
 ):
@@ -2020,8 +1918,6 @@ async def test_space_scoped_key_can_list_conversations_for_scoped_assistant(
     assert "total_count" in payload
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_method_aware_guard_blocks_write_key_on_assistant_delete(
     client, default_user_token
 ):
@@ -2057,8 +1953,6 @@ async def test_method_aware_guard_blocks_write_key_on_assistant_delete(
     assert delete_response.json()["code"] == "insufficient_permission"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_owner_scoped_governance_denials_follow_permission_then_scope_order(
     client, default_user_token
 ):
@@ -2125,8 +2019,6 @@ async def test_owner_scoped_governance_denials_follow_permission_then_scope_orde
     assert admin_body["context"]["auth_layer"] == "api_key_scope"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_owner_scoped_governance_denials_cover_all_locked_governance_routes(
     client, default_user_token
 ):
@@ -2202,8 +2094,6 @@ async def test_owner_scoped_governance_denials_cover_all_locked_governance_route
         assert admin_body["context"]["auth_layer"] == "api_key_scope"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_owner_scoped_keys_cannot_access_diagnostics_regardless_of_permission(
     client, default_user_token
 ):

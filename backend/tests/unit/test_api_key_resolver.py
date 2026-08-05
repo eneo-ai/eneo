@@ -64,21 +64,18 @@ def resolver():
     return ApiKeyAuthResolver(api_key_repo=api_key_repo)
 
 
-@pytest.mark.asyncio
 async def test_resolve_rejects_missing_api_key(resolver: ApiKeyAuthResolver):
     with pytest.raises(ApiKeyValidationError) as exc:
         await resolver.resolve("")
     assert exc.value.code == "invalid_api_key"
 
 
-@pytest.mark.asyncio
 async def test_resolve_rejects_invalid_prefix(resolver: ApiKeyAuthResolver):
     with pytest.raises(ApiKeyValidationError) as exc:
         await resolver.resolve("invalid-prefix")
     assert exc.value.code == "invalid_api_key"
 
 
-@pytest.mark.asyncio
 async def test_resolve_returns_v2_hmac_match(resolver: ApiKeyAuthResolver):
     key = _make_v2_key(key_prefix=ApiKeyType.SK.value, key_type=ApiKeyType.SK)
     resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
@@ -89,7 +86,6 @@ async def test_resolve_returns_v2_hmac_match(resolver: ApiKeyAuthResolver):
     assert resolved.prefix == ApiKeyType.SK.value
 
 
-@pytest.mark.asyncio
 async def test_resolve_passes_expected_tenant_to_lookup(resolver: ApiKeyAuthResolver):
     tenant_id = uuid4()
     key = _make_v2_key(
@@ -106,7 +102,6 @@ async def test_resolve_passes_expected_tenant_to_lookup(resolver: ApiKeyAuthReso
     assert first_call.kwargs["tenant_id"] == tenant_id
 
 
-@pytest.mark.asyncio
 async def test_resolve_rejects_v2_key_outside_expected_tenant(
     resolver: ApiKeyAuthResolver,
 ):
@@ -120,7 +115,6 @@ async def test_resolve_rejects_v2_key_outside_expected_tenant(
     assert exc.value.code == "invalid_api_key"
 
 
-@pytest.mark.asyncio
 async def test_resolve_migrates_sha_record_to_hmac(resolver: ApiKeyAuthResolver):
     key = _make_v2_key(
         hash_version=ApiKeyHashVersion.SHA256.value,
@@ -137,7 +131,6 @@ async def test_resolve_migrates_sha_record_to_hmac(resolver: ApiKeyAuthResolver)
     resolver.api_key_repo.update.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("prefix", ["inp_", "ina_"])
 async def test_resolve_accepts_migrated_legacy_prefixes(
     resolver: ApiKeyAuthResolver, prefix: str
@@ -153,7 +146,6 @@ async def test_resolve_accepts_migrated_legacy_prefixes(
     assert resolved.prefix == prefix
 
 
-@pytest.mark.asyncio
 async def test_resolve_raises_for_unknown_key(resolver: ApiKeyAuthResolver):
     resolver.api_key_repo.get_by_hash = AsyncMock(side_effect=[None, None])
 
@@ -163,7 +155,6 @@ async def test_resolve_raises_for_unknown_key(resolver: ApiKeyAuthResolver):
     assert exc.value.code == "invalid_api_key"
 
 
-@pytest.mark.asyncio
 async def test_resolve_has_no_legacy_table_fallback(resolver: ApiKeyAuthResolver):
     """A v1-prefixed key with no api_keys_v2 record is rejected outright —
     the legacy api_keys table lookup is gone."""

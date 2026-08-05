@@ -14,8 +14,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
@@ -113,7 +111,6 @@ def _session() -> SimpleNamespace:
     )
 
 
-@pytest.mark.asyncio
 async def test_disabled_mcp_server_is_filtered_before_proxy_is_built():
     service, factory = _service_with_mocked_proxy()
     model = _make_completion_model()
@@ -137,7 +134,6 @@ async def test_disabled_mcp_server_is_filtered_before_proxy_is_built():
     factory.create.return_value.prepare_tools_for_context.assert_awaited_once_with()
 
 
-@pytest.mark.asyncio
 async def test_all_disabled_mcp_servers_build_no_proxy():
     service, factory = _service_with_mocked_proxy()
     model = _make_completion_model()

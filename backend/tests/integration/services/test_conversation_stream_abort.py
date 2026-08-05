@@ -109,8 +109,6 @@ async def _get_question_row(question_id: UUID) -> QuestionSnapshot | None:
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_placeholder_persists_user_question_before_stream(
     client, db_container, default_user, default_user_token
 ):
@@ -147,8 +145,6 @@ async def test_placeholder_persists_user_question_before_stream(
     assert row.tenant_id == default_user.tenant_id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_new_session_rolls_back_when_first_question_insert_fails(
     db_container,
     default_user,
@@ -182,8 +178,6 @@ async def test_new_session_rolls_back_when_first_question_insert_fails(
     assert after == before
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_complete_question_with_answer_updates_existing_row(
     client, db_container, default_user, default_user_token
 ):
@@ -239,8 +233,6 @@ async def test_complete_question_with_answer_updates_existing_row(
         assert result.scalar_one() == 1
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_persist_partial_question_answer_writes_via_fresh_session(
     client, db_container, default_user, default_user_token
 ):
@@ -283,8 +275,6 @@ async def test_persist_partial_question_answer_writes_via_fresh_session(
     assert row.num_tokens_answer == 9
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
     client,
     db_container,
@@ -427,8 +417,6 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
     assert after_abort.skill_activation == evidence
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_provider_failure_evidence_survives_request_transaction_rollback(
     client,
     db_container,
@@ -540,8 +528,6 @@ async def test_provider_failure_evidence_survives_request_transaction_rollback(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_persist_partial_question_answer_refuses_cross_tenant_write(
     client, db_container, default_user, default_user_token
 ):

@@ -10,14 +10,11 @@ Tests the system-wide AI model management endpoints that require super admin API
 - DELETE /sysadmin/embedding-models/{id}
 """
 
-import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_duplicate_display_name_race_returns_409(
     client, super_admin_token, monkeypatch
 ):
@@ -68,8 +65,6 @@ async def test_duplicate_display_name_race_returns_409(
     assert second.json().get("eneo_error_code") == 9017
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_model_success(client, super_admin_token, db_container):
     """Test creating a new completion model with valid data."""
     model_data = {
@@ -130,8 +125,6 @@ async def test_create_completion_model_success(client, super_admin_token, db_con
         assert db_model.max_input_tokens == 8000
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_model_without_auth(client):
     """Test that creating a completion model without authentication fails."""
     model_data = {
@@ -155,8 +148,6 @@ async def test_create_completion_model_without_auth(client):
     assert response.status_code == 401
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_model_with_invalid_auth(client):
     """Test that creating a completion model with invalid API key fails."""
     model_data = {
@@ -181,8 +172,6 @@ async def test_create_completion_model_with_invalid_auth(client):
     assert response.status_code == 401
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_completion_model_metadata(
     client, super_admin_token, db_container
 ):
@@ -245,8 +234,6 @@ async def test_update_completion_model_metadata(
         assert db_model.max_input_tokens == 16000
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_nonexistent_completion_model(client, super_admin_token):
     """Test that updating a non-existent model returns 404."""
     from uuid import uuid4
@@ -266,8 +253,6 @@ async def test_update_nonexistent_completion_model(client, super_admin_token):
     assert response.status_code == 404
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_delete_completion_model(client, super_admin_token, db_container):
     """Test soft-deleting a completion model."""
     # First create a model
@@ -311,8 +296,6 @@ async def test_delete_completion_model(client, super_admin_token, db_container):
         assert db_model.deleted_at is not None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_delete_nonexistent_completion_model(client, super_admin_token):
     """Test that deleting a non-existent model succeeds (idempotent delete)."""
     from uuid import uuid4
@@ -328,8 +311,6 @@ async def test_delete_nonexistent_completion_model(client, super_admin_token):
     assert response.status_code == 200
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_force_delete_completion_model_without_history(
     client, super_admin_token, db_container
 ):
@@ -369,8 +350,6 @@ async def test_force_delete_completion_model_without_history(
         assert result.scalar_one_or_none() is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_force_delete_completion_model_with_history_returns_400(
     client, super_admin_token, db_container
 ):
@@ -434,8 +413,6 @@ async def test_force_delete_completion_model_with_history_returns_400(
         assert result.scalar_one_or_none() is not None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_model_with_duplicate_name(client, super_admin_token):
     """Test that duplicate model names are allowed (unique constraint removed)."""
     model_data = {
@@ -475,8 +452,6 @@ async def test_create_completion_model_with_duplicate_name(client, super_admin_t
 # Embedding Models Tests
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_embedding_model_success(client, super_admin_token, db_container):
     """Test creating a new embedding model with valid data."""
     model_data = {
@@ -532,8 +507,6 @@ async def test_create_embedding_model_success(client, super_admin_token, db_cont
         assert db_model.dimensions == 1536
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_embedding_model_without_auth(client):
     """Test that creating an embedding model without authentication fails."""
     model_data = {
@@ -553,8 +526,6 @@ async def test_create_embedding_model_without_auth(client):
     assert response.status_code == 401
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_embedding_model_metadata(client, super_admin_token, db_container):
     """Test updating an existing embedding model's metadata."""
     # First create a model
@@ -609,8 +580,6 @@ async def test_update_embedding_model_metadata(client, super_admin_token, db_con
         assert db_model.dimensions == 512
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_update_nonexistent_embedding_model(client, super_admin_token):
     """Test that updating a non-existent embedding model returns 404."""
     from uuid import uuid4
@@ -629,8 +598,6 @@ async def test_update_nonexistent_embedding_model(client, super_admin_token):
     assert response.status_code == 404
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_delete_embedding_model(client, super_admin_token, db_container):
     """Test deleting an embedding model."""
     # First create a model
@@ -672,8 +639,6 @@ async def test_delete_embedding_model(client, super_admin_token, db_container):
         assert db_model.deleted_at is not None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_delete_nonexistent_embedding_model(client, super_admin_token):
     """Test that deleting a non-existent embedding model succeeds (idempotent delete)."""
     from uuid import uuid4
@@ -692,8 +657,6 @@ async def test_delete_nonexistent_embedding_model(client, super_admin_token):
 # Validation Tests
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_model_missing_required_fields(
     client, super_admin_token
 ):
@@ -712,8 +675,6 @@ async def test_create_completion_model_missing_required_fields(
     assert response.status_code == 422  # Unprocessable Entity
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_completion_model_accepts_custom_family(client, super_admin_token):
     """Test that creating a model with custom family string is accepted.
 
@@ -742,8 +703,6 @@ async def test_create_completion_model_accepts_custom_family(client, super_admin
     assert response.status_code == 200  # Now accepts custom family strings
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_embedding_model_invalid_batch_size(client, super_admin_token):
     """Test that creating an embedding model with invalid batch size fails."""
     invalid_data = {
@@ -765,8 +724,6 @@ async def test_create_embedding_model_invalid_batch_size(client, super_admin_tok
     assert response.status_code == 422  # Validation error
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_partial_update_completion_model(client, super_admin_token):
     """Test that partial updates work (only update specified fields)."""
     # Create a model

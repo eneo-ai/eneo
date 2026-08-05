@@ -29,7 +29,6 @@ def user():
     return SimpleNamespace(id=uuid4(), email="user@example.com", tenant_id=uuid4())
 
 
-@pytest.mark.asyncio
 async def test_create_service_key_sets_null_owner(user):
     """When ownership=SERVICE, repo.create should receive owner_user_id=None."""
     key = _make_key(tenant_id=user.tenant_id, owner_user_id=None)
@@ -59,7 +58,6 @@ async def test_create_service_key_sets_null_owner(user):
     assert repo.create.call_args.kwargs["owner_user_id"] is None
 
 
-@pytest.mark.asyncio
 async def test_create_user_key_sets_owner(user):
     """When ownership=USER (default), repo.create should receive owner_user_id=user.id."""
     key = _make_key(tenant_id=user.tenant_id, owner_user_id=user.id)

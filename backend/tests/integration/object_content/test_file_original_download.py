@@ -91,8 +91,6 @@ async def _signed_download(client, headers, file_id: UUID, *, original: bool):
     return await client.get(f"{parsed.path}?{parsed.query}")
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("name", "media_type", "original"),
     [
@@ -160,8 +158,6 @@ async def test_original_text_download_does_not_fall_back_to_extracted_text(
     assert downloaded.headers["repr-digest"] == f"sha-256=:{digest}:"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_original_image_and_audio_ranges_preserve_exact_bytes(
     client,
     db_container,
@@ -249,8 +245,6 @@ async def test_original_image_and_audio_ranges_preserve_exact_bytes(
     assert invalid_range.json()["eneo_error_code"] == 9007
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_missing_original_is_typed_and_never_falls_back(
     client,
     db_container,
@@ -299,8 +293,6 @@ async def test_missing_original_is_typed_and_never_falls_back(
     assert download.json()["code"] == "file_original_not_found"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_original_mint_does_not_read_payload_and_corruption_fails_before_headers(
     client,
     db_container,
@@ -384,8 +376,6 @@ async def test_original_mint_does_not_read_payload_and_corruption_fails_before_h
     assert "code" not in retry.json()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_original_signed_url_enforces_short_lived_expiry(
     client,
     db_container,
@@ -425,8 +415,6 @@ async def test_original_signed_url_enforces_short_lived_expiry(
         assert rejected.status_code == 422
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

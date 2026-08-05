@@ -10,8 +10,6 @@ async def admin_token(db_container, patch_auth_service_jwt, admin_user):
         return container.auth_service().create_access_token_for_user(admin_user)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_identical_revision_returns_ok_and_changed_revision_returns_created(
     client, admin_token
 ):
@@ -71,8 +69,6 @@ async def test_identical_revision_returns_ok_and_changed_revision_returns_create
     assert changed_history.json()["total_count"] == 2
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_organization_identical_revision_is_a_noop_http_contract(
     client, admin_token
 ):
@@ -135,8 +131,6 @@ async def test_organization_identical_revision_is_a_noop_http_contract(
         assert changed_history.json()["total_count"] == 2
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_restore_rejects_a_revision_that_changed_after_preview(
     client, admin_token
 ):

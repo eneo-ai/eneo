@@ -4,8 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
-
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import (
     ApiKeyPermission,
@@ -24,7 +22,6 @@ def _make_key(**overrides: object):
     )
 
 
-@pytest.mark.asyncio
 async def test_revoke_by_owner_filters_user_ownership():
     """revoke_by_owner should call list_filtered with ownership='user'."""
     tenant_id = uuid4()
@@ -49,7 +46,6 @@ async def test_revoke_by_owner_filters_user_ownership():
     assert repo.list_filtered.call_args.kwargs["ownership"] == "user"
 
 
-@pytest.mark.asyncio
 async def test_revoke_member_keys_filters_user_ownership():
     """All list_filtered calls in revoke_member_keys should include ownership='user'."""
     tenant_id = uuid4()

@@ -17,7 +17,6 @@ require running live crawler jobs and simulating staleness conditions.
 These tests verify the configuration layer that enables stale detection.
 """
 
-import pytest
 from httpx import AsyncClient
 
 from eneo.jobs.job_models import Task
@@ -26,8 +25,6 @@ from eneo.tenants.crawler_settings_helper import (
 )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestStaleThresholdConfiguration:
     """Tests that stale threshold setting configures correctly."""
 
@@ -90,8 +87,6 @@ class TestStaleThresholdConfiguration:
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestStaleThresholdRangeValidation:
     """Tests that stale threshold enforces its 5-1440 minute range."""
 
@@ -146,8 +141,6 @@ class TestStaleThresholdRangeValidation:
         assert response.status_code == 200
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestStaleThresholdMultiTenantIsolation:
     """Tests that stale thresholds are isolated between tenants."""
 
@@ -221,8 +214,6 @@ class TestStaleThresholdMultiTenantIsolation:
             assert t2_threshold == 120, "Tenant 2 should have lenient threshold"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestStaleThresholdUpdatePropagation:
     """Tests that stale threshold changes propagate immediately."""
 
@@ -265,8 +256,6 @@ class TestStaleThresholdUpdatePropagation:
             assert threshold_2 == 15, "Updated threshold should be visible immediately"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestStaleThresholdUseCases:
     """Tests for different stale threshold use cases."""
 
@@ -337,8 +326,6 @@ class TestStaleThresholdUseCases:
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestStaleThresholdWithHeartbeat:
     """Tests stale threshold interaction with heartbeat settings."""
 
@@ -416,8 +403,6 @@ class TestStaleThresholdWithHeartbeat:
             )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestStaleThresholdWithJobMaxAge:
     """Tests stale threshold interaction with job max age settings."""
 
@@ -460,8 +445,6 @@ class TestStaleThresholdWithJobMaxAge:
             # They serve complementary purposes
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestJobRepoTouchJob:
     """Tests for JobRepository.touch_job() heartbeat method.
 
@@ -471,7 +454,8 @@ class TestJobRepoTouchJob:
 
     async def test_touch_job_updates_timestamp(self, db_container, admin_user):
         """touch_job() should update the job's updated_at timestamp."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
         from eneo.database.tables.job_table import Jobs
         from eneo.jobs.job_repo import JobRepository
         from eneo.main.models import Status
@@ -517,6 +501,7 @@ class TestJobRepoTouchJob:
     ):
         """Regular touch_job() calls should keep job under stale threshold."""
         from datetime import datetime, timezone
+
         from eneo.database.tables.job_table import Jobs
         from eneo.jobs.job_repo import JobRepository
         from eneo.main.models import Status
@@ -556,6 +541,7 @@ class TestJobRepoTouchJob:
     async def test_touch_job_nonexistent_job_no_error(self, db_container):
         """touch_job() on non-existent job should not raise error."""
         from uuid import uuid4
+
         from eneo.jobs.job_repo import JobRepository
 
         async with db_container() as container:
@@ -567,8 +553,6 @@ class TestJobRepoTouchJob:
             # No assertion needed - just verifying no exception
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestJobRepoMarkJobFailedIfRunning:
     """Tests for JobRepository.mark_job_failed_if_running() atomic preemption.
 
@@ -750,6 +734,7 @@ class TestJobRepoMarkJobFailedIfRunning:
     async def test_nonexistent_job_returns_zero(self, db_container):
         """mark_job_failed_if_running() on non-existent job returns 0."""
         from uuid import uuid4
+
         from eneo.jobs.job_repo import JobRepository
 
         async with db_container() as container:

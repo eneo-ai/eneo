@@ -1,16 +1,16 @@
 """Unit tests for rate limiting infrastructure."""
 
-import pytest
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 import redis.exceptions
 
 from eneo.audit.infrastructure.rate_limiting import (
     RATE_LIMIT_SCRIPT,
     RateLimitConfig,
-    RateLimitResult,
     RateLimitExceededError,
+    RateLimitResult,
     RateLimitServiceUnavailableError,
     build_rate_limit_key,
     check_rate_limit,
@@ -99,7 +99,6 @@ class TestBuildRateLimitKey:
 class TestCheckRateLimit:
     """Test check_rate_limit function."""
 
-    @pytest.mark.asyncio
     async def test_first_request_allowed(self):
         """Test first request is allowed."""
         redis_client = AsyncMock()
@@ -112,7 +111,6 @@ class TestCheckRateLimit:
         assert result.remaining == 4
         redis_client.eval.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_under_limit_allowed(self):
         """Test requests under limit are allowed."""
         redis_client = AsyncMock()
@@ -123,7 +121,6 @@ class TestCheckRateLimit:
         assert result.allowed is True
         assert result.current_count == 3
 
-    @pytest.mark.asyncio
     async def test_at_limit_allowed(self):
         """Test request at exact limit is allowed."""
         redis_client = AsyncMock()
@@ -135,7 +132,6 @@ class TestCheckRateLimit:
         assert result.current_count == 5
         assert result.remaining == 0
 
-    @pytest.mark.asyncio
     async def test_over_limit_denied(self):
         """Test request over limit is denied."""
         redis_client = AsyncMock()
@@ -146,7 +142,6 @@ class TestCheckRateLimit:
         assert result.allowed is False
         assert result.current_count == 6
 
-    @pytest.mark.asyncio
     async def test_custom_config(self):
         """Test with custom configuration."""
         redis_client = AsyncMock()
@@ -166,7 +161,6 @@ class TestCheckRateLimit:
             60,
         )
 
-    @pytest.mark.asyncio
     async def test_redis_error_raises_service_unavailable(self):
         """Test Redis error raises RateLimitServiceUnavailableError."""
         redis_client = AsyncMock()
@@ -183,7 +177,6 @@ class TestCheckRateLimit:
 class TestEnforceRateLimit:
     """Test enforce_rate_limit function."""
 
-    @pytest.mark.asyncio
     async def test_allowed_returns_result(self):
         """Test allowed request returns result."""
         redis_client = AsyncMock()
@@ -196,7 +189,6 @@ class TestEnforceRateLimit:
         assert result.allowed is True
         assert result.current_count == 1
 
-    @pytest.mark.asyncio
     async def test_exceeded_raises_error(self):
         """Test exceeded limit raises RateLimitExceededError."""
         redis_client = AsyncMock()
@@ -210,7 +202,6 @@ class TestEnforceRateLimit:
         assert exc_info.value.result.current_count == 6
         assert exc_info.value.result.max_requests == 5
 
-    @pytest.mark.asyncio
     async def test_builds_correct_key(self):
         """Test correct key is built."""
         redis_client = AsyncMock()
@@ -224,7 +215,6 @@ class TestEnforceRateLimit:
         call_args = redis_client.eval.call_args
         assert call_args[0][2] == expected_key
 
-    @pytest.mark.asyncio
     async def test_redis_error_propagates(self):
         """Test Redis errors propagate as RateLimitServiceUnavailableError."""
         redis_client = AsyncMock()

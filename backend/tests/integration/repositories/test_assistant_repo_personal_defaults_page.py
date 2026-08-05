@@ -99,8 +99,6 @@ def _walk_pages_ids(pages) -> list[UUID]:
     return ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_pages_partition_the_tenants_personal_defaults(
     db_container, admin_user, user_factory, tenant_factory
 ):
@@ -158,8 +156,6 @@ async def test_pages_partition_the_tenants_personal_defaults(
         assert first.has_knowledge is False
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_identical_created_at_rows_page_deterministically(
     db_container, admin_user, user_factory
 ):
@@ -197,8 +193,6 @@ async def test_identical_created_at_rows_page_deterministically(
         assert collected == sorted(seeded)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_page_ordering_is_served_by_the_partial_index(db_container, admin_user):
     """The cursor order must come from ``ix_assistants_default_created_at_id``.
 

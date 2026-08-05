@@ -16,7 +16,6 @@ the real rebind).
 from datetime import datetime, timezone
 from uuid import UUID
 
-import pytest
 from sqlalchemy import select
 
 from eneo.database.tables.app_template_table import AppTemplates
@@ -68,8 +67,6 @@ async def _add_app_template(
     return template
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestMigrationTemplateTenantScope:
     """Tenant + soft-delete scoping for templates in migration & usage count."""
 

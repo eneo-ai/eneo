@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import pytest
 from sqlalchemy.exc import IntegrityError
 
 from eneo.completion_models.infrastructure.model_cleanup_worker import (
@@ -49,7 +48,6 @@ class _MockSession:
 class TestFindRemovableModels:
     """Verify the SQL query that identifies lifecycle cleanup candidates."""
 
-    @pytest.mark.asyncio
     async def test_returns_model_when_fully_orphaned(self):
         model_id = uuid4()
         target_id = uuid4()
@@ -70,7 +68,6 @@ class TestFindRemovableModels:
         assert result[0]["name"] == "old-model"
         assert result[0]["migrated_to_model_id"] == target_id
 
-    @pytest.mark.asyncio
     async def test_query_targets_soft_deleted_or_migrated_models(self):
         session = AsyncMock()
         mock_result = MagicMock()
@@ -93,7 +90,6 @@ class TestFindRemovableModels:
 class TestActiveReferenceSemantics:
     """Verify the worker reuses the shared reference rules."""
 
-    @pytest.mark.asyncio
     async def test_reference_check_delegates_to_shared_repository(self, monkeypatch):
         repo = MagicMock()
         repo.has_active_references = AsyncMock(return_value=True)
@@ -128,7 +124,6 @@ def _make_container(session: _MockSession) -> SimpleNamespace:
 class TestCleanupWorker:
     """Verify worker behavior around skips, deletes, and error handling."""
 
-    @pytest.mark.asyncio
     async def test_integrity_error_is_classified_as_db_restrict(self, monkeypatch):
         model_id = uuid4()
         mock_session = _MockSession(
@@ -167,7 +162,6 @@ class TestCleanupWorker:
             {"id": str(model_id), "name": "old-model", "reason": "db_restrict"}
         ]
 
-    @pytest.mark.asyncio
     async def test_active_references_are_skipped_without_delete(self, monkeypatch):
         model_id = uuid4()
         mock_session = _MockSession(execute=AsyncMock())
@@ -205,7 +199,6 @@ class TestCleanupWorker:
         ]
         mock_session.execute.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_uses_container_provided_session(self, monkeypatch):
         """Regression guard for the session-ownership refactor.
 

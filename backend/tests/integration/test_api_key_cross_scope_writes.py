@@ -155,8 +155,6 @@ def _error_code(resp) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_suspended_key_is_rejected_on_every_request(client, bearer_token):
     """A suspended key must fail authentication on any endpoint."""
     secret, key_id = await _create_api_key(
@@ -198,8 +196,6 @@ async def test_suspended_key_is_rejected_on_every_request(client, bearer_token):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_feature_flag_off_basic_permission_is_still_enforced(
     client, bearer_token, resource_permissions_enforcement_off
 ):
@@ -234,8 +230,6 @@ async def test_feature_flag_off_basic_permission_is_still_enforced(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_dual_credentials_invalid_bearer_does_not_silently_escalate(
     client, bearer_token
 ):
@@ -286,8 +280,6 @@ async def test_dual_credentials_invalid_bearer_does_not_silently_escalate(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_transfer_assistant_to_other_space_denied_for_space_scoped_key(
     client, bearer_token
 ):

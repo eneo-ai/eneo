@@ -98,7 +98,6 @@ async def _clear_deployment_namespace(
     )
 
 
-@pytest.mark.asyncio
 async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -153,7 +152,6 @@ async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
         client.close()
 
 
-@pytest.mark.asyncio
 async def test_inline_runtime_rejects_stranded_object_store_content(
     object_content_database: DatabaseSessionManager,
     monkeypatch: pytest.MonkeyPatch,
@@ -222,7 +220,6 @@ async def test_inline_runtime_rejects_stranded_object_store_content(
         await runtime.stop()
 
 
-@pytest.mark.asyncio
 async def test_readiness_tracks_real_postgres_stop_and_restart_without_process_restart(
     real_object_store: RealObjectStore,
     unused_tcp_port_factory: Callable[[], int],
@@ -297,7 +294,6 @@ async def test_readiness_tracks_real_postgres_stop_and_restart_without_process_r
             client.close()
 
 
-@pytest.mark.asyncio
 async def test_reachable_unpaired_store_blocks_readiness_and_all_reconciliation(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -411,7 +407,6 @@ async def test_reachable_unpaired_store_blocks_readiness_and_all_reconciliation(
         store_b_client.close()
 
 
-@pytest.mark.asyncio
 async def test_concurrent_processes_cannot_pair_one_database_with_two_stores(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -540,7 +535,6 @@ async def test_concurrent_processes_cannot_pair_one_database_with_two_stores(
             client.close()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "marker_written_before_restart",
     [False, True],
@@ -607,7 +601,6 @@ async def test_binding_establishment_recovers_both_crash_windows(
         client.close()
 
 
-@pytest.mark.asyncio
 async def test_ambiguous_binding_creation_never_creates_a_marker_in_another_store(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -681,7 +674,6 @@ async def test_ambiguous_binding_creation_never_creates_a_marker_in_another_stor
         second_client.close()
 
 
-@pytest.mark.asyncio
 async def test_confirmed_binding_read_does_not_wait_for_bootstrap_lock(
     object_content_database: DatabaseSessionManager,
 ) -> None:

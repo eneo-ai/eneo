@@ -1,6 +1,5 @@
 """Integration tests for audit API authentication."""
 
-import pytest
 from uuid import uuid4
 
 from eneo.audit.application.audit_service import AuditService
@@ -8,10 +7,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-pytestmark = pytest.mark.integration
 
-
-@pytest.mark.asyncio
 async def test_audit_logs_requires_authentication(
     client, test_tenant, test_user, db_session
 ):
@@ -36,7 +32,6 @@ async def test_audit_logs_requires_authentication(
     assert response.status_code == 401  # Unauthorized
 
 
-@pytest.mark.asyncio
 async def test_audit_logs_rejects_super_admin_key(
     client, test_tenant, test_user, db_session, super_admin_token
 ):

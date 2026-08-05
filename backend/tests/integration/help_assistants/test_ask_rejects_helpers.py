@@ -167,8 +167,6 @@ async def _sessions_row_count(
     return int(count or 0)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_ask_active_helper_returns_403_and_creates_no_session(
     db_container, admin_user, client, patch_auth_service_jwt
 ):
@@ -223,8 +221,6 @@ async def test_ask_active_helper_returns_403_and_creates_no_session(
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_ask_followup_against_helper_returns_403(
     db_container, admin_user, client, patch_auth_service_jwt
 ):
@@ -298,8 +294,6 @@ async def test_ask_followup_against_helper_returns_403(
         assert after == before == 1
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_ask_former_helper_returns_403_and_creates_no_session(
     db_container, admin_user, client, patch_auth_service_jwt
 ):
@@ -351,8 +345,6 @@ async def test_ask_former_helper_returns_403_and_creates_no_session(
         assert rows == 0
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_guard_does_not_block_regular_assistant(db_container, admin_user):
     """Regression: a normal assistant — never assigned to a helper role and
     never in history — passes the guard. Pairs with the 403 tests above so

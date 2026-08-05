@@ -5,11 +5,7 @@ Note: Basic infrastructure verification (settings, database connection, app init
 tenant/user setup) is now done automatically in conftest.py fixtures before tests run.
 """
 
-import pytest
 
-
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_authenticated_user_request(client, admin_user, admin_user_api_key):
     """
     Test that an authenticated user can access /api/users/me endpoint.

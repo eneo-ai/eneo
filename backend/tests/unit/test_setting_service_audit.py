@@ -101,7 +101,6 @@ def _make_service(
 class TestSettingToggleAuditLogging:
     """Each toggle method must produce a structured audit log entry."""
 
-    @pytest.mark.asyncio
     async def test_update_template_setting_logs_audit(self):
         service, audit_mock = _make_service()
         service.feature_flag_service.feature_flag_repo.one_or_none = AsyncMock(
@@ -135,7 +134,6 @@ class TestSkillExecutionBlockAudit:
             blocked_at=now,
         )
 
-    @pytest.mark.asyncio
     async def test_block_records_typed_old_and_new_setting_values(self):
         service, audit_mock = _make_service()
         block = self._block(service)
@@ -168,7 +166,6 @@ class TestSkillExecutionBlockAudit:
         assert change["new"]["id"] == str(block.id)
         assert change["new"]["reason"] == block.reason
 
-    @pytest.mark.asyncio
     async def test_execution_block_state_requires_tenant_admin(self):
         service, _ = _make_service(user=_make_user(permissions=[]))
 
@@ -177,7 +174,6 @@ class TestSkillExecutionBlockAudit:
 
         service.skill_repo.get_organization_for_tenant.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_unblock_records_recovery_reason_and_closed_time(self):
         service, audit_mock = _make_service()
         active = self._block(service)
@@ -212,7 +208,6 @@ class TestSkillExecutionBlockAudit:
 
 
 class TestSettingToggleAuditLoggingAdditional:
-    @pytest.mark.asyncio
     async def test_update_audit_logging_setting_logs_audit(self):
         service, audit_mock = _make_service()
         service.feature_flag_service.feature_flag_repo.one_or_none = AsyncMock(
@@ -233,7 +228,6 @@ class TestSettingToggleAuditLoggingAdditional:
             call_kwargs["metadata"]["changes"]["audit_logging_enabled"]["old"] is False
         )
 
-    @pytest.mark.asyncio
     async def test_update_provisioning_setting_logs_audit(self):
         service, audit_mock = _make_service()
 
@@ -247,7 +241,6 @@ class TestSettingToggleAuditLoggingAdditional:
         # old value comes from tenant_repo.get mock (provisioning=False)
         assert call_kwargs["metadata"]["changes"]["provisioning"]["old"] is False
 
-    @pytest.mark.asyncio
     async def test_audit_log_includes_actor(self):
         """Audit entry must include who made the change."""
         user = _make_user()
@@ -262,7 +255,6 @@ class TestSettingToggleAuditLoggingAdditional:
         assert call_kwargs["user"] is user
         assert call_kwargs["tenant_id"] == user.tenant_id
 
-    @pytest.mark.asyncio
     async def test_audit_log_description_contains_setting_name(self):
         """Description should be human-readable with setting name and value."""
         service, audit_mock = _make_service()
@@ -273,7 +265,6 @@ class TestSettingToggleAuditLoggingAdditional:
         assert "provisioning" in call_kwargs["description"]
         assert "False" in call_kwargs["description"]
 
-    @pytest.mark.asyncio
     async def test_idempotent_toggle_logs_same_old_and_new(self):
         """When toggling to the same value, audit logs old==new (real query, no synthetic)."""
         service, audit_mock = _make_service()
@@ -309,7 +300,6 @@ class TestSkillRuntimePolicy:
             max_activations_per_turn=max_activations_per_turn,
         )
 
-    @pytest.mark.asyncio
     async def test_non_admin_cannot_read_or_change_policy(self):
         service, _ = _make_service(user=_make_user(permissions=[]))
 
@@ -332,7 +322,6 @@ class TestSkillRuntimePolicy:
         service.skill_repo.get_or_seed_runtime_policy.assert_not_awaited()
         service.skill_repo.update_runtime_policy.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_update_audits_only_changed_fields_with_old_and_new(self):
         service, audit_mock = _make_service()
         old = self._stored()
@@ -364,7 +353,6 @@ class TestSkillRuntimePolicy:
             "context_share_percent": {"old": 10, "new": 5},
         }
 
-    @pytest.mark.asyncio
     async def test_identical_update_emits_no_audit_event(self):
         service, audit_mock = _make_service()
         stored = self._stored()
@@ -383,7 +371,6 @@ class TestSkillRuntimePolicy:
 
         audit_mock.log_async.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_reset_restores_product_defaults_and_audits(self):
         service, audit_mock = _make_service()
         migrated = self._stored(max_attached_skills=37)
@@ -404,7 +391,6 @@ class TestSkillRuntimePolicy:
             "max_attached_skills": {"old": 37, "new": 100},
         }
 
-    @pytest.mark.asyncio
     async def test_activation_ceiling_cannot_be_raised_past_platform_bound(self):
         with pytest.raises(ValidationError):
             SkillRuntimePolicyUpdate(
@@ -428,7 +414,6 @@ class TestSkillRuntimePolicy:
                 max_activations_per_turn=10,
             )
 
-    @pytest.mark.asyncio
     async def test_model_projections_filter_and_compute_allowance(self):
         service, _ = _make_service()
         service.skill_repo.get_or_seed_runtime_policy = AsyncMock(
@@ -475,7 +460,6 @@ class TestSkillRuntimePolicy:
 
 
 class TestSkillRuntimePolicyActivationLimitAudit:
-    @pytest.mark.asyncio
     async def test_lowering_activation_ceiling_audits_old_and_new(self):
         service, audit_mock = _make_service()
         old = SkillRuntimePolicy(

@@ -23,8 +23,6 @@ from eneo.worker.crawl.recovery import (
 )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_job_retry_stats_tracks_per_job_not_per_tenant(
     redis_client: aioredis.Redis,
 ):
@@ -72,8 +70,6 @@ async def test_job_retry_stats_tracks_per_job_not_per_tenant(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_busy_signal_does_not_increment_retry_count(
     redis_client: aioredis.Redis,
 ):
@@ -109,8 +105,6 @@ async def test_busy_signal_does_not_increment_retry_count(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_actual_failure_increments_retry_count(
     redis_client: aioredis.Redis,
 ):
@@ -137,8 +131,6 @@ async def test_actual_failure_increments_retry_count(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_mixed_busy_and_failure_only_counts_failures(
     redis_client: aioredis.Redis,
 ):
@@ -198,8 +190,6 @@ async def test_mixed_busy_and_failure_only_counts_failures(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_job_age_tracking_from_first_attempt(
     redis_client: aioredis.Redis,
 ):
@@ -240,8 +230,6 @@ async def test_job_age_tracking_from_first_attempt(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_redis_keys_have_proper_ttl(
     redis_client: aioredis.Redis,
 ):
@@ -276,8 +264,6 @@ async def test_redis_keys_have_proper_ttl(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_exponential_backoff_with_real_calculation(
     redis_client: aioredis.Redis,
     monkeypatch: pytest.MonkeyPatch,
@@ -335,8 +321,6 @@ async def test_exponential_backoff_with_real_calculation(
     assert avg_4 > avg_3, "Attempt 4 average should exceed attempt 3"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_concurrent_job_updates_race_condition(
     redis_client: aioredis.Redis,
 ):
@@ -377,8 +361,6 @@ async def test_concurrent_job_updates_race_condition(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_max_retry_count_behavior(
     redis_client: aioredis.Redis,
 ):
@@ -416,8 +398,6 @@ async def test_max_retry_count_behavior(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_job_age_exceeds_max_age(
     redis_client: aioredis.Redis,
 ):
@@ -466,8 +446,6 @@ async def test_job_age_exceeds_max_age(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_retry_count_returned_correctly(
     redis_client: aioredis.Redis,
 ):

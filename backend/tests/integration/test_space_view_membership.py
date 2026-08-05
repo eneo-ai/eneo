@@ -30,8 +30,6 @@ from eneo.roles.role import RoleCreate
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.users.user import UserAdd, UserState
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
-
 
 @pytest.fixture
 async def admin_token(db_container, admin_user, patch_auth_service_jwt):

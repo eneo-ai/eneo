@@ -23,6 +23,39 @@ tasks:
       - uv run alembic upgrade head
     dir: ./backend
 
+  # --- Tests (see backend/TESTING.md) ---------------------------------------
+  # Parallelism lives here, not in pytest.ini: per-worker container boot makes
+  # small targeted runs slower, and -n breaks -x/--pdb ergonomics.
+
+  test:
+    desc: "Backend unit suite, parallel (the tight loop)"
+    dir: ./backend
+    cmds:
+      - uv run pytest tests/unit tests/unittests tests/test_settings_override.py -n auto -q
+
+  test:lf:
+    desc: "Re-run last failing backend tests, serial, stop at first failure"
+    dir: ./backend
+    cmds:
+      - uv run pytest --lf -x {{.CLI_ARGS}}
+
+  test:feature:
+    desc: "One integration domain, serial (task test:feature -- skills)"
+    dir: ./backend
+    cmds:
+      - uv run pytest tests/integration/{{.CLI_ARGS}} -q
+
+  test:int:
+    desc: "Full backend integration suite, parallel"
+    dir: ./backend
+    cmds:
+      - uv run pytest tests/integration -n 4 --dist loadgroup -q
+
+  test:migrations:
+    desc: "Alembic downgrade/upgrade suite (slow; one container per file)"
+    cmds:
+      - scripts/run_migration_tests.sh -q
+
   # --- Quality gates (enforced) ---------------------------------------------
   # `task check` is the single aggregated, deterministic pass/fail signal:
   # ruff + format on the backend, svelte-check + eslint on the frontend.

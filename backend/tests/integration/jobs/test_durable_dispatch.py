@@ -35,8 +35,6 @@ from eneo.jobs.task_models import (
 from eneo.main.models import Status
 from eneo.object_content.content import StorageKind
 
-pytestmark = pytest.mark.integration
-
 
 def _params(task: Task, user_id: UUID) -> UploadInfoBlob | Transcription:
     model = UploadInfoBlob if task == Task.UPLOAD_FILE else Transcription

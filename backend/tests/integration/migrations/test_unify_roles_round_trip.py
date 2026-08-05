@@ -31,7 +31,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 
 PRE_UNIFY_REVISION = "202604101000"
@@ -70,12 +70,17 @@ def _clear_template_named_roles(conn) -> None:
     collisions present. The unify_roles preflight would halt re-upgrade on
     those rows — clear them so this fixture can return the DB to a known
     post-upgrade state regardless of predecessor state.
+
+    Every statement is guarded on table existence: this module also has to work
+    against a database no migration has touched yet, where there is nothing to
+    collide in the first place.
     """
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT to_regclass('predefined_roles'), to_regclass('users_roles')"
-        )
-        predefined_exists, users_roles_exists = cur.fetchone()
+        cur.execute("SELECT to_regclass('roles'), to_regclass('users_roles')")
+        roles_exists, users_roles_exists = cur.fetchone()
+
+        if roles_exists is None:
+            return
 
         if users_roles_exists is not None:
             cur.execute(

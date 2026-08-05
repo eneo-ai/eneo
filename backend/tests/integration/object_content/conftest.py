@@ -1,11 +1,15 @@
+import functools
 import json
 import os
-from collections.abc import AsyncGenerator, Callable, Generator
+import shutil
+import socket
+from collections.abc import AsyncGenerator, Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from ipaddress import ip_address
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 from uuid import UUID, uuid4
 
 import psycopg2
@@ -26,6 +30,88 @@ from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.s3_object_store import S3ObjectStore
 from init_db import add_tenant_user
 
+_WORKSPACE = Path("/workspace")
+
+
+@functools.cache
+def _workspace_host_source() -> str | None:
+    """Host-side path of the /workspace mount, when running in the devcontainer.
+
+    The devcontainer talks to the HOST docker daemon, so bind-mount sources
+    must be host paths: a path under the container's own /tmp does not exist
+    for the daemon and mounts as an empty directory. The host location of
+    /workspace is read from this container's own mount table.
+    """
+    if not _WORKSPACE.is_dir():
+        return None
+    try:
+        import docker
+
+        client = docker.from_env()
+        try:
+            me = client.containers.get(socket.gethostname())
+            for mount in me.attrs.get("Mounts", []):
+                if mount.get("Destination") == str(_WORKSPACE):
+                    return mount.get("Source")
+        finally:
+            client.close()
+    except Exception:
+        return None
+    return None
+
+
+@contextmanager
+def _container_bound_directory(
+    prefix: str,
+) -> Iterator[tuple[Path, Callable[[Path], str]]]:
+    """Directory for files that get bind-mounted into test containers.
+
+    Yields (directory, bind_source): write files into `directory`, pass
+    `bind_source(file)` as the volume-mapping source. Outside the devcontainer
+    this is a plain TemporaryDirectory with identity translation; inside the
+    devcontainer the directory lives under the /workspace mount and
+    bind_source rewrites each path to its host-side equivalent so the host
+    daemon can see it.
+    """
+    host_source = _workspace_host_source()
+    if host_source is None:
+        with TemporaryDirectory(prefix=prefix) as directory:
+            yield Path(directory), str
+        return
+
+    base = _WORKSPACE / "backend" / ".pytest-container-mounts"
+    base.mkdir(exist_ok=True)
+    directory = Path(mkdtemp(prefix=prefix, dir=base))
+    # The store container drops to a non-root service UID that must traverse
+    # into the directory to read the mounted files.
+    os.chmod(directory, 0o755)
+    try:
+        yield (
+            directory,
+            lambda p: str(Path(host_source) / Path(p).relative_to(_WORKSPACE)),
+        )
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+        try:
+            base.rmdir()
+        except OSError:
+            pass
+
+
+def pytest_collection_modifyitems(config, items):
+    """Pin this directory's tests to one xdist worker.
+
+    The fixtures here boot a second Postgres (pg13) and a SeaweedFS S3
+    container per worker that touches them. Under ``--dist loadgroup`` the
+    shared group keeps that to a single stack per run.
+    """
+    conftest_root = Path(__file__).parent.resolve()
+    group_marker = pytest.mark.xdist_group("object_content")
+    for item in items:
+        if Path(item.path).resolve().is_relative_to(conftest_root):
+            item.add_marker(group_marker)
+
+
 POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"
     "sha256:751a89c96f7c32cb8133472f711c274853378fb5f8b55dd9fa0e9d3f1471bfc3"
@@ -45,6 +131,45 @@ _CONFORMANCE_IMAGE = os.environ.get(
 # reading these mounts, so the files themselves need a read bit for that UID.
 # Every value is generated test material and every mount remains read-only.
 _CONTAINER_BOUND_TEST_FILE_MODE = 0o444
+
+
+def _extra_tls_hosts() -> list[str]:
+    """Extra hosts the S3 client may dial for the TLS store's published port.
+
+    On a plain runner testcontainers resolves localhost. In the devcontainer
+    it resolves the gateway of the docker bridge network the store container
+    lands on, so that gateway IP must appear in the server certificate SANs.
+    """
+    if _workspace_host_source() is None:
+        return []
+    try:
+        import docker
+
+        client = docker.from_env()
+        try:
+            ipam = client.networks.get("bridge").attrs.get("IPAM") or {}
+        finally:
+            client.close()
+        return [
+            gateway
+            for config in ipam.get("Config") or []
+            if (gateway := config.get("Gateway"))
+        ]
+    except Exception:
+        return []
+
+
+def _tls_subject_alternative_names() -> list[x509.GeneralName]:
+    names: list[x509.GeneralName] = [
+        x509.DNSName("localhost"),
+        x509.IPAddress(ip_address("127.0.0.1")),
+    ]
+    for host in _extra_tls_hosts():
+        try:
+            names.append(x509.IPAddress(ip_address(host)))
+        except ValueError:
+            names.append(x509.DNSName(host))
+    return names
 
 
 def _write_test_tls_material(directory: Path) -> tuple[Path, Path, Path]:
@@ -76,12 +201,7 @@ def _write_test_tls_material(directory: Path) -> tuple[Path, Path, Path]:
         .not_valid_before(now - timedelta(minutes=1))
         .not_valid_after(now + timedelta(hours=1))
         .add_extension(
-            x509.SubjectAlternativeName(
-                [
-                    x509.DNSName("localhost"),
-                    x509.IPAddress(ip_address("127.0.0.1")),
-                ]
-            ),
+            x509.SubjectAlternativeName(_tls_subject_alternative_names()),
             critical=False,
         )
         .add_extension(
@@ -232,7 +352,10 @@ async def _real_object_store_process(
             }
         ]
     }
-    with TemporaryDirectory(prefix="eneo-object-content-store-") as directory:
+    with _container_bound_directory("eneo-object-content-store-") as (
+        directory,
+        bind_source,
+    ):
         host_port = unused_tcp_port_factory()
         config_path = Path(directory) / "s3.json"
         config_path.write_text(json.dumps(identity), encoding="utf-8")
@@ -241,7 +364,7 @@ async def _real_object_store_process(
             DockerContainer(_CONFORMANCE_IMAGE)
             .with_bind_ports(8333, host_port)
             .with_volume_mapping(
-                str(config_path),
+                bind_source(config_path),
                 "/etc/seaweedfs/s3.json",
                 mode="ro",
             )
@@ -350,8 +473,10 @@ async def real_tls_object_store(
             }
         ]
     }
-    with TemporaryDirectory(prefix="eneo-object-content-tls-store-") as directory:
-        test_directory = Path(directory)
+    with _container_bound_directory("eneo-object-content-tls-store-") as (
+        test_directory,
+        bind_source,
+    ):
         host_port = unused_tcp_port_factory()
         config_path = test_directory / "s3.json"
         config_path.write_text(json.dumps(identity), encoding="utf-8")
@@ -361,22 +486,22 @@ async def real_tls_object_store(
             DockerContainer(_CONFORMANCE_IMAGE)
             .with_bind_ports(8443, host_port)
             .with_volume_mapping(
-                str(config_path),
+                bind_source(config_path),
                 "/etc/seaweedfs/s3.json",
                 mode="ro",
             )
             .with_volume_mapping(
-                str(ca_path),
+                bind_source(ca_path),
                 "/etc/seaweedfs/ca.pem",
                 mode="ro",
             )
             .with_volume_mapping(
-                str(certificate_path),
+                bind_source(certificate_path),
                 "/etc/seaweedfs/server.pem",
                 mode="ro",
             )
             .with_volume_mapping(
-                str(key_path),
+                bind_source(key_path),
                 "/etc/seaweedfs/server-key.pem",
                 mode="ro",
             )

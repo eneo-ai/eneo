@@ -73,8 +73,6 @@ async def _make_embedding_model(session, admin_user, name, *, deleted=False):
     return model
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestEmbeddingModelSoftDelete:
     async def test_delete_soft_deletes_and_hides_from_reads(
         self, db_container, admin_user
@@ -170,8 +168,6 @@ class TestEmbeddingModelSoftDelete:
             assert link is None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestEmbeddingModelCleanupWorker:
     async def test_cleanup_removes_soft_deleted_without_references(
         self, db_container, admin_user

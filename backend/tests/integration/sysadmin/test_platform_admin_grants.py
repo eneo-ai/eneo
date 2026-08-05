@@ -15,8 +15,6 @@ async def admin_token(db_container, admin_user, patch_auth_service_jwt) -> str:
         return container.auth_service().create_access_token_for_user(admin_user)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_platform_admin_grant_is_idempotent_for_eligible_admin(
     db_container, admin_user
 ) -> None:
@@ -39,8 +37,6 @@ async def test_platform_admin_grant_is_idempotent_for_eligible_admin(
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_platform_admin_grant_rejects_system_user(
     db_container, admin_user
 ) -> None:
@@ -71,8 +67,6 @@ async def test_platform_admin_grant_rejects_system_user(
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_platform_admin_revoke_works_for_dormant_soft_deleted_user(
     db_container, admin_user
 ) -> None:
@@ -105,8 +99,6 @@ async def test_platform_admin_revoke_works_for_dormant_soft_deleted_user(
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_platform_admin_revoke_missing_user_returns_none(db_container) -> None:
     async with db_container() as container:
         assert (
@@ -115,8 +107,6 @@ async def test_platform_admin_revoke_missing_user_returns_none(db_container) -> 
         )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_platform_admin_endpoint_requires_super_key_and_round_trips(
     client, super_admin_token, admin_user, admin_token
 ) -> None:

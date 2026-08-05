@@ -25,7 +25,6 @@ def _service() -> tuple[FileService, AsyncMock, SimpleNamespace]:
     return service, repo, user
 
 
-@pytest.mark.asyncio
 async def test_delete_non_owned_and_missing_files_share_the_404_path() -> None:
     service, repo, _user = _service()
     repo.get_by_id_and_owner_for_lifecycle.return_value = None
@@ -37,7 +36,6 @@ async def test_delete_non_owned_and_missing_files_share_the_404_path() -> None:
     repo.delete_by_owner.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_deletion_preview_returns_404_if_the_file_disappears_during_read() -> (
     None
 ):
@@ -56,7 +54,6 @@ async def test_deletion_preview_returns_404_if_the_file_disappears_during_read()
     service._usage.count_product_usage.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_delete_rechecks_usage_under_the_family_lock() -> None:
     service, repo, user = _service()
     file_id = uuid4()
@@ -88,7 +85,6 @@ async def test_delete_rechecks_usage_under_the_family_lock() -> None:
     )
 
 
-@pytest.mark.asyncio
 async def test_delete_does_not_mask_database_failures() -> None:
     service, repo, _user = _service()
     repo.get_by_id_and_owner_for_lifecycle.side_effect = RuntimeError(
@@ -99,7 +95,6 @@ async def test_delete_does_not_mask_database_failures() -> None:
         await service.delete_file(uuid4())
 
 
-@pytest.mark.asyncio
 async def test_repository_delete_contains_all_owner_predicates() -> None:
     result = MagicMock()
     result.scalar_one_or_none.return_value = None
@@ -122,7 +117,6 @@ async def test_repository_delete_contains_all_owner_predicates() -> None:
     assert "RETURNING" in sql
 
 
-@pytest.mark.asyncio
 async def test_unready_object_store_rejects_without_inline_fallback_or_mutation() -> (
     None
 ):

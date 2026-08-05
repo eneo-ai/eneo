@@ -7,6 +7,17 @@ unit tests (with function-scoped tests).
 """
 
 import os
+import sys as _sys
+import tempfile as _tempfile
+from pathlib import Path as _Path
+
+# The repo is bind-mounted into the devcontainer, so host and container share
+# the in-tree __pycache__. Bytecode embeds the absolute source path at compile
+# time: a .pyc compiled on the host still validates (same mtime/size) inside
+# the container but carries /Users/... paths, which breaks inspect.getsource
+# and traceback rendering for the source-inspecting contract tests. Keep this
+# process's bytecode cache in a per-environment tmp dir instead of the mount.
+_sys.pycache_prefix = str(_Path(_tempfile.gettempdir()) / "eneo-pyc")
 
 # CRITICAL: Set crawler settings BEFORE importing pytest_plugins
 # pytest_plugins imports modules that trigger get_settings() at module load time
@@ -68,21 +79,6 @@ def _resolve_category(name: str) -> type[Warning]:
 
 
 _install_warning_ignores_eagerly()
-
-
-# Import shared fixture modules
-# These fixtures are automatically discovered by pytest
-# Organized to mirror the backend source structure (src/eneo/*)
-pytest_plugins = [
-    "tests.integration.fixtures.completion_models",  # Completion model fixtures
-    "tests.integration.fixtures.transcription_models",  # Transcription model fixtures
-    "tests.integration.fixtures.assistants",  # Assistant fixtures
-    "tests.integration.fixtures.apps",  # App fixtures
-    "tests.integration.fixtures.services",  # Service fixtures
-    "tests.integration.fixtures.spaces",  # Space fixtures
-    "tests.integration.fixtures.organization_knowledge",  # Organization knowledge fixtures
-    "tests.integration.fixtures.integrations",  # Integration fixtures (SharePoint, etc.)
-]
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -169,25 +165,6 @@ def pytest_terminal_summary(
         terminalreporter.write_line(f"      why: {entry.reason}")
         terminalreporter.write_line(f"      fix: {entry.resolution}")
         terminalreporter.write_line("")
-
-
-def pytest_collection_modifyitems(config, items):
-    """Auto-skip tests with opt-in markers unless explicitly requested via -m."""
-    OPT_IN_MARKERS = {"api_key_matrix"}
-
-    # Check if any opt-in marker was explicitly requested via -m
-    marker_expr = config.getoption("-m", default="")
-    requested = {m for m in OPT_IN_MARKERS if m in marker_expr}
-
-    skip_markers = OPT_IN_MARKERS - requested
-    for item in items:
-        for marker_name in skip_markers:
-            if marker_name in item.keywords:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"'{marker_name}' tests require explicit -m {marker_name}"
-                    )
-                )
 
 
 @pytest.fixture(scope="session")

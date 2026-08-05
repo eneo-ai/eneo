@@ -21,7 +21,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import jwt
-import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
 
@@ -139,8 +138,6 @@ async def _callback(client: AsyncClient, *, code: str, state: str):
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_config_drift_rejected_with_zero_grace(
     client: AsyncClient,
     super_admin_token: str,
@@ -272,8 +269,6 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         set_settings(test_settings)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_federation_grace_period_allows_recent_config_change(
     client: AsyncClient,
     super_admin_token: str,
@@ -387,8 +382,6 @@ async def test_federation_grace_period_allows_recent_config_change(
         test_settings.oidc_redirect_grace_period_seconds = original_grace
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_concurrent_federation_config_updates_last_write_wins(
     client: AsyncClient,
     super_admin_token: str,
@@ -498,8 +491,6 @@ async def test_concurrent_federation_config_updates_last_write_wins(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_deleted_during_oidc_flow_returns_404(
     client: AsyncClient,
     super_admin_token: str,
@@ -604,8 +595,6 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_state_token_tampering_rejected(
     client: AsyncClient,
     super_admin_token: str,
@@ -713,8 +702,6 @@ async def test_state_token_tampering_rejected(
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_grace_period_boundary_exact_ttl_minus_grace(
     client: AsyncClient,
     super_admin_token: str,

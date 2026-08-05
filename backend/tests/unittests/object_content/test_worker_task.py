@@ -1,14 +1,11 @@
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from eneo.object_content.reconciliation import ReconciliationResult
 from eneo.object_content.runtime import ObjectContentRuntime
 from eneo.worker.object_content_tasks import reconcile_object_content_task
 
 
-@pytest.mark.asyncio
 async def test_worker_task_returns_only_bounded_sanitized_counts() -> None:
     runtime = MagicMock(spec=ObjectContentRuntime)
     runtime.reconcile_once = AsyncMock(

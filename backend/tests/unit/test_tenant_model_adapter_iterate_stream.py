@@ -258,7 +258,6 @@ async def _collect(adapter: TenantModelAdapter, stream, **kwargs):
     return output
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("method_name", "phase"),
     [
@@ -310,7 +309,6 @@ async def test_provider_connectivity_failure_returns_clear_unavailable_error(
     span.record_exception.assert_called_once()
 
 
-@pytest.mark.asyncio
 async def test_wrapped_provider_failure_returns_clear_unavailable_error():
     adapter = _make_completion_adapter()
     outer_error = RuntimeError("upstream call failed")
@@ -329,7 +327,6 @@ async def test_wrapped_provider_failure_returns_clear_unavailable_error():
     assert exc.details == {"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True}
 
 
-@pytest.mark.asyncio
 async def test_text_only_provider_failure_returns_clear_unavailable_error():
     adapter = _make_completion_adapter()
 
@@ -346,7 +343,6 @@ async def test_text_only_provider_failure_returns_clear_unavailable_error():
     assert exc.details == {"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True}
 
 
-@pytest.mark.asyncio
 async def test_unknown_stream_preparation_error_remains_unexpected():
     adapter = _make_completion_adapter()
 
@@ -363,7 +359,6 @@ async def test_unknown_stream_preparation_error_remains_unexpected():
     assert exc_info.value.code == "provider_error"
 
 
-@pytest.mark.asyncio
 async def test_generic_timeout_word_remains_unexpected():
     adapter = _make_completion_adapter()
 
@@ -380,7 +375,6 @@ async def test_generic_timeout_word_remains_unexpected():
     assert exc_info.value.code == "provider_error"
 
 
-@pytest.mark.asyncio
 async def test_prepare_streaming_returns_explicit_context_wrapper():
     adapter = _make_completion_adapter()
     raw_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
@@ -400,7 +394,6 @@ async def test_prepare_streaming_returns_explicit_context_wrapper():
     assert not hasattr(raw_stream, "_eneo_context")
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_supports_multiple_tool_rounds():
     adapter = _make_completion_adapter()
     mcp_proxy = _ResourceMCPProxy()
@@ -451,7 +444,6 @@ def test_models_without_tool_capability_receive_no_tools():
     assert adapter._merge_mcp_tools([{"type": "function"}], _FakeMCPProxy()) == []
 
 
-@pytest.mark.asyncio
 async def test_mid_stream_provider_failure_yields_unavailable_event():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -503,7 +495,6 @@ def _tool_call_events(completions):
     ]
 
 
-@pytest.mark.asyncio
 async def test_iterate_stream_emits_pending_event_before_arguments_complete():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -555,7 +546,6 @@ async def test_iterate_stream_emits_pending_event_before_arguments_complete():
     assert "succeeded" in statuses
 
 
-@pytest.mark.asyncio
 async def test_iterate_stream_emits_pending_per_parallel_tool_call():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -607,7 +597,6 @@ async def test_iterate_stream_emits_pending_per_parallel_tool_call():
     ]
 
 
-@pytest.mark.asyncio
 async def test_iterate_stream_no_pending_event_for_disallowed_tool():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -642,7 +631,6 @@ async def test_iterate_stream_no_pending_event_for_disallowed_tool():
     assert any(c.response_type == ResponseType.ERROR for c in completions)
 
 
-@pytest.mark.asyncio
 async def test_iterate_stream_stops_at_max_rounds():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -680,7 +668,6 @@ async def test_iterate_stream_stops_at_max_rounds():
     assert any(chunk.stop for chunk in completions)
 
 
-@pytest.mark.asyncio
 async def test_iterate_stream_yields_approval_required_and_blocks():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -728,7 +715,6 @@ async def test_iterate_stream_yields_approval_required_and_blocks():
     approval_manager.wait_for_approval.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_iterate_stream_timeout_yields_timeout_event_and_auto_denies():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -787,7 +773,6 @@ async def test_iterate_stream_timeout_yields_timeout_event_and_auto_denies():
     assert denied_payload["user_reason"] == "timeout"
 
 
-@pytest.mark.asyncio
 async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -844,7 +829,6 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
     }
 
 
-@pytest.mark.asyncio
 async def test_iterate_stream_approved_tools_execute_and_continue():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()

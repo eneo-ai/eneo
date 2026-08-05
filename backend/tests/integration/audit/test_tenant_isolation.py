@@ -1,6 +1,5 @@
 """Integration tests for multi-tenant isolation in audit logging."""
 
-import pytest
 from uuid import uuid4
 
 from eneo.audit.application.audit_service import AuditService
@@ -8,10 +7,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
-pytestmark = pytest.mark.integration
 
-
-@pytest.mark.asyncio
 async def test_tenant_isolation_basic(db_session, test_tenant, test_user):
     """Test that audit logs are properly filtered by tenant."""
     async with db_session() as session:
@@ -52,7 +48,6 @@ async def test_tenant_isolation_basic(db_session, test_tenant, test_user):
         assert log2.id in log_ids
 
 
-@pytest.mark.asyncio
 async def test_tenant_isolation_with_filters(db_session, test_tenant, test_user):
     """Test tenant isolation with action filters."""
     async with db_session() as session:
@@ -89,7 +84,6 @@ async def test_tenant_isolation_with_filters(db_session, test_tenant, test_user)
         assert all(log.action == ActionType.ASSISTANT_CREATED for log in tenant_logs)
 
 
-@pytest.mark.asyncio
 async def test_actor_filtering(db_session, test_tenant, test_user):
     """Test filtering logs by actor_id."""
     async with db_session() as session:

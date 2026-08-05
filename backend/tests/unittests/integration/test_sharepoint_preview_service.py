@@ -1,14 +1,11 @@
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from eneo.integration.domain.entities.integration_preview import IntegrationPreview
 from eneo.integration.infrastructure.preview_service.sharepoint_preview_service import (
     SharePointPreviewService,
 )
 
 
-@pytest.mark.asyncio
 async def test_classifies_my_teams_and_public_non_member_teams():
     service = SharePointPreviewService(oauth_token_service=MagicMock())
     content_client = MagicMock()
@@ -66,7 +63,6 @@ async def test_classifies_my_teams_and_public_non_member_teams():
     assert categories["site-other"] == service.CATEGORY_OTHER_SITES
 
 
-@pytest.mark.asyncio
 async def test_classification_falls_back_to_unknown_when_graph_membership_fails():
     service = SharePointPreviewService(oauth_token_service=MagicMock())
     content_client = MagicMock()
@@ -97,7 +93,6 @@ async def test_classification_falls_back_to_unknown_when_graph_membership_fails(
     assert categories["site-b"] == service.CATEGORY_UNKNOWN
 
 
-@pytest.mark.asyncio
 async def test_classification_falls_back_to_visibility_only_when_memberof_unavailable():
     service = SharePointPreviewService(oauth_token_service=MagicMock())
     content_client = MagicMock()

@@ -149,8 +149,6 @@ def _by_id(summary: dict) -> dict[str, dict]:
     return {item["id"]: item for item in summary["items"]}
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_expiring_soon_filters_by_days_window(client, default_user_token):
     """The `days` query param defines an upper bound on which keys appear."""
     soon_id = await _create_tenant_key(
@@ -187,8 +185,6 @@ async def test_expiring_soon_filters_by_days_window(client, default_user_token):
     assert {soon_id, mid_id, far_id} <= _ids(wide)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_expiring_soon_severity_classification(client, default_user_token):
     """Severity tiers: expired (≤now) → urgent (≤3d) → warning (≤14d) → notice (>14d)."""
     expired_id = await _create_tenant_key(
@@ -225,8 +221,6 @@ async def test_expiring_soon_severity_classification(client, default_user_token)
     assert by_id[notice_id]["severity"] == "notice"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_expiring_soon_includes_recently_expired_keys(client, default_user_token):
     """Keys expired within the lookback window (~30d) still appear."""
     recently_expired_id = await _create_tenant_key(
@@ -243,8 +237,6 @@ async def test_expiring_soon_includes_recently_expired_keys(client, default_user
     assert by_id[recently_expired_id]["severity"] == "expired"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_expiring_soon_excludes_revoked_keys(client, default_user_token):
     """Revoked keys must not appear even if their expires_at is in window."""
     key_id = await _create_tenant_key(
@@ -268,8 +260,6 @@ async def test_expiring_soon_excludes_revoked_keys(client, default_user_token):
     assert key_id not in _ids(after)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_expiring_soon_subscribed_mode_filters_followed_keys(
     client, default_user_token
 ):
@@ -306,8 +296,6 @@ async def test_expiring_soon_subscribed_mode_filters_followed_keys(
     assert unfollowed_id not in subscribed_ids
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_expiring_soon_subscribed_mode_returns_empty_without_subscriptions(
     client, default_user_token
 ):
@@ -327,8 +315,6 @@ async def test_expiring_soon_subscribed_mode_returns_empty_without_subscriptions
     assert summary["total_count"] == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_expiring_soon_accepts_days_up_to_365(client, default_user_token):
     """The days look-ahead must accept up to 365d to match tenant policy max."""
     far_future_id = await _create_tenant_key(
@@ -348,8 +334,6 @@ async def test_expiring_soon_accepts_days_up_to_365(client, default_user_token):
     assert rejected.status_code == 422
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_expiring_soon_subscribed_mode_via_assistant_scope(
     client, default_user_token
 ):

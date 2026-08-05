@@ -59,7 +59,6 @@ def _make_pk_key(*, tenant_id=None, allowed_origins=_UNSET):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_origin_matches_single_label_wildcard():
     service = _service()
 
@@ -69,7 +68,6 @@ async def test_origin_matches_single_label_wildcard():
     )
 
 
-@pytest.mark.asyncio
 async def test_origin_matches_host_only_patterns():
     service = _service()
 
@@ -78,7 +76,6 @@ async def test_origin_matches_host_only_patterns():
     assert not service._origin_matches("https://sub.example.com", "example.com")
 
 
-@pytest.mark.asyncio
 async def test_origin_matches_host_only_wildcard():
     service = _service()
 
@@ -87,7 +84,6 @@ async def test_origin_matches_host_only_wildcard():
     assert not service._origin_matches("https://a.b.example.com", "*.example.com")
 
 
-@pytest.mark.asyncio
 async def test_origin_matches_default_ports():
     service = _service()
 
@@ -95,7 +91,6 @@ async def test_origin_matches_default_ports():
     assert service._origin_matches("http://example.com:80", "http://example.com")
 
 
-@pytest.mark.asyncio
 async def test_origin_matches_case_insensitive_scheme():
     service = _service()
 
@@ -107,7 +102,6 @@ async def test_origin_matches_case_insensitive_scheme():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_request_rejects_empty_allowed_origins_for_pk():
     service = _service_with_user(permissions=[Permission.ADMIN])
 
@@ -128,7 +122,6 @@ async def test_create_request_rejects_empty_allowed_origins_for_pk():
     assert "at least one allowed origin" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_update_request_rejects_empty_allowed_origins_for_pk():
     service = _service()
     key = SimpleNamespace(
@@ -149,7 +142,6 @@ async def test_update_request_rejects_empty_allowed_origins_for_pk():
     assert "at least one allowed origin" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_update_request_rejects_null_allowed_origins_for_pk():
     """An explicit `allowed_origins: None` PATCH for a pk_ key would land a row
     that the fail-closed _validate_origin check then rejects on every request.
@@ -173,7 +165,6 @@ async def test_update_request_rejects_null_allowed_origins_for_pk():
     assert "at least one allowed origin" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_update_request_rejects_non_read_permission_for_pk():
     service = _service()
     key = SimpleNamespace(
@@ -195,7 +186,6 @@ async def test_update_request_rejects_non_read_permission_for_pk():
         assert "can only have read permission" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_create_pk_defaults_to_safe_public_resource_permissions():
     service = _service_with_user(permissions=[Permission.ADMIN])
 
@@ -216,7 +206,6 @@ async def test_create_pk_defaults_to_safe_public_resource_permissions():
     )
 
 
-@pytest.mark.asyncio
 async def test_create_pk_assistant_scope_does_not_default_resource_permissions(
     monkeypatch,
 ):
@@ -245,7 +234,6 @@ async def test_create_pk_assistant_scope_does_not_default_resource_permissions(
     assert request.resource_permissions is None
 
 
-@pytest.mark.asyncio
 async def test_create_pk_assistant_scope_allows_scoped_resource_permissions(
     monkeypatch,
 ):
@@ -279,7 +267,6 @@ async def test_create_pk_assistant_scope_allows_scoped_resource_permissions(
     )
 
 
-@pytest.mark.asyncio
 async def test_create_pk_assistant_scope_rejects_unreachable_resource_permissions():
     service = _service_with_user(permissions=[Permission.ADMIN])
 
@@ -302,7 +289,6 @@ async def test_create_pk_assistant_scope_rejects_unreachable_resource_permission
     assert "apps" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_create_pk_assistant_scope_rejects_missing_assistant_permission():
     service = _service_with_user(permissions=[Permission.ADMIN])
 
@@ -324,7 +310,6 @@ async def test_create_pk_assistant_scope_rejects_missing_assistant_permission():
     assert "require 'assistants' resource permission" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_create_pk_rejects_write_resource_permissions():
     service = _service_with_user(permissions=[Permission.ADMIN])
 
@@ -346,7 +331,6 @@ async def test_create_pk_rejects_write_resource_permissions():
     assert "pk_ keys only support" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_create_pk_rejects_jobs_resource_permission():
     """jobs is on the pk_ denylist regardless of level — even read is too much."""
     service = _service_with_user(permissions=[Permission.ADMIN])
@@ -369,7 +353,6 @@ async def test_create_pk_rejects_jobs_resource_permission():
     assert "jobs" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_create_pk_rejects_prompts_resource_permission():
     service = _service_with_user(permissions=[Permission.ADMIN])
 
@@ -391,7 +374,6 @@ async def test_create_pk_rejects_prompts_resource_permission():
     assert "prompts" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_update_pk_rejects_jobs_resource_permission():
     service = _service()
     key = SimpleNamespace(
@@ -413,7 +395,6 @@ async def test_update_pk_rejects_jobs_resource_permission():
     assert "jobs" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_update_pk_null_resource_permissions_normalizes_to_public_default():
     service = _service()
     key = SimpleNamespace(
@@ -439,7 +420,6 @@ async def test_update_pk_null_resource_permissions_normalizes_to_public_default(
     }
 
 
-@pytest.mark.asyncio
 async def test_update_pk_assistant_scope_allows_scoped_resource_permissions():
     service = _service()
     key = SimpleNamespace(
@@ -465,7 +445,6 @@ async def test_update_pk_assistant_scope_allows_scoped_resource_permissions():
     }
 
 
-@pytest.mark.asyncio
 async def test_update_sk_app_scope_rejects_unreachable_resource_permissions():
     service = _service()
     key = SimpleNamespace(
@@ -488,7 +467,6 @@ async def test_update_sk_app_scope_rejects_unreachable_resource_permissions():
     assert "conversations" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_update_sk_app_scope_rejects_missing_app_permission():
     service = _service()
     key = SimpleNamespace(
@@ -510,7 +488,6 @@ async def test_update_sk_app_scope_rejects_missing_app_permission():
     assert "require 'apps' resource permission" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_update_pk_assistant_scope_allows_clearing_resource_permissions():
     service = _service()
     key = SimpleNamespace(
@@ -532,7 +509,6 @@ async def test_update_pk_assistant_scope_allows_clearing_resource_permissions():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_rejects_origin_without_scheme():
     """Bare hostnames (no scheme) are rejected with a clear 400."""
     service = _service_with_user(permissions=[Permission.ADMIN])
@@ -554,7 +530,6 @@ async def test_create_rejects_origin_without_scheme():
     assert "scheme" in exc.value.message
 
 
-@pytest.mark.asyncio
 async def test_create_rejects_origin_with_non_http_scheme():
     """Schemes other than http/https are rejected."""
     service = _service_with_user(permissions=[Permission.ADMIN])
@@ -575,7 +550,6 @@ async def test_create_rejects_origin_with_non_http_scheme():
     assert exc.value.code == "invalid_request"
 
 
-@pytest.mark.asyncio
 async def test_create_accepts_https_origin_without_consulting_tenant_allowlist():
     """No central allowlist gate — any well-formed origin the user lists is accepted."""
     service = _service_with_user(permissions=[Permission.ADMIN])
@@ -593,7 +567,6 @@ async def test_create_accepts_https_origin_without_consulting_tenant_allowlist()
     await service.validate_create_request(request=request)
 
 
-@pytest.mark.asyncio
 async def test_update_rejects_origin_without_scheme():
     service = _service()
     key = SimpleNamespace(
@@ -612,7 +585,6 @@ async def test_update_rejects_origin_without_scheme():
     assert exc.value.code == "invalid_request"
 
 
-@pytest.mark.asyncio
 async def test_create_accepts_port_wildcard():
     """``http://localhost:*`` is a valid pattern for dev iteration."""
     service = _service_with_user(permissions=[Permission.ADMIN])
@@ -630,7 +602,6 @@ async def test_create_accepts_port_wildcard():
     await service.validate_create_request(request=request)
 
 
-@pytest.mark.asyncio
 async def test_pk_port_wildcard_matches_any_port_at_request_time():
     """Pattern ``http://localhost:*`` permits any port on localhost."""
     service = _service()
@@ -649,7 +620,6 @@ async def test_pk_port_wildcard_matches_any_port_at_request_time():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_pk_key_missing_origin_header_rejected():
     """pk_ key with NO Origin header → 403 origin_not_allowed."""
     service = _service()
@@ -662,7 +632,6 @@ async def test_pk_key_missing_origin_header_rejected():
     assert exc.value.code == "origin_not_allowed"
 
 
-@pytest.mark.asyncio
 async def test_pk_origin_matched_against_per_key_list():
     """Origin in the key's allowed_origins → permitted."""
     service = _service()
@@ -671,7 +640,6 @@ async def test_pk_origin_matched_against_per_key_list():
     await service._validate_origin(key=key, origin="https://app.example.com")
 
 
-@pytest.mark.asyncio
 async def test_pk_origin_not_in_per_key_list_rejected():
     """Origin not in the key's allowed_origins → 403."""
     service = _service()
@@ -684,7 +652,6 @@ async def test_pk_origin_not_in_per_key_list_rejected():
     assert exc.value.code == "origin_not_allowed"
 
 
-@pytest.mark.asyncio
 async def test_pk_localhost_permitted_when_listed_on_key():
     """No env-flag bypass — localhost works iff the key explicitly lists it."""
     service = _service()
@@ -693,7 +660,6 @@ async def test_pk_localhost_permitted_when_listed_on_key():
     await service._validate_origin(key=key, origin="http://localhost:5173")
 
 
-@pytest.mark.asyncio
 async def test_pk_localhost_rejected_when_not_listed_on_key():
     """localhost is not magic — if the key didn't list it, it's denied."""
     service = _service()
@@ -704,7 +670,6 @@ async def test_pk_localhost_rejected_when_not_listed_on_key():
     assert exc.value.code == "origin_not_allowed"
 
 
-@pytest.mark.asyncio
 async def test_pk_empty_allowed_origins_blocks_all():
     """An empty list is treated as 'block everything'."""
     service = _service()
@@ -715,7 +680,6 @@ async def test_pk_empty_allowed_origins_blocks_all():
     assert exc.value.code == "origin_not_allowed"
 
 
-@pytest.mark.asyncio
 async def test_pk_null_allowed_origins_blocks_all():
     """A pk_ key without an allowed_origins list (NULL) is misconfigured —
     earlier behaviour was to silently permit every origin, which let any
@@ -734,7 +698,6 @@ async def test_pk_null_allowed_origins_blocks_all():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_ip_allowlist_allows_matching_ip():
     service = _service()
     key = SimpleNamespace(allowed_ips=["10.0.0.0/24"])
@@ -742,7 +705,6 @@ async def test_ip_allowlist_allows_matching_ip():
     service._validate_ip(key=key, client_ip="10.0.0.5")
 
 
-@pytest.mark.asyncio
 async def test_ip_allowlist_rejects_non_matching_ip():
     service = _service()
     key = SimpleNamespace(allowed_ips=["10.0.0.0/24"])
@@ -751,7 +713,6 @@ async def test_ip_allowlist_rejects_non_matching_ip():
         service._validate_ip(key=key, client_ip="192.168.1.10")
 
 
-@pytest.mark.asyncio
 async def test_ip_allowlist_requires_client_ip():
     service = _service()
     key = SimpleNamespace(allowed_ips=["10.0.0.0/24"])
@@ -760,7 +721,6 @@ async def test_ip_allowlist_requires_client_ip():
         service._validate_ip(key=key, client_ip=None)
 
 
-@pytest.mark.asyncio
 async def test_ip_allowlist_rejects_malformed_client_ip():
     service = _service()
     key = SimpleNamespace(allowed_ips=["10.0.0.0/24"])
@@ -770,7 +730,6 @@ async def test_ip_allowlist_rejects_malformed_client_ip():
     assert exc.value.code == "ip_not_allowed"
 
 
-@pytest.mark.asyncio
 async def test_ip_allowlist_none_skips_check():
     """Key with allowed_ips=None → IP check is skipped entirely."""
     service = _service()
@@ -779,7 +738,6 @@ async def test_ip_allowlist_none_skips_check():
     service._validate_ip(key=key, client_ip="anything")
 
 
-@pytest.mark.asyncio
 async def test_ip_allowlist_empty_list_rejects_all():
     """Key with allowed_ips=[] → rejects all IPs (no entries match)."""
     service = _service()
@@ -794,7 +752,6 @@ async def test_ip_allowlist_empty_list_rejects_all():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_zero_rejected():
     service = _service_with_user()
 
@@ -805,7 +762,6 @@ async def test_rate_limit_zero_rejected():
     assert exc.value.code == "invalid_request"
 
 
-@pytest.mark.asyncio
 async def test_max_rate_limit_override_blocks_unlimited_rate_limit():
     """max_rate_limit_override blocks rate_limit=-1 on create/update."""
     service = _service_with_user()
@@ -818,7 +774,6 @@ async def test_max_rate_limit_override_blocks_unlimited_rate_limit():
     assert "not allowed" in exc.value.message.lower()
 
 
-@pytest.mark.asyncio
 async def test_max_rate_limit_override_blocks_exceeding_value():
     """max_rate_limit_override blocks rate_limit exceeding the cap."""
     service = _service_with_user()
@@ -831,7 +786,6 @@ async def test_max_rate_limit_override_blocks_exceeding_value():
     assert "exceeds" in exc.value.message.lower()
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_negative_one_is_unlimited_without_cap_requires_admin():
     """rate_limit=-1 (unlimited) without cap → requires admin permission."""
     # Non-admin user → rejected
@@ -847,7 +801,6 @@ async def test_rate_limit_negative_one_is_unlimited_without_cap_requires_admin()
     await admin_service._validate_rate_limit(-1)
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_positive_value_always_valid():
     """Positive rate_limit is always valid regardless of cap."""
     service = _service_with_user()
@@ -855,7 +808,6 @@ async def test_rate_limit_positive_value_always_valid():
     await service._validate_rate_limit(500)
 
 
-@pytest.mark.asyncio
 async def test_rate_limit_at_cap_boundary_valid():
     """rate_limit exactly at the cap boundary → valid."""
     service = _service_with_user()

@@ -17,15 +17,13 @@ running live crawler jobs and Redis concurrency management.
 These tests verify the configuration and integration patterns.
 """
 
-import pytest
-from httpx import AsyncClient
 from uuid import uuid4
+
+from httpx import AsyncClient
 
 from eneo.tenants.crawler_settings_helper import get_crawler_setting
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOptimisticAcquireConfiguration:
     """Tests that optimistic acquire is enabled via settings."""
 
@@ -64,8 +62,6 @@ class TestOptimisticAcquireConfiguration:
             assert isinstance(concurrency_limit, int)
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOptimisticAcquireSlotBehavior:
     """Tests for optimistic slot acquisition patterns."""
 
@@ -128,8 +124,6 @@ class TestOptimisticAcquireSlotBehavior:
             assert limit == 0, "Zero limit = unlimited concurrency"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOptimisticAcquireRangeValidation:
     """Tests that concurrency limit enforces valid ranges."""
 
@@ -173,8 +167,6 @@ class TestOptimisticAcquireRangeValidation:
         assert response.status_code == 200
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOptimisticAcquireMultiTenantIsolation:
     """Tests that concurrency limits are isolated between tenants."""
 
@@ -246,8 +238,6 @@ class TestOptimisticAcquireMultiTenantIsolation:
             assert t2_limit == 2, "Tenant 2 should have low concurrency"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOptimisticAcquireUpdatePropagation:
     """Tests that concurrency limit changes propagate immediately."""
 
@@ -290,8 +280,6 @@ class TestOptimisticAcquireUpdatePropagation:
             assert limit_2 == 10, "Updated limit should be visible immediately"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOptimisticAcquireUseCases:
     """Tests for different concurrency limit use cases."""
 
@@ -343,8 +331,6 @@ class TestOptimisticAcquireUseCases:
             assert limit == 2, "Low limit protects resources"
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOptimisticAcquireWithOtherSettings:
     """Tests optimistic acquire interaction with other crawler settings."""
 
@@ -414,8 +400,6 @@ class TestOptimisticAcquireWithOtherSettings:
             assert heartbeat == 300
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 class TestOptimisticAcquireSlotManagement:
     """Tests for slot acquisition and release patterns."""
 

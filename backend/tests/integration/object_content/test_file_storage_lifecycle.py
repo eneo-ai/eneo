@@ -228,7 +228,6 @@ async def _delete_remote_objects(
             pass
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("fail_on_upload", [1, 2, 3])
 async def test_remote_failure_publishes_no_multi_content_family_rows(
     object_content_database: DatabaseSessionManager,
@@ -320,7 +319,6 @@ async def test_remote_failure_publishes_no_multi_content_family_rows(
         )
 
 
-@pytest.mark.asyncio
 async def test_cancellation_before_publication_leaves_no_file_family_rows(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -384,7 +382,6 @@ async def test_cancellation_before_publication_leaves_no_file_family_rows(
         )
 
 
-@pytest.mark.asyncio
 async def test_database_rollback_after_verified_uploads_publishes_no_family_rows(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -465,7 +462,6 @@ async def test_database_rollback_after_verified_uploads_publishes_no_family_rows
         )
 
 
-@pytest.mark.asyncio
 async def test_cancellation_after_final_promotion_preserves_the_visible_family(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -526,7 +522,6 @@ async def test_cancellation_after_final_promotion_preserves_the_visible_family(
         )
 
 
-@pytest.mark.asyncio
 async def test_inline_and_object_store_save_the_same_exact_bytes(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -621,7 +616,6 @@ async def test_inline_and_object_store_save_the_same_exact_bytes(
         )
 
 
-@pytest.mark.asyncio
 async def test_generated_file_family_content_uses_operator_not_source_business_limit(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

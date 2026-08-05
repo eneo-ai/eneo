@@ -38,7 +38,6 @@ def captured_spans(monkeypatch):
     exporter.clear()
 
 
-@pytest.mark.asyncio
 async def test_traced_job_creates_root_span_and_propagates_trace_id(captured_spans):
     """A queued job runs inside a root span named 'arq.job <name>', tagged with
     the job id, and the active trace_id inside the job matches the span."""
@@ -68,7 +67,6 @@ async def test_traced_job_creates_root_span_and_propagates_trace_id(captured_spa
     assert seen_trace_id == [format(span.get_span_context().trace_id, "032x")]
 
 
-@pytest.mark.asyncio
 async def test_traced_cron_uses_cron_kind_without_job_id(captured_spans):
     """A cron job is named 'arq.cron <name>'; cron job ids are non-UUID strings,
     so no arq.job_id attribute is set."""
@@ -88,7 +86,6 @@ async def test_traced_cron_uses_cron_kind_without_job_id(captured_spans):
     assert "arq.job_id" not in span.attributes
 
 
-@pytest.mark.asyncio
 async def test_traced_job_records_exception(captured_spans):
     """If the job raises, the span still ends and records the error status."""
 

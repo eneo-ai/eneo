@@ -720,7 +720,6 @@ def test_assistant_binding_summary_exposes_mode_without_broadening_shared_summar
     )
 
 
-@pytest.mark.asyncio
 async def test_assistant_skill_configuration_returns_modes_and_exact_runtime():
     binding = replace(
         _binding(position=0),

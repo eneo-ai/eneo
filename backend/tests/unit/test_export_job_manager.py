@@ -58,7 +58,6 @@ class TestExportJobCreation:
             manager = ExportJobManager(redis_mock)
         return manager, redis_mock
 
-    @pytest.mark.asyncio
     async def test_create_job_stores_in_redis(self, manager_with_mocks, mock_settings):
         """Verify job creation stores data in Redis with correct TTL."""
         manager, redis_mock = manager_with_mocks
@@ -86,7 +85,6 @@ class TestExportJobCreation:
         assert stored_data["status"] == "pending"
         assert stored_data["format"] == "csv"
 
-    @pytest.mark.asyncio
     async def test_create_job_returns_pending_status(
         self, manager_with_mocks, mock_settings
     ):
@@ -100,7 +98,6 @@ class TestExportJobCreation:
         assert job.progress == 0
         assert job.format == "jsonl"
 
-    @pytest.mark.asyncio
     async def test_create_job_sets_expiration(self, manager_with_mocks, mock_settings):
         """Verify job expires_at is set correctly."""
         manager, redis_mock = manager_with_mocks
@@ -135,7 +132,6 @@ class TestExportJobRetrieval:
 
         return manager, redis_mock
 
-    @pytest.mark.asyncio
     async def test_get_job_returns_none_when_not_found(self, manager_with_mocks):
         """Verify None is returned for non-existent job."""
         manager, redis_mock = manager_with_mocks
@@ -145,7 +141,6 @@ class TestExportJobRetrieval:
 
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_get_job_parses_redis_data(self, manager_with_mocks):
         """Verify job is correctly parsed from Redis."""
         manager, redis_mock = manager_with_mocks
@@ -223,7 +218,6 @@ class TestExportJobProgressUpdates:
 
         return manager, redis_mock, job_id, tenant_id
 
-    @pytest.mark.asyncio
     async def test_update_progress_calculates_percentage(self, manager_with_job):
         """Verify progress percentage is calculated correctly."""
         manager, redis_mock, job_id, tenant_id = manager_with_job
@@ -239,7 +233,6 @@ class TestExportJobProgressUpdates:
         assert result.processed_records == 500
         assert result.total_records == 1000
 
-    @pytest.mark.asyncio
     async def test_update_progress_caps_at_99_percent(self, manager_with_job):
         """Verify progress never exceeds 99% during processing."""
         manager, redis_mock, job_id, tenant_id = manager_with_job
@@ -253,7 +246,6 @@ class TestExportJobProgressUpdates:
 
         assert result.progress == 99
 
-    @pytest.mark.asyncio
     async def test_update_progress_transitions_to_processing(self, manager_with_job):
         """Verify job transitions from pending to processing on first update."""
         manager, redis_mock, job_id, tenant_id = manager_with_job
@@ -268,7 +260,6 @@ class TestExportJobProgressUpdates:
         assert result.status == ExportJobStatus.PROCESSING
         assert result.started_at is not None
 
-    @pytest.mark.asyncio
     async def test_update_progress_handles_zero_total(self, manager_with_job):
         """Verify zero total records doesn't cause division error."""
         manager, redis_mock, job_id, tenant_id = manager_with_job
@@ -324,7 +315,6 @@ class TestExportJobCompletion:
 
         return manager, redis_mock, job_id, tenant_id
 
-    @pytest.mark.asyncio
     async def test_complete_job_sets_final_state(self, manager_with_processing_job):
         """Verify job completion sets all final fields."""
         manager, redis_mock, job_id, tenant_id = manager_with_processing_job
@@ -343,7 +333,6 @@ class TestExportJobCompletion:
         assert result.file_size_bytes == 1024000
         assert result.completed_at is not None
 
-    @pytest.mark.asyncio
     async def test_fail_job_stores_error_message(self, manager_with_processing_job):
         """Verify failure stores error message."""
         manager, redis_mock, job_id, tenant_id = manager_with_processing_job
@@ -400,7 +389,6 @@ class TestExportJobCancellation:
 
         return manager, redis_mock, job_id, tenant_id
 
-    @pytest.mark.asyncio
     async def test_set_cancelled_flags_job(self, manager_with_cancellable_job):
         """Verify cancellation sets the cancelled flag."""
         manager, redis_mock, job_id, tenant_id = manager_with_cancellable_job
@@ -414,7 +402,6 @@ class TestExportJobCancellation:
         stored_data = json.loads(call_args[0][2])
         assert stored_data["cancelled"] is True
 
-    @pytest.mark.asyncio
     async def test_set_cancelled_returns_false_for_completed_job(self):
         """Verify completed jobs cannot be cancelled."""
         redis_mock = AsyncMock()
@@ -456,7 +443,6 @@ class TestExportJobCancellation:
         assert result is False
         redis_mock.setex.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_is_cancelled_returns_true_when_flagged(
         self, manager_with_cancellable_job
     ):
@@ -488,7 +474,6 @@ class TestExportJobCancellation:
 
         assert result is True
 
-    @pytest.mark.asyncio
     async def test_is_cancelled_returns_true_for_missing_job(
         self, manager_with_cancellable_job
     ):
@@ -554,7 +539,6 @@ class TestExportJobConcurrencyLimit:
 
         return manager, redis_mock, tenant_id
 
-    @pytest.mark.asyncio
     async def test_count_active_jobs_scans_redis(self, manager_with_active_jobs):
         """Verify active job counting uses Redis scan."""
         manager, redis_mock, tenant_id = manager_with_active_jobs
@@ -564,7 +548,6 @@ class TestExportJobConcurrencyLimit:
         # Should find 2 active jobs
         assert count == 2
 
-    @pytest.mark.asyncio
     async def test_count_active_jobs_ignores_terminal_jobs(self):
         """Verify completed/failed jobs are not counted."""
         redis_mock = AsyncMock()
@@ -688,7 +671,6 @@ class TestExportJobCleanup:
 
         return manager, redis_mock, tenant_id, expired_job_id
 
-    @pytest.mark.asyncio
     async def test_get_expired_jobs_returns_only_expired(
         self, manager_with_expired_jobs
     ):
@@ -701,7 +683,6 @@ class TestExportJobCleanup:
         assert len(expired_jobs) == 1
         assert expired_jobs[0].job_id == expired_job_id
 
-    @pytest.mark.asyncio
     async def test_delete_job_removes_from_redis(self):
         """Verify job deletion removes Redis key."""
         redis_mock = AsyncMock()

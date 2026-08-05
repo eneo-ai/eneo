@@ -15,15 +15,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.infrastructure.data_retention_service import (
+    DataRetentionService,
+)
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 
 
 @pytest.fixture
@@ -162,7 +162,6 @@ async def create_old_app_run(
     return app_run
 
 
-@pytest.mark.asyncio
 async def test_assistant_level_retention_deletes_old_questions(
     async_session: AsyncSession,
     test_assistant: Assistants,
@@ -203,7 +202,6 @@ async def test_assistant_level_retention_deletes_old_questions(
     assert recent_exists is not None, "Recent question should be kept"
 
 
-@pytest.mark.asyncio
 async def test_space_level_retention_fallback(
     async_session: AsyncSession,
     test_space: Spaces,
@@ -245,7 +243,6 @@ async def test_space_level_retention_fallback(
     assert recent_exists is not None, "Question within space retention should be kept"
 
 
-@pytest.mark.asyncio
 async def test_assistant_overrides_space_retention(
     async_session: AsyncSession,
     test_space: Spaces,
@@ -285,7 +282,6 @@ async def test_assistant_overrides_space_retention(
     )
 
 
-@pytest.mark.asyncio
 async def test_tenant_level_retention_fallback(
     async_session: AsyncSession,
     test_space: Spaces,
@@ -332,7 +328,6 @@ async def test_tenant_level_retention_fallback(
     assert recent_exists is not None, "Question within tenant retention should be kept"
 
 
-@pytest.mark.asyncio
 async def test_no_retention_keeps_all_questions(
     async_session: AsyncSession,
     test_assistant: Assistants,
@@ -364,7 +359,6 @@ async def test_no_retention_keeps_all_questions(
     assert exists is not None, "Question should be kept when no retention policy exists"
 
 
-@pytest.mark.asyncio
 async def test_app_level_retention_deletes_old_runs(
     async_session: AsyncSession,
     test_app: Apps,
@@ -406,7 +400,6 @@ async def test_app_level_retention_deletes_old_runs(
     assert recent_exists is not None, "Recent app run should be kept"
 
 
-@pytest.mark.asyncio
 async def test_space_level_app_retention_fallback(
     async_session: AsyncSession,
     test_space: Spaces,
@@ -449,7 +442,6 @@ async def test_space_level_app_retention_fallback(
     assert recent_exists is not None, "App run within space retention should be kept"
 
 
-@pytest.mark.asyncio
 async def test_multi_tenant_isolation(
     async_session: AsyncSession,
     test_assistant: Assistants,
@@ -484,7 +476,6 @@ async def test_multi_tenant_isolation(
     assert exists is None, "Old question from this tenant should be deleted"
 
 
-@pytest.mark.asyncio
 async def test_get_affected_count_for_assistant(
     async_session: AsyncSession,
     test_assistant: Assistants,
@@ -518,7 +509,6 @@ async def test_get_affected_count_for_assistant(
     assert count == 2, "Should count questions older than 30 days"
 
 
-@pytest.mark.asyncio
 async def test_get_affected_count_for_space(
     async_session: AsyncSession,
     test_space: Spaces,
@@ -555,7 +545,6 @@ async def test_get_affected_count_for_space(
     )
 
 
-@pytest.mark.asyncio
 async def test_retention_validation_constraints(
     async_session: AsyncSession, test_assistant: Assistants
 ):
@@ -584,7 +573,6 @@ async def test_retention_validation_constraints(
     )
 
 
-@pytest.mark.asyncio
 async def test_hard_delete_not_soft_delete(
     async_session: AsyncSession,
     test_assistant: Assistants,
@@ -627,7 +615,6 @@ async def test_hard_delete_not_soft_delete(
     )
 
 
-@pytest.mark.asyncio
 async def test_tenant_level_retention_fallback_for_app_runs(
     async_session: AsyncSession,
     test_space: Spaces,
@@ -675,7 +662,6 @@ async def test_tenant_level_retention_fallback_for_app_runs(
     assert recent_exists is not None, "App run within tenant retention should be kept"
 
 
-@pytest.mark.asyncio
 async def test_boundary_condition_exact_retention_days(
     async_session: AsyncSession,
     test_assistant: Assistants,
@@ -722,7 +708,6 @@ async def test_boundary_condition_exact_retention_days(
     assert past_exists is None, "Question at 31 days should be deleted"
 
 
-@pytest.mark.asyncio
 async def test_tenant_enabled_but_days_null_keeps_forever(
     async_session: AsyncSession,
     test_space: Spaces,

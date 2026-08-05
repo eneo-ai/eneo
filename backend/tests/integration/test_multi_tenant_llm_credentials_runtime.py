@@ -72,8 +72,6 @@ async def _create_tenant(
     return response.json()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_resolver_returns_decrypted_tenant_key(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -105,8 +103,6 @@ async def test_resolver_returns_decrypted_tenant_key(
     assert resolved == tenant_key
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_resolver_falls_back_to_global_when_disabled(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -144,8 +140,6 @@ async def test_resolver_falls_back_to_global_when_disabled(
         test_settings.openai_api_key = original_global_key
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_resolver_raises_in_strict_mode_without_tenant_key(
     client: AsyncClient,
     async_session: AsyncSession,
@@ -182,8 +176,6 @@ async def test_resolver_raises_in_strict_mode_without_tenant_key(
         test_settings.tenant_credentials_enabled = original_flag
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_resolver_isolates_credentials_between_tenants(
     client: AsyncClient,
     async_session: AsyncSession,

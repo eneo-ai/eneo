@@ -11,7 +11,6 @@ These tests verify:
 
 from uuid import uuid4
 
-import pytest
 from sqlalchemy import text
 
 from eneo.database.database import sessionmanager
@@ -110,8 +109,6 @@ async def _enable_templates_feature(client, token: str):
 # Tests
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_feature_flag_disabled_returns_empty_gallery(
     client,
     super_admin_token,
@@ -137,8 +134,6 @@ async def test_feature_flag_disabled_returns_empty_gallery(
     assert data["count"] == 0
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_create_template_requires_feature_flag(
     client,
     super_admin_token,
@@ -179,8 +174,6 @@ async def test_create_template_requires_feature_flag(
     assert "not enabled" in response.json()["message"].lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_isolation_templates_not_visible_across_tenants(
     client,
     super_admin_token,
@@ -258,8 +251,6 @@ async def test_tenant_isolation_templates_not_visible_across_tenants(
     assert data["items"][0]["tenant_id"] == tenant_a["id"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_duplicate_name_within_tenant_rejected(
     client,
     super_admin_token,
@@ -308,8 +299,6 @@ async def test_duplicate_name_within_tenant_rejected(
     assert "already exists" in response.json()["message"].lower()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_soft_delete_hides_template_from_gallery(
     client,
     super_admin_token,
@@ -392,8 +381,6 @@ async def test_soft_delete_hides_template_from_gallery(
     assert deleted[0]["deleted_at"] is not None
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_rollback_restores_original_state(
     client,
     super_admin_token,
@@ -467,8 +454,6 @@ async def test_rollback_restores_original_state(
     assert rolled_back["prompt_text"] == "Original prompt text"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_delete_template_does_not_affect_existing_assistants(
     client,
     super_admin_token,
@@ -553,8 +538,6 @@ async def test_delete_template_does_not_affect_existing_assistants(
     assert our_assistant["name"] == "Support Bot"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_app_template_crud_operations(
     client,
     super_admin_token,
@@ -617,8 +600,6 @@ async def test_app_template_crud_operations(
     assert any(item["id"] == template["id"] for item in items)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_restore_soft_deleted_template(
     client,
     super_admin_token,
@@ -703,8 +684,6 @@ async def test_restore_soft_deleted_template(
     assert template_id not in deleted_ids
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_permanent_delete_requires_soft_delete_first(
     client,
     super_admin_token,
@@ -785,8 +764,6 @@ async def test_permanent_delete_requires_soft_delete_first(
     assert template_id not in gallery_ids
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_cross_tenant_access_denied(
     client,
     super_admin_token,
@@ -855,8 +832,6 @@ async def test_cross_tenant_access_denied(
     assert response.status_code == 404
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_gallery_endpoint_accessible_to_regular_users(
     client,
     super_admin_token,

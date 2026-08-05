@@ -1,7 +1,5 @@
 from datetime import timedelta
 
-import pytest
-
 from eneo.main.request_context import (
     clear_request_context,
     get_request_context,
@@ -33,7 +31,6 @@ class FakeRedisBroken(FakeRedisSuccess):
         raise RuntimeError("redis unavailable")
 
 
-@pytest.mark.asyncio
 async def test_debug_toggle_fallback_on_storage_failure():
     redis = FakeRedisBroken()
 

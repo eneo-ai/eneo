@@ -211,7 +211,6 @@ def mock_embeddings_service():
 class TestEmbeddingSemaphoreBehavior:
     """Tests for the module-level embedding semaphore that limits concurrent API calls."""
 
-    @pytest.mark.asyncio
     async def test_semaphore_limits_concurrent_embedding_calls(
         self, crawl_context, embedding_model_spec
     ):
@@ -274,7 +273,6 @@ class TestEmbeddingSemaphoreBehavior:
             f"Semaphore should limit to 2 concurrent calls, but saw {max_concurrent}"
         )
 
-    @pytest.mark.asyncio
     async def test_semaphore_released_on_embedding_exception(
         self, crawl_context, embedding_model_spec
     ):
@@ -332,7 +330,6 @@ class TestEmbeddingSemaphoreBehavior:
         # Page 2 should have failed
         assert failed >= 1, "At least one page should have failed"
 
-    @pytest.mark.asyncio
     async def test_semaphore_released_on_timeout(
         self, crawl_context, embedding_model_spec
     ):
@@ -418,7 +415,6 @@ class TestEmbeddingSemaphoreBehavior:
 class TestMemoryCapsEnforcement:
     """Tests for memory cap enforcement during Phase 1."""
 
-    @pytest.mark.asyncio
     async def test_embedding_bytes_cap_triggers_early_exit(
         self, crawl_context, embedding_model_spec
     ):
@@ -513,7 +509,6 @@ class TestMemoryCapsEnforcement:
 class TestPhase2SavepointBehavior:
     """Tests for per-page savepoint creation and atomic operations in Phase 2."""
 
-    @pytest.mark.asyncio
     async def test_each_page_gets_own_savepoint(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
@@ -560,7 +555,6 @@ class TestPhase2SavepointBehavior:
             f"Expected 3 savepoints, got {mock_session.begin_nested.call_count}"
         )
 
-    @pytest.mark.asyncio
     async def test_supersede_and_insert_within_same_savepoint(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
@@ -634,7 +628,6 @@ class TestPhase2SavepointBehavior:
         assert first_insert_idx > select_idx, "INSERT must be after SELECT"
         assert commit_idx > first_insert_idx, "COMMIT must be after INSERTs"
 
-    @pytest.mark.asyncio
     async def test_retained_quota_rejects_page_before_publication(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
@@ -695,7 +688,6 @@ class TestPhase2SavepointBehavior:
 class TestSuccessfulUrlsTracking:
     """Tests for accurate tracking of successfully persisted URLs."""
 
-    @pytest.mark.asyncio
     async def test_successful_urls_only_contains_committed_pages(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
@@ -765,7 +757,6 @@ class TestSuccessfulUrlsTracking:
             "Failed URL must NOT be in successful_urls"
         )
 
-    @pytest.mark.asyncio
     async def test_empty_buffer_returns_empty_urls(
         self, crawl_context, embedding_model_spec
     ):
@@ -785,7 +776,6 @@ class TestSuccessfulUrlsTracking:
             f"Empty buffer should return (0, 0, [], {{}}), got {result}"
         )
 
-    @pytest.mark.asyncio
     async def test_no_embedding_model_fails_all_pages(self, crawl_context):
         """
         INVARIANT: When embedding_model is None, all pages fail with NO_EMBEDDING_MODEL reason.
@@ -813,7 +803,6 @@ class TestSuccessfulUrlsTracking:
         assert FailureReason.NO_EMBEDDING_MODEL.value in failures_by_reason
         assert len(failures_by_reason[FailureReason.NO_EMBEDDING_MODEL.value]) == 2
 
-    @pytest.mark.asyncio
     async def test_savepoint_rollback_excludes_url_from_successful(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
@@ -878,7 +867,6 @@ class TestSuccessfulUrlsTracking:
 class TestPhaseIsolation:
     """Tests that verify Phase 1 has ZERO database operations."""
 
-    @pytest.mark.asyncio
     async def test_unchanged_page_skips_embedding_and_database_write(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
@@ -907,7 +895,6 @@ class TestPhaseIsolation:
         mock_embeddings_service.get_embeddings.assert_not_awaited()
         mock_sm.session.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_matching_content_with_a_new_model_is_reembedded(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
@@ -942,7 +929,6 @@ class TestPhaseIsolation:
         assert (success, failed, persisted_urls, failures) == (1, 0, [url], {})
         mock_embeddings_service.get_embeddings.assert_awaited_once()
 
-    @pytest.mark.asyncio
     async def test_no_session_opened_during_phase_1(
         self, crawl_context, embedding_model_spec
     ):
@@ -1044,7 +1030,6 @@ class TestPhaseIsolation:
 class TestTransactionWallTimeGuard:
     """Tests for the transaction wall-time timeout in Phase 2."""
 
-    @pytest.mark.asyncio
     async def test_transaction_timeout_fails_remaining_pages(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):

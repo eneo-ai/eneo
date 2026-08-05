@@ -1,9 +1,8 @@
 """Integration tests for audit log export endpoints."""
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
-pytestmark = pytest.mark.integration
+import pytest
 
 
 class TestExportAuthentication:
@@ -105,15 +104,16 @@ class TestCsvInjectionProtection:
         self, client, auth_headers, db_session, test_tenant, test_user
     ):
         """Verify formula characters are sanitized in CSV export."""
+        from uuid import uuid4
+
+        from eneo.audit.domain.action_types import ActionType
+        from eneo.audit.domain.actor_types import ActorType
+        from eneo.audit.domain.audit_log import AuditLog
+        from eneo.audit.domain.entity_types import EntityType
+        from eneo.audit.domain.outcome import Outcome
         from eneo.audit.infrastructure.audit_log_repo_impl import (
             AuditLogRepositoryImpl,
         )
-        from eneo.audit.domain.audit_log import AuditLog
-        from eneo.audit.domain.action_types import ActionType
-        from eneo.audit.domain.entity_types import EntityType
-        from eneo.audit.domain.actor_types import ActorType
-        from eneo.audit.domain.outcome import Outcome
-        from uuid import uuid4
 
         # Create a log with dangerous description
         async with db_session() as session:

@@ -2,8 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 from uuid import uuid4
 
-import pytest
-
 from eneo.apps.app_runs.api.app_run_assembler import AppRunAssembler
 from eneo.apps.app_runs.app_run import AppRun
 from eneo.apps.app_runs.app_run_factory import AppRunFactory
@@ -101,7 +99,6 @@ def test_app_run_public_model_exposes_only_revision_provenance():
     }
 
 
-@pytest.mark.asyncio
 async def test_app_run_file_projection_is_one_deduplicated_batch() -> None:
     first_file_id = uuid4()
     second_file_id = uuid4()

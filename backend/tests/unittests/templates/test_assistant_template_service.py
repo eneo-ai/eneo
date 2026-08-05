@@ -1,21 +1,22 @@
 """Unit tests for AssistantTemplateService tenant-scoped methods."""
 
-import pytest
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
-from eneo.templates.assistant_template.assistant_template_service import (
-    AssistantTemplateService,
+import pytest
+
+from eneo.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    NotFoundException,
 )
 from eneo.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateCreate,
     AssistantTemplateUpdate,
     AssistantTemplateWizard,
 )
-from eneo.main.exceptions import (
-    NotFoundException,
-    BadRequestException,
-    NameCollisionException,
+from eneo.templates.assistant_template.assistant_template_service import (
+    AssistantTemplateService,
 )
 
 
@@ -74,7 +75,6 @@ def service(
     )
 
 
-@pytest.mark.asyncio
 async def test_get_templates_returns_empty_when_feature_disabled(
     service, mock_feature_flag_service, mock_repo
 ):
@@ -94,7 +94,6 @@ async def test_get_templates_returns_empty_when_feature_disabled(
     mock_repo.get_assistant_template_list.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_get_templates_returns_list_when_feature_enabled(
     service, mock_feature_flag_service, mock_repo
 ):
@@ -111,7 +110,6 @@ async def test_get_templates_returns_list_when_feature_enabled(
     mock_repo.get_assistant_template_list.assert_called_once_with(tenant_id=tenant_id)
 
 
-@pytest.mark.asyncio
 async def test_create_template_requires_feature_flag_enabled(
     service, mock_feature_flag_service
 ):
@@ -133,7 +131,6 @@ async def test_create_template_requires_feature_flag_enabled(
     assert "not enabled" in str(exc_info.value).lower()
 
 
-@pytest.mark.asyncio
 async def test_create_template_checks_duplicate_name(
     service, mock_feature_flag_service, mock_repo
 ):
@@ -160,7 +157,6 @@ async def test_create_template_checks_duplicate_name(
     )
 
 
-@pytest.mark.asyncio
 async def test_update_template_validates_ownership(service, mock_repo):
     """Cannot update template that doesn't belong to tenant."""
     template_id = uuid4()
@@ -179,7 +175,6 @@ async def test_update_template_validates_ownership(service, mock_repo):
     assert "does not belong" in str(exc_info.value).lower()
 
 
-@pytest.mark.asyncio
 async def test_update_template_checks_duplicate_on_rename(service, mock_repo):
     """When renaming, checks if new name already exists."""
     template_id = uuid4()
@@ -201,7 +196,6 @@ async def test_update_template_checks_duplicate_on_rename(service, mock_repo):
         )
 
 
-@pytest.mark.asyncio
 async def test_delete_template_allowed_even_when_in_use(service, mock_repo):
     """Templates can be deleted even when in use (assistants remain independent)."""
     template_id = uuid4()
@@ -229,7 +223,6 @@ async def test_delete_template_allowed_even_when_in_use(service, mock_repo):
     )
 
 
-@pytest.mark.asyncio
 async def test_rollback_template_validates_snapshot_exists(service, mock_repo):
     """Cannot rollback template without original_snapshot."""
     template_id = uuid4()
@@ -246,7 +239,6 @@ async def test_rollback_template_validates_snapshot_exists(service, mock_repo):
     assert "snapshot not found" in str(exc_info.value).lower()
 
 
-@pytest.mark.asyncio
 async def test_create_template_persists_completion_model_id_and_snapshot(
     service,
     mock_feature_flag_service,
@@ -288,7 +280,6 @@ async def test_create_template_persists_completion_model_id_and_snapshot(
     )
 
 
-@pytest.mark.asyncio
 async def test_rollback_template_restores_completion_model_id(
     service,
     mock_repo,
@@ -326,7 +317,6 @@ async def test_rollback_template_restores_completion_model_id(
     assert params["completion_model_id"] == completion_model_id
 
 
-@pytest.mark.asyncio
 async def test_get_templates_for_tenant_excludes_global(
     service, mock_session, mock_factory
 ):
@@ -354,7 +344,6 @@ async def test_get_templates_for_tenant_excludes_global(
     assert result[0][1] == 1  # usage_count
 
 
-@pytest.mark.asyncio
 async def test_count_template_usage_returns_zero_when_not_used(service, mock_session):
     """Usage count returns 0 when template not used."""
     template_id = uuid4()
@@ -365,7 +354,6 @@ async def test_count_template_usage_returns_zero_when_not_used(service, mock_ses
     assert count == 0
 
 
-@pytest.mark.asyncio
 async def test_count_template_usage_returns_actual_count(service, mock_session):
     """Usage count returns actual number of assistants using template."""
     template_id = uuid4()

@@ -242,8 +242,6 @@ def _assert_api_key_error(
     return detail
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize("permission", ["read", "write"])
 async def test_scoped_non_admin_keys_on_governance_fail_with_management_permission(
     client,
@@ -283,8 +281,6 @@ async def test_scoped_non_admin_keys_on_governance_fail_with_management_permissi
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_scoped_admin_keys_on_governance_fail_with_scope(
     client,
     default_user_token,
@@ -316,8 +312,6 @@ async def test_scoped_admin_keys_on_governance_fail_with_scope(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize("permission", ["read", "write"])
 async def test_scoped_non_admin_keys_on_governance_write_fail_with_management_permission(
     client,
@@ -366,8 +360,6 @@ async def test_scoped_non_admin_keys_on_governance_write_fail_with_management_pe
             ), response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_scoped_admin_keys_on_governance_write_fail_with_scope(
     client,
     default_user_token,
@@ -401,8 +393,6 @@ async def test_scoped_admin_keys_on_governance_write_fail_with_scope(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize("permission", ["read", "write", "admin"])
 async def test_scoped_keys_cannot_access_diagnostics_endpoints(
     client,
@@ -436,8 +426,6 @@ async def test_scoped_keys_cannot_access_diagnostics_endpoints(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_key_matrix_for_governance_and_diagnostics(
     client,
     default_user_token,
@@ -506,8 +494,6 @@ async def test_tenant_key_matrix_for_governance_and_diagnostics(
         ), response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_tenant_read_key_logging_requires_bearer_session(
     client,
     default_user_token,
@@ -533,8 +519,6 @@ async def test_tenant_read_key_logging_requires_bearer_session(
     assert detail.get("code") == "session_auth_required", response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_api_key_scope_smoke_matrix_no_500_on_representative_locked_and_core_routes(
     client,
     default_user_token,
@@ -580,8 +564,6 @@ async def test_api_key_scope_smoke_matrix_no_500_on_representative_locked_and_co
                 )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_scoped_read_keys_keep_access_to_low_risk_self_service_routes(
     client,
     default_user_token,
@@ -620,8 +602,6 @@ async def test_scoped_read_keys_keep_access_to_low_risk_self_service_routes(
             ), response.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_scope_capability_matrix_for_core_resource_endpoints(
     client,
     default_user_token,

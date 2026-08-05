@@ -15,11 +15,7 @@ which is left for a follow-up test paired with a fault-injection route.
 
 from __future__ import annotations
 
-import pytest
 
-
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_x_trace_id_present_on_404(client):
     """X-Trace-Id must be set on 4xx responses (TraceIdResponseMiddleware runs
     on every http.response.start, regardless of status code)."""
@@ -32,8 +28,6 @@ async def test_x_trace_id_present_on_404(client):
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_cors_exposes_both_trace_headers(client, admin_user_api_key):
     """Access-Control-Expose-Headers must list both X-Trace-Id and the legacy
     X-Correlation-ID alias so browser-side JS can read them on every response."""
@@ -56,8 +50,6 @@ async def test_cors_exposes_both_trace_headers(client, admin_user_api_key):
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_500_exposes_trace_headers(app):
     """An unhandled 500 must still expose the trace headers via CORS and carry
     error_id, exercising the manual CORS block in the Exception handler that

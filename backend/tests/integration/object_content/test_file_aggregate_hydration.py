@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from uuid import UUID, uuid4
 
-import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.group_chats_table import GroupChatsTable
@@ -21,8 +20,6 @@ async def _create_space(client, headers: dict[str, str]) -> str:
     return response.json()["id"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_persisted_aggregate_files_reload_through_object_content(
     client,
     db_container,
@@ -115,8 +112,6 @@ async def test_persisted_aggregate_files_reload_through_object_content(
     assert reloaded_question.files[0].text == "durable policy"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_space_applications_view_does_not_read_attachment_content(
     client,
     db_container,

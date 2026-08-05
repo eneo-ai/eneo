@@ -225,8 +225,6 @@ def _upload(payload: bytes) -> UploadFile:
     )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_inline_and_object_store_icons_are_immediately_byte_identical(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -290,8 +288,6 @@ async def test_inline_and_object_store_icons_are_immediately_byte_identical(
             await real_object_store.store.delete_and_confirm(remote_object_key)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_policy_sized_object_store_icon_spools_and_streams_in_chunks(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -352,8 +348,6 @@ async def test_policy_sized_object_store_icon_spools_and_streams_in_chunks(
             await real_object_store.store.delete_and_confirm(remote_object_key)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_object_store_icon_is_not_published_until_remote_verification_finishes(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -422,8 +416,6 @@ async def test_object_store_icon_is_not_published_until_remote_verification_fini
             await real_object_store.store.delete_and_confirm(remote_object_key)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_cancelled_verified_upload_leaves_only_bounded_remote_residue(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -468,8 +460,6 @@ async def test_cancelled_verified_upload_leaves_only_bounded_remote_residue(
             await real_object_store.store.delete_and_confirm(content_service.object_key)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_remote_failure_publishes_no_icon_or_content_rows(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -506,8 +496,6 @@ async def test_remote_failure_publishes_no_icon_or_content_rows(
             await real_object_store.store.delete_and_confirm(content_service.object_key)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_cancellation_after_publication_preserves_visible_icon(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
@@ -566,8 +554,6 @@ async def test_cancellation_after_publication_preserves_visible_icon(
             await real_object_store.store.delete_and_confirm(remote_object_key)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_failed_icon_stays_hidden_and_tenant_deletable(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

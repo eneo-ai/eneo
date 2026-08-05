@@ -17,7 +17,7 @@ from alembic.config import Config
 from eneo.jobs.job_repo import stale_in_progress_jobs_statement
 from eneo.jobs.job_staging import terminal_staging_jobs_statement
 
-pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
+pytestmark = pytest.mark.migration_isolation
 
 _PREVIOUS_REVISION = "202607281600"
 _REAPER_INDEX = "ix_jobs_knowledge_in_progress_reaper"

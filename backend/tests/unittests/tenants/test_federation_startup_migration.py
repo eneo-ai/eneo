@@ -69,7 +69,6 @@ def _make_service(*, settings=None, tenant=None, encryption_service=None):
     return service, tenant_repo, encryption_service
 
 
-@pytest.mark.asyncio
 async def test_startup_migration_encrypts_secret_before_persisting():
     service, tenant_repo, _ = _make_service()
 
@@ -84,7 +83,6 @@ async def test_startup_migration_encrypts_secret_before_persisting():
     assert stored_config["encrypted_at"]
 
 
-@pytest.mark.asyncio
 async def test_startup_migration_preserves_existing_redirect_fields():
     tenant = _make_tenant(
         federation_config={
@@ -129,7 +127,6 @@ def test_startup_migration_normalizes_legacy_redirect_path_when_merging_existing
     assert merged_config["redirect_path"] == "/auth/callback"
 
 
-@pytest.mark.asyncio
 async def test_startup_migration_skips_when_provider_fields_already_exist():
     tenant = _make_tenant(
         federation_config={
@@ -147,7 +144,6 @@ async def test_startup_migration_skips_when_provider_fields_already_exist():
     tenant_repo.update_federation_config.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_startup_migration_skips_when_multiple_active_tenants_exist():
     service, tenant_repo, _ = _make_service()
     tenant_repo.get_all_active.return_value = [_make_tenant(), _make_tenant()]
@@ -158,7 +154,6 @@ async def test_startup_migration_skips_when_multiple_active_tenants_exist():
     tenant_repo.update_federation_config.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_startup_migration_skips_when_env_config_is_incomplete():
     settings = MockSettings(oidc_client_secret=None)
     service, tenant_repo, _ = _make_service(settings=settings)
@@ -169,7 +164,6 @@ async def test_startup_migration_skips_when_env_config_is_incomplete():
     tenant_repo.update_federation_config.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_startup_migration_requires_active_encryption():
     encryption_service = MagicMock()
     encryption_service.is_active.return_value = False
@@ -181,7 +175,6 @@ async def test_startup_migration_requires_active_encryption():
     tenant_repo.update_federation_config.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_startup_migration_fails_when_encryption_raises():
     service, tenant_repo, _ = _make_service(
         encryption_service=FailingEncryptionService()
@@ -193,7 +186,6 @@ async def test_startup_migration_fails_when_encryption_raises():
     tenant_repo.update_federation_config.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_startup_migration_is_idempotent_after_first_run():
     tenant = _make_tenant()
     service, tenant_repo, _ = _make_service(tenant=tenant)
@@ -243,7 +235,6 @@ def test_credential_resolver_can_decrypt_migrated_federation_config():
     assert resolved["discovery_endpoint"] == settings.oidc_discovery_endpoint
 
 
-@pytest.mark.asyncio
 async def test_manual_runner_opens_explicit_transaction(monkeypatch):
     import eneo.tenants.federation_startup_migration as startup_migration
 
@@ -278,7 +269,6 @@ async def test_manual_runner_opens_explicit_transaction(monkeypatch):
     fake_session.begin.assert_called_once_with()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "settings",
     [

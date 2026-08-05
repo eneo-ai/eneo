@@ -23,13 +23,11 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from eneo.main.container.container import Container
 
-
 # =============================================================================
 # UNIT TESTS: Container.session_scope() method
 # =============================================================================
 
 
-@pytest.mark.asyncio
 class TestContainerSessionScope:
     """Unit tests for Container.session_scope() method."""
 
@@ -48,7 +46,7 @@ class TestContainerSessionScope:
 
     async def test_session_scope_yields_session(self, test_settings):
         """session_scope should yield a valid AsyncSession."""
-        from eneo.database.database import sessionmanager, AsyncSession
+        from eneo.database.database import AsyncSession, sessionmanager
 
         # Initialize sessionmanager with test database
         if not sessionmanager._engine:
@@ -142,8 +140,9 @@ class TestContainerSessionScope:
 
         original_session = sessionmanager.session
 
-        from sqlalchemy.ext.asyncio import async_sessionmaker
         from contextlib import asynccontextmanager
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         TestSessionLocal = async_sessionmaker(
             bind=tiny_engine,
@@ -181,8 +180,6 @@ class TestContainerSessionScope:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestSessionScopePoolExhaustion:
     """
     Test that session_scope pattern prevents pool exhaustion.
@@ -345,8 +342,6 @@ class TestSessionScopePoolExhaustion:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestWorkerBootstrapSession:
     """
     Test that worker decorators use short-lived bootstrap sessions.
@@ -476,8 +471,6 @@ class TestWorkerBootstrapSession:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestSessionScopeStress:
     """
     Stress tests for session_scope pattern under high concurrency.
@@ -575,8 +568,6 @@ class TestSessionScopeStress:
 # =============================================================================
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 class TestPoolExhaustionRegression:
     """
     Regression tests for specific production pool exhaustion scenarios.

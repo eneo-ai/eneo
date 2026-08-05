@@ -61,7 +61,6 @@ def _inline_content(
     )
 
 
-@pytest.mark.asyncio
 async def test_inline_payload_and_first_reference_commit_atomically(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -118,7 +117,6 @@ async def test_inline_payload_and_first_reference_commit_atomically(
         assert sorted(audit_events) == ["available", "prepared", "reference_changed"]
 
 
-@pytest.mark.asyncio
 async def test_non_tombstoned_content_requires_exact_backend_row_at_commit(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -149,7 +147,6 @@ async def test_non_tombstoned_content_requires_exact_backend_row_at_commit(
             )
 
 
-@pytest.mark.asyncio
 async def test_new_inline_content_requires_first_reference_in_same_transaction(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -175,7 +172,6 @@ async def test_new_inline_content_requires_first_reference_in_same_transaction(
             )
 
 
-@pytest.mark.asyncio
 async def test_new_inline_content_rejects_multiple_initial_references(
     object_content_database: DatabaseSessionManager,
 ) -> None:

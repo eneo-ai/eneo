@@ -43,7 +43,6 @@ def _mock_httpx_get(payload: dict[str, Any]):
     return patch("httpx.AsyncClient.get", new=fake_get)
 
 
-@pytest.mark.asyncio
 async def test_results_sorted_newest_first_with_display_names() -> None:
     """A response with ISO-formatted ``created_at`` and ``display_name``
     should be sorted newest-first and propagate the friendly name through."""
@@ -77,7 +76,6 @@ async def test_results_sorted_newest_first_with_display_names() -> None:
     assert all(r["mode"] == "completion" for r in result)
 
 
-@pytest.mark.asyncio
 async def test_openai_compatible_endpoint_with_rich_response_shape() -> None:
     """Validates the maintainability promise: any OpenAI-compatible provider
     that follows the /v1/models shape works without code changes. Some
@@ -106,7 +104,6 @@ async def test_openai_compatible_endpoint_with_rich_response_shape() -> None:
     assert result[0]["mode"] == "completion"  # default for unknown live-listed names
 
 
-@pytest.mark.asyncio
 async def test_openai_filters_realtime_and_audio_variants() -> None:
     """Live list calls into the same filter as the static endpoint, so noise
     like realtime-preview and gpt-audio doesn't reach the picker."""
@@ -129,7 +126,6 @@ async def test_openai_filters_realtime_and_audio_variants() -> None:
     assert [r["name"] for r in result] == ["gpt-4o"]
 
 
-@pytest.mark.asyncio
 async def test_azure_returns_empty_without_calling_out() -> None:
     """Azure's /openai/models returns the wrong thing. We skip it entirely."""
 
@@ -142,7 +138,6 @@ async def test_azure_returns_empty_without_calling_out() -> None:
     assert result == []
 
 
-@pytest.mark.asyncio
 async def test_unknown_provider_without_endpoint_returns_empty() -> None:
     """A provider type without a default URL and without a configured
     endpoint short-circuits to empty — frontend then falls back to static."""
@@ -156,7 +151,6 @@ async def test_unknown_provider_without_endpoint_returns_empty() -> None:
     assert result == []
 
 
-@pytest.mark.asyncio
 async def test_http_error_returns_error_entry_for_frontend() -> None:
     async def fake_get(self, url, headers=None, **kwargs):  # noqa: ARG001
         return httpx.Response(
@@ -170,7 +164,6 @@ async def test_http_error_returns_error_entry_for_frontend() -> None:
     assert len(result) == 1 and "error" in result[0]
 
 
-@pytest.mark.asyncio
 async def test_anthropic_uses_x_api_key_header() -> None:
     """Verify the auth-header dispatch reaches the wire."""
     captured: dict[str, Any] = {}
@@ -190,7 +183,6 @@ async def test_anthropic_uses_x_api_key_header() -> None:
     assert "Authorization" not in captured["headers"]
 
 
-@pytest.mark.asyncio
 async def test_openai_compatible_endpoint_uses_bearer() -> None:
     captured: dict[str, Any] = {}
 
@@ -210,7 +202,6 @@ async def test_openai_compatible_endpoint_uses_bearer() -> None:
     assert captured["headers"]["Authorization"] == "Bearer test-key"
 
 
-@pytest.mark.asyncio
 async def test_endpoint_with_v1_suffix_does_not_double() -> None:
     """Regression: users who paste the URL with ``/v1`` should not get
     ``…/v1/v1/models``."""
@@ -229,7 +220,6 @@ async def test_endpoint_with_v1_suffix_does_not_double() -> None:
     assert captured["url"] == "https://api.example.com/v1/models"
 
 
-@pytest.mark.asyncio
 async def test_provider_metadata_classifies_embedding_with_obscure_name() -> None:
     """Regression: embedding models whose names don't contain the word
     "embedding" (e.g. ``intfloat/multilingual-e5-large-instruct``) used to
@@ -262,7 +252,6 @@ async def test_provider_metadata_classifies_embedding_with_obscure_name() -> Non
     assert by_name["meta-llama/Llama-3.1-8B-Instruct"]["mode"] == "completion"
 
 
-@pytest.mark.asyncio
 async def test_mode_filter_returns_only_matching_entries() -> None:
     """Service-level mode filter: callers asking for ``mode="embedding"``
     must get only embedding entries; completion/transcription are dropped."""
@@ -282,7 +271,6 @@ async def test_mode_filter_returns_only_matching_entries() -> None:
     assert result[0]["mode"] == "embedding"
 
 
-@pytest.mark.asyncio
 async def test_mode_none_returns_all_modes() -> None:
     """Backwards compat: omitting ``mode`` returns everything (so existing
     consumers and ad-hoc /v1/models inspection both still work)."""
@@ -300,7 +288,6 @@ async def test_mode_none_returns_all_modes() -> None:
     assert {r["mode"] for r in result} == {"completion", "embedding", "transcription"}
 
 
-@pytest.mark.asyncio
 async def test_delete_rejects_provider_with_attached_models_as_bad_request() -> None:
     repository = MagicMock()
     repository.count_models_for_provider = AsyncMock(return_value=2)

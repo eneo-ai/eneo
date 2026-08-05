@@ -246,7 +246,6 @@ def _service(
     )
 
 
-@pytest.mark.asyncio
 async def test_probe_waits_for_timed_out_upload_before_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -268,7 +267,6 @@ async def test_probe_waits_for_timed_out_upload_before_cleanup(
     assert store.closed is True
 
 
-@pytest.mark.asyncio
 async def test_probe_reports_cleanup_failure_after_ambiguous_upload() -> None:
     store = _CleanupFailureStore()
 
@@ -279,7 +277,6 @@ async def test_probe_reports_cleanup_failure_after_ambiguous_upload() -> None:
     assert store.closed is True
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("fail_upload", [False, True])
 async def test_probe_preserves_external_cancellation_after_cleanup(
     fail_upload: bool,
@@ -299,7 +296,6 @@ async def test_probe_preserves_external_cancellation_after_cleanup(
     assert store.closed is True
 
 
-@pytest.mark.asyncio
 async def test_binding_probe_cleanup_does_not_replace_external_cancellation() -> None:
     store = _CancelledBindingCleanupStore()
     probe = asyncio.create_task(_service(store)._probe(_settings(), binding=None))
@@ -314,7 +310,6 @@ async def test_binding_probe_cleanup_does_not_replace_external_cancellation() ->
     assert store.closed is True
 
 
-@pytest.mark.asyncio
 async def test_binding_probe_cleanup_failure_wins_after_internal_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -334,7 +329,6 @@ async def test_binding_probe_cleanup_failure_wins_after_internal_deadline(
     assert store.closed is True
 
 
-@pytest.mark.asyncio
 async def test_connection_is_not_saved_when_conditional_binding_write_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -394,7 +388,6 @@ async def test_connection_is_not_saved_when_conditional_binding_write_is_rejecte
     assert database.transactions == 1
 
 
-@pytest.mark.asyncio
 async def test_probe_caps_preserve_valid_operator_timeout_relationships() -> None:
     store = _ConditionalBindingRejectedStore()
     observed_settings: ObjectContentSettings | None = None
@@ -433,7 +426,6 @@ async def test_probe_caps_preserve_valid_operator_timeout_relationships() -> Non
     assert observed_settings.delete_poll_interval_seconds == 10
 
 
-@pytest.mark.asyncio
 async def test_unbound_rotation_keeps_probe_bounds_and_authentication_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -492,13 +484,11 @@ async def test_unbound_rotation_keeps_probe_bounds_and_authentication_error(
     assert observed_settings.readiness_max_attempts == 1
 
 
-@pytest.mark.asyncio
 async def test_connection_database_failure_uses_typed_contract() -> None:
     with pytest.raises(ObjectStoreConnectionDatabaseUnavailable):
         await _service(_DelayedUploadStore(), _UnavailableDatabase()).get()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["create", "rotate"])
 async def test_admin_mutations_reject_unapproved_endpoint_before_remote_io(
     monkeypatch: pytest.MonkeyPatch,
@@ -561,7 +551,6 @@ async def test_admin_mutations_reject_unapproved_endpoint_before_remote_io(
     assert database.transactions == 1
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["create", "rotate"])
 async def test_admin_mutations_report_unknown_commit_outcome(
     monkeypatch: pytest.MonkeyPatch,
@@ -648,7 +637,6 @@ async def test_admin_mutations_report_unknown_commit_outcome(
     assert database.transactions == 2
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["create", "rotate"])
 async def test_admin_connection_requires_bucket_readiness_before_persistence(
     monkeypatch: pytest.MonkeyPatch,

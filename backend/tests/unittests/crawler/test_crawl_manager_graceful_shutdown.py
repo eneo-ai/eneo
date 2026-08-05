@@ -179,7 +179,6 @@ class TestCrawlShutdownError:
 class TestRunCrawlWithTimeoutGracefulShutdown:
     """Tests for _run_crawl_with_timeout graceful shutdown behavior."""
 
-    @pytest.mark.asyncio
     async def test_timeout_triggers_stop_crawl(self):
         """When timeout occurs, stop_crawl() is called on CrawlManager."""
         stop_crawl_called = threading.Event()
@@ -220,7 +219,6 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
             "wait_for_completion() should be called"
         )
 
-    @pytest.mark.asyncio
     async def test_shutdown_failure_raises_error(self):
         """When wait_for_completion returns False, CrawlShutdownError is raised."""
 
@@ -258,7 +256,6 @@ class TestRunCrawlWithTimeoutGracefulShutdown:
 class TestHeartbeatDuringCrawl:
     """Tests for concurrent heartbeat during Scrapy crawl phase."""
 
-    @pytest.mark.asyncio
     async def test_heartbeat_callback_called_during_crawl(self):
         """heartbeat_callback is invoked during the crawl execution."""
         heartbeat_calls = []
@@ -304,7 +301,6 @@ class TestHeartbeatDuringCrawl:
             f"Expected heartbeat calls, got {len(heartbeat_calls)}"
         )
 
-    @pytest.mark.asyncio
     async def test_heartbeat_stops_when_crawl_completes(self):
         """Heartbeat loop terminates when crawl completes normally."""
         heartbeat_calls = []
@@ -352,7 +348,6 @@ class TestHeartbeatDuringCrawl:
             f"Got {final_count - initial_count} extra calls"
         )
 
-    @pytest.mark.asyncio
     async def test_heartbeat_stops_on_timeout(self):
         """Heartbeat loop terminates when crawl times out."""
         heartbeat_calls = []
@@ -401,7 +396,6 @@ class TestHeartbeatDuringCrawl:
 class TestHeartbeatCallbackParameter:
     """Tests for heartbeat_callback parameter passing through layers."""
 
-    @pytest.mark.asyncio
     async def test_crawl_method_passes_heartbeat_to_internal(self):
         """crawl() method passes heartbeat_callback to _crawl()."""
         captured_heartbeat = None
@@ -440,7 +434,6 @@ class TestHeartbeatCallbackParameter:
         assert captured_heartbeat is mock_heartbeat
         assert captured_interval == 30.0
 
-    @pytest.mark.asyncio
     async def test_crawl_method_defaults_heartbeat_to_none(self):
         """crawl() method defaults heartbeat_callback to None."""
         captured_heartbeat = "not_set"
@@ -476,7 +469,6 @@ class TestHeartbeatCallbackParameter:
 class TestSitemapCrawlGracefulShutdown:
     """Tests for sitemap crawl graceful shutdown (same pattern as regular crawl)."""
 
-    @pytest.mark.asyncio
     async def test_sitemap_timeout_triggers_stop_crawl(self):
         """Sitemap crawl timeout also triggers stop_crawl()."""
         stop_crawl_called = threading.Event()
@@ -516,7 +508,6 @@ class TestSitemapCrawlGracefulShutdown:
 class TestNoResourceLeakOnTimeout:
     """Integration-style tests verifying no resource leak on timeout."""
 
-    @pytest.mark.asyncio
     async def test_completion_event_set_before_file_read(self):
         """Verify completion event is checked before file can be read.
 

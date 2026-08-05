@@ -37,8 +37,6 @@ from eneo.worker import upload_tasks
 from eneo.worker.task_manager import TaskManager
 from eneo.worker.upload_tasks import transcription_task, upload_info_blob_task
 
-pytestmark = pytest.mark.integration
-
 
 class StubExtractor:
     def extract(

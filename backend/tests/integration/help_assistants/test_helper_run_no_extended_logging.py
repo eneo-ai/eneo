@@ -27,7 +27,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-import pytest
 import sqlalchemy as sa
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -148,8 +147,6 @@ def _stub_completion_response(
     )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_helper_run_does_not_produce_logging_or_insights(
     db_container, admin_user, monkeypatch
 ):

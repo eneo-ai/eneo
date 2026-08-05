@@ -1,20 +1,27 @@
 """Integration tests for SyncLogRepository with database operations."""
 
-import pytest
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
+import pytest
+from sqlalchemy import text
+
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.integration_table import (
     Integration as IntegrationDB,
+)
+from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDB,
+)
+from eneo.database.tables.integration_table import (
     TenantIntegration as TenantIntegrationDB,
+)
+from eneo.database.tables.integration_table import (
     UserIntegration as UserIntegrationDB,
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.integration.domain.entities.sync_log import SyncLog
-from sqlalchemy import text
 
 
 async def create_integration_knowledge_record(
@@ -100,8 +107,6 @@ async def create_integration_knowledge_record(
     return integration_knowledge.id
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_add_and_retrieve(db_container):
     """Test adding and retrieving a sync log."""
     async with db_container() as container:
@@ -139,8 +144,6 @@ async def test_sync_log_repo_add_and_retrieve(db_container):
         assert retrieved.files_deleted == 2
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_get_by_integration_knowledge(db_container):
     """Test retrieving sync logs for an integration."""
     async with db_container() as container:
@@ -187,8 +190,6 @@ async def test_sync_log_repo_get_by_integration_knowledge(db_container):
         assert [log.files_processed for log in logs] == expected_files
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_pagination_with_offset(db_container):
     """Test pagination with offset."""
     async with db_container() as container:
@@ -242,8 +243,6 @@ async def test_sync_log_repo_pagination_with_offset(db_container):
         assert len(page1_ids & page3_ids) == 0  # No overlap
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_count_by_integration_knowledge(db_container):
     """Test counting sync logs for an integration."""
     async with db_container() as container:
@@ -273,8 +272,6 @@ async def test_sync_log_repo_count_by_integration_knowledge(db_container):
         assert count == 7
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_count_other_integration_not_included(db_container):
     """Test that count doesn't include logs from other integrations."""
     async with db_container() as container:
@@ -319,8 +316,6 @@ async def test_sync_log_repo_count_other_integration_not_included(db_container):
         assert count_2 == 3
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_ordered_by_created_at_desc(db_container):
     """Test that logs are ordered by created_at descending (most recent first)."""
     async with db_container() as container:
@@ -377,8 +372,6 @@ async def test_sync_log_repo_ordered_by_created_at_desc(db_container):
         assert [log.id for log in logs] == expected_order
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_get_recent_by_integration_knowledge(db_container):
     """Test getting recent sync logs (default limit)."""
     async with db_container() as container:
@@ -407,8 +400,6 @@ async def test_sync_log_repo_get_recent_by_integration_knowledge(db_container):
         assert len(recent) == 10
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_update_status(db_container):
     """Test updating sync log status."""
     async with db_container() as container:
@@ -438,8 +429,6 @@ async def test_sync_log_repo_update_status(db_container):
         assert retrieved.metadata["files_processed"] == 20
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_with_error_status(db_container):
     """Test sync log with error status and message."""
     async with db_container() as container:
@@ -467,8 +456,6 @@ async def test_sync_log_repo_with_error_status(db_container):
         assert retrieved.error_message == "SharePoint API returned 401 Unauthorized"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_limit_enforced(db_container):
     """Test that limit parameter is respected."""
     async with db_container() as container:
@@ -505,8 +492,6 @@ async def test_sync_log_repo_limit_enforced(db_container):
         assert len(logs_15) == 15
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_sync_log_repo_empty_result(db_container):
     """Test getting logs when none exist."""
     async with db_container() as container:

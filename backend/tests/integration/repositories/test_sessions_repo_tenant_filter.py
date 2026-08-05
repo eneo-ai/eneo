@@ -19,10 +19,10 @@ import psycopg2
 import pytest
 import sqlalchemy as sa
 
-from init_db import add_tenant_user
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.sessions_table import Sessions
+from init_db import add_tenant_user
 
 
 @pytest.fixture
@@ -121,8 +121,6 @@ async def _insert_assistant(
     return assistant_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_by_tenant_includes_service_key_sessions(
     db_container, admin_user, second_tenant_user
 ):
@@ -170,8 +168,6 @@ async def test_get_by_tenant_includes_service_key_sessions(
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_metadata_by_assistant_includes_service_key_sessions(
     db_container, admin_user
 ):

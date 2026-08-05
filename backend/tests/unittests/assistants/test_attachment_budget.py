@@ -218,7 +218,6 @@ def _resolved_skill(
     )
 
 
-@pytest.mark.asyncio
 async def test_candidate_pin_fit_uses_preloaded_resolution_without_repo_reads(
     monkeypatch,
 ):
@@ -252,7 +251,6 @@ async def test_candidate_pin_fit_uses_preloaded_resolution_without_repo_reads(
     service.skill_service.resolve_assistant_bindings_for_runtime.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_candidate_pin_fit_stages_blocked_always_binding_for_full_save(
     monkeypatch,
 ):
@@ -295,7 +293,6 @@ async def test_candidate_pin_fit_stages_blocked_always_binding_for_full_save(
     assert verdict is AssistantPinAdvanceIncompatibleReason.CONTEXT_WINDOW
 
 
-@pytest.mark.asyncio
 async def test_candidate_pin_fit_validates_every_on_demand_skill(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     target = _resolved_skill(
@@ -333,7 +330,6 @@ async def test_candidate_pin_fit_validates_every_on_demand_skill(monkeypatch):
     assert verdict is AssistantPinAdvanceIncompatibleReason.ACTIVATION_UNAVAILABLE
 
 
-@pytest.mark.asyncio
 async def test_candidate_pin_fit_revalidates_unchanged_on_demand_binding(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     current = _resolved_skill(
@@ -370,7 +366,6 @@ async def test_candidate_pin_fit_revalidates_unchanged_on_demand_binding(monkeyp
         (False, None),
     ],
 )
-@pytest.mark.asyncio
 async def test_candidate_pin_fit_without_model_matches_full_save_behavior(
     include_on_demand,
     expected,
@@ -410,7 +405,6 @@ async def test_candidate_pin_fit_without_model_matches_full_save_behavior(
     assert verdict is expected
 
 
-@pytest.mark.asyncio
 async def test_candidate_pin_fit_reports_context_window_without_rejecting_current_pin(
     monkeypatch,
 ):
@@ -561,7 +555,6 @@ def test_update_enforces_count_cap_through_setter(monkeypatch):
 # --- context fit (service, always on): prompt + attachments must fit ---
 
 
-@pytest.mark.asyncio
 async def test_fit_rejects_when_over_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 5)
@@ -576,7 +569,6 @@ async def test_fit_rejects_when_over_ceiling(monkeypatch):
         )
 
 
-@pytest.mark.asyncio
 async def test_fit_passes_when_within(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 5)
@@ -590,7 +582,6 @@ async def test_fit_passes_when_within(monkeypatch):
     )
 
 
-@pytest.mark.asyncio
 async def test_fit_passes_at_exact_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
@@ -602,7 +593,6 @@ async def test_fit_passes_at_exact_ceiling(monkeypatch):
     await _service()._validate_attachments_fit(_assistant_with(100), space=MagicMock())
 
 
-@pytest.mark.asyncio
 async def test_changed_on_demand_candidates_share_the_attachment_ceiling(
     monkeypatch,
 ):
@@ -693,7 +683,6 @@ async def test_changed_on_demand_candidates_share_the_attachment_ceiling(
     assert attachment_count_calls == 1
 
 
-@pytest.mark.asyncio
 async def test_save_skill_share_uses_raw_model_window(monkeypatch):
     _patch_reserve(monkeypatch, 1_000)
     measured_windows: list[int] = []
@@ -757,7 +746,6 @@ async def test_save_skill_share_uses_raw_model_window(monkeypatch):
     assert set(measured_windows) == {8_000}
 
 
-@pytest.mark.asyncio
 async def test_full_save_stages_blocked_on_demand_candidate(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
@@ -797,7 +785,6 @@ async def test_full_save_stages_blocked_on_demand_candidate(monkeypatch):
         )
 
 
-@pytest.mark.asyncio
 async def test_fit_skipped_when_no_model(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
@@ -815,7 +802,6 @@ async def test_fit_skipped_when_no_model(monkeypatch):
     await _service()._validate_attachments_fit(assistant, space=MagicMock())  # no raise
 
 
-@pytest.mark.asyncio
 async def test_fit_counts_derived_images_for_vision_model(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
@@ -843,7 +829,6 @@ async def test_fit_counts_derived_images_for_vision_model(monkeypatch):
     file_service.with_derived_images.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_fit_does_not_count_derived_images_without_vision(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
@@ -870,7 +855,6 @@ async def test_fit_does_not_count_derived_images_without_vision(monkeypatch):
 # --- context fit: the prompt counts on its own, even with no attachments ---
 
 
-@pytest.mark.asyncio
 async def test_fit_rejects_prompt_only_over_ceiling(monkeypatch):
     # A system prompt that alone overflows must be rejected even with zero
     # attachments — the ceiling covers prompt + attachments, not attachments
@@ -886,7 +870,6 @@ async def test_fit_rejects_prompt_only_over_ceiling(monkeypatch):
         await _service()._validate_attachments_fit(assistant, space=MagicMock())
 
 
-@pytest.mark.asyncio
 async def test_fit_passes_prompt_only_within_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 50)
@@ -1007,7 +990,6 @@ async def test_save_fit_uses_the_exact_initial_turn_runtime_prompt(
     service.skill_service.create_turn_plan.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_preflight_baseline_uses_the_exact_initial_turn_runtime_prompt(
     monkeypatch,
 ):
@@ -1253,7 +1235,6 @@ async def test_explicit_on_demand_change_rejects_unloadable_candidate(
     baseline_check.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_existing_on_demand_binding_remains_saveable_during_policy_drift(
     monkeypatch,
 ):
@@ -1301,7 +1282,6 @@ async def test_existing_on_demand_binding_remains_saveable_during_policy_drift(
     service.completion_service.prepare_skill_activation_preflight.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_explicit_on_demand_change_requires_an_effective_model():
     binding = _resolved_skill(
         name="On demand",
@@ -1329,7 +1309,6 @@ async def test_explicit_on_demand_change_requires_an_effective_model():
         )
 
 
-@pytest.mark.asyncio
 async def test_skill_configuration_projects_saved_modes_and_exact_runtime(
     monkeypatch,
 ):
@@ -1375,7 +1354,6 @@ async def test_skill_configuration_projects_saved_modes_and_exact_runtime(
     assert configuration.runtime.snapshot.measurement is measurement
 
 
-@pytest.mark.asyncio
 async def test_personal_default_skill_configuration_has_no_direct_runtime():
     assistant = _assistant_with_runtime_model()
     assistant.is_default = True
@@ -1398,7 +1376,6 @@ async def test_personal_default_skill_configuration_has_no_direct_runtime():
     service.skill_service.create_turn_plan.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_skill_configuration_authorizes_skill_read_before_runtime_resolution():
     service = _service()
     service.skill_service.list_assistant_binding_projections.side_effect = (
@@ -1417,7 +1394,6 @@ async def test_skill_configuration_authorizes_skill_read_before_runtime_resoluti
 # --- context fit: governance validates the model + prompt ask() will send ---
 
 
-@pytest.mark.asyncio
 async def test_fit_uses_governance_effective_model(monkeypatch):
     # Own model fits (100-token window), but governance steers to a 20-token
     # model: the save must be rejected against the model ask() will actually use.
@@ -1458,7 +1434,6 @@ async def test_fit_uses_governance_effective_model(monkeypatch):
         )
 
 
-@pytest.mark.asyncio
 async def test_fit_uses_governance_enforced_prompt(monkeypatch):
     # Own prompt is empty (would fit), but governance enforces a long prompt
     # that ask() will send: the save must be rejected against that prompt.
@@ -1491,7 +1466,6 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
         )
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_uses_each_assistants_effective_model():
     on_demand = _resolved_skill(
         name="On demand",
@@ -1590,7 +1564,6 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
     service.effective_config_service.resolve_personal_default.assert_awaited_once_with()
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_projects_each_personal_assistants_mcp_tools():
     on_demand = _resolved_skill(
         name="On demand",
@@ -1650,7 +1623,6 @@ async def test_governance_preflight_projects_each_personal_assistants_mcp_tools(
     ] == [projected_server]
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_walks_every_page_of_personal_defaults():
     """Unrestricted scans retain projected adapters across every bounded page."""
     first = _assistant_with_runtime_model()
@@ -1728,7 +1700,6 @@ async def test_governance_preflight_walks_every_page_of_personal_defaults():
     assert service.space_repo.project_assistants_mcp_servers.await_count == 2
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_does_not_load_unused_page_model_adapter():
     assistant = _assistant_with_runtime_model()
     effective_config = SimpleNamespace(
@@ -1774,7 +1745,6 @@ async def test_governance_preflight_does_not_load_unused_page_model_adapter():
     )
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_hydrates_each_assistant_projection_separately():
     class HydratedBlob:
         pass
@@ -1877,7 +1847,6 @@ async def test_governance_preflight_hydrates_each_assistant_projection_separatel
     ]
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
     on_demand = _resolved_skill(
         name="On demand",
@@ -1927,7 +1896,6 @@ async def test_governance_preflight_excludes_mcp_when_assistant_has_knowledge():
     )
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_validates_on_demand_against_the_current_unbounded_model():
     on_demand = _resolved_skill(
         name="On demand",
@@ -2025,7 +1993,6 @@ async def test_governance_preflight_validates_on_demand_against_the_current_unbo
     ],
     ids=("no-tool-support", "catalogue-too-large", "estimated", "disabled"),
 )
-@pytest.mark.asyncio
 async def test_personal_chat_only_keeps_on_demand_configuration_for_safe_fallbacks(
     selective_activation_enabled,
     supports_tool_calling,
@@ -2093,7 +2060,6 @@ async def test_personal_chat_only_keeps_on_demand_configuration_for_safe_fallbac
         service.completion_service.prepare_skill_activation_preflight.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_keeps_on_demand_for_current_model_without_tool_calling():
     on_demand = _resolved_skill(
         name="On demand",
@@ -2137,7 +2103,6 @@ async def test_governance_preflight_keeps_on_demand_for_current_model_without_to
     service.completion_service.prepare_skill_activation_preflight.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_governance_preflight_validates_each_explicit_model_without_assistants():
     on_demand = _resolved_skill(
         name="On demand",
@@ -2189,7 +2154,6 @@ async def test_governance_preflight_validates_each_explicit_model_without_assist
 # --- context fit: per-message ask-time guard (uploads have no save-time gate) ---
 
 
-@pytest.mark.asyncio
 async def test_message_fit_rejects_when_upload_alone_over_ceiling(monkeypatch):
     # A chat upload big enough to overflow on its own is rejected up front
     # instead of being inlined whole and failing at the provider.
@@ -2208,7 +2172,6 @@ async def test_message_fit_rejects_when_upload_alone_over_ceiling(monkeypatch):
         )
 
 
-@pytest.mark.asyncio
 async def test_message_fit_passes_when_within_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
@@ -2224,7 +2187,6 @@ async def test_message_fit_passes_when_within_ceiling(monkeypatch):
     )
 
 
-@pytest.mark.asyncio
 async def test_message_fit_includes_persistent_baseline(monkeypatch):
     # An upload that fits alone is still rejected when the assistant's persistent
     # attachments leave no room — the request sends both on the same turn.
@@ -2243,7 +2205,6 @@ async def test_message_fit_includes_persistent_baseline(monkeypatch):
         )
 
 
-@pytest.mark.asyncio
 async def test_message_fit_skips_when_no_uploads(monkeypatch):
     # The hot text-only chat path does no token work: nothing was uploaded, the
     # baseline was gated on save, and history is budget-evicted downstream.
@@ -2265,7 +2226,6 @@ async def test_message_fit_skips_when_no_uploads(monkeypatch):
     file_service.with_derived_images.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_message_fit_rechecks_skill_baseline_without_uploads(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 95)
@@ -2285,7 +2245,6 @@ async def test_message_fit_rechecks_skill_baseline_without_uploads(monkeypatch):
         )
 
 
-@pytest.mark.asyncio
 async def test_message_fit_counts_derived_images_for_vision(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
@@ -2311,7 +2270,6 @@ async def test_message_fit_counts_derived_images_for_vision(monkeypatch):
     file_service.with_derived_images.assert_awaited()
 
 
-@pytest.mark.asyncio
 async def test_message_fit_no_derived_images_without_vision(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)

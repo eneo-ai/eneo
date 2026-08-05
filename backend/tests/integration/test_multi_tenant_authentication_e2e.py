@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-import pytest
-
 from eneo.authentication.auth_service import AuthService
 
 
@@ -125,8 +123,6 @@ def _build_oidc_maps(tenant_slug: str, issuer_base: str):
     return discovery_url, discovery_payload
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_multi_tenant_oidc_login_isolated(
     client,
     super_admin_token,
@@ -261,8 +257,6 @@ async def test_multi_tenant_oidc_login_isolated(
     assert all(url.startswith("https://idp.") for _, url in requests)
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_multi_tenant_password_login(
     client,
     super_admin_token,

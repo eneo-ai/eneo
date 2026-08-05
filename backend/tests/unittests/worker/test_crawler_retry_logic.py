@@ -10,8 +10,6 @@ import random
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-import pytest
-
 from eneo.worker.crawl.recovery import (
     calculate_exponential_backoff,
     update_job_retry_stats,
@@ -251,7 +249,6 @@ class TestUpdateJobRetryStats:
 
         return mock_redis, mock_pipe
 
-    @pytest.mark.asyncio
     async def test_returns_defaults_when_redis_is_none(self):
         """Graceful degradation: no Redis returns (0, 0.0)."""
         job_id = uuid4()
@@ -266,7 +263,6 @@ class TestUpdateJobRetryStats:
         assert retry_count == 0
         assert job_age == 0.0
 
-    @pytest.mark.asyncio
     async def test_actual_failure_increments_counter(self):
         """is_actual_failure=True should increment the retry counter."""
         job_id = uuid4()
@@ -292,7 +288,6 @@ class TestUpdateJobRetryStats:
         # Should have called incr (is_actual_failure=True)
         assert mock_pipe.incr.called, "Should increment counter for actual failure"
 
-    @pytest.mark.asyncio
     async def test_busy_signal_does_not_increment_counter(self):
         """is_actual_failure=False should NOT increment the retry counter."""
         job_id = uuid4()
@@ -317,7 +312,6 @@ class TestUpdateJobRetryStats:
         # Should NOT have called incr (is_actual_failure=False)
         assert not mock_pipe.incr.called, "Should NOT increment counter for busy signal"
 
-    @pytest.mark.asyncio
     async def test_uses_correct_redis_keys(self):
         """Verify Redis keys follow job:{id}:* pattern."""
         job_id = uuid4()
@@ -344,7 +338,6 @@ class TestUpdateJobRetryStats:
             f"Should use {expected_start_key}"
         )
 
-    @pytest.mark.asyncio
     async def test_handles_redis_error_gracefully(self):
         """Redis errors should not crash, return defaults."""
         job_id = uuid4()
@@ -364,7 +357,6 @@ class TestUpdateJobRetryStats:
         assert retry_count == 0
         assert job_age == 0.0
 
-    @pytest.mark.asyncio
     async def test_first_attempt_sets_start_time_with_nx(self):
         """First attempt should set start_time with NX flag (only if not exists)."""
         job_id = uuid4()
@@ -386,7 +378,6 @@ class TestUpdateJobRetryStats:
         call_kwargs = mock_pipe.set.call_args
         assert call_kwargs.kwargs.get("nx") is True, "Should use NX flag"
 
-    @pytest.mark.asyncio
     async def test_ttl_includes_buffer_over_max_age(self):
         """TTL should be max_age_seconds + 3600 (1 hour buffer)."""
         job_id = uuid4()
@@ -412,7 +403,6 @@ class TestUpdateJobRetryStats:
             f"TTL should be {expected_ttl}"
         )
 
-    @pytest.mark.asyncio
     async def test_redis_pipeline_execute_failure(self):
         """Test graceful handling when pipeline execute() fails.
 
@@ -443,7 +433,6 @@ class TestUpdateJobRetryStats:
         assert retry_count == 0, "Should return default retry_count on failure"
         assert job_age == 0.0, "Should return default job_age on failure"
 
-    @pytest.mark.asyncio
     async def test_redis_pipeline_partial_results(self):
         """Test handling of partial/incomplete pipeline results.
 
@@ -473,7 +462,6 @@ class TestUpdateJobRetryStats:
         assert isinstance(retry_count, int), "Should return int retry_count"
         assert isinstance(job_age, float), "Should return float job_age"
 
-    @pytest.mark.asyncio
     async def test_multiple_concurrent_mock_calls(self):
         """Test that mocked pipeline can handle multiple sequential calls.
 

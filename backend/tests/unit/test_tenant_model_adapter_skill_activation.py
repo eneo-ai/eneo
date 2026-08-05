@@ -254,7 +254,6 @@ def _reasoning_chunk(reasoning: str) -> object:
     )
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_activates_skill_before_follow_up() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -290,7 +289,6 @@ async def test_non_streaming_activates_skill_before_follow_up() -> None:
     assert "KNOWLEDGE_SENTINEL" in follow_up_messages[0]["content"]
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_keeps_final_request_context_usage_separate() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -333,7 +331,6 @@ async def test_non_streaming_keeps_final_request_context_usage_separate() -> Non
     assert completion.usage.context_completion_tokens == 40
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_does_not_reuse_context_usage_from_an_earlier_request() -> (
     None
 ):
@@ -372,7 +369,6 @@ async def test_non_streaming_does_not_reuse_context_usage_from_an_earlier_reques
     assert completion.context_input_token_estimate is not None
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_rejects_unadvertised_activation_with_mcp_present() -> None:
     adapter = _adapter()
     runtime = _runtime(selective_activation_enabled=False)
@@ -414,7 +410,6 @@ async def test_non_streaming_rejects_unadvertised_activation_with_mcp_present() 
     assert proxy.calls == []
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_estimates_every_request_when_provider_omits_usage() -> (
     None
 ):
@@ -472,7 +467,6 @@ async def test_non_streaming_estimates_every_request_when_provider_omits_usage()
     assert completion.usage is None or completion.usage.prompt_tokens is None
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_estimates_final_reasoning_output_when_usage_is_omitted() -> (
     None
 ):
@@ -502,7 +496,6 @@ async def test_non_streaming_estimates_final_reasoning_output_when_usage_is_omit
     assert completion.usage is None
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_maps_prompt_ownership_failure_without_mutating_runtime() -> (
     None
 ):
@@ -544,7 +537,6 @@ async def test_non_streaming_maps_prompt_ownership_failure_without_mutating_runt
     assert runtime.snapshot() == snapshot_before
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_rejects_duplicate_provider_call_ids() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -581,7 +573,6 @@ async def test_non_streaming_rejects_duplicate_provider_call_ids() -> None:
     assert exc_info.value.code == "invalid_tool_call"
 
 
-@pytest.mark.asyncio
 async def test_non_streaming_existing_builtin_is_not_treated_as_unauthorized_without_mcp() -> (
     None
 ):
@@ -612,7 +603,6 @@ async def test_non_streaming_existing_builtin_is_not_treated_as_unauthorized_wit
     assert completion_call.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_accepted_activation_defers_external_sibling_call() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -650,7 +640,6 @@ async def test_accepted_activation_defers_external_sibling_call() -> None:
     assert proxy.calls == []
 
 
-@pytest.mark.asyncio
 async def test_rejected_activation_keeps_external_sibling_dispatchable() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -691,7 +680,6 @@ async def test_rejected_activation_keeps_external_sibling_dispatchable() -> None
     )
 
 
-@pytest.mark.asyncio
 async def test_streaming_activates_skill_without_mcp_proxy() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -739,7 +727,6 @@ async def test_streaming_activates_skill_without_mcp_proxy() -> None:
     assert follow_up_messages[-2]["content"] == ("I will load the payroll procedure.")
 
 
-@pytest.mark.asyncio
 async def test_streaming_rejects_unadvertised_activation_with_mcp_present() -> None:
     adapter = _adapter()
     runtime = _runtime(selective_activation_enabled=False)
@@ -798,7 +785,6 @@ async def test_streaming_rejects_unadvertised_activation_with_mcp_present() -> N
     assert proxy.calls == []
 
 
-@pytest.mark.asyncio
 async def test_streaming_estimates_every_request_when_provider_omits_usage() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -872,7 +858,6 @@ async def test_streaming_estimates_every_request_when_provider_omits_usage() -> 
     assert output[-1].usage is None
 
 
-@pytest.mark.asyncio
 async def test_streaming_estimates_final_reasoning_output_when_usage_is_omitted() -> (
     None
 ):
@@ -915,7 +900,6 @@ async def test_streaming_estimates_final_reasoning_output_when_usage_is_omitted(
     assert output[-1].usage is None
 
 
-@pytest.mark.asyncio
 async def test_streaming_keeps_final_request_context_usage_separate() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -978,7 +962,6 @@ async def test_streaming_keeps_final_request_context_usage_separate() -> None:
     assert usage.context_completion_tokens == 40
 
 
-@pytest.mark.asyncio
 async def test_streaming_does_not_reuse_context_usage_from_an_earlier_request() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -1034,7 +1017,6 @@ async def test_streaming_does_not_reuse_context_usage_from_an_earlier_request() 
     assert output[-1].context_input_token_estimate is not None
 
 
-@pytest.mark.asyncio
 async def test_streaming_accepted_activation_defers_external_sibling_call() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -1093,7 +1075,6 @@ async def test_streaming_accepted_activation_defers_external_sibling_call() -> N
     assert deferred[-1].result_status == "deferred"
 
 
-@pytest.mark.asyncio
 async def test_streaming_existing_builtin_is_not_treated_as_unauthorized_without_mcp() -> (
     None
 ):
@@ -1147,7 +1128,6 @@ async def test_streaming_existing_builtin_is_not_treated_as_unauthorized_without
         ),
     ],
 )
-@pytest.mark.asyncio
 async def test_streaming_rejected_activation_dispatches_external_sibling(
     selective_activation_enabled: bool,
     skill_key: str,
