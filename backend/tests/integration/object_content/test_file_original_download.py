@@ -39,6 +39,7 @@ from eneo.object_content.content import (
     capture_content,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.s3_object_store import S3ObjectStore
 from tests.integration.object_content.conftest import RealObjectStore
 
@@ -435,8 +436,10 @@ async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
     content_service = ObjectContentService(
         settings,
         object_content_database,
-        object_store_settings=settings,
-        object_store=real_object_store.store,
+        object_store_provider=ObjectStoreProvider.fixed(
+            settings,
+            real_object_store.store,
+        ),
     )
     prepared_id: UUID | None = None
     object_key: str | None = None
@@ -530,8 +533,7 @@ async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
             read_content_service = ObjectContentService(
                 settings,
                 object_content_database,
-                object_store_settings=settings,
-                object_store=read_store,
+                object_store_provider=ObjectStoreProvider.fixed(settings, read_store),
             )
             checked_content_service = MagicMock(wraps=read_content_service)
 
