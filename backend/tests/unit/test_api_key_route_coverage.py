@@ -109,6 +109,7 @@ INTENTIONALLY_UNGUARDED = {
     "/dashboard": "Read-only aggregation endpoint with scope guard",
     "/icons": "Public static assets",
     "/limits": "Authenticated limit info (with_user=True)",
+    "/me": "Self-scoped read-only endpoints (with_user=True) that only ever return the calling user's own state; there is no target resource to permission-check",
     "/prompts": "Scope-guarded per prompt ID; no resource permission needed (regular user feature)",
     "/integrations": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/jobs": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer authorization",
@@ -148,6 +149,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/settings": "Tenant settings read/models endpoints",
     "/icons": "Static icon catalog",
     "/limits": "Tenant/user limits endpoint",
+    "/me": "Self-scoped read-only endpoints; the response is derived from the authenticated principal itself, so a scope check would not narrow what is returned",
     "/ws": "WebSocket auth path",
     "/templates": "Template listing/discovery endpoints",
     "/ai-models": "Model listing endpoint",
@@ -837,6 +839,13 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
 # reason and a rationale for why the basic method→permission + scope check is
 # sufficient for this endpoint.
 MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
+    (
+        "POST",
+        "/auth/oidc/logout",
+    ): "Revokes only the calling user's own IdP token rows, resolved from the "
+    "authenticated principal rather than from any request input. There is no target "
+    "resource to permission-check, and a caller who can authenticate is already "
+    "entitled to drop their own delegated tokens.",
     (
         "POST",
         "/icons/",

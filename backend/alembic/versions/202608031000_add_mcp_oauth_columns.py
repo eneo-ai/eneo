@@ -21,7 +21,7 @@ Adds the per-server configuration for the MCP token broker:
   for IdPs with broken or absent metadata.
 
 Revision ID: 202608031000
-Revises: 202607301200
+Revises: 202608031800
 Create Date: 2026-08-03
 """
 
@@ -31,7 +31,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "202608031000"
-down_revision = "202607301200"
+down_revision = "202608031800"
 branch_labels = None
 depends_on = None
 

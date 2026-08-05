@@ -582,7 +582,7 @@ async def get_mcp_server(
     "/",
     description="Create a new MCP server in global catalog (admin only).",
     response_model=MCPServerCreateResponse,
-    responses=responses.get_responses([400, 403, 409]),
+    responses=responses.get_responses([400, 403, 409, 501]),
 )
 async def create_mcp_server(
     data: MCPServerCreate,
@@ -675,7 +675,7 @@ async def create_mcp_server(
     "/{id}/",
     description="Update an MCP server in global catalog (admin only).",
     response_model=MCPServerPublic,
-    responses=responses.get_responses([400, 403, 404, 409]),
+    responses=responses.get_responses([400, 403, 404, 409, 501]),
 )
 async def update_mcp_server(
     id: UUID,
