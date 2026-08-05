@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
@@ -181,6 +182,36 @@ async def _wait_until_database_lock(db_container, *, pid: int) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"Database session {pid} did not wait for the parent lock")
+
+
+def _walk_plan(node: Mapping[str, object]) -> list[Mapping[str, object]]:
+    nodes = [node]
+    children = node.get("Plans")
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict):
+                nodes.extend(_walk_plan(child))
+    return nodes
+
+
+async def _explain_statement(
+    session,
+    *,
+    statement: str,
+    parameters: tuple[object, ...],
+) -> list[Mapping[str, object]]:
+    connection = await session.connection()
+    explained = await connection.exec_driver_sql(
+        f"EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, FORMAT JSON) {statement}",
+        parameters,
+    )
+    document = explained.scalar_one()
+    assert isinstance(document, list)
+    root = document[0]
+    assert isinstance(root, dict)
+    plan = root.get("Plan")
+    assert isinstance(plan, dict)
+    return _walk_plan(plan)
 
 
 @pytest.mark.integration
@@ -1154,6 +1185,7 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
             size=0,
         )
         session = container.session()
+        page_size = 100
         assistant_ids = tuple(UUID(int=(1 << 120) + index) for index in range(10_000))
         await session.execute(
             sa.insert(Assistants),
@@ -1176,6 +1208,19 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
             sa.select(Skills.space_id).where(Skills.id == seed.skill_id)
         )
         assert skill_space_id is not None
+        distractor = await container.skill_repo().create(
+            space_id=skill_space_id,
+            slug=f"fleet-scale-distractor-{uuid4().hex[:8]}",
+            display_name="Fleet scale distractor",
+            description="Fleet scale distractor",
+            instructions="Fleet scale distractor",
+            content_digest="d" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        binding_variants = (
+            (seed.skill_id, seed.old_revision_id, 0),
+            (distractor.id, distractor.current_revision.id, 1),
+        )
         await session.execute(
             sa.insert(AssistantSkillBindings),
             [
@@ -1184,31 +1229,37 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
                     "tenant_id": admin_user.tenant_id,
                     "space_id": seed.space_id,
                     "skill_space_id": skill_space_id,
-                    "skill_id": seed.skill_id,
-                    "skill_revision_id": seed.old_revision_id,
-                    "position": 0,
+                    "skill_id": skill_id,
+                    "skill_revision_id": revision_id,
+                    "position": position,
                     "activation_mode": "always",
                 }
                 for assistant_id in assistant_ids
+                for skill_id, revision_id, position in binding_variants
             ],
         )
+        await session.execute(sa.text("ANALYZE assistant_skill_bindings"))
 
         discovery_queries = 0
+        captured_statement: tuple[str, tuple[object, ...]] | None = None
 
         def capture_discovery(
             _connection,
             _cursor,
             statement,
-            _parameters,
+            parameters,
             _context,
             _executemany,
         ) -> None:
-            nonlocal discovery_queries
+            nonlocal discovery_queries, captured_statement
             if (
                 "FROM assistant_skill_bindings" in statement
                 and "ORDER BY assistant_skill_bindings.assistant_id" in statement
             ):
                 discovery_queries += 1
+                if "assistant_skill_bindings.assistant_id >" in statement:
+                    assert isinstance(parameters, tuple)
+                    captured_statement = (statement, parameters)
 
         assert session.bind is not None
         sync_engine = session.bind.sync_engine
@@ -1228,7 +1279,7 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
                     skill_id=seed.skill_id,
                     expected_published_revision_id=seed.published_revision_id,
                     after_assistant_id=after,
-                    limit=100,
+                    limit=page_size,
                 )
                 per_chunk_queries.append(discovery_queries - before_count)
                 peak_targets = max(peak_targets, len(targets))
@@ -1247,8 +1298,34 @@ async def test_discovery_scales_as_one_bounded_forward_index_walk(
             )
 
         assert seen == list(assistant_ids)
-        assert peak_targets == 100
-        assert per_chunk_queries == [1] * 100
+        assert peak_targets == page_size
+        assert per_chunk_queries == [1] * (len(assistant_ids) // page_size)
+        assert captured_statement is not None
+        plan_nodes = await _explain_statement(
+            session,
+            statement=captured_statement[0],
+            parameters=captured_statement[1],
+        )
+        binding_scan = next(
+            (
+                node
+                for node in plan_nodes
+                if node.get("Relation Name") == "assistant_skill_bindings"
+            ),
+            None,
+        )
+        assert binding_scan is not None
+        assert binding_scan.get("Node Type") in {"Index Scan", "Index Only Scan"}
+        assert "assistant_id" in str(binding_scan.get("Index Cond", ""))
+        actual_rows = binding_scan.get("Actual Rows")
+        actual_loops = binding_scan.get("Actual Loops")
+        rows_filtered = binding_scan.get("Rows Removed by Filter", 0)
+        assert isinstance(actual_rows, int | float)
+        assert isinstance(actual_loops, int | float)
+        assert isinstance(rows_filtered, int | float)
+        assert (actual_rows + rows_filtered) * actual_loops <= (page_size + 1) * len(
+            binding_variants
+        )
         ordered_columns = (
             await session.scalars(
                 sa.text(
